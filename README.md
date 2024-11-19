@@ -53,3 +53,8 @@
 5. Наслаждайтесь визуализацией аудиоданных!
 
 **SpectrumNet** предоставляет мощный инструмент для визуализации аудиоданных, подходящий как для профессионального использования, так и для образовательных целей.
+
+![image](https://github.com/user-attachments/assets/66291e7c-4807-474b-87b4-67e067baa3fd)
+![image](https://github.com/user-attachments/assets/9210c8e0-f857-48a0-b2c8-a53bc3023b78)
+![image](https://github.com/user-attachments/assets/0608add7-c2fe-4866-a779-7140d5ef09ad)
+
