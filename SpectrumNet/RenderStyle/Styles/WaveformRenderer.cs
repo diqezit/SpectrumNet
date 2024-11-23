@@ -8,6 +8,10 @@
         private readonly SKPath _bottomPath = new();
         private readonly SKPath _fillPath = new();
 
+        // Constants for magic numbers
+        private const float StrokeWidth = 2f;
+        private const byte FillAlpha = 64;
+
         private WaveformRenderer() { }
 
         public static WaveformRenderer GetInstance() => _instance ??= new WaveformRenderer();
@@ -15,55 +19,45 @@
         public void Initialize()
         {
             if (_isInitialized) return;
-            Log.Debug("WaveformRenderer initialized");
             _isInitialized = true;
         }
 
         public void Configure(bool isOverlayActive)
         {
-            // Конфигурация не требуется для этого рендерера
+            // Configuration not required for this renderer
         }
 
         private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
         {
-            if (canvas == null || spectrum.IsEmpty || paint == null || info.Width <= 0 || info.Height <= 0)
-            {
-                Log.Warning("Invalid render parameters");
-                return false;
-            }
-            return true;
+            return canvas != null && !spectrum.IsEmpty && paint != null && info.Width > 0 && info.Height > 0;
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                         float barWidth, float barSpacing, int barCount, SKPaint? paint)
         {
-            if (!_isInitialized)
-            {
-                Log.Warning("WaveformRenderer is not initialized.");
+            if (!_isInitialized || canvas == null || spectrum == null || paint == null)
                 return;
-            }
 
-            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, basePaint)) return;
+            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, paint)) return;
 
             float midY = info.Height / 2;
-            int spectrumMiddle = spectrum!.Length / 2;
+            int spectrumMiddle = spectrum.Length / 2;
             float xStep = (float)info.Width / spectrumMiddle;
 
-            using var waveformPaint = basePaint!.Clone();
+            using var waveformPaint = paint.Clone();
             waveformPaint.Style = SKPaintStyle.Stroke;
-            waveformPaint.StrokeWidth = 2;
+            waveformPaint.StrokeWidth = StrokeWidth;
 
-            using var fillPaint = basePaint!.Clone();
+            using var fillPaint = paint.Clone();
             fillPaint.Style = SKPaintStyle.Fill;
-            fillPaint.Color = fillPaint.Color.WithAlpha(64);
+            fillPaint.Color = fillPaint.Color.WithAlpha(FillAlpha);
 
-            RenderWaveform(canvas!, spectrum.AsSpan(), spectrumMiddle, midY, xStep,
-                          info.Width, waveformPaint, fillPaint);
+            RenderWaveform(canvas, spectrum.AsSpan(), spectrumMiddle, midY, xStep, info.Width, waveformPaint, fillPaint);
         }
 
         private void RenderWaveform(SKCanvas canvas, ReadOnlySpan<float> spectrum,
-                                          int spectrumMiddle, float midY, float xStep, float width,
-                                          SKPaint waveformPaint, SKPaint fillPaint)
+                                    int spectrumMiddle, float midY, float xStep, float width,
+                                    SKPaint waveformPaint, SKPaint fillPaint)
         {
             CreateWavePaths(spectrum, spectrumMiddle, midY, xStep);
             CreateFillPath(width, midY);
@@ -75,19 +69,23 @@
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void CreateWavePaths(ReadOnlySpan<float> spectrum, int spectrumMiddle,
-                                   float midY, float xStep)
+                                     float midY, float xStep)
         {
             _topPath.Reset();
             _bottomPath.Reset();
 
-            _topPath.MoveTo(0, midY - (spectrum[0] * midY));
-            _bottomPath.MoveTo(0, midY + (spectrum[0] * midY));
+            float x = 0;
+            float topY = midY - (spectrum[0] * midY);
+            float bottomY = midY + (spectrum[0] * midY);
+
+            _topPath.MoveTo(x, topY);
+            _bottomPath.MoveTo(x, bottomY);
 
             for (int i = 1; i < spectrumMiddle; i++)
             {
-                float x = i * xStep;
-                float topY = midY - (spectrum[i] * midY);
-                float bottomY = midY + (spectrum[i] * midY);
+                x = i * xStep;
+                topY = midY - (spectrum[i] * midY);
+                bottomY = midY + (spectrum[i] * midY);
 
                 _topPath.LineTo(x, topY);
                 _bottomPath.LineTo(x, bottomY);

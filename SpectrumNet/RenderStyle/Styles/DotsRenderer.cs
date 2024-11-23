@@ -4,6 +4,8 @@
     {
         private static DotsRenderer? _instance;
         private bool _isInitialized;
+        private const float MinIntensityThreshold = 0.01f;
+        private const float MinDotRadius = 2f;
 
         public DotsRenderer() { }
 
@@ -12,71 +14,61 @@
         public void Initialize()
         {
             if (_isInitialized) return;
-
-            Log.Debug("DotsRenderer initialized");
             _isInitialized = true;
         }
 
-        public void Configure(bool isOverlayActive)
-        {
-            // Конфигурация не требуется для этого рендерера
-        }
+        public void Configure(bool isOverlayActive) { }
 
         private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
         {
             if (canvas == null || spectrum.IsEmpty || paint == null || info.Width <= 0 || info.Height <= 0)
-            {
-                Log.Warning("Invalid render parameters");
                 return false;
-            }
             return true;
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                         float barWidth, float barSpacing, int barCount, SKPaint? paint)
         {
             if (!_isInitialized)
-            {
-                Log.Warning("DotsRenderer is not initialized.");
                 return;
-            }
 
-            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, basePaint)) return;
+            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, paint))
+                return;
 
             float totalWidth = barWidth + barSpacing;
             int halfLength = spectrum!.Length / 2;
 
-            RenderDots(canvas!, spectrum.AsSpan(), info, totalWidth, barWidth, halfLength, basePaint!);
+            RenderDots(canvas!, spectrum.AsSpan(), info, totalWidth, barWidth, halfLength, paint!);
         }
 
         private void RenderDots(SKCanvas canvas, ReadOnlySpan<float> spectrum, SKImageInfo info,
-                              float totalWidth, float barWidth, int halfLength, SKPaint basePaint)
+                              float totalWidth, float barWidth, int halfLength, SKPaint paint)
         {
             for (int i = 0; i < halfLength; i++)
             {
                 float intensity = spectrum[i];
-                if (intensity < 0.01f) continue; // Skip dots with very low intensity
+                if (intensity < MinIntensityThreshold) continue;
 
-                float dotRadius = Math.Max(barWidth / 2 * intensity, 2);
+                float dotRadius = Math.Max(barWidth / 2 * intensity, MinDotRadius);
                 float x = i * totalWidth + dotRadius;
                 float y = info.Height - (intensity * info.Height);
 
-                RenderMainDot(canvas, x, y, dotRadius, intensity, basePaint);
+                RenderMainDot(canvas, x, y, dotRadius, intensity, paint);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void RenderMainDot(SKCanvas canvas, float x, float y, float dotRadius,
-                                 float intensity, SKPaint basePaint)
+                                 float intensity, SKPaint paint)
         {
-            using var dotPaint = basePaint.Clone();
-            dotPaint.Color = basePaint.Color.WithAlpha((byte)(255 * intensity));
+            using var dotPaint = paint.Clone();
+            dotPaint.Color = paint.Color.WithAlpha((byte)(255 * intensity));
             canvas.DrawCircle(x, y, dotRadius, dotPaint);
         }
 
         public void Dispose()
         {
-            // No paints to dispose as glow paints are removed
+            // No paints to dispose as clones are used
         }
     }
 }

@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using Microsoft.Extensions.DependencyInjection;
-
 namespace SpectrumNet
 {
     public partial class App : Application

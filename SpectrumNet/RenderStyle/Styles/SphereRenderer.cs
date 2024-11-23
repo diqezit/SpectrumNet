@@ -11,6 +11,17 @@
         private float[]? _cosValues;
         private float[]? _sinValues;
         private SKPaint? _spherePaint;
+
+        // Constants for magic numbers
+        private const float OverlaySphereRadius = 10f;
+        private const float DefaultSphereRadius = 20f;
+        private const float OverlaySphereSpacing = 5f;
+        private const float DefaultSphereSpacing = 10f;
+        private const int OverlaySphereCount = 16;
+        private const int DefaultSphereCount = 8;
+        private const float AngleStep = 360f;
+        private const float PiOver180 = (float)(Math.PI / 180);
+        private const float MinMagnitude = 0.01f;
         private const float MaxIntensityMultiplier = 1.5f;
 
         public SphereRenderer() { }
@@ -28,7 +39,6 @@
             };
 
             UpdateConfiguration(false);
-            Log.Debug("SphereRenderer initialized");
             _isInitialized = true;
         }
 
@@ -43,9 +53,9 @@
 
         private void UpdateConfiguration(bool isOverlayActive)
         {
-            _sphereRadius = isOverlayActive ? 10f : 20f;
-            _sphereSpacing = isOverlayActive ? 5f : 10f;
-            _sphereCount = isOverlayActive ? 16 : 8;
+            _sphereRadius = isOverlayActive ? OverlaySphereRadius : DefaultSphereRadius;
+            _sphereSpacing = isOverlayActive ? OverlaySphereSpacing : DefaultSphereSpacing;
+            _sphereCount = isOverlayActive ? OverlaySphereCount : DefaultSphereCount;
 
             PrecomputeTrigValues();
         }
@@ -57,7 +67,7 @@
 
             for (int i = 0; i < _sphereCount; i++)
             {
-                float angle = (float)i / _sphereCount * 360f * (float)(Math.PI / 180);
+                float angle = (float)i / _sphereCount * AngleStep * PiOver180;
                 _cosValues[i] = (float)Math.Cos(angle);
                 _sinValues[i] = (float)Math.Sin(angle);
             }
@@ -66,23 +76,17 @@
         private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
         {
             if (canvas == null || spectrum.IsEmpty || paint == null || info.Width <= 0 || info.Height <= 0)
-            {
-                Log.Warning("Invalid render parameters");
                 return false;
-            }
             return true;
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float unused1, float unused2, int unused3, SKPaint? basePaint)
+                         float unused1, float unused2, int unused3, SKPaint? paint)
         {
             if (!_isInitialized || _spherePaint == null || _cosValues == null || _sinValues == null)
-            {
-                Log.Warning("SphereRenderer is not initialized.");
                 return;
-            }
 
-            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, basePaint)) return;
+            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, paint)) return;
 
             int actualSphereCount = Math.Min(spectrum!.Length / 2, _sphereCount);
             float centerX = info.Width / 2f;
@@ -90,22 +94,17 @@
             float totalSphereRadius = _sphereRadius + _sphereSpacing;
             float maxRadius = centerY - totalSphereRadius;
 
-            RenderSpheres(canvas!, spectrum.AsSpan(), actualSphereCount, centerX, centerY,
-                         maxRadius, basePaint!);
+            RenderSpheres(canvas!, spectrum.AsSpan(), actualSphereCount, centerX, centerY, maxRadius, paint!);
         }
 
-        private void RenderSpheres(SKCanvas canvas, ReadOnlySpan<float> spectrum,
-                                 int sphereCount, float centerX, float centerY,
-                                 float maxRadius, SKPaint basePaint)
+        private void RenderSpheres(SKCanvas canvas, ReadOnlySpan<float> spectrum, int sphereCount, float centerX, float centerY, float maxRadius, SKPaint paint)
         {
-            if (_spherePaint == null || _cosValues == null || _sinValues == null) return;
-
             for (int i = 0; i < sphereCount; i++)
             {
                 float magnitude = spectrum[i];
-                if (magnitude < 0.01f) continue; // Пропускаем сферы с очень низкой интенсивностью
+                if (magnitude < MinMagnitude) continue;
 
-                using (var clonedPaint = basePaint.Clone())
+                using (var clonedPaint = paint.Clone())
                 {
                     RenderSphere(canvas, i, magnitude, centerX, centerY, maxRadius, clonedPaint);
                 }
@@ -113,21 +112,15 @@
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void RenderSphere(SKCanvas canvas, int index, float magnitude,
-                                float centerX, float centerY, float maxRadius,
-                                SKPaint basePaint)
+        private void RenderSphere(SKCanvas canvas, int index, float magnitude, float centerX, float centerY, float maxRadius, SKPaint paint)
         {
-            if (_spherePaint == null || _cosValues == null || _sinValues == null) return;
-
             float x = centerX + _cosValues[index] * maxRadius;
             float y = centerY + _sinValues[index] * maxRadius;
             float sphereHeight = magnitude * maxRadius;
 
-            basePaint.Color = basePaint.Color.WithAlpha(
-                (byte)(255 * Math.Min(magnitude * MaxIntensityMultiplier, 1.0f))
-            );
+            paint.Color = paint.Color.WithAlpha((byte)(255 * Math.Min(magnitude * MaxIntensityMultiplier, 1.0f)));
 
-            canvas.DrawCircle(x, y, sphereHeight, basePaint);
+            canvas.DrawCircle(x, y, sphereHeight, paint);
         }
 
         public void Dispose()

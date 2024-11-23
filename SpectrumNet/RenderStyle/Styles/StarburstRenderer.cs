@@ -5,6 +5,10 @@
         private static StarburstRenderer? _instance;
         private bool _isInitialized;
 
+        // Constants for magic numbers
+        private const float Pi = (float)Math.PI;
+        private const float IntensityMultiplier = 1.0f;
+
         private StarburstRenderer() { }
 
         public static StarburstRenderer GetInstance() => _instance ??= new StarburstRenderer();
@@ -13,7 +17,6 @@
         {
             if (_isInitialized) return;
 
-            Log.Debug("StarburstRenderer initialized");
             _isInitialized = true;
         }
 
@@ -22,11 +25,10 @@
             // Configuration logic can be added here if needed
         }
 
-        public void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint basePaint)
+        public void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint paint)
         {
             if (!_isInitialized)
             {
-                Log.Warning("StarburstRenderer is not initialized.");
                 return;
             }
 
@@ -37,13 +39,15 @@
             for (int i = 0; i < spectrum.Length; i++)
             {
                 float intensity = spectrum[i];
-                float angle = (float)(i * Math.PI * 2 / (spectrum.Length / 2));
-                float x = centerX + (float)Math.Cos(angle) * intensity * maxRadius;
-                float y = centerY + (float)Math.Sin(angle) * intensity * maxRadius;
+                float angle = (float)(i * Pi * 2 / (spectrum.Length / 2));
+                float x = centerX + (float)Math.Cos(angle) * intensity * IntensityMultiplier * maxRadius;
+                float y = centerY + (float)Math.Sin(angle) * intensity * IntensityMultiplier * maxRadius;
 
-                using var paint = basePaint.Clone();
-                paint.Color = paint.Color.WithAlpha((byte)(255 * intensity));
-                canvas.DrawLine(centerX, centerY, x, y, paint);
+                using (var clonedPaint = paint.Clone())
+                {
+                    clonedPaint.Color = clonedPaint.Color.WithAlpha((byte)(255 * intensity));
+                    canvas.DrawLine(centerX, centerY, x, y, clonedPaint);
+                }
             }
         }
 

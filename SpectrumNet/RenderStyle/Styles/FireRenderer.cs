@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace SpectrumNet
+﻿namespace SpectrumNet
 {
     public class FireRenderer : ISpectrumRenderer
     {
@@ -8,6 +6,11 @@ namespace SpectrumNet
         private bool _isInitialized;
         private float[] _previousSpectrum = Array.Empty<float>();
         private const float DecayRate = 0.1f;
+        private const float ControlPointProportion = 0.5f;
+        private const float RandomOffsetProportion = 0.4f;
+        private const float RandomOffsetCenter = 0.2f;
+        private const float FlameBottomProportion = 0.2f;
+        private const float FlameBottomMax = 5f;
         private readonly Random _random = new();
 
         private FireRenderer() { }
@@ -17,7 +20,6 @@ namespace SpectrumNet
         public void Initialize()
         {
             if (_isInitialized) return;
-            Log.Debug("FireRenderer initialized");
             _isInitialized = true;
         }
 
@@ -26,23 +28,18 @@ namespace SpectrumNet
         private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
         {
             if (canvas == null || spectrum.IsEmpty || paint == null || info.Width <= 0 || info.Height <= 0)
-            {
-                Log.Warning("Invalid render parameters");
                 return false;
-            }
             return true;
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                         float barWidth, float barSpacing, int barCount, SKPaint? paint)
         {
             if (!_isInitialized)
-            {
-                Log.Warning("FireRenderer is not initialized.");
                 return;
-            }
 
-            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, basePaint)) return;
+            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, paint))
+                return;
 
             if (_previousSpectrum.Length != spectrum!.Length)
             {
@@ -53,8 +50,8 @@ namespace SpectrumNet
             int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
             float totalBarWidth = barWidth + barSpacing;
 
-            using var flamePaint = basePaint!.Clone();
-            RenderFlames(canvas!, spectrum.AsSpan(), actualBarCount, totalBarWidth, barWidth, info.Height, flamePaint);
+            using var paintClone = paint!.Clone();
+            RenderFlames(canvas!, spectrum.AsSpan(), actualBarCount, totalBarWidth, barWidth, info.Height, paintClone);
 
             for (int i = 0; i < spectrum.Length; i++)
             {
@@ -85,12 +82,12 @@ namespace SpectrumNet
             path.Reset();
 
             float flameTop = canvasHeight - Math.Max(currentHeight, previousHeight);
-            float flameBottom = canvasHeight - Math.Min(currentHeight * 0.2f, 5f);
+            float flameBottom = canvasHeight - Math.Min(currentHeight * FlameBottomProportion, FlameBottomMax);
 
             path.MoveTo(x, flameBottom);
 
-            float controlY = flameTop + (flameBottom - flameTop) * 0.5f;
-            float randomOffset = (float)(_random.NextDouble() * barWidth * 0.4f - barWidth * 0.2f);
+            float controlY = flameTop + (flameBottom - flameTop) * ControlPointProportion;
+            float randomOffset = (float)(_random.NextDouble() * barWidth * RandomOffsetProportion - barWidth * RandomOffsetCenter);
 
             path.QuadTo(
                 x + barWidth * 0.5f + randomOffset, controlY,

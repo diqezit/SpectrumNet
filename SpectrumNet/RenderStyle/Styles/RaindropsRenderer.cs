@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace SpectrumNet
+﻿namespace SpectrumNet
 {
     public class RaindropsRenderer : ISpectrumRenderer
     {
@@ -11,6 +9,11 @@ namespace SpectrumNet
         private const int MaxRaindrops = 100;
         private const float FallSpeed = 5f;
         private const float RippleExpandSpeed = 2f;
+        private const float SpectrumThreshold = 0.5f;
+        private const double SpawnProbability = 0.1;
+        private const float RippleStrokeWidth = 2f;
+        private const float InitialRadius = 2f;
+        private const float InitialAlpha = 1f;
 
         private RaindropsRenderer() { }
 
@@ -28,7 +31,6 @@ namespace SpectrumNet
         public void Initialize()
         {
             if (_isInitialized) return;
-            Log.Debug("RaindropsRenderer initialized");
             _isInitialized = true;
         }
 
@@ -36,27 +38,18 @@ namespace SpectrumNet
 
         private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
         {
-            if (canvas == null || spectrum.IsEmpty || paint == null || info.Width <= 0 || info.Height <= 0)
-            {
-                Log.Warning("Invalid render parameters");
-                return false;
-            }
-            return true;
+            return canvas != null && !spectrum.IsEmpty && paint != null && info.Width > 0 && info.Height > 0;
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                         float barWidth, float barSpacing, int barCount, SKPaint? paint)
         {
-            if (!_isInitialized)
-            {
-                Log.Warning("RaindropsRenderer is not initialized.");
-                return;
-            }
+            if (!_isInitialized) return;
 
-            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, basePaint)) return;
+            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, paint)) return;
 
             UpdateRaindrops(spectrum!, info.Width, info.Height);
-            RenderDrops(canvas!, info.Height, basePaint!);
+            RenderDrops(canvas!, info.Height, paint!);
         }
 
         private void UpdateRaindrops(float[] spectrum, float width, float height)
@@ -81,7 +74,7 @@ namespace SpectrumNet
                     if (drop.Y >= height)
                     {
                         drop.IsRipple = true;
-                        drop.Radius = 1f;
+                        drop.Radius = InitialRadius;
                         drop.Y = height;
                     }
                 }
@@ -90,16 +83,17 @@ namespace SpectrumNet
             // Create new raindrops based on spectrum
             if (_raindrops.Count < MaxRaindrops)
             {
+                float step = width / (spectrum.Length / 2);
                 for (int i = 0; i < spectrum.Length / 2; i++)
                 {
-                    if (spectrum[i] > 0.5f && _random.NextDouble() < 0.1)
+                    if (spectrum[i] > SpectrumThreshold && _random.NextDouble() < SpawnProbability)
                     {
                         _raindrops.Add(new Raindrop
                         {
-                            X = i * (width / (spectrum.Length / 2)) + (float)_random.NextDouble() * 10,
+                            X = i * step + (float)_random.NextDouble() * 10,
                             Y = 0,
-                            Radius = 2f,
-                            Alpha = 1f,
+                            Radius = InitialRadius,
+                            Alpha = InitialAlpha,
                             IsRipple = false
                         });
                     }
@@ -119,7 +113,7 @@ namespace SpectrumNet
                 {
                     using var ripplePaint = paint.Clone();
                     ripplePaint.Style = SKPaintStyle.Stroke;
-                    ripplePaint.StrokeWidth = 2;
+                    ripplePaint.StrokeWidth = RippleStrokeWidth;
                     ripplePaint.Color = ripplePaint.Color.WithAlpha((byte)(255 * drop.Alpha));
 
                     canvas.DrawCircle(drop.X, drop.Y, drop.Radius, ripplePaint);

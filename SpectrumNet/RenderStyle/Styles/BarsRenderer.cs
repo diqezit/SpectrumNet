@@ -5,7 +5,16 @@
         private static BarsRenderer? _instance;
         private bool _isInitialized;
         private readonly SKPath _path = new();
+        private volatile bool _disposed;
 
+        // Constants for magic numbers
+        private const float MaxCornerRadius = 10f;
+        private const float HighlightWidthProportion = 0.6f;
+        private const float HighlightHeightProportion = 0.1f;
+        private const float MaxHighlightHeight = 5f;
+        private const float AlphaMultiplier = 1.5f;
+        private const float HighlightAlphaDivisor = 3f;
+        private const float DefaultCornerRadiusFactor = 5.0f;
         private BarsRenderer() { }
 
         public static BarsRenderer GetInstance() => _instance ??= new BarsRenderer();
@@ -19,7 +28,7 @@
 
         public void Configure(bool isOverlayActive)
         {
-            // Конфигурация не требуется для этого рендерера
+            // Configuration not required for this renderer
         }
 
         private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
@@ -45,10 +54,9 @@
 
             int actualBarCount = Math.Min(spectrum!.Length / 2, barCount);
             float totalBarWidth = barWidth + barSpacing;
-            float cornerRadius = Math.Min(barWidth / 2, 10);
 
             using var barPaint = basePaint!.Clone();
-            using var highlightPaint = new SKPaint
+            SKPaint highlightPaint = new SKPaint
             {
                 IsAntialias = true,
                 Style = SKPaintStyle.Fill,
@@ -56,19 +64,22 @@
             };
 
             RenderBars(canvas!, spectrum.AsSpan(), actualBarCount, totalBarWidth, barWidth,
-                      cornerRadius, info.Height, barPaint, highlightPaint);
+                      barSpacing, info.Height, barPaint, highlightPaint);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void RenderBars(SKCanvas canvas, ReadOnlySpan<float> spectrum, int barCount,
-                              float totalBarWidth, float barWidth, float cornerRadius,
+                              float totalBarWidth, float barWidth, float barSpacing,
                               float canvasHeight, SKPaint barPaint, SKPaint highlightPaint)
         {
+            float cornerRadiusFactor = DefaultCornerRadiusFactor;
+
             for (int i = 0; i < barCount; i++)
             {
                 float barHeight = Math.Max(spectrum[i] * canvasHeight, 1);
                 float x = i * totalBarWidth;
 
+                float cornerRadius = Math.Min(barWidth * cornerRadiusFactor, MaxCornerRadius);
                 RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
                 RenderHighlight(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, highlightPaint);
             }
@@ -84,7 +95,7 @@
                 cornerRadius, 0
             ));
 
-            byte alpha = (byte)(255 * Math.Min(barHeight / canvasHeight * 1.5f, 1.0f));
+            byte alpha = (byte)(255 * Math.Min(barHeight / canvasHeight * AlphaMultiplier, 1.0f));
             barPaint.Color = barPaint.Color.WithAlpha(alpha);
 
             canvas.DrawPath(_path, barPaint);
@@ -96,10 +107,10 @@
         {
             if (barHeight <= cornerRadius * 2) return;
 
-            float highlightWidth = barWidth * 0.6f;
-            float highlightHeight = Math.Min(barHeight * 0.1f, 5);
+            float highlightWidth = barWidth * HighlightWidthProportion;
+            float highlightHeight = Math.Min(barHeight * HighlightHeightProportion, MaxHighlightHeight);
 
-            byte alpha = (byte)(255 * Math.Min(barHeight / canvasHeight * 1.5f, 1.0f) / 3);
+            byte alpha = (byte)(255 * Math.Min(barHeight / canvasHeight * AlphaMultiplier, 1.0f) / HighlightAlphaDivisor);
             highlightPaint.Color = highlightPaint.Color.WithAlpha(alpha);
 
             canvas.DrawRect(
@@ -113,7 +124,9 @@
 
         public void Dispose()
         {
+            if (_disposed) return;
             _path.Dispose();
+            _disposed = true;
         }
     }
 }
