@@ -51,7 +51,7 @@ namespace SpectrumNet
 
     public static class StyleFactory
     {
-        private static readonly IStyleCommand[] StyleCommands = new IStyleCommand[12];
+        private static readonly IStyleCommand[] StyleCommands = new IStyleCommand[9];
 
         static StyleFactory()
         {
@@ -139,8 +139,8 @@ namespace SpectrumNet
 
         public override StyleDefinition CreateStyle() =>
             new(
-                new SKColor(0xFF, 0x63, 0x47), // Tomato color
-                new SKColor(0xFF, 0x63, 0x47), // Tomato color
+                new SKColor(0xFF, 0x63, 0x47),
+                new SKColor(0xFF, 0x63, 0x47),
                 (color, _) => new SKPaint { Color = color, Style = SKPaintStyle.Fill, IsAntialias = true }
             );
     }
@@ -151,8 +151,8 @@ namespace SpectrumNet
 
         public override StyleDefinition CreateStyle() =>
             new(
-                new SKColor(0x8A, 0x2B, 0xE2), // BlueViolet color
-                new SKColor(0xFF, 0x14, 0x93), // DeepPink color
+                new SKColor(0x8A, 0x2B, 0xE2),
+                new SKColor(0xFF, 0x14, 0x93),
                 (start, end) => CreateRadialGradient(start, end, new(0.5f, 0.5f), 0.5f)
             );
     }
@@ -324,8 +324,4 @@ namespace SpectrumNet
             return paint;
         }
     }
-
-    // Style command implementations...
-    // Add implementations for all style commands 
-    // following the same pattern as in the original code
 }

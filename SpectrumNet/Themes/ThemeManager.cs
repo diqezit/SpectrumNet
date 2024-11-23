@@ -2,15 +2,10 @@
 
 namespace SpectrumNet
 {
-    /// <summary>
-    /// Ресурс для управления обработчиков слайдеров и кнопок для стилей темы в CommonRecources.xml.
-    /// </summary>
     public partial class CommonResources
     {
-
         public static void InitaliseRecources()
         {
-            // Загрузка ресурсов для xaml
             var commonResources = new ResourceDictionary { Source = new Uri("/Themes/CommonResources.xaml", UriKind.Relative) };
             var lightTheme = new ResourceDictionary { Source = new Uri("/Themes/LightTheme.xaml", UriKind.Relative) };
             var darkTheme = new ResourceDictionary { Source = new Uri("/Themes/DarkTheme.xaml", UriKind.Relative) };
@@ -24,17 +19,13 @@ namespace SpectrumNet
         {
             if (sender is Slider slider)
             {
-                double change = slider.SmallChange > 0 ? slider.SmallChange : 1;
-                slider.Value += (e.Delta > 0 ? change : -change);
-                slider.Value = Math.Max(slider.Minimum, Math.Min(slider.Maximum, slider.Value));
+                double change = slider.SmallChange <= 0 ? 1 : slider.SmallChange;
+                slider.Value = Math.Clamp(slider.Value + (e.Delta > 0 ? change : -change), slider.Minimum, slider.Maximum);
                 e.Handled = true;
             }
         }
     }
 
-    /// <summary>
-    /// Управляет темами приложения, позволяя переключаться между светлой и темной темой.
-    /// </summary>
     public class ThemeManager : INotifyPropertyChanged
     {
         private static ThemeManager? _instance;
@@ -76,25 +67,15 @@ namespace SpectrumNet
             return new ResourceDictionary { Source = new Uri(path, UriKind.Relative) };
         }
 
-        #region Регистрация и управление окнами
-
         public void RegisterWindow(Window window)
         {
-            try
-            {
-                CleanupUnusedReferences();
+            CleanupUnusedReferences();
 
-                if (!_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
-                {
-                    _registeredWindows.Add(new WeakReference<Window>(window));
-                    window.Closed += OnWindowClosed;
-                    ApplyThemeToWindow(window);
-                    Log.Debug($"[ThemeManager] Окно {window.GetType().Name} зарегистрировано");
-                }
-            }
-            catch (Exception ex)
+            if (!_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
             {
-                Log.Error(ex, "[ThemeManager] Ошибка при регистрации окна");
+                _registeredWindows.Add(new WeakReference<Window>(window));
+                window.Closed += OnWindowClosed;
+                ApplyThemeToWindow(window);
             }
         }
 
@@ -105,20 +86,12 @@ namespace SpectrumNet
 
         public void UnregisterWindow(Window window)
         {
-            try
-            {
-                CleanupUnusedReferences();
+            CleanupUnusedReferences();
 
-                if (_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
-                {
-                    _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
-                    window.Closed -= OnWindowClosed;
-                    Log.Debug($"[ThemeManager] Окно {window.GetType().Name} разорегистрировано");
-                }
-            }
-            catch (Exception ex)
+            if (_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
             {
-                Log.Error(ex, "[ThemeManager] Ошибка при разорегистрации окна");
+                _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
+                window.Closed -= OnWindowClosed;
             }
         }
 
@@ -143,25 +116,13 @@ namespace SpectrumNet
 
         private void OnWindowUnloaded(object sender, RoutedEventArgs e)
         {
-            // Ничего не делаем, чтобы избежать перезагрузки ресурсов
+            // No action needed
         }
-
-        #endregion
-
-        #region Переключение темы
 
         public void ToggleTheme()
         {
-            try
-            {
-                IsDarkTheme = !IsDarkTheme;
-                UpdateAllWindows();
-                Log.Information($"[ThemeManager] Тема изменена на {(IsDarkTheme ? "темную" : "светлую")}");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[ThemeManager] Ошибка при переключении темы");
-            }
+            IsDarkTheme = !IsDarkTheme;
+            UpdateAllWindows();
         }
 
         private void UpdateAllWindows()
@@ -180,57 +141,42 @@ namespace SpectrumNet
         {
             if (window == null) return;
 
-            try
+            Application.Current.Dispatcher.Invoke(() =>
             {
-                Application.Current.Dispatcher.Invoke(() =>
+                var themeDict = _themeDictionaries[IsDarkTheme];
+
+                foreach (var key in themeDict.Keys)
                 {
-                    var themeDict = _themeDictionaries[IsDarkTheme];
-
-                    // Обновляем только измененные ресурсы
-                    foreach (var key in themeDict.Keys)
+                    if (window.Resources.Contains(key))
                     {
-                        if (window.Resources.Contains(key))
-                        {
-                            window.Resources[key] = themeDict[key];
-                        }
-                        else
-                        {
-                            window.Resources.Add(key, themeDict[key]);
-                        }
+                        window.Resources[key] = themeDict[key];
                     }
-
-                    // Если это главное окно, обновляем ресурсы приложения
-                    if (window is MainWindow)
+                    else
                     {
-                        var app = Application.Current;
-                        if (app != null)
+                        window.Resources.Add(key, themeDict[key]);
+                    }
+                }
+
+                if (window is MainWindow)
+                {
+                    var app = Application.Current;
+                    if (app != null)
+                    {
+                        foreach (var key in themeDict.Keys)
                         {
-                            foreach (var key in themeDict.Keys)
+                            if (app.Resources.Contains(key))
                             {
-                                if (app.Resources.Contains(key))
-                                {
-                                    app.Resources[key] = themeDict[key];
-                                }
-                                else
-                                {
-                                    app.Resources.Add(key, themeDict[key]);
-                                }
+                                app.Resources[key] = themeDict[key];
+                            }
+                            else
+                            {
+                                app.Resources.Add(key, themeDict[key]);
                             }
                         }
                     }
-
-                    Log.Debug($"[ThemeManager] Тема применена к окну {window.GetType().Name}");
-                });
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"[ThemeManager] Ошибка при применении темы к окну {window.GetType().Name}");
-            }
+                }
+            });
         }
-
-        #endregion
-
-        #region События и уведомления
 
         protected virtual void OnPropertyChanged(string propertyName)
         {
@@ -241,13 +187,8 @@ namespace SpectrumNet
         {
             ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(isDarkTheme));
         }
-
-        #endregion
     }
 
-    /// <summary>
-    /// Аргументы события, указывающие на изменение темы.
-    /// </summary>
     public class ThemeChangedEventArgs : EventArgs
     {
         public bool IsDarkTheme { get; }

@@ -13,16 +13,8 @@ namespace SpectrumNet
 
         public SpectrumBrushes()
         {
-            _styles = new ConcurrentDictionary<string, StyleDefinition>(
-                Environment.ProcessorCount,
-                DefaultCapacity,
-                StringComparer.OrdinalIgnoreCase);
-
-            _paintCache = new ConcurrentDictionary<string, SKPaint>(
-                Environment.ProcessorCount,
-                DefaultCapacity,
-                StringComparer.OrdinalIgnoreCase);
-
+            _styles = new ConcurrentDictionary<string, StyleDefinition>(Environment.ProcessorCount, DefaultCapacity, StringComparer.OrdinalIgnoreCase);
+            _paintCache = new ConcurrentDictionary<string, SKPaint>(Environment.ProcessorCount, DefaultCapacity, StringComparer.OrdinalIgnoreCase);
             RegisterDefaultStyles();
         }
 
@@ -30,119 +22,76 @@ namespace SpectrumNet
         {
             var styleTypes = Enum.GetValues<StyleType>();
             if (styleTypes.Length > 10)
-            {
-                Parallel.ForEach(styleTypes, styleType =>
-                {
-                    var command = StyleFactory.CreateStyleCommand(styleType);
-                    RegisterStyle(command.Name, command.CreateStyle());
-                });
-            }
+                Parallel.ForEach(styleTypes, styleType => RegisterStyle(StyleFactory.CreateStyleCommand(styleType).Name, StyleFactory.CreateStyleCommand(styleType).CreateStyle()));
             else
-            {
                 foreach (var styleType in styleTypes)
-                {
-                    var command = StyleFactory.CreateStyleCommand(styleType);
-                    RegisterStyle(command.Name, command.CreateStyle());
-                }
-            }
+                    RegisterStyle(StyleFactory.CreateStyleCommand(styleType).Name, StyleFactory.CreateStyleCommand(styleType).CreateStyle());
         }
 
         public void RegisterStyle(string styleName, StyleDefinition definition, bool overwriteIfExists = false)
         {
             ValidateDisposed();
-            ValidateStyleName(styleName);
+            if (string.IsNullOrWhiteSpace(styleName))
+                throw new ArgumentException("Style name cannot be empty.", nameof(styleName));
 
             if (!overwriteIfExists && _styles.ContainsKey(styleName))
-            {
-                Log.Warning("[SpectrumStyles] Style '{StyleName}' already exists.", styleName);
                 return;
-            }
 
             if (_styles.TryAdd(styleName, definition) || overwriteIfExists)
-            {
                 _paintCache.TryRemove(styleName, out var oldPaint);
-                oldPaint?.Dispose();
-                Log.Information("[SpectrumStyles] Registered style '{StyleName}'.", styleName);
-            }
         }
 
         public (SKColor startColor, SKColor endColor, SKPaint paint) GetColorsAndBrush(string styleName)
         {
             ValidateDisposed();
-            ValidateStyleName(styleName);
+            if (string.IsNullOrWhiteSpace(styleName))
+                throw new ArgumentException("Style name cannot be empty.", nameof(styleName));
 
             if (!_styles.TryGetValue(styleName, out var styleDefinition))
-            {
                 throw new InvalidOperationException($"Style '{styleName}' not found.");
-            }
 
             var (startColor, endColor) = styleDefinition.GetColors();
             var paint = _paintCache.GetOrAdd(styleName, _ => styleDefinition.CreatePaint());
-
             return (startColor, endColor, paint);
         }
 
         public bool RemoveStyle(string styleName)
         {
             ValidateDisposed();
-            ValidateStyleName(styleName);
+            if (string.IsNullOrWhiteSpace(styleName))
+                throw new ArgumentException("Style name cannot be empty.", nameof(styleName));
 
             bool removed = _styles.TryRemove(styleName, out _);
             if (removed && _paintCache.TryRemove(styleName, out var paint))
-            {
                 paint.Dispose();
-            }
-
             return removed;
         }
 
         public void ClearStyles()
         {
             ValidateDisposed();
-
             foreach (var paint in _paintCache.Values)
-            {
                 paint.Dispose();
-            }
-
             _styles.Clear();
             _paintCache.Clear();
-        }
-
-        private static void ValidateStyleName(string styleName)
-        {
-            if (string.IsNullOrWhiteSpace(styleName))
-            {
-                throw new ArgumentException("Style name cannot be empty.", nameof(styleName));
-            }
         }
 
         private void ValidateDisposed()
         {
             if (_disposed)
-            {
                 throw new ObjectDisposedException(nameof(SpectrumBrushes));
-            }
         }
 
         public void Dispose()
         {
             if (_disposed)
-            {
                 return;
-            }
 
             _disposed = true;
-
             foreach (var paint in _paintCache.Values)
-            {
                 paint.Dispose();
-            }
-
             _styles.Clear();
             _paintCache.Clear();
-
-            Log.Information("[SpectrumStyles] Successfully disposed SpectrumStyles instance.");
             GC.SuppressFinalize(this);
         }
     }
@@ -170,15 +119,11 @@ namespace SpectrumNet
         public SKPaint CreatePaint()
         {
             if (_cachedPaint != null)
-            {
                 return _cachedPaint;
-            }
 
             lock (_cacheLock)
-            {
                 _cachedPaint ??= _factory(_startColor, _endColor);
-                return _cachedPaint;
-            }
+            return _cachedPaint;
         }
     }
 }
