@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace SpectrumNet
 {
     public partial class App : Application
@@ -35,6 +37,7 @@ namespace SpectrumNet
                 };
 
                 base.OnStartup(e);
+
             }
             catch (Exception ex)
             {

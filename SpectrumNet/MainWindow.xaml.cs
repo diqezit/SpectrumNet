@@ -328,7 +328,14 @@ namespace SpectrumNet
             {
                 Log.Information("[MainWindow] Начало реинициализации компонентов");
 
-                _mainWindow._analyzer ??= new SpectrumAnalyzer();
+                var fftProcessor = new FftProcessor(2048); // Or your desired FFT size
+                var spectrumConverter = new SpectrumConverter(_mainWindow._gainParameters);
+                _mainWindow._analyzer ??= new SpectrumAnalyzer(
+                    fftProcessor,
+                    spectrumConverter,
+                    SynchronizationContext.Current
+                );
+
                 _mainWindow._captureController = new AudioController(_mainWindow._analyzer, _mainWindow, captureOperations);
 
                 if (_mainWindow._skElement == null || _mainWindow._skElement.ActualWidth <= 0 || _mainWindow._skElement.ActualHeight <= 0)
@@ -488,8 +495,13 @@ namespace SpectrumNet
             _mainWindow._skElement = _mainWindow.spectrumCanvas ??
                 throw new ArgumentNullException(nameof(_mainWindow.spectrumCanvas), $"[{nameof(MainWindow)}] spectrumCanvas не был инициализирован.");
 
-            _mainWindow._analyzer = new SpectrumAnalyzer() ??
-                throw new InvalidOperationException($"[{nameof(MainWindow)}] _analyzer не был инициализирован.");
+            var fftProcessor = new FftProcessor(2048); // Or your desired FFT size
+            var spectrumConverter = new SpectrumConverter(_mainWindow._gainParameters);
+            _mainWindow._analyzer = new SpectrumAnalyzer(
+                fftProcessor,
+                spectrumConverter,
+                SynchronizationContext.Current
+            ) ?? throw new InvalidOperationException($"[{nameof(MainWindow)}] _analyzer не был инициализирован.");
 
             _mainWindow._captureController = new AudioController(_mainWindow._analyzer, _mainWindow, captureOperations);
 
@@ -815,6 +827,7 @@ namespace SpectrumNet
         internal CaptureOperations _captureOperations;
         internal readonly InitializationManager _initializationManager;
         internal OverlayManager _overlayManager;
+        internal GainParameters _gainParameters;
 
         // Cleanup
         private readonly Dictionary<string, Action> _cleanupActions = new();
@@ -826,6 +839,7 @@ namespace SpectrumNet
         {
             InitializeComponent();
             DataContext = this;
+            _gainParameters = new GainParameters(SynchronizationContext.Current);
             _eventHandlers = new EventHandlersMainWindow(this);
             _renderTimer = new DispatcherTimer();
             _initializationManager = new InitializationManager(this);
@@ -961,42 +975,42 @@ namespace SpectrumNet
 
         public float MinDbLevel
         {
-            get => _analyzer?.MinDbValue ?? 0;
+            get => _gainParameters.MinDbValue;
             set
             {
-                if (_analyzer != null && _analyzer.MinDbValue != value)
+                if (_gainParameters.MinDbValue != value)
                 {
-                    _analyzer.MinDbValue = value;
+                    _gainParameters.MinDbValue = value;
                     OnPropertyChanged(nameof(MinDbLevel));
-                    UpdateAnalyzerAndInvalidate();
+                    InvalidateVisuals();
                 }
             }
         }
 
         public float MaxDbLevel
         {
-            get => _analyzer?.MaxDbValue ?? 0;
+            get => _gainParameters.MaxDbValue;
             set
             {
-                if (_analyzer != null && _analyzer.MaxDbValue != value)
+                if (_gainParameters.MaxDbValue != value)
                 {
-                    _analyzer.MaxDbValue = value;
+                    _gainParameters.MaxDbValue = value;
                     OnPropertyChanged(nameof(MaxDbLevel));
-                    UpdateAnalyzerAndInvalidate();
+                    InvalidateVisuals();
                 }
             }
         }
 
         public float AmplificationFactor
         {
-            get => _analyzer!.AmplificationFactor;
+            get => _gainParameters.AmplificationFactor;
             set
             {
-                if (_analyzer != null && _analyzer.AmplificationFactor != value)
+                if (_gainParameters.AmplificationFactor != value)
                 {
-                    _analyzer.AmplificationFactor = value;
+                    _gainParameters.AmplificationFactor = value;
                     OnPropertyChanged(nameof(AmplificationFactor));
-                    UpdateAnalyzerAndInvalidate();
+                    InvalidateVisuals();
                 }
             }
         }
@@ -1052,16 +1066,8 @@ namespace SpectrumNet
         #endregion
 
         #region Helper Methods
-        private void UpdateAnalyzerAndInvalidate()
+        private void InvalidateVisuals()
         {
-            lock (_updateLock)
-            {
-                _analyzer?.UpdateGainParameters(
-                    amplificationFactor: AmplificationFactor,
-                    minDbValue: MinDbLevel,
-                    maxDbValue: MaxDbLevel
-                );
-            }
             _skElement?.InvalidateVisual();
         }
 

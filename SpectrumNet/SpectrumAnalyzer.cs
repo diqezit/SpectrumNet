@@ -2,6 +2,46 @@
 
 namespace SpectrumNet
 {
+    //--------Constants--------
+    public static class Constants
+    {
+        public const float DefaultAmplificationFactor = 0.55f;
+        public const float DefaultMinDbValue = -100f;
+        public const float DefaultMaxDbValue = -20f;
+        public const float Epsilon = float.Epsilon;
+        public const int DefaultFftSize = 1024; // Default FFT size
+    }
+
+    #region Interfaces
+
+    public interface ISpectralDataProvider
+    {
+        event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
+        SpectralData? GetCurrentSpectrum();
+        Task AddSamplesAsync(float[] samples, int sampleRate, CancellationToken cancellationToken = default);
+    }
+
+    public interface IFftProcessor
+    {
+        event EventHandler<FftEventArgs>? FftCalculated;
+        ValueTask AddSamplesAsync(float[] samples, int sampleRate);
+        ValueTask DisposeAsync();
+    }
+
+    public interface ISpectrumConverter
+    {
+        float[] ConvertToSpectrum(NAudio.Dsp.Complex[] fftResult, int sampleRate);
+    }
+
+    public interface IGainParametersProvider
+    {
+        float AmplificationFactor { get; }
+        float MinDbValue { get; }
+        float MaxDbValue { get; }
+    }
+
+    #endregion
+
     #region Data Models
 
     public record SpectralData(float[] Spectrum, DateTime Timestamp);
@@ -26,9 +66,9 @@ namespace SpectrumNet
 
     #endregion
 
-    #region Sample Processing
+    #region FFT Processing
 
-    public class SampleAggregator
+    public class FftProcessor : IFftProcessor
     {
         private readonly Channel<(float[] Samples, int SampleRate)> _sampleChannel;
         private readonly CancellationTokenSource _cancellationTokenSource;
@@ -39,13 +79,9 @@ namespace SpectrumNet
 
         public event EventHandler<FftEventArgs>? FftCalculated;
 
-        public SampleAggregator(int fftSize)
+        public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
-            if (fftSize <= 0 || (fftSize & (fftSize - 1)) != 0)
-            {
-                Log.Error("[SampleAggregator] Invalid FFT size: {FftSize}", fftSize);
-                throw new ArgumentException("FFT size must be a positive power of 2", nameof(fftSize));
-            }
+            ValidateFftSize(fftSize);
 
             _fftSize = fftSize;
             _fftBuffer = new NAudio.Dsp.Complex[fftSize];
@@ -53,6 +89,15 @@ namespace SpectrumNet
                 new UnboundedChannelOptions { SingleReader = true });
             _cancellationTokenSource = new CancellationTokenSource();
             _processingTask = ProcessSamplesAsync(_cancellationTokenSource.Token);
+        }
+
+        private static void ValidateFftSize(int fftSize)
+        {
+            if (fftSize <= 0 || (fftSize & (fftSize - 1)) != 0)
+            {
+                Log.Error("[FftProcessor] Invalid FFT size: {FftSize}", fftSize);
+                throw new ArgumentException("FFT size must be a positive power of 2", nameof(fftSize));
+            }
         }
 
         public async ValueTask AddSamplesAsync(float[] samples, int sampleRate)
@@ -63,7 +108,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "[SampleAggregator] Error adding samples: {Message}", ex.Message);
+                Log.Error(ex, "[FftProcessor] Error adding samples: {Message}", ex.Message);
                 throw;
             }
         }
@@ -83,7 +128,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "[SampleAggregator] Error processing samples: {Message}", ex.Message);
+                Log.Error(ex, "[FftProcessor] Error processing samples: {Message}", ex.Message);
                 throw;
             }
         }
@@ -127,7 +172,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "[SampleAggregator] Error processing FFT buffer: {Message}", ex.Message);
+                Log.Error(ex, "[FftProcessor] Error processing FFT buffer: {Message}", ex.Message);
                 throw;
             }
         }
@@ -142,29 +187,28 @@ namespace SpectrumNet
 
     #endregion
 
-    #region Spectrum Analysis
+    #region Spectrum Processing
 
-    public class SpectrumAnalyzer : IDisposable, INotifyPropertyChanged
+    public class GainParameters : IGainParametersProvider, INotifyPropertyChanged
     {
-        private readonly SampleAggregator _sampleAggregator;
+        private float _amplificationFactor = Constants.DefaultAmplificationFactor;
+        private float _minDbValue = Constants.DefaultMinDbValue;
+        private float _maxDbValue = Constants.DefaultMaxDbValue;
         private readonly SynchronizationContext? _synchronizationContext;
-        private SpectralData? _lastSpectralData;
-        private bool _disposed;
 
-        // Spectrum settings with thread-safe access
-        private volatile float _amplificationFactor = 0.55f;
-        private volatile float _minDbValue = -100f;
-        private volatile float _maxDbValue = -20f;
-
-        public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
         public event PropertyChangedEventHandler? PropertyChanged;
+
+        public GainParameters(SynchronizationContext? synchronizationContext = null)
+        {
+            _synchronizationContext = synchronizationContext;
+        }
 
         public float AmplificationFactor
         {
             get => _amplificationFactor;
             set
             {
-                if (Math.Abs(_amplificationFactor - value) > float.Epsilon)
+                if (Math.Abs(_amplificationFactor - value) > Constants.Epsilon)
                 {
                     _amplificationFactor = Math.Max(0.1f, value);
                     OnPropertyChanged(nameof(AmplificationFactor));
@@ -177,7 +221,7 @@ namespace SpectrumNet
             get => _minDbValue;
             set
             {
-                if (Math.Abs(_minDbValue - value) > float.Epsilon)
+                if (Math.Abs(_minDbValue - value) > Constants.Epsilon)
                 {
                     _minDbValue = Math.Min(value, _maxDbValue);
                     OnPropertyChanged(nameof(MinDbValue));
@@ -190,7 +234,7 @@ namespace SpectrumNet
             get => _maxDbValue;
             set
             {
-                if (Math.Abs(_maxDbValue - value) > float.Epsilon)
+                if (Math.Abs(_maxDbValue - value) > Constants.Epsilon)
                 {
                     _maxDbValue = Math.Max(value, _minDbValue);
                     OnPropertyChanged(nameof(MaxDbValue));
@@ -198,11 +242,86 @@ namespace SpectrumNet
             }
         }
 
-        public SpectrumAnalyzer(int fftSize = 1024)
+        protected virtual void OnPropertyChanged(string propertyName)
         {
-            _synchronizationContext = SynchronizationContext.Current;
-            _sampleAggregator = new SampleAggregator(fftSize);
-            _sampleAggregator.FftCalculated += OnFftCalculated;
+            if (_synchronizationContext != null)
+            {
+                _synchronizationContext.Post(_ =>
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName)), null);
+            }
+            else
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            }
+        }
+    }
+
+    public class SpectrumConverter : ISpectrumConverter
+    {
+        private readonly IGainParametersProvider _gainParameters;
+
+        public SpectrumConverter(IGainParametersProvider gainParameters)
+        {
+            _gainParameters = gainParameters ?? throw new ArgumentNullException(nameof(gainParameters));
+        }
+
+        public float[] ConvertToSpectrum(NAudio.Dsp.Complex[] fftResult, int sampleRate)
+        {
+            int length = fftResult.Length / 2;
+            var spectrum = new float[length];
+
+            Parallel.For(0, length, i =>
+            {
+                float magnitude = CalculateMagnitude(fftResult[i], i == 0 || i == length - 1);
+                float db = 20 * (float)Math.Log10(magnitude);
+                spectrum[i] = NormalizeDb(db);
+            });
+
+            return spectrum;
+        }
+
+        private static float CalculateMagnitude(NAudio.Dsp.Complex value, bool isEndpoint)
+        {
+            float magnitude = (float)Math.Sqrt(value.X * value.X + value.Y * value.Y);
+            return isEndpoint ? magnitude : magnitude * 2;
+        }
+
+        private float NormalizeDb(float db)
+        {
+            return Math.Clamp(
+                ((db - _gainParameters.MinDbValue) /
+                (_gainParameters.MaxDbValue - _gainParameters.MinDbValue)) *
+                _gainParameters.AmplificationFactor,
+                0,
+                1
+            );
+        }
+    }
+
+    #endregion
+
+    #region Main Analyzer
+
+    public class SpectrumAnalyzer : ISpectralDataProvider, IDisposable
+    {
+        private readonly IFftProcessor _fftProcessor;
+        private readonly ISpectrumConverter _spectrumConverter;
+        private readonly SynchronizationContext? _synchronizationContext;
+        private SpectralData? _lastSpectralData;
+        private bool _disposed;
+
+        public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
+
+        public SpectrumAnalyzer(
+            IFftProcessor fftProcessor,
+            ISpectrumConverter spectrumConverter,
+            SynchronizationContext? synchronizationContext = null)
+        {
+            _fftProcessor = fftProcessor ?? throw new ArgumentNullException(nameof(fftProcessor));
+            _spectrumConverter = spectrumConverter ?? throw new ArgumentNullException(nameof(spectrumConverter));
+            _synchronizationContext = synchronizationContext;
+
+            _fftProcessor.FftCalculated += OnFftCalculated;
         }
 
         public SpectralData? GetCurrentSpectrum()
@@ -223,7 +342,7 @@ namespace SpectrumNet
 
             try
             {
-                await _sampleAggregator.AddSamplesAsync(samples, sampleRate);
+                await _fftProcessor.AddSamplesAsync(samples, sampleRate);
             }
             catch (Exception ex)
             {
@@ -232,21 +351,13 @@ namespace SpectrumNet
             }
         }
 
-        public void UpdateGainParameters(float amplificationFactor, float minDbValue, float maxDbValue)
-        {
-            ThrowIfDisposed();
-            AmplificationFactor = amplificationFactor;
-            MinDbValue = minDbValue;
-            MaxDbValue = maxDbValue;
-        }
-
         private void OnFftCalculated(object? sender, FftEventArgs e)
         {
             if (e.Result == null || e.Result.Length == 0) return;
 
             try
             {
-                var spectrum = ConvertToSpectrum(e.Result, e.SampleRate);
+                var spectrum = _spectrumConverter.ConvertToSpectrum(e.Result, e.SampleRate);
                 var spectralData = new SpectralData(spectrum, DateTime.UtcNow);
                 _lastSpectralData = spectralData;
 
@@ -267,43 +378,6 @@ namespace SpectrumNet
             }
         }
 
-        private float[] ConvertToSpectrum(NAudio.Dsp.Complex[] fftResult, int sampleRate)
-        {
-            int length = fftResult.Length / 2;
-            var spectrum = new float[length];
-
-            Parallel.For(0, length, i =>
-            {
-                float magnitude = (float)Math.Sqrt(fftResult[i].X * fftResult[i].X + fftResult[i].Y * fftResult[i].Y);
-                if (i != 0 && i != length - 1)
-                {
-                    magnitude *= 2;
-                }
-
-                float db = 20 * (float)Math.Log10(magnitude);
-                spectrum[i] = Math.Clamp(
-                    ((db - _minDbValue) / (_maxDbValue - _minDbValue)) * _amplificationFactor,
-                    0,
-                    1
-                );
-            });
-
-            return spectrum;
-        }
-
-        protected virtual void OnPropertyChanged(string propertyName)
-        {
-            if (_synchronizationContext != null)
-            {
-                _synchronizationContext.Post(_ =>
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName)), null);
-            }
-            else
-            {
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-            }
-        }
-
         private void ThrowIfDisposed()
         {
             if (_disposed)
@@ -316,8 +390,8 @@ namespace SpectrumNet
         {
             if (_disposed) return;
 
-            _sampleAggregator.FftCalculated -= OnFftCalculated;
-            (_sampleAggregator as IAsyncDisposable)?.DisposeAsync().AsTask().Wait();
+            _fftProcessor.FftCalculated -= OnFftCalculated;
+            (_fftProcessor as IAsyncDisposable)?.DisposeAsync().AsTask().Wait();
             _disposed = true;
 
             GC.SuppressFinalize(this);
