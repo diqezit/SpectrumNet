@@ -1,28 +1,29 @@
 ﻿#nullable enable
 namespace SpectrumNet
 {
-    public static class MainWindowConstants
+    public static class MwConstants
     {
-        public static class Defaults
-        {
-            public const int RenderIntervalMs = 16;
-            public const int MonitorDelay = 16;
-            public const int FftSize = 2048;
-            public const int BarCount = 120;
-            public const double BarWidth = 8;
-            public const double BarSpacing = 2;
-            public const string Style = "Gradient";
-            public const string StatusText = "Готово";
-        }
+        public const int RenderIntervalMs = 16;
+        public const int MonitorDelay = 16;
+        public const int FftSize = 2048;
+        public const int BarCount = 120;
+        public const double BarWidth = 8;
+        public const double BarSpacing = 2;
+        public const string DefaultStyle = "Gradient";
+        public const string ReadyStatus = "Готово";
+        public const string RecordingStatus = "Запись...";
     }
 
     public sealed class AudioCaptureManager : IDisposable
     {
         private readonly MainWindow _mainWindow;
         private readonly object _lock = new();
-        private SpectrumAnalyzer? _analyzer;
-        private WasapiLoopbackCapture? _capture;
-        private CancellationTokenSource? _cts;
+        private record CaptureState(
+            SpectrumAnalyzer Analyzer,
+            WasapiLoopbackCapture Capture,
+            CancellationTokenSource Cts);
+
+        private CaptureState? _state;
         private bool _isDisposed;
 
         public bool IsRecording { get; private set; }
@@ -38,38 +39,43 @@ namespace SpectrumNet
                 InitializeCapture();
             }
 
-            await MonitorCaptureAsync(_cts!.Token);
+            await MonitorCaptureAsync(_state!.Cts.Token);
         }
 
-        public async Task StopCaptureAsync()
+        public Task StopCaptureAsync()
         {
             lock (_lock)
             {
-                _cts?.Cancel();
-                _capture?.StopRecording();
-                DisposeComponents();
+                _state?.Cts.Cancel();
+                _state?.Capture.StopRecording();
+                DisposeState();
             }
 
             UpdateStatus(false);
+            return Task.CompletedTask;
         }
 
         private void InitializeCapture()
         {
-            DisposeComponents();
+            DisposeState();
 
-            _cts = new CancellationTokenSource();
-            _capture = new WasapiLoopbackCapture();
-            _capture.DataAvailable += OnDataAvailable;
+            var capture = new WasapiLoopbackCapture();
+            var analyzer = InitializeAnalyzer();
 
-            InitializeAnalyzer();
+            _state = new CaptureState(
+                analyzer,
+                capture,
+                new CancellationTokenSource());
+
+            capture.DataAvailable += OnDataAvailable;
             UpdateStatus(true);
-            _capture.StartRecording();
+            capture.StartRecording();
         }
 
-        private void InitializeAnalyzer() => _mainWindow.Dispatcher.Invoke(() =>
+        private SpectrumAnalyzer InitializeAnalyzer() => _mainWindow.Dispatcher.Invoke(() =>
         {
-            _analyzer = new SpectrumAnalyzer(
-                new FftProcessor(MainWindowConstants.Defaults.FftSize),
+            var analyzer = new SpectrumAnalyzer(
+                new FftProcessor(MwConstants.FftSize),
                 new SpectrumConverter(_mainWindow._gainParameters),
                 SynchronizationContext.Current);
 
@@ -79,18 +85,20 @@ namespace SpectrumNet
                 _mainWindow._renderer = new Renderer(
                     _mainWindow._spectrumStyles ?? new SpectrumBrushes(),
                     _mainWindow,
-                    _analyzer,
+                    analyzer,
                     _mainWindow.RenderElement);
             }
+
+            return analyzer;
         });
 
         private void OnDataAvailable(object? sender, WaveInEventArgs e)
         {
-            if (e.BytesRecorded <= 0 || _analyzer == null || _capture == null) return;
+            if (e.BytesRecorded <= 0 || _state?.Analyzer is null || _state.Capture is null) return;
 
             var samples = new float[e.BytesRecorded / 4];
             Buffer.BlockCopy(e.Buffer, 0, samples, 0, e.BytesRecorded);
-            _ = _analyzer.AddSamplesAsync(samples, _capture.WaveFormat.SampleRate);
+            _ = _state.Analyzer.AddSamplesAsync(samples, _state.Capture.WaveFormat.SampleRate);
         }
 
         private async Task MonitorCaptureAsync(CancellationToken token)
@@ -99,7 +107,7 @@ namespace SpectrumNet
             {
                 while (!token.IsCancellationRequested)
                 {
-                    await Task.Delay(MainWindowConstants.Defaults.MonitorDelay, token);
+                    await Task.Delay(MwConstants.MonitorDelay, token);
                     _mainWindow.Dispatcher.Invoke(() => _mainWindow.RenderElement?.InvalidateVisual());
                 }
             }
@@ -110,22 +118,21 @@ namespace SpectrumNet
         {
             IsRecording = isRecording;
             _mainWindow.IsRecording = isRecording;
-            _mainWindow.StatusText = isRecording ? "Запись..." : MainWindowConstants.Defaults.StatusText;
+            _mainWindow.StatusText = isRecording ? MwConstants.RecordingStatus : MwConstants.ReadyStatus;
             _mainWindow.OnPropertyChanged(
                 nameof(_mainWindow.IsRecording),
                 nameof(_mainWindow.CanStartCapture),
                 nameof(_mainWindow.StatusText));
         });
 
-        private void DisposeComponents()
+        private void DisposeState()
         {
-            _cts?.Dispose();
-            _capture?.Dispose();
-            _analyzer?.Dispose();
+            if (_state is null) return;
 
-            _cts = null;
-            _capture = null;
-            _analyzer = null;
+            _state.Cts.Dispose();
+            _state.Capture.Dispose();
+            _state.Analyzer.Dispose();
+            _state = null;
         }
 
         public void Dispose()
@@ -143,12 +150,10 @@ namespace SpectrumNet
 
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
+        private record WindowState(string Style = MwConstants.DefaultStyle, double BarSpacing = MwConstants.BarSpacing, double BarWidth = MwConstants.BarWidth, int BarCount = MwConstants.BarCount, string StatusText = MwConstants.ReadyStatus);
+
         private readonly object _lock = new();
-        private string _style = MainWindowConstants.Defaults.Style;
-        private double _barSpacing = MainWindowConstants.Defaults.BarSpacing,
-                       _barWidth = MainWindowConstants.Defaults.BarWidth;
-        private int _barCount = MainWindowConstants.Defaults.BarCount;
-        private string _statusText = MainWindowConstants.Defaults.StatusText;
+        private WindowState _state = new();
         private bool _isOverlayActive, _isPopupOpen;
         private RenderStyle _selectedDrawingType;
         private OverlayWindow? _overlayWindow;
@@ -159,13 +164,12 @@ namespace SpectrumNet
         internal AudioCaptureManager? _captureManager;
         internal GainParameters _gainParameters;
         internal CompositeDisposable? _disposables;
-        private DispatcherTimer? _renderTimer;
-        
+
         public bool IsDarkTheme => ThemeManager.Instance.IsDarkTheme;
         public IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>();
         public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles => _spectrumStyles?.Styles ?? new Dictionary<string, StyleDefinition>();
         public SKElement? RenderElement { get; private set; }
-        public bool CanStartCapture => _captureManager != null && !IsRecording;
+        public bool CanStartCapture => _captureManager is not null && !IsRecording;
 
         public MainWindow()
         {
@@ -183,33 +187,24 @@ namespace SpectrumNet
             RenderElement = spectrumCanvas;
             _spectrumStyles = new SpectrumBrushes();
             _disposables = new CompositeDisposable();
-            _renderTimer = new DispatcherTimer 
-            { 
-                Interval = TimeSpan.FromMilliseconds(MainWindowConstants.Defaults.RenderIntervalMs) 
-            };
 
-            _analyzer = new SpectrumAnalyzer(
-                new FftProcessor(MainWindowConstants.Defaults.FftSize),
-                new SpectrumConverter(_gainParameters),
-                SynchronizationContext.Current);
-            
+            var renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(MwConstants.RenderIntervalMs) };
+            renderTimer.Tick += (_, _) => RenderElement?.InvalidateVisual();
+            renderTimer.Start();
+
+            _analyzer = new SpectrumAnalyzer(new FftProcessor(MwConstants.FftSize), new SpectrumConverter(_gainParameters), SynchronizationContext.Current);
             _captureManager = new AudioCaptureManager(this);
             _renderer = new Renderer(_spectrumStyles, this, _analyzer, RenderElement);
-            SelectedStyle = MainWindowConstants.Defaults.Style;
+            SelectedStyle = MwConstants.DefaultStyle;
         }
 
         private void SetupEventHandlers()
         {
-            if (RenderElement == null) return;
-
             RenderElement.PaintSurface += OnPaintSurface;
             SizeChanged += OnWindowSizeChanged;
-            StyleComboBox.SelectionChanged += OnStyleComboBoxSelectionChanged;
-            RenderStyleComboBox.SelectionChanged += OnRenderStyleComboBoxSelectionChanged;
+            StyleComboBox.SelectionChanged += OnComboBoxSelectionChanged;
+            RenderStyleComboBox.SelectionChanged += OnComboBoxSelectionChanged;
             Closed += OnWindowClosed;
-
-            _renderTimer!.Tick += (_, _) => RenderElement.InvalidateVisual();
-            _renderTimer.Start();
         }
 
         private void ConfigureTheme()
@@ -222,157 +217,108 @@ namespace SpectrumNet
             };
         }
 
-        private void UpdateProperties() =>
-            OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
+        private void UpdateProperties() => OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
 
-        // Event Handlers
-        private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) =>
-            _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+        private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) => _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) =>
-            _renderer?.RenderFrame(sender, e);
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) => _renderer?.RenderFrame(sender, e);
 
-        private void OnStyleComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_renderer == null || SelectedStyle == null || _spectrumStyles == null) return;
-
-            var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
-            _renderer.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
-            InvalidateVisuals();
-        }
-
-        private void OnRenderStyleComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (RenderStyleComboBox?.SelectedValue is RenderStyle renderStyle)
+            if (sender == StyleComboBox && _renderer != null && SelectedStyle != null && _spectrumStyles != null)
+            {
+                var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
+                _renderer.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
+            }
+            else if (sender == RenderStyleComboBox && RenderStyleComboBox.SelectedValue is RenderStyle renderStyle)
             {
                 _selectedDrawingType = renderStyle;
                 _renderer?.UpdateRenderStyle(renderStyle);
-                InvalidateVisuals();
             }
+            InvalidateVisuals();
         }
 
         private void OnWindowClosed(object? sender, EventArgs e)
         {
-            if (IsOverlayActive)
-                CloseOverlay();
-                
+            if (IsOverlayActive) CloseOverlay();
             _renderer?.Dispose();
             _analyzer?.Dispose();
             _captureManager?.Dispose();
             _disposables?.Dispose();
         }
 
-        public void OnOpenPopupButtonClick(object sender, RoutedEventArgs e) =>
-            IsPopupOpen = !IsPopupOpen;
+        private void OnOpenPopupButtonClick(object sender, RoutedEventArgs e) => IsPopupOpen = !IsPopupOpen;
 
-        public void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e) =>
-            new SettingsWindow().ShowDialog();
+        private void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e) => new SettingsWindow().ShowDialog();
 
-        public void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (sender is not Slider slider) return;
-
-            var value = slider.Value;
-            var updates = new Dictionary<string, Action>
+            if (sender is Slider slider)
             {
-                { "barWidthSlider", () => BarWidth = value },
-                { "barSpacingSlider", () => BarSpacing = value },
-                { "barCountSlider", () => BarCount = (int)value },
-                { "minDbLevelSlider", () => MinDbLevel = (float)value },
-                { "maxDbLevelSlider", () => MaxDbLevel = (float)value },
-                { "adaptionRateSlider", () => AmplificationFactor = (float)value }
-            };
+                var value = slider.Value;
+                var updates = new Dictionary<string, Action>
+                {
+                    ["barWidthSlider"] = () => BarWidth = value,
+                    ["barSpacingSlider"] = () => BarSpacing = value,
+                    ["barCountSlider"] = () => BarCount = (int)value,
+                    ["minDbLevelSlider"] = () => MinDbLevel = (float)value,
+                    ["maxDbLevelSlider"] = () => MaxDbLevel = (float)value,
+                    ["adaptionRateSlider"] = () => AmplificationFactor = (float)value
+                };
 
-            if (updates.TryGetValue(slider.Name, out var action))
-            {
-                action();
-                InvalidateVisuals();
+                if (updates.TryGetValue(slider.Name, out var action))
+                {
+                    action();
+                    InvalidateVisuals();
+                }
             }
         }
 
-        private void OnButtonClick(object sender, RoutedEventArgs e)
+        private async void OnButtonClick(object sender, RoutedEventArgs e)
         {
             if (sender is Button button)
             {
                 switch (button.Name)
                 {
-                    case "StartCaptureButton":
-                        _ = StartCaptureAsync();
-                        break;
-                    case "StopCaptureButton":
-                        _ = StopCaptureAsync();
-                        break;
+                    case "StartCaptureButton": await StartCaptureAsync(); break;
+                    case "StopCaptureButton": await StopCaptureAsync(); break;
+                    case "OverlayButton": OnOverlayButtonClick(sender, e); break;
+                    case "OpenSettingsButton": OnOpenSettingsButtonClick(sender, e); break;
+                    case "OpenPopupButton": OnOpenPopupButtonClick(sender, e); break;
                 }
             }
         }
 
-        public void OnOverlayButtonClick(object sender, RoutedEventArgs e)
-        {
-            if (IsOverlayActive)
-                CloseOverlay();
-            else
-                OpenOverlay();
-        }
+        private void OnOverlayButtonClick(object sender, RoutedEventArgs e) => (IsOverlayActive ? (Action)CloseOverlay : OpenOverlay)();
 
-        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e) =>
-            ThemeManager.Instance.ToggleTheme();
+        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e) => ThemeManager.Instance.ToggleTheme();
 
-        // Overlay Management
         private void OpenOverlay()
         {
-            _overlayWindow = new OverlayWindow(this, new OverlayConfiguration
-            {
-                RenderInterval = MainWindowConstants.Defaults.RenderIntervalMs,
-                IsTopmost = true,
-                ShowInTaskbar = false
-            });
-
+            _overlayWindow = new OverlayWindow(this, new OverlayConfiguration { RenderInterval = MwConstants.RenderIntervalMs, IsTopmost = true, ShowInTaskbar = false });
             _overlayWindow.Closed += (_, _) => OnOverlayClosed();
             _overlayWindow.Show();
             IsOverlayActive = true;
-
-            UpdateRendererDimensions(
-                (int)SystemParameters.PrimaryScreenWidth,
-                (int)SystemParameters.PrimaryScreenHeight
-            );
+            UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth, (int)SystemParameters.PrimaryScreenHeight);
         }
 
-        private void OnOverlayClosed()
-        {
-            IsOverlayActive = false;
-            UpdateRendererDimensions(
-                (int)RenderElement?.ActualWidth,
-                (int)RenderElement?.ActualHeight
-            );
-        }
+        private void OnOverlayClosed() => IsOverlayActive = false;
 
         public void CloseOverlay()
         {
-            _overlayWindow?.Close();
-            _overlayWindow?.Dispose();
-            _overlayWindow = null;
+            if (_overlayWindow != null)
+            {
+                _overlayWindow.Close();
+                _overlayWindow.Dispose();
+                _overlayWindow = null;
+            }
             IsOverlayActive = false;
         }
 
-        private void UpdateRendererDimensions(int? width, int? height)
-        {
-            if (width.HasValue && height.HasValue)
-                _renderer?.UpdateRenderDimensions(width.Value, height.Value);
-        }
+        private void UpdateRendererDimensions(int? width, int? height) => _renderer?.UpdateRenderDimensions(width ?? 0, height ?? 0);
 
-        // Properties
-        public bool IsPopupOpen
-        {
-            get => _isPopupOpen;
-            set => SetField(ref _isPopupOpen, value);
-        }
-
-        public bool IsOverlayActive
-        {
-            get => _isOverlayActive;
-            set => SetField(ref _isOverlayActive, value);
-        }
-
+        public bool IsPopupOpen { get => _isPopupOpen; set => SetField(ref _isPopupOpen, value); }
+        public bool IsOverlayActive { get => _isOverlayActive; set => SetField(ref _isOverlayActive, value); }
         public bool IsRecording
         {
             get => _captureManager?.IsRecording ?? false;
@@ -386,70 +332,25 @@ namespace SpectrumNet
             }
         }
 
-        public double BarWidth
-        {
-            get => _barWidth;
-            set => SetField(ref _barWidth, value, InvalidateVisuals);
-        }
-
-        public double BarSpacing
-        {
-            get => _barSpacing;
-            set => SetField(ref _barSpacing, value, InvalidateVisuals);
-        }
-
-        public int BarCount
-        {
-            get => _barCount;
-            set => SetField(ref _barCount, value, InvalidateVisuals);
-        }
-
-        public RenderStyle SelectedDrawingType
-        {
-            get => _selectedDrawingType;
-            set => SetField(ref _selectedDrawingType, value, () =>
-            {
-                _renderer?.UpdateRenderStyle(_selectedDrawingType);
-                InvalidateVisuals();
-            });
-        }
-
+        public double BarWidth { get => _state.BarWidth; set => UpdateState(s => s with { BarWidth = value }, nameof(BarWidth), InvalidateVisuals); }
+        public double BarSpacing { get => _state.BarSpacing; set => UpdateState(s => s with { BarSpacing = value }, nameof(BarSpacing), InvalidateVisuals); }
+        public int BarCount { get => _state.BarCount; set => UpdateState(s => s with { BarCount = value }, nameof(BarCount), InvalidateVisuals); }
+        public RenderStyle SelectedDrawingType { get => _selectedDrawingType; set => SetField(ref _selectedDrawingType, value, () => _renderer?.UpdateRenderStyle(value)); }
         public string SelectedStyle
         {
-            get => _style;
-            set => SetField(ref _style, value, () =>
+            get => _state.Style;
+            set => UpdateState(s => s with { Style = value }, nameof(SelectedStyle), () =>
             {
-                var (sC, eC, _) = _spectrumStyles?.GetColorsAndBrush(SelectedStyle) ?? default;
-                _renderer?.UpdateSpectrumStyle(SelectedStyle, sC, eC);
+                var (sC, eC, _) = _spectrumStyles?.GetColorsAndBrush(value) ?? default;
+                _renderer?.UpdateSpectrumStyle(value, sC, eC);
                 InvalidateVisuals();
             });
         }
+        public string StatusText { get => _state.StatusText; set => UpdateState(s => s with { StatusText = value }, nameof(StatusText)); }
+        public float MinDbLevel { get => _gainParameters.MinDbValue; set => UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel)); }
+        public float MaxDbLevel { get => _gainParameters.MaxDbValue; set => UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel)); }
+        public float AmplificationFactor { get => _gainParameters.AmplificationFactor; set => UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor)); }
 
-        public string StatusText
-        {
-            get => _statusText;
-            set => SetField(ref _statusText, value);
-        }
-
-        public float MinDbLevel
-        {
-            get => _gainParameters.MinDbValue;
-            set => UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel));
-        }
-
-        public float MaxDbLevel
-        {
-            get => _gainParameters.MaxDbValue;
-            set => UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
-        }
-
-        public float AmplificationFactor
-        {
-            get => _gainParameters.AmplificationFactor;
-            set => UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
-        }
-
-        // Helper Methods
         private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName)
         {
             setter(newValue);
@@ -457,37 +358,32 @@ namespace SpectrumNet
             InvalidateVisuals();
         }
 
+        private void UpdateState(Func<WindowState, WindowState> updater, string propertyName, Action? callback = null)
+        {
+            _state = updater(_state);
+            OnPropertyChanged(propertyName);
+            callback?.Invoke();
+        }
+
         private void InvalidateVisuals() => RenderElement?.InvalidateVisual();
 
-        public async Task StartCaptureAsync()
+        public Task StartCaptureAsync() => _captureManager?.StartCaptureAsync() ?? Task.CompletedTask;
+        public Task StopCaptureAsync() => _captureManager?.StopCaptureAsync() ?? Task.CompletedTask;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public virtual void OnPropertyChanged(params string[] propertyNames)
         {
-            if (_captureManager != null)
-                await _captureManager.StartCaptureAsync();
+            foreach (var name in propertyNames)
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
-        public async Task StopCaptureAsync()
-        {
-            if (_captureManager != null)
-                await _captureManager.StopCaptureAsync();
-        }
-
-        // Property Changed Implementation
-        private bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
+        protected bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
         {
             if (EqualityComparer<T>.Default.Equals(field, value)) return false;
-            
             field = value;
             OnPropertyChanged(propertyName ?? string.Empty);
             callback?.Invoke();
             return true;
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-        
-        public void OnPropertyChanged(params string[] properties)
-        {
-            foreach (var prop in properties)
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(prop));
         }
     }
 }
