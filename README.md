@@ -85,7 +85,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ---
 
-For any questions or support, please contact the maintainers of this project.
+For any questions or support, please contact me :) 
 
 
 
