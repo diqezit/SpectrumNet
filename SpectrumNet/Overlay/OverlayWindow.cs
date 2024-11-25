@@ -2,29 +2,17 @@
 
 namespace SpectrumNet
 {
-    /// <summary>
-    /// Configuration options for the overlay window.
-    /// </summary>
-    public sealed record OverlayConfiguration
-    {
-        public int RenderInterval { get; init; } = 16;
-        public bool IsTopmost { get; init; } = true;
-        public bool ShowInTaskbar { get; init; } = false;
-        public WindowStyle Style { get; init; } = WindowStyle.None;
-        public WindowState State { get; init; } = WindowState.Maximized;
-    }
+    public sealed record OverlayConfiguration(
+        int RenderInterval = 16,
+        bool IsTopmost = true,
+        bool ShowInTaskbar = false,
+        WindowStyle Style = WindowStyle.None,
+        WindowState State = WindowState.Maximized
+    );
 
-    /// <summary>
-    /// Represents a transparent overlay window that displays the spectrum visualization.
-    /// Implements IDisposable pattern for proper resource cleanup.
-    /// </summary>
     public sealed class OverlayWindow : Window, IDisposable
     {
-        private readonly record struct RenderContext(
-            MainWindow MainWindow,
-            SKElement SkElement,
-            DispatcherTimer RenderTimer
-        );
+        private record struct RenderContext(MainWindow MainWindow, SKElement SkElement, DispatcherTimer RenderTimer);
 
         private readonly OverlayConfiguration _configuration;
         private readonly CancellationTokenSource _disposalTokenSource = new();
@@ -32,324 +20,170 @@ namespace SpectrumNet
         private bool _isDisposed;
         private readonly Serilog.ILogger _logger;
 
-        /// <summary>
-        /// Gets a value indicating whether the window is currently initialized and ready for rendering.
-        /// </summary>
         public bool IsInitialized => _renderContext != null;
 
-        #region Construction & Initialization
-
-        /// <summary>
-        /// Initializes a new instance of the OverlayWindow class with custom configuration.
-        /// </summary>
-        /// <param name="mainWindow">The main application window.</param>
-        /// <param name="configuration">Configuration options for the overlay.</param>
-        /// <param name="logger">Logger instance for diagnostic purposes.</param>
-        public OverlayWindow(
-            MainWindow mainWindow,
-            OverlayConfiguration? configuration = null,
-            Serilog.ILogger? logger = null)
+        public OverlayWindow(MainWindow mainWindow, OverlayConfiguration? configuration = null, Serilog.ILogger? logger = null)
         {
-            ArgumentNullException.ThrowIfNull(mainWindow, nameof(mainWindow));
-
-            _configuration = configuration ?? new OverlayConfiguration();
-            _logger = logger ?? Log.Logger.ForContext<OverlayWindow>();
-
-            try
-            {
-                InitializeOverlay(mainWindow);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, "Failed to initialize overlay window");
-                throw new InvalidOperationException("Failed to initialize overlay window", ex);
-            }
+            if (mainWindow == null) throw new ArgumentNullException(nameof(mainWindow));
+            _configuration = configuration ?? new();
+            _logger = logger ?? Log.ForContext<OverlayWindow>();
+            InitializeOverlay(mainWindow);
         }
 
         private void InitializeOverlay(MainWindow mainWindow)
         {
             ConfigureWindowProperties();
-
-            var skElement = CreateSkElement();
-            var renderTimer = CreateRenderTimer();
-
-            _renderContext = new RenderContext(
-                MainWindow: mainWindow,
-                SkElement: skElement,
-                RenderTimer: renderTimer
-            );
-
+            var skElement = new SKElement { VerticalAlignment = VerticalAlignment.Stretch, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var renderTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(_configuration.RenderInterval) };
+            _renderContext = new(mainWindow, skElement, renderTimer);
             Content = skElement;
             SubscribeToEvents();
+            _logger.Information("[OverlayWindow] Overlay window initialized");
         }
 
         private void ConfigureWindowProperties()
         {
-            WindowStyle = _configuration.Style;
-            AllowsTransparency = true;
-            Background = null;
-            Topmost = _configuration.IsTopmost;
-            WindowState = _configuration.State;
-            ShowInTaskbar = _configuration.ShowInTaskbar;
-            ResizeMode = ResizeMode.NoResize;
-
-            // Enable Windows DWM transparency
+            (WindowStyle, AllowsTransparency, Background, Topmost, WindowState, ShowInTaskbar, ResizeMode) =
+                (_configuration.Style, true, null, _configuration.IsTopmost, _configuration.State, _configuration.ShowInTaskbar, ResizeMode.NoResize);
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                var backdrop = new SystemBackdrop();
-                backdrop.SetTransparentBackground(this);
+                new SystemBackdrop().SetTransparentBackground(this);
+                _logger.Debug("[OverlayWindow] Transparent background set for Windows");
             }
         }
-
-        private SKElement CreateSkElement() => new()
-        {
-            VerticalAlignment = VerticalAlignment.Stretch,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-
-        private DispatcherTimer CreateRenderTimer() => new(DispatcherPriority.Render)
-        {
-            Interval = TimeSpan.FromMilliseconds(_configuration.RenderInterval)
-        };
-
-        #endregion
-
-        #region Event Handling
 
         private void SubscribeToEvents()
         {
-            if (_renderContext is null) return;
-
+            if (_renderContext is null)
+            {
+                _logger.Error("[OverlayWindow] Failed to subscribe to events: RenderContext is null");
+                return;
+            }
             _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
-            _renderContext.Value.RenderTimer.Tick += HandleRenderTick;
-
-            Closing += OnClosing;
-            SourceInitialized += OnSourceInitialized;
-            KeyDown += OnKeyDown;
-
-            // Handle DPI changes
-            DpiChanged += OnDpiChanged;
-        }
-
-        private void UnsubscribeFromEvents()
-        {
-            if (_renderContext is null) return;
-
-            _renderContext.Value.SkElement.PaintSurface -= HandlePaintSurface;
-            _renderContext.Value.RenderTimer.Tick -= HandleRenderTick;
-
-            Closing -= OnClosing;
-            SourceInitialized -= OnSourceInitialized;
-            KeyDown -= OnKeyDown;
-            DpiChanged -= OnDpiChanged;
-        }
-
-        private void HandleRenderTick(object? sender, EventArgs e)
-        {
-            if (_isDisposed || _renderContext is null) return;
-            _renderContext.Value.SkElement.InvalidateVisual();
-        }
-
-        private void HandlePaintSurface(object? sender, SkiaSharp.Views.Desktop.SKPaintSurfaceEventArgs args)
-        {
-            if (_isDisposed || _renderContext is null) return;
-
-            try
+            _renderContext.Value.RenderTimer.Tick += (_, _) => _renderContext?.SkElement.InvalidateVisual();
+            Closing += (_, _) =>
             {
-                _renderContext.Value.MainWindow.OnPaintSurface(sender, args);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, "Error during surface painting");
-                // Consider implementing a fallback rendering mechanism
-            }
-        }
-
-        private void OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-        {
-            if (e.Key == System.Windows.Input.Key.Escape)
-            {
-                Close();
-                e.Handled = true;
-            }
-        }
-
-        private void OnClosing(object? sender, CancelEventArgs e)
-        {
-            if (_renderContext?.RenderTimer is not null)
-            {
-                _renderContext.Value.RenderTimer.Stop();
-            }
-
-            Dispose();
-        }
-
-        private void OnSourceInitialized(object? sender, EventArgs e)
-        {
-            if (_isDisposed) return;
-
-            try
+                _renderContext?.RenderTimer.Stop();
+                Dispose();
+                _logger.Information("[OverlayWindow] Overlay window closing");
+            };
+            SourceInitialized += (_, _) =>
             {
                 ConfigureWindowStyleEx();
-                StartRendering();
-            }
-            catch (Exception ex)
+                _renderContext?.RenderTimer.Start();
+                _logger.Information("[OverlayWindow] Overlay window source initialized");
+            };
+            KeyDown += (_, e) =>
             {
-                _logger.Error(ex, "Failed to initialize window source");
-                Close();
-            }
+                if (e.Key == System.Windows.Input.Key.Escape)
+                {
+                    Close();
+                    e.Handled = true;
+                    _logger.Information("[OverlayWindow] Overlay window closed by Escape key");
+                }
+            };
+            DpiChanged += (_, _) => _renderContext?.SkElement.InvalidateVisual();
         }
 
-        private void OnDpiChanged(object? sender, DpiChangedEventArgs e)
+        private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args)
         {
-            // Adjust rendering for new DPI settings
-            if (_renderContext?.SkElement is not null)
+            if (_isDisposed)
             {
-                _renderContext.Value.SkElement.InvalidateVisual();
+                _logger.Warning("[OverlayWindow] Attempted to paint surface after disposal");
+                return;
             }
+            if (_renderContext is null)
+            {
+                _logger.Error("[OverlayWindow] Failed to handle paint surface: RenderContext is null");
+                return;
+            }
+            _renderContext.Value.MainWindow.OnPaintSurface(sender, args);
         }
-
-        #endregion
-
-        #region Window Configuration
 
         private void ConfigureWindowStyleEx()
         {
-            var helper = new WindowInteropHelper(this);
-            var hwnd = helper.Handle;
-
+            var hwnd = new WindowInteropHelper(this).Handle;
             if (hwnd == IntPtr.Zero)
             {
-                throw new InvalidOperationException("Window handle not initialized");
+                _logger.Error("[OverlayWindow] Failed to configure window style: Invalid window handle");
+                return;
             }
-
             var extendedStyle = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
-            _ = NativeMethods.SetWindowLong(
-                hwnd,
-                NativeMethods.GWL_EXSTYLE,
-                extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED
-            );
+            _ = NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE, extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED);
+            _logger.Debug("[OverlayWindow] Window style configured");
         }
-
-        private void StartRendering()
-        {
-            if (_renderContext?.RenderTimer is not null && !_isDisposed)
-            {
-                _renderContext.Value.RenderTimer.Start();
-            }
-        }
-
-        #endregion
-
-        #region IDisposable Implementation
 
         public void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        private void Dispose(bool disposing)
-        {
-            if (!disposing || _isDisposed) return;
-
+            if (_isDisposed) return;
             _isDisposed = true;
             _disposalTokenSource.Cancel();
-
-            UnsubscribeFromEvents();
-
-            if (_renderContext is not null)
-            {
-                _renderContext.Value.RenderTimer.Stop();
-                _renderContext = null;
-            }
-
+            _renderContext?.RenderTimer.Stop();
+            _renderContext = null;
             _disposalTokenSource.Dispose();
-            _logger.Debug("Overlay window disposed successfully");
+            _logger.Information("[OverlayWindow] Overlay window disposed");
         }
-
-        #endregion
     }
 
-    /// <summary>
-    /// Helper class for Windows-specific backdrop configuration.
-    /// </summary>
     internal sealed class SystemBackdrop
     {
         public void SetTransparentBackground(Window window)
         {
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
+            var hwnd = new WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero) return;
 
-            var windowHelper = new WindowInteropHelper(window);
-            var hwnd = windowHelper.Handle;
+            var accent = new NativeMethods.ACCENT_POLICY { nAccentState = 2, nColor = 0x00000000 };
+            var accentStructSize = Marshal.SizeOf(accent);
+            var accentPtr = Marshal.AllocHGlobal(accentStructSize);
 
-            if (hwnd != IntPtr.Zero)
+            try
             {
-                // Настройка прозрачности окна
-                var accent = new AccentPolicy
+                Marshal.StructureToPtr(accent, accentPtr, false);
+                var nativeData = new NativeMethods.WINDOWCOMPOSITIONATTRIBDATA
                 {
-                    AccentState = AccentState.ACCENT_ENABLE_TRANSPARENTGRADIENT,
-                    GradientColor = 0x00000000
+                    Attrib = NativeMethods.WINDOWCOMPOSITIONATTRIB.WCA_ACCENT_POLICY,
+                    pvData = accentPtr,
+                    cbData = accentStructSize
                 };
-
-                var accentStructSize = Marshal.SizeOf(accent);
-                var accentPtr = Marshal.AllocHGlobal(accentStructSize);
-
-                try
-                {
-                    Marshal.StructureToPtr(accent, accentPtr, false);
-                    var data = new WindowCompositionAttributeData
-                    {
-                        Attribute = WindowCompositionAttribute.WCA_ACCENT_POLICY,
-                        SizeOfData = accentStructSize,
-                        Data = accentPtr
-                    };
-
-                    // Создаем экземпляр NativeMethods.WINDOWCOMPOSITIONATTRIBDATA
-                    var nativeData = new NativeMethods.WINDOWCOMPOSITIONATTRIBDATA
-                    {
-                        Attrib = (NativeMethods.WINDOWCOMPOSITIONATTRIB)data.Attribute,
-                        pvData = data.Data,
-                        cbData = data.SizeOfData
-                    };
-
-                    // Передаем nativeData в SetWindowCompositionAttribute
-                    _ = NativeMethods.SetWindowCompositionAttribute(hwnd, ref nativeData);
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(accentPtr);
-                }
+                _ = NativeMethods.SetWindowCompositionAttribute(hwnd, ref nativeData);
             }
+            finally { Marshal.FreeHGlobal(accentPtr); }
+        }
+    }
+
+    internal static class NativeMethods
+    {
+        public const int GWL_EXSTYLE = -20;
+        public const int WS_EX_TRANSPARENT = 0x00000020;
+        public const int WS_EX_LAYERED = 0x00080000;
+
+        [DllImport("user32.dll")]
+        public static extern int GetWindowLong(IntPtr hwnd, int index);
+
+        [DllImport("user32.dll")]
+        public static extern int SetWindowLong(IntPtr hwnd, int index, int newStyle);
+
+        [DllImport("user32.dll")]
+        public static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WINDOWCOMPOSITIONATTRIBDATA data);
+
+        public enum WINDOWCOMPOSITIONATTRIB { WCA_ACCENT_POLICY = 19 }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WINDOWCOMPOSITIONATTRIBDATA
+        {
+            public WINDOWCOMPOSITIONATTRIB Attrib;
+            public IntPtr pvData;
+            public int cbData;
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        private struct AccentPolicy
+        public struct ACCENT_POLICY
         {
-            public AccentState AccentState;
-            public int AccentFlags;
-            public int GradientColor;
-            public int AnimationId;
-        }
-
-        private enum AccentState
-        {
-            ACCENT_DISABLED = 0,
-            ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
-            ACCENT_ENABLE_BLURBEHIND = 3,
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct WindowCompositionAttributeData
-        {
-            public WindowCompositionAttribute Attribute;
-            public IntPtr Data;
-            public int SizeOfData;
-        }
-
-        private enum WindowCompositionAttribute
-        {
-            WCA_ACCENT_POLICY = 19
+            public int nAccentState;
+            public int nFlags;
+            public int nColor;
+            public int nAnimationId;
         }
     }
 }
