@@ -5,7 +5,6 @@ namespace SpectrumNet
     {
         public const int RenderIntervalMs = 16;
         public const int MonitorDelay = 16;
-        public const int FftSize = 2048;
         public const int BarCount = 120;
         public const double BarWidth = 8;
         public const double BarSpacing = 2;
@@ -118,9 +117,8 @@ namespace SpectrumNet
         private SpectrumAnalyzer InitializeAnalyzer() => _mainWindow.Dispatcher.Invoke(() =>
         {
             var analyzer = new SpectrumAnalyzer(
-                new FftProcessor(MwConstants.FftSize),
-                new SpectrumConverter(_mainWindow._gainParameters),
-                SynchronizationContext.Current);
+                new FftProcessor(),
+                new SpectrumConverter(_mainWindow._gainParameters));
 
             if (_mainWindow.RenderElement is { ActualWidth: > 0, ActualHeight: > 0 })
             {
@@ -250,7 +248,7 @@ namespace SpectrumNet
 
             try
             {
-                _gainParameters = new GainParameters(SynchronizationContext.Current);
+                _gainParameters = new GainParameters();
                 DataContext = this;
                 InitializeComponents();
                 SetupEventHandlers();
@@ -274,8 +272,8 @@ namespace SpectrumNet
             renderTimer.Tick += (_, _) => RenderElement?.InvalidateVisual();
             renderTimer.Start();
 
-            _analyzer = new SpectrumAnalyzer(new FftProcessor(MwConstants.FftSize),
-                new SpectrumConverter(_gainParameters), SynchronizationContext.Current);
+            _analyzer = new SpectrumAnalyzer(new FftProcessor(),
+                new SpectrumConverter(_gainParameters));
 
             if (_analyzer == null)
             {
