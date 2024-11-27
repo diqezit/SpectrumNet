@@ -1,6 +1,7 @@
-﻿#nullable enable
+﻿using Vector = System.Numerics.Vector;
+using Complex = NAudio.Dsp.Complex;
 
-using System.Buffers;
+#nullable enable
 
 namespace SpectrumNet
 {
@@ -14,10 +15,10 @@ namespace SpectrumNet
         public const float Epsilon = float.Epsilon;
     }
 
-    //Interfaces
+    // Interfaces
     public interface IFftProcessor
     {
-        event EventHandler<FftEventArgs> FftCalculated;
+        event EventHandler<FftEventArgs>? FftCalculated;
         ValueTask AddSamplesAsync(float[] samples, int sampleRate);
         ValueTask DisposeAsync();
     }
@@ -31,25 +32,25 @@ namespace SpectrumNet
 
     public interface ISpectralDataProvider
     {
-        event EventHandler<SpectralDataEventArgs> SpectralDataReady;
+        event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
         SpectralData? GetCurrentSpectrum();
         Task AddSamplesAsync(float[] samples, int sampleRate, CancellationToken cancellationToken = default);
     }
 
     public interface ISpectrumConverter
     {
-        float[] ConvertToSpectrum(NAudio.Dsp.Complex[] fftResult, int sampleRate);
+        float[] ConvertToSpectrum(Complex[] fftResult, int sampleRate);
     }
 
     // Event Arguments
     public class FftEventArgs : EventArgs
     {
-        public NAudio.Dsp.Complex[] Result { get; }
+        public Complex[] Result { get; }
         public int SampleRate { get; }
 
-        public FftEventArgs(NAudio.Dsp.Complex[] result, int sampleRate)
+        public FftEventArgs(Complex[] result, int sampleRate)
         {
-            Result = result;
+            Result = result ?? throw new ArgumentNullException(nameof(result));
             SampleRate = sampleRate;
         }
     }
@@ -58,44 +59,50 @@ namespace SpectrumNet
     {
         public SpectralData Data { get; }
 
-        public SpectralDataEventArgs(SpectralData data) => Data = data;
+        public SpectralDataEventArgs(SpectralData data) => Data = data ?? throw new ArgumentNullException(nameof(data));
     }
 
     // Data Records
     public record SpectralData(float[] Spectrum, DateTime Timestamp);
 
     // Implementation Classes
-
-    public class GainParameters : IGainParametersProvider, INotifyPropertyChanged
+    public sealed class GainParameters : IGainParametersProvider, INotifyPropertyChanged
     {
         private float _amp = Constants.DefaultAmplificationFactor;
         private float _min = Constants.DefaultMinDbValue;
         private float _max = Constants.DefaultMaxDbValue;
         private readonly SynchronizationContext? _context;
 
-        public event PropertyChangedEventHandler? PropertyChanged = delegate { };
+        public event PropertyChangedEventHandler? PropertyChanged;
 
         public GainParameters(SynchronizationContext? context = null) => _context = context;
 
         public float AmplificationFactor
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _amp;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => UpdateProperty(ref _amp, Math.Max(0.1f, value), nameof(AmplificationFactor));
         }
 
         public float MaxDbValue
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _max;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => UpdateProperty(ref _max, Math.Max(value, _min), nameof(MaxDbValue));
         }
 
         public float MinDbValue
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _min;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => UpdateProperty(ref _min, Math.Min(value, _max), nameof(MinDbValue));
         }
 
-        private void UpdateProperty(ref float field, float value, [CallerMemberName] string propertyName = "")
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void UpdateProperty(ref float field, float value, [CallerMemberName] string? propertyName = null)
         {
             if (Math.Abs(field - value) > Constants.Epsilon)
             {
@@ -113,7 +120,7 @@ namespace SpectrumNet
         private SpectralData? _lastData;
         private bool _disposed;
 
-        public event EventHandler<SpectralDataEventArgs> SpectralDataReady = delegate { };
+        public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
 
         public SpectrumAnalyzer(
             IFftProcessor fftProcessor,
@@ -141,7 +148,7 @@ namespace SpectrumNet
 
         private void OnFftCalculated(object? sender, FftEventArgs e)
         {
-            if (e.Result?.Length > 0)
+            if (e?.Result?.Length > 0)
             {
                 var spectrum = _converter.ConvertToSpectrum(e.Result, e.SampleRate);
                 var data = new SpectralData(spectrum, DateTime.UtcNow);
@@ -167,17 +174,18 @@ namespace SpectrumNet
         }
     }
 
-    public class FftProcessor : IFftProcessor, IAsyncDisposable
+    public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
     {
-        private readonly ArrayPool<NAudio.Dsp.Complex> _bufferPool = ArrayPool<NAudio.Dsp.Complex>.Shared;
+        private readonly ArrayPool<Complex> _bufferPool = ArrayPool<Complex>.Shared;
         private readonly Channel<(float[] Samples, int SampleRate)> _channel;
         private readonly CancellationTokenSource _cts;
-        private readonly NAudio.Dsp.Complex[] _buffer;
+        private readonly Complex[] _buffer;
         private readonly Task _processingTask;
         private readonly int _fftSize;
+        private readonly AutoResetEvent _dataReadyEvent = new(false);
         private int _sampleCount;
 
-        public event EventHandler<FftEventArgs> FftCalculated = delegate { };
+        public event EventHandler<FftEventArgs>? FftCalculated;
 
         public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
@@ -185,7 +193,7 @@ namespace SpectrumNet
                 throw new ArgumentException("FFT size must be a positive power of 2");
 
             _fftSize = fftSize;
-            _buffer = _bufferPool.Rent(fftSize); // берем буфер из пула
+            _buffer = _bufferPool.Rent(fftSize);
             _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(
                 new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
             _cts = new CancellationTokenSource();
@@ -198,31 +206,38 @@ namespace SpectrumNet
             {
                 await _channel.Writer.WriteAsync((samples, sampleRate)).ConfigureAwait(false);
             }
+            _dataReadyEvent.Set();
         }
 
         public async ValueTask DisposeAsync()
         {
             _cts.Cancel();
+            _dataReadyEvent.Set();
             await _processingTask.ConfigureAwait(false);
+
             _cts.Dispose();
             _bufferPool.Return(_buffer);
+            _dataReadyEvent.Dispose();
         }
 
         private async Task ProcessSamplesAsync(CancellationToken ct)
         {
-            while (!ct.IsCancellationRequested)
+            try
             {
-                if (_channel.Reader.TryRead(out var item))
+                while (!ct.IsCancellationRequested)
                 {
-                    var (samples, sampleRate) = item;
-                    ProcessSampleBlock(samples, sampleRate);
-                }
-                else
-                {
-                    // Добавляем небольшую задержку для предотвращения busy-waiting
-                    await Task.Delay(1).ConfigureAwait(false);
+                    if (_channel.Reader.TryRead(out var item))
+                    {
+                        var (samples, sampleRate) = item;
+                        ProcessSampleBlock(samples, sampleRate);
+                    }
+                    else
+                    {
+                        _dataReadyEvent.WaitOne();
+                    }
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         }
 
         private void ProcessSampleBlock(float[] samples, int sampleRate)
@@ -249,24 +264,27 @@ namespace SpectrumNet
 
         private void CopySamplesToBuffer(ReadOnlySpan<float> samples, int bufferOffset)
         {
-            Span<NAudio.Dsp.Complex> bufferSpan = _buffer.AsSpan(bufferOffset, samples.Length);
+            Span<Complex> bufferSpan = _buffer.AsSpan(bufferOffset, samples.Length);
 
             int i = 0;
             int simdLength = Vector<float>.Count;
 
-            // Обрабатываем данные с помощью SIMD
             while (i <= samples.Length - simdLength)
             {
                 var vector = new Vector<float>(samples.Slice(i, simdLength));
-                for (int j = 0; j < simdLength; j++)
+                Vector.Widen(vector, out var low, out var high);
+
+                for (int j = 0; j < simdLength / 2; j++)
                 {
-                    bufferSpan[i + j].X = vector[j];
+                    bufferSpan[i + j].X = (float)low[j];
                     bufferSpan[i + j].Y = 0;
+                    bufferSpan[i + j + simdLength / 2].X = (float)high[j];
+                    bufferSpan[i + j + simdLength / 2].Y = 0;
                 }
+
                 i += simdLength;
             }
 
-            // Обычная обработка оставшихся данных
             for (; i < samples.Length; i++)
             {
                 bufferSpan[i].X = samples[i];
@@ -275,70 +293,135 @@ namespace SpectrumNet
         }
     }
 
-    public class SpectrumConverter : ISpectrumConverter
+    public sealed class SpectrumConverter : ISpectrumConverter
     {
         private readonly IGainParametersProvider _params;
 
         public SpectrumConverter(IGainParametersProvider parameters) =>
             _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
 
-        public unsafe float[] ConvertToSpectrum(NAudio.Dsp.Complex[] fftResult, int sampleRate)
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        public unsafe float[] ConvertToSpectrum(Complex[] fftResult, int sampleRate)
         {
             int length = fftResult.Length / 2;
-            var spectrum = new float[length];
+            var spectrum = GC.AllocateUninitializedArray<float>(length, pinned: true);
+
             float minDb = _params.MinDbValue;
             float maxDbValueMinusMinDbValue = _params.MaxDbValue - minDb;
             float amplificationFactor = _params.AmplificationFactor;
 
-            float[] realParts = fftResult.Select(c => c.X).ToArray();
-            float[] imagParts = fftResult.Select(c => c.Y).ToArray();
+            const float logBase10Multiplier = 10f;
+            const float fourMultiplier = 4f;
+            const float epsilon = float.Epsilon;
 
-            fixed (float* ptrReal = realParts, ptrImag = imagParts, ptrSpectrum = spectrum)
+            fixed (Complex* ptrInput = fftResult)
+            fixed (float* ptrSpectrum = spectrum)
             {
                 int vectorSize = Vector<float>.Count;
                 int vectorizedLength = length - (length % vectorSize);
 
                 for (int i = 0; i < vectorizedLength; i += vectorSize)
                 {
-                    Vector<float> xVector = new Vector<float>(realParts, i);
-                    Vector<float> yVector = new Vector<float>(imagParts, i);
-                    Vector<float> magnitudeVector = xVector * xVector + yVector * yVector;
-
-                    magnitudeVector *= new Vector<float>(4f);
-                    Vector<float> dbVector = new Vector<float>(10f) * VectorLog10(magnitudeVector);
-                    Vector<float> valueVector = (dbVector - new Vector<float>(minDb)) / new Vector<float>(maxDbValueMinusMinDbValue) * new Vector<float>(amplificationFactor);
-
-                    valueVector = VectorMax(VectorMin(valueVector, new Vector<float>(1f)), Vector<float>.Zero);
-                    valueVector.CopyTo(spectrum, i);
+                    ProcessVectorizedSpectrum(
+                        ptrInput + i,
+                        ptrSpectrum + i,
+                        minDb,
+                        maxDbValueMinusMinDbValue,
+                        amplificationFactor,
+                        logBase10Multiplier,
+                        fourMultiplier,
+                        vectorSize
+                    );
                 }
 
                 for (int i = vectorizedLength; i < length; i++)
                 {
-                    float x = ptrReal[i];
-                    float y = ptrImag[i];
-                    float magnitude = x * x + y * y;
-                    if (i != 0 && i != length - 1)
-                        magnitude *= 4;
-
-                    if (magnitude < float.Epsilon)
-                        ptrSpectrum[i] = 0;
-                    else
-                    {
-                        float db = 10 * MathF.Log10(magnitude);
-                        float value = ((db - minDb) / maxDbValueMinusMinDbValue) * amplificationFactor;
-                        ptrSpectrum[i] = value < 0 ? 0 : value > 1 ? 1 : value;
-                    }
+                    ProcessScalarSpectrum(
+                        ptrInput[i],
+                        ptrSpectrum + i,
+                        minDb,
+                        maxDbValueMinusMinDbValue,
+                        amplificationFactor,
+                        logBase10Multiplier,
+                        fourMultiplier,
+                        i,
+                        length,
+                        epsilon
+                    );
                 }
             }
 
             return spectrum;
         }
 
-        private static Vector<float> VectorLog10(Vector<float> x)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe void ProcessVectorizedSpectrum(
+            Complex* inputPtr,
+            float* outputPtr,
+            float minDb,
+            float maxDbValueMinusMinDbValue,
+            float amplificationFactor,
+            float logBase10Multiplier,
+            float fourMultiplier,
+            int vectorSize)
         {
-            return VectorLog(x) * new Vector<float>(0.43429448190325f); // 1 / ln(10)
+            Span<float> realParts = MemoryMarshal.Cast<Complex, float>(new Span<Complex>(inputPtr, vectorSize));
+            Span<float> imagParts = realParts.Slice(1, vectorSize);
+
+            var xVector = new Vector<float>(realParts);
+            var yVector = new Vector<float>(imagParts);
+
+            var magnitudeVector = Vector.Multiply(xVector, xVector) + Vector.Multiply(yVector, yVector);
+            magnitudeVector = Vector.Multiply(magnitudeVector, new Vector<float>(fourMultiplier));
+
+            var dbVector = Vector.Multiply(new Vector<float>(logBase10Multiplier), VectorLog10(magnitudeVector));
+            var valueVector = Vector.Divide(
+                Vector.Multiply(
+                    Vector.Subtract(dbVector, new Vector<float>(minDb)),
+                    new Vector<float>(amplificationFactor)
+                ),
+                new Vector<float>(maxDbValueMinusMinDbValue)
+            );
+
+            var clampedVector = Vector.Max(Vector.Min(valueVector, new Vector<float>(1f)), Vector<float>.Zero);
+            clampedVector.CopyTo(new Span<float>(outputPtr, vectorSize));
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe void ProcessScalarSpectrum(
+            Complex input,
+            float* outputPtr,
+            float minDb,
+            float maxDbValueMinusMinDbValue,
+            float amplificationFactor,
+            float logBase10Multiplier,
+            float fourMultiplier,
+            int index,
+            int length,
+            float epsilon)
+        {
+            float x = input.X;
+            float y = input.Y;
+            float magnitude = x * x + y * y;
+
+            if (index != 0 && index != length - 1)
+                magnitude *= fourMultiplier;
+
+            if (magnitude < epsilon)
+                *outputPtr = 0;
+            else
+            {
+                float db = logBase10Multiplier * MathF.Log10(magnitude);
+                float value = ((db - minDb) / maxDbValueMinusMinDbValue) * amplificationFactor;
+                *outputPtr = Math.Clamp(value, 0, 1);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector<float> VectorLog10(Vector<float> x) =>
+            VectorLog(x) * new Vector<float>(0.43429448190325f);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector<float> VectorLog(Vector<float> x)
         {
             float[] values = new float[Vector<float>.Count];
@@ -350,6 +433,7 @@ namespace SpectrumNet
             return new Vector<float>(values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector<float> VectorMin(Vector<float> a, Vector<float> b)
         {
             float[] result = new float[Vector<float>.Count];
@@ -358,6 +442,7 @@ namespace SpectrumNet
             return new Vector<float>(result);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector<float> VectorMax(Vector<float> a, Vector<float> b)
         {
             float[] result = new float[Vector<float>.Count];

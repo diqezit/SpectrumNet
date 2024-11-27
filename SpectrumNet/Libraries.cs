@@ -23,3 +23,4 @@ global using System.Windows.Input;
 global using System.Windows.Interop;
 global using System.Windows.Threading;
 global using System.Numerics;
+global using System.Buffers;
