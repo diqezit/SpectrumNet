@@ -1,5 +1,4 @@
-﻿using Vector = System.Numerics.Vector;
-using Complex = NAudio.Dsp.Complex;
+﻿using Complex = NAudio.Dsp.Complex;
 using System.Runtime.Intrinsics.X86;
 using System.Runtime.Intrinsics;
 
@@ -177,7 +176,7 @@ namespace SpectrumNet
         private readonly Task _processingTask;
         private readonly int _fftSize;
         private readonly int _log2FftSize;
-        private readonly AutoResetEvent _dataReadyEvent = new(false);
+        private readonly SemaphoreSlim _dataReadySemaphore = new(0);
         private int _sampleCount;
 
         public event EventHandler<FftEventArgs>? FftCalculated;
@@ -219,7 +218,7 @@ namespace SpectrumNet
         {
             if (_channel.Writer.TryWrite((samples, sampleRate)))
             {
-                _dataReadyEvent.Set();
+                _dataReadySemaphore.Release();
                 return default;
             }
             return new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
@@ -228,12 +227,12 @@ namespace SpectrumNet
         public async ValueTask DisposeAsync()
         {
             _cts.Cancel();
-            _dataReadyEvent.Set();
+            _dataReadySemaphore.Release();
             await _processingTask.ConfigureAwait(false);
             _cts.Dispose();
             _bufferPool.Return(_buffer);
             _windowPool.Return(_window);
-            _dataReadyEvent.Dispose();
+            _dataReadySemaphore.Dispose();
         }
 
         private async Task ProcessSamplesAsync()
@@ -248,7 +247,7 @@ namespace SpectrumNet
                     }
                     else
                     {
-                        await Task.Run(() => _dataReadyEvent.WaitOne());
+                        await _dataReadySemaphore.WaitAsync(_cts.Token).ConfigureAwait(false);
                     }
                 }
             }
@@ -282,176 +281,107 @@ namespace SpectrumNet
 
         private void CopySamplesToBuffer(ReadOnlySpan<float> samples, Span<Complex> buffer, ReadOnlySpan<float> window)
         {
-            if (Vector.IsHardwareAccelerated && samples.Length >= Vector<float>.Count)
+            for (int i = 0; i < samples.Length; i++)
             {
-                int vectorSize = Vector<float>.Count;
-                int i = 0;
-
-                for (; i <= samples.Length - vectorSize; i += vectorSize)
-                {
-                    var sampleVector = new Vector<float>(samples.Slice(i, vectorSize));
-                    var windowVector = new Vector<float>(window.Slice(i, vectorSize));
-                    var multipliedVector = sampleVector * windowVector;
-
-                    for (int j = 0; j < vectorSize; j++)
-                    {
-                        buffer[i + j].X = multipliedVector[j];
-                        buffer[i + j].Y = 0;
-                    }
-                }
-
-                for (; i < samples.Length; i++)
-                {
-                    buffer[i].X = samples[i] * window[i];
-                    buffer[i].Y = 0;
-                }
-            }
-            else
-            {
-                for (int i = 0; i < samples.Length; i++)
-                {
-                    buffer[i].X = samples[i] * window[i];
-                    buffer[i].Y = 0;
-                }
+                buffer[i].X = samples[i] * window[i];
+                buffer[i].Y = 0;
             }
         }
     }
 
     public sealed class SpectrumConverter : ISpectrumConverter
     {
-        private readonly IGainParametersProvider _params;
+        private readonly IGainParametersProvider _p;
+        private const float L10M = 10f, F4M = 4f, Z = 0f, O = 1f;
 
-        public SpectrumConverter(IGainParametersProvider parameters) =>
-            _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
+        public SpectrumConverter(IGainParametersProvider p) => _p = p ?? throw new ArgumentNullException(nameof(p));
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        public unsafe float[] ConvertToSpectrum(Complex[] fftResult, int sampleRate)
+        public unsafe float[] ConvertToSpectrum(Complex[] fft, int sr)
         {
-            int length = fftResult.Length / 2;
-            var spectrum = GC.AllocateUninitializedArray<float>(length, pinned: true);
+            int len = fft.Length / 2;
+            var s = GC.AllocateUninitializedArray<float>(len, pinned: true);
+            float minDb = _p.MinDbValue, range = _p.MaxDbValue - minDb, amp = _p.AmplificationFactor;
 
-            float minDb = _params.MinDbValue;
-            float maxDbRange = _params.MaxDbValue - minDb;
-            float amp = _params.AmplificationFactor;
-
-            const float log10Mult = 10f, fourMult = 4f;
-
-            fixed (Complex* ptrIn = fftResult)
-            fixed (float* ptrOut = spectrum)
+            fixed (Complex* inPtr = fft)
+            fixed (float* outPtr = s)
             {
-                if (Avx.IsSupported && length >= 8)
-                    ProcessAvx(ptrIn, ptrOut, length, minDb, maxDbRange, amp, log10Mult, fourMult);
-                else if (Sse.IsSupported && length >= 4)
-                    ProcessSse(ptrIn, ptrOut, length, minDb, maxDbRange, amp, log10Mult, fourMult);
+                if (Avx.IsSupported && len >= 8)
+                    ProcAvx(inPtr, outPtr, len, minDb, range, amp);
+                else if (Sse.IsSupported && len >= 4)
+                    ProcSse(inPtr, outPtr, len, minDb, range, amp);
                 else
-                    for (int i = 0; i < length; i++)
-                        ProcessScalar(ptrIn[i], ptrOut + i, minDb, maxDbRange, amp, log10Mult, fourMult, i, length);
+                    for (int i = 0; i < len; i++)
+                        ProcScalar(inPtr[i], outPtr + i, minDb, range, amp, i, len);
             }
-            return spectrum;
+            return s;
         }
 
-        private static unsafe void ProcessAvx(Complex* input, float* output, int len, float minDb, float maxDbRange,
-            float amp, float log10Mult, float fourMult)
+        private static unsafe void ProcAvx(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
         {
             int i = 0, aligned = len - (len % 8);
-            var vectors = new
+            var v = new
             {
                 MinDb = Vector256.Create(minDb),
                 Amp = Vector256.Create(amp),
-                MaxRange = Vector256.Create(maxDbRange),
-                FourMult = Vector256.Create(fourMult),
-                Log10 = Vector256.Create(log10Mult),
-                Ones = Vector256.Create(1.0f),
-                Zeros = Vector256<float>.Zero
+                Range = Vector256.Create(range),
+                F4 = Vector256.Create(F4M),
+                L10 = Vector256.Create(L10M),
+                O = Vector256.Create(O),
+                Z = Vector256<float>.Zero
             };
 
             for (; i < aligned; i += 8)
             {
-                var complex0 = Avx.LoadVector256((float*)(input + i));
-                var complex1 = Avx.LoadVector256((float*)(input + i + 4));
-                var mags = Avx.Multiply(Avx.Add(Avx.Multiply(complex0, complex0),
-                                              Avx.Multiply(complex1, complex1)),
-                                      vectors.FourMult);
+                var c0 = Avx.LoadVector256((float*)(inPtr + i));
+                var c1 = Avx.LoadVector256((float*)(inPtr + i + 4));
+                var mags = Avx.Multiply(Avx.Add(Avx.Multiply(c0, c0), Avx.Multiply(c1, c1)), v.F4);
 
-                float* magPtr = (float*)&mags;
-                var logVals = Vector256.Create(MathF.Log(magPtr[0]), MathF.Log(magPtr[1]),
-                    MathF.Log(magPtr[2]), MathF.Log(magPtr[3]), MathF.Log(magPtr[4]),
-                    MathF.Log(magPtr[5]), MathF.Log(magPtr[6]), MathF.Log(magPtr[7]));
-
-                var normalized = Avx.Multiply(Avx.Divide(Avx.Subtract(Avx.Multiply(vectors.Log10, logVals),
-                    vectors.MinDb), vectors.MaxRange), vectors.Amp);
-                Avx.Store(output + i, Avx.Min(Avx.Max(normalized, vectors.Zeros), vectors.Ones));
+                float* m = (float*)&mags;
+                var logs = Vector256.Create(MathF.Log(m[0]), MathF.Log(m[1]), MathF.Log(m[2]),
+                    MathF.Log(m[3]), MathF.Log(m[4]), MathF.Log(m[5]), MathF.Log(m[6]), MathF.Log(m[7]));
+                var norm = Avx.Multiply(Avx.Divide(Avx.Subtract(Avx.Multiply(v.L10, logs), v.MinDb), v.Range), v.Amp);
+                Avx.Store(outPtr + i, Avx.Min(Avx.Max(norm, v.Z), v.O));
             }
 
             for (; i < len; i++)
-                ProcessScalar(input[i], output + i, minDb, maxDbRange, amp, log10Mult, fourMult, i, len);
+                ProcScalar(inPtr[i], outPtr + i, minDb, range, amp, i, len);
         }
 
-        private static unsafe void ProcessSse(Complex* input, float* output, int len, float minDb, float maxDbRange,
-            float amp, float log10Mult, float fourMult)
+        private static unsafe void ProcSse(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
         {
             int i = 0, aligned = len - (len % 4);
-            var vectors = new
+            var v = new
             {
                 MinDb = Vector128.Create(minDb),
                 Amp = Vector128.Create(amp),
-                MaxRange = Vector128.Create(maxDbRange),
-                FourMult = Vector128.Create(fourMult),
-                Log10 = Vector128.Create(log10Mult),
-                Ones = Vector128.Create(1.0f),
-                Zeros = Vector128<float>.Zero
+                Range = Vector128.Create(range),
+                F4 = Vector128.Create(F4M),
+                L10 = Vector128.Create(L10M),
+                O = Vector128.Create(O),
+                Z = Vector128<float>.Zero
             };
 
             for (; i < aligned; i += 4)
             {
-                var complex = Sse.LoadVector128((float*)(input + i));
-                var mags = Sse.Multiply(Sse.Add(Sse.Multiply(complex, complex),
-                                              Sse.Multiply(complex, complex)),
-                                      vectors.FourMult);
+                var c = Sse.LoadVector128((float*)(inPtr + i));
+                var mags = Sse.Multiply(Sse.Add(Sse.Multiply(c, c), Sse.Multiply(c, c)), v.F4);
 
-                float* magPtr = (float*)&mags;
-                var logVals = Vector128.Create(
-                    MathF.Log(magPtr[0]),
-                    MathF.Log(magPtr[1]),
-                    MathF.Log(magPtr[2]),
-                    MathF.Log(magPtr[3])
-                );
-
-                var normalized = Sse.Multiply(
-                    Sse.Divide(
-                        Sse.Subtract(
-                            Sse.Multiply(vectors.Log10, logVals),
-                            vectors.MinDb
-                        ),
-                        vectors.MaxRange
-                    ),
-                    vectors.Amp
-                );
-
-                Sse.Store(output + i,
-                    Sse.Min(
-                        Sse.Max(normalized, vectors.Zeros),
-                        vectors.Ones
-                    )
-                );
+                float* m = (float*)&mags;
+                var logs = Vector128.Create(MathF.Log(m[0]), MathF.Log(m[1]), MathF.Log(m[2]), MathF.Log(m[3]));
+                var norm = Sse.Multiply(Sse.Divide(Sse.Subtract(Sse.Multiply(v.L10, logs), v.MinDb), v.Range), v.Amp);
+                Sse.Store(outPtr + i, Sse.Min(Sse.Max(norm, v.Z), v.O));
             }
 
             for (; i < len; i++)
-                ProcessScalar(input[i], output + i, minDb, maxDbRange, amp, log10Mult, fourMult, i, len);
+                ProcScalar(inPtr[i], outPtr + i, minDb, range, amp, i, len);
         }
 
-        private static unsafe void ProcessScalar(Complex input, float* output, float minDb, float maxDbRange,
-            float amp, float log10Mult, float fourMult, int idx, int len)
+        private static unsafe void ProcScalar(Complex inPtr, float* outPtr, float minDb, float range, float amp, int i, int len)
         {
-            float mag = input.X * input.X + input.Y * input.Y;
-            if (idx != 0 && idx != len - 1) mag *= fourMult;
-
-            if (mag < float.Epsilon) *output = 0;
-            else
-            {
-                float db = log10Mult * MathF.Log10(mag);
-                *output = Math.Clamp(((db - minDb) / maxDbRange) * amp, 0, 1);
-            }
+            float mag = inPtr.X * inPtr.X + inPtr.Y * inPtr.Y;
+            if (i != 0 && i != len - 1) mag *= F4M;
+            *outPtr = mag < float.Epsilon ? Z : Math.Clamp((L10M * MathF.Log10(mag) - minDb) / range * amp, Z, O);
         }
     }
 }
