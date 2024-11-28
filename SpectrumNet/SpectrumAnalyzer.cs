@@ -6,7 +6,6 @@ using System.Runtime.Intrinsics;
 
 namespace SpectrumNet
 {
-    // Constants
     public static class Constants
     {
         public const float DefaultAmplificationFactor = 0.75f;
@@ -16,7 +15,6 @@ namespace SpectrumNet
         public const float Epsilon = float.Epsilon;
     }
 
-    // Interfaces
     public interface IFftProcessor
     {
         event EventHandler<FftEventArgs>? FftCalculated;
@@ -43,12 +41,10 @@ namespace SpectrumNet
         float[] ConvertToSpectrum(Complex[] fftResult, int sampleRate);
     }
 
-    // Event Arguments
     public class FftEventArgs : EventArgs
     {
         public Complex[] Result { get; }
         public int SampleRate { get; }
-
         public FftEventArgs(Complex[] result, int sampleRate)
         {
             Result = result ?? throw new ArgumentNullException(nameof(result));
@@ -59,14 +55,11 @@ namespace SpectrumNet
     public class SpectralDataEventArgs : EventArgs
     {
         public SpectralData Data { get; }
-
         public SpectralDataEventArgs(SpectralData data) => Data = data ?? throw new ArgumentNullException(nameof(data));
     }
 
-    // Data Records
     public record SpectralData(float[] Spectrum, DateTime Timestamp);
 
-    // Implementation Classes
     public sealed class GainParameters : IGainParametersProvider, INotifyPropertyChanged
     {
         private float _amp = Constants.DefaultAmplificationFactor;
@@ -165,18 +158,15 @@ namespace SpectrumNet
         }
     }
 
-    public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
+    public sealed class FftProcessor : IFftProcessor, IAsyncDisposable, IDisposable
     {
         private readonly ArrayPool<Complex> _bufferPool = ArrayPool<Complex>.Shared;
-        private readonly ArrayPool<float> _windowPool = ArrayPool<float>.Shared;
         private readonly Channel<(float[] Samples, int SampleRate)> _channel;
-        private readonly CancellationTokenSource _cts;
+        private readonly CancellationTokenSource _cts = new();
         private readonly Complex[] _buffer;
-        private readonly float[] _window;
         private readonly Task _processingTask;
         private readonly int _fftSize;
         private readonly int _log2FftSize;
-        private readonly SemaphoreSlim _dataReadySemaphore = new(0);
         private int _sampleCount;
 
         public event EventHandler<FftEventArgs>? FftCalculated;
@@ -184,88 +174,80 @@ namespace SpectrumNet
         public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
             if (fftSize <= 0 || (fftSize & (fftSize - 1)) != 0)
-                throw new ArgumentException("FFT size must be a positive power of 2");
+                throw new ArgumentException("FFT size must be a positive power of 2.");
 
             _fftSize = fftSize;
             _log2FftSize = (int)Math.Log2(fftSize);
             _buffer = _bufferPool.Rent(fftSize);
-            _window = _windowPool.Rent(fftSize);
-            InitializeHannWindow();
-
             _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(
-                new UnboundedChannelOptions
-                {
-                    SingleReader = true,
-                    SingleWriter = false,
-                    AllowSynchronousContinuations = true
-                });
-
-            _cts = new CancellationTokenSource();
-            _processingTask = Task.Run(ProcessSamplesAsync);
+                new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+            _processingTask = Task.Run(ProcessSamplesAsync, _cts.Token);
         }
 
-        private void InitializeHannWindow()
-        {
-            double multiplier = 2.0 * Math.PI / (_fftSize - 1);
-            for (int i = 0; i < _fftSize; i++)
-            {
-                _window[i] = (float)(0.5 * (1.0 - Math.Cos(i * multiplier)));
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ValueTask AddSamplesAsync(float[] samples, int sampleRate)
         {
-            if (_channel.Writer.TryWrite((samples, sampleRate)))
-            {
-                _dataReadySemaphore.Release();
-                return default;
-            }
-            return new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
+            if (samples == null || sampleRate <= 0 || samples.Any(float.IsNaN))
+                throw new ArgumentException("Invalid samples or sample rate.");
+
+            return _channel.Writer.TryWrite((samples, sampleRate))
+                ? default
+                : new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
         }
 
         public async ValueTask DisposeAsync()
         {
             _cts.Cancel();
-            _dataReadySemaphore.Release();
+            _channel.Writer.TryComplete();
             await _processingTask.ConfigureAwait(false);
+            DisposeResources();
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            DisposeResources();
+        }
+
+        private void DisposeResources()
+        {
             _cts.Dispose();
             _bufferPool.Return(_buffer);
-            _windowPool.Return(_window);
-            _dataReadySemaphore.Dispose();
         }
 
         private async Task ProcessSamplesAsync()
         {
             try
             {
-                while (!_cts.Token.IsCancellationRequested)
+                while (await _channel.Reader.WaitToReadAsync(_cts.Token).ConfigureAwait(false))
                 {
-                    if (_channel.Reader.TryRead(out var item))
-                    {
+                    while (_channel.Reader.TryRead(out var item))
                         ProcessSampleBlock(item.Samples, item.SampleRate);
-                    }
-                    else
-                    {
-                        await _dataReadySemaphore.WaitAsync(_cts.Token).ConfigureAwait(false);
-                    }
                 }
             }
             catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                Log.Error($"[FftProcessor] Error: {ex}");
+            }
         }
 
         private void ProcessSampleBlock(float[] samples, int sampleRate)
         {
             int index = 0;
+            double multiplier = 2.0 * Math.PI / (_fftSize - 1);
+
             while (index < samples.Length)
             {
                 int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
                 if (copyCount <= 0) break;
 
-                CopySamplesToBuffer(
-                    samples.AsSpan(index, copyCount),
-                    _buffer.AsSpan(_sampleCount, copyCount),
-                    _window.AsSpan(_sampleCount, copyCount));
+                for (int i = 0; i < copyCount; i++)
+                {
+                    int bufferIndex = _sampleCount + i;
+                    float windowValue = (float)(0.5 * (1.0 - Math.Cos((bufferIndex) * multiplier)));
+                    _buffer[bufferIndex].X = samples[index + i] * windowValue;
+                    _buffer[bufferIndex].Y = 0;
+                }
 
                 index += copyCount;
                 _sampleCount += copyCount;
@@ -278,15 +260,6 @@ namespace SpectrumNet
                 }
             }
         }
-
-        private void CopySamplesToBuffer(ReadOnlySpan<float> samples, Span<Complex> buffer, ReadOnlySpan<float> window)
-        {
-            for (int i = 0; i < samples.Length; i++)
-            {
-                buffer[i].X = samples[i] * window[i];
-                buffer[i].Y = 0;
-            }
-        }
     }
 
     public sealed class SpectrumConverter : ISpectrumConverter
@@ -296,7 +269,6 @@ namespace SpectrumNet
 
         public SpectrumConverter(IGainParametersProvider p) => _p = p ?? throw new ArgumentNullException(nameof(p));
 
-        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         public unsafe float[] ConvertToSpectrum(Complex[] fft, int sr)
         {
             int len = fft.Length / 2;
