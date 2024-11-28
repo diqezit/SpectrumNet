@@ -1,5 +1,7 @@
 ﻿using Vector = System.Numerics.Vector;
 using Complex = NAudio.Dsp.Complex;
+using System.Runtime.Intrinsics.X86;
+using System.Runtime.Intrinsics;
 
 #nullable enable
 
@@ -8,9 +10,9 @@ namespace SpectrumNet
     // Constants
     public static class Constants
     {
-        public const float DefaultAmplificationFactor = 0.55f;
-        public const float DefaultMaxDbValue = -20f;
-        public const float DefaultMinDbValue = -100f;
+        public const float DefaultAmplificationFactor = 0.75f;
+        public const float DefaultMaxDbValue = 0f;
+        public const float DefaultMinDbValue = -200f;
         public const int DefaultFftSize = 2048;
         public const float Epsilon = float.Epsilon;
     }
@@ -79,29 +81,22 @@ namespace SpectrumNet
 
         public float AmplificationFactor
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _amp;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => UpdateProperty(ref _amp, Math.Max(0.1f, value), nameof(AmplificationFactor));
+            set => UpdateProperty(ref _amp, Math.Max(0.1f, value));
         }
 
         public float MaxDbValue
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _max;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => UpdateProperty(ref _max, Math.Max(value, _min), nameof(MaxDbValue));
+            set => UpdateProperty(ref _max, Math.Max(value, _min));
         }
 
         public float MinDbValue
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _min;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => UpdateProperty(ref _min, Math.Min(value, _max), nameof(MinDbValue));
+            set => UpdateProperty(ref _min, Math.Min(value, _max));
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateProperty(ref float field, float value, [CallerMemberName] string? propertyName = null)
         {
             if (Math.Abs(field - value) > Constants.Epsilon)
@@ -122,10 +117,7 @@ namespace SpectrumNet
 
         public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
 
-        public SpectrumAnalyzer(
-            IFftProcessor fftProcessor,
-            ISpectrumConverter converter,
-            SynchronizationContext? context = null)
+        public SpectrumAnalyzer(IFftProcessor fftProcessor, ISpectrumConverter converter, SynchronizationContext? context = null)
         {
             _fftProcessor = fftProcessor ?? throw new ArgumentNullException(nameof(fftProcessor));
             _converter = converter ?? throw new ArgumentNullException(nameof(converter));
@@ -177,11 +169,14 @@ namespace SpectrumNet
     public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
     {
         private readonly ArrayPool<Complex> _bufferPool = ArrayPool<Complex>.Shared;
+        private readonly ArrayPool<float> _windowPool = ArrayPool<float>.Shared;
         private readonly Channel<(float[] Samples, int SampleRate)> _channel;
         private readonly CancellationTokenSource _cts;
         private readonly Complex[] _buffer;
+        private readonly float[] _window;
         private readonly Task _processingTask;
         private readonly int _fftSize;
+        private readonly int _log2FftSize;
         private readonly AutoResetEvent _dataReadyEvent = new(false);
         private int _sampleCount;
 
@@ -193,20 +188,41 @@ namespace SpectrumNet
                 throw new ArgumentException("FFT size must be a positive power of 2");
 
             _fftSize = fftSize;
+            _log2FftSize = (int)Math.Log2(fftSize);
             _buffer = _bufferPool.Rent(fftSize);
+            _window = _windowPool.Rent(fftSize);
+            InitializeHannWindow();
+
             _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(
-                new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+                new UnboundedChannelOptions
+                {
+                    SingleReader = true,
+                    SingleWriter = false,
+                    AllowSynchronousContinuations = true
+                });
+
             _cts = new CancellationTokenSource();
-            _processingTask = Task.Run(() => ProcessSamplesAsync(_cts.Token));
+            _processingTask = Task.Run(ProcessSamplesAsync);
         }
 
-        public async ValueTask AddSamplesAsync(float[] samples, int sampleRate)
+        private void InitializeHannWindow()
         {
-            if (!_channel.Writer.TryWrite((samples, sampleRate)))
+            double multiplier = 2.0 * Math.PI / (_fftSize - 1);
+            for (int i = 0; i < _fftSize; i++)
             {
-                await _channel.Writer.WriteAsync((samples, sampleRate)).ConfigureAwait(false);
+                _window[i] = (float)(0.5 * (1.0 - Math.Cos(i * multiplier)));
             }
-            _dataReadyEvent.Set();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ValueTask AddSamplesAsync(float[] samples, int sampleRate)
+        {
+            if (_channel.Writer.TryWrite((samples, sampleRate)))
+            {
+                _dataReadyEvent.Set();
+                return default;
+            }
+            return new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
         }
 
         public async ValueTask DisposeAsync()
@@ -214,30 +230,29 @@ namespace SpectrumNet
             _cts.Cancel();
             _dataReadyEvent.Set();
             await _processingTask.ConfigureAwait(false);
-
             _cts.Dispose();
             _bufferPool.Return(_buffer);
+            _windowPool.Return(_window);
             _dataReadyEvent.Dispose();
         }
 
-        private async Task ProcessSamplesAsync(CancellationToken ct)
+        private async Task ProcessSamplesAsync()
         {
             try
             {
-                while (!ct.IsCancellationRequested)
+                while (!_cts.Token.IsCancellationRequested)
                 {
                     if (_channel.Reader.TryRead(out var item))
                     {
-                        var (samples, sampleRate) = item;
-                        ProcessSampleBlock(samples, sampleRate);
+                        ProcessSampleBlock(item.Samples, item.SampleRate);
                     }
                     else
                     {
-                        _dataReadyEvent.WaitOne();
+                        await Task.Run(() => _dataReadyEvent.WaitOne());
                     }
                 }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            catch (OperationCanceledException) { }
         }
 
         private void ProcessSampleBlock(float[] samples, int sampleRate)
@@ -248,47 +263,56 @@ namespace SpectrumNet
                 int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
                 if (copyCount <= 0) break;
 
-                CopySamplesToBuffer(samples.AsSpan(index, copyCount), _sampleCount);
+                CopySamplesToBuffer(
+                    samples.AsSpan(index, copyCount),
+                    _buffer.AsSpan(_sampleCount, copyCount),
+                    _window.AsSpan(_sampleCount, copyCount));
 
                 index += copyCount;
                 _sampleCount += copyCount;
 
                 if (_sampleCount >= _fftSize)
                 {
-                    FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
+                    FastFourierTransform.FFT(true, _log2FftSize, _buffer);
                     FftCalculated?.Invoke(this, new FftEventArgs(_buffer, sampleRate));
                     _sampleCount = 0;
                 }
             }
         }
 
-        private void CopySamplesToBuffer(ReadOnlySpan<float> samples, int bufferOffset)
+        private void CopySamplesToBuffer(ReadOnlySpan<float> samples, Span<Complex> buffer, ReadOnlySpan<float> window)
         {
-            Span<Complex> bufferSpan = _buffer.AsSpan(bufferOffset, samples.Length);
-
-            int i = 0;
-            int simdLength = Vector<float>.Count;
-
-            while (i <= samples.Length - simdLength)
+            if (Vector.IsHardwareAccelerated && samples.Length >= Vector<float>.Count)
             {
-                var vector = new Vector<float>(samples.Slice(i, simdLength));
-                Vector.Widen(vector, out var low, out var high);
+                int vectorSize = Vector<float>.Count;
+                int i = 0;
 
-                for (int j = 0; j < simdLength / 2; j++)
+                for (; i <= samples.Length - vectorSize; i += vectorSize)
                 {
-                    bufferSpan[i + j].X = (float)low[j];
-                    bufferSpan[i + j].Y = 0;
-                    bufferSpan[i + j + simdLength / 2].X = (float)high[j];
-                    bufferSpan[i + j + simdLength / 2].Y = 0;
+                    var sampleVector = new Vector<float>(samples.Slice(i, vectorSize));
+                    var windowVector = new Vector<float>(window.Slice(i, vectorSize));
+                    var multipliedVector = sampleVector * windowVector;
+
+                    for (int j = 0; j < vectorSize; j++)
+                    {
+                        buffer[i + j].X = multipliedVector[j];
+                        buffer[i + j].Y = 0;
+                    }
                 }
 
-                i += simdLength;
+                for (; i < samples.Length; i++)
+                {
+                    buffer[i].X = samples[i] * window[i];
+                    buffer[i].Y = 0;
+                }
             }
-
-            for (; i < samples.Length; i++)
+            else
             {
-                bufferSpan[i].X = samples[i];
-                bufferSpan[i].Y = 0;
+                for (int i = 0; i < samples.Length; i++)
+                {
+                    buffer[i].X = samples[i] * window[i];
+                    buffer[i].Y = 0;
+                }
             }
         }
     }
@@ -307,148 +331,127 @@ namespace SpectrumNet
             var spectrum = GC.AllocateUninitializedArray<float>(length, pinned: true);
 
             float minDb = _params.MinDbValue;
-            float maxDbValueMinusMinDbValue = _params.MaxDbValue - minDb;
-            float amplificationFactor = _params.AmplificationFactor;
+            float maxDbRange = _params.MaxDbValue - minDb;
+            float amp = _params.AmplificationFactor;
 
-            const float logBase10Multiplier = 10f;
-            const float fourMultiplier = 4f;
-            const float epsilon = float.Epsilon;
+            const float log10Mult = 10f, fourMult = 4f;
 
-            fixed (Complex* ptrInput = fftResult)
-            fixed (float* ptrSpectrum = spectrum)
+            fixed (Complex* ptrIn = fftResult)
+            fixed (float* ptrOut = spectrum)
             {
-                int vectorSize = Vector<float>.Count;
-                int vectorizedLength = length - (length % vectorSize);
-
-                for (int i = 0; i < vectorizedLength; i += vectorSize)
-                {
-                    ProcessVectorizedSpectrum(
-                        ptrInput + i,
-                        ptrSpectrum + i,
-                        minDb,
-                        maxDbValueMinusMinDbValue,
-                        amplificationFactor,
-                        logBase10Multiplier,
-                        fourMultiplier,
-                        vectorSize
-                    );
-                }
-
-                for (int i = vectorizedLength; i < length; i++)
-                {
-                    ProcessScalarSpectrum(
-                        ptrInput[i],
-                        ptrSpectrum + i,
-                        minDb,
-                        maxDbValueMinusMinDbValue,
-                        amplificationFactor,
-                        logBase10Multiplier,
-                        fourMultiplier,
-                        i,
-                        length,
-                        epsilon
-                    );
-                }
+                if (Avx.IsSupported && length >= 8)
+                    ProcessAvx(ptrIn, ptrOut, length, minDb, maxDbRange, amp, log10Mult, fourMult);
+                else if (Sse.IsSupported && length >= 4)
+                    ProcessSse(ptrIn, ptrOut, length, minDb, maxDbRange, amp, log10Mult, fourMult);
+                else
+                    for (int i = 0; i < length; i++)
+                        ProcessScalar(ptrIn[i], ptrOut + i, minDb, maxDbRange, amp, log10Mult, fourMult, i, length);
             }
-
             return spectrum;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe void ProcessVectorizedSpectrum(
-            Complex* inputPtr,
-            float* outputPtr,
-            float minDb,
-            float maxDbValueMinusMinDbValue,
-            float amplificationFactor,
-            float logBase10Multiplier,
-            float fourMultiplier,
-            int vectorSize)
+        private static unsafe void ProcessAvx(Complex* input, float* output, int len, float minDb, float maxDbRange,
+            float amp, float log10Mult, float fourMult)
         {
-            Span<float> realParts = MemoryMarshal.Cast<Complex, float>(new Span<Complex>(inputPtr, vectorSize));
-            Span<float> imagParts = realParts.Slice(1, vectorSize);
+            int i = 0, aligned = len - (len % 8);
+            var vectors = new
+            {
+                MinDb = Vector256.Create(minDb),
+                Amp = Vector256.Create(amp),
+                MaxRange = Vector256.Create(maxDbRange),
+                FourMult = Vector256.Create(fourMult),
+                Log10 = Vector256.Create(log10Mult),
+                Ones = Vector256.Create(1.0f),
+                Zeros = Vector256<float>.Zero
+            };
 
-            var xVector = new Vector<float>(realParts);
-            var yVector = new Vector<float>(imagParts);
+            for (; i < aligned; i += 8)
+            {
+                var complex0 = Avx.LoadVector256((float*)(input + i));
+                var complex1 = Avx.LoadVector256((float*)(input + i + 4));
+                var mags = Avx.Multiply(Avx.Add(Avx.Multiply(complex0, complex0),
+                                              Avx.Multiply(complex1, complex1)),
+                                      vectors.FourMult);
 
-            var magnitudeVector = Vector.Multiply(xVector, xVector) + Vector.Multiply(yVector, yVector);
-            magnitudeVector = Vector.Multiply(magnitudeVector, new Vector<float>(fourMultiplier));
+                float* magPtr = (float*)&mags;
+                var logVals = Vector256.Create(MathF.Log(magPtr[0]), MathF.Log(magPtr[1]),
+                    MathF.Log(magPtr[2]), MathF.Log(magPtr[3]), MathF.Log(magPtr[4]),
+                    MathF.Log(magPtr[5]), MathF.Log(magPtr[6]), MathF.Log(magPtr[7]));
 
-            var dbVector = Vector.Multiply(new Vector<float>(logBase10Multiplier), VectorLog10(magnitudeVector));
-            var valueVector = Vector.Divide(
-                Vector.Multiply(
-                    Vector.Subtract(dbVector, new Vector<float>(minDb)),
-                    new Vector<float>(amplificationFactor)
-                ),
-                new Vector<float>(maxDbValueMinusMinDbValue)
-            );
+                var normalized = Avx.Multiply(Avx.Divide(Avx.Subtract(Avx.Multiply(vectors.Log10, logVals),
+                    vectors.MinDb), vectors.MaxRange), vectors.Amp);
+                Avx.Store(output + i, Avx.Min(Avx.Max(normalized, vectors.Zeros), vectors.Ones));
+            }
 
-            var clampedVector = Vector.Max(Vector.Min(valueVector, new Vector<float>(1f)), Vector<float>.Zero);
-            clampedVector.CopyTo(new Span<float>(outputPtr, vectorSize));
+            for (; i < len; i++)
+                ProcessScalar(input[i], output + i, minDb, maxDbRange, amp, log10Mult, fourMult, i, len);
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe void ProcessScalarSpectrum(
-            Complex input,
-            float* outputPtr,
-            float minDb,
-            float maxDbValueMinusMinDbValue,
-            float amplificationFactor,
-            float logBase10Multiplier,
-            float fourMultiplier,
-            int index,
-            int length,
-            float epsilon)
+        private static unsafe void ProcessSse(Complex* input, float* output, int len, float minDb, float maxDbRange,
+            float amp, float log10Mult, float fourMult)
         {
-            float x = input.X;
-            float y = input.Y;
-            float magnitude = x * x + y * y;
+            int i = 0, aligned = len - (len % 4);
+            var vectors = new
+            {
+                MinDb = Vector128.Create(minDb),
+                Amp = Vector128.Create(amp),
+                MaxRange = Vector128.Create(maxDbRange),
+                FourMult = Vector128.Create(fourMult),
+                Log10 = Vector128.Create(log10Mult),
+                Ones = Vector128.Create(1.0f),
+                Zeros = Vector128<float>.Zero
+            };
 
-            if (index != 0 && index != length - 1)
-                magnitude *= fourMultiplier;
+            for (; i < aligned; i += 4)
+            {
+                var complex = Sse.LoadVector128((float*)(input + i));
+                var mags = Sse.Multiply(Sse.Add(Sse.Multiply(complex, complex),
+                                              Sse.Multiply(complex, complex)),
+                                      vectors.FourMult);
 
-            if (magnitude < epsilon)
-                *outputPtr = 0;
+                float* magPtr = (float*)&mags;
+                var logVals = Vector128.Create(
+                    MathF.Log(magPtr[0]),
+                    MathF.Log(magPtr[1]),
+                    MathF.Log(magPtr[2]),
+                    MathF.Log(magPtr[3])
+                );
+
+                var normalized = Sse.Multiply(
+                    Sse.Divide(
+                        Sse.Subtract(
+                            Sse.Multiply(vectors.Log10, logVals),
+                            vectors.MinDb
+                        ),
+                        vectors.MaxRange
+                    ),
+                    vectors.Amp
+                );
+
+                Sse.Store(output + i,
+                    Sse.Min(
+                        Sse.Max(normalized, vectors.Zeros),
+                        vectors.Ones
+                    )
+                );
+            }
+
+            for (; i < len; i++)
+                ProcessScalar(input[i], output + i, minDb, maxDbRange, amp, log10Mult, fourMult, i, len);
+        }
+
+        private static unsafe void ProcessScalar(Complex input, float* output, float minDb, float maxDbRange,
+            float amp, float log10Mult, float fourMult, int idx, int len)
+        {
+            float mag = input.X * input.X + input.Y * input.Y;
+            if (idx != 0 && idx != len - 1) mag *= fourMult;
+
+            if (mag < float.Epsilon) *output = 0;
             else
             {
-                float db = logBase10Multiplier * MathF.Log10(magnitude);
-                float value = ((db - minDb) / maxDbValueMinusMinDbValue) * amplificationFactor;
-                *outputPtr = Math.Clamp(value, 0, 1);
+                float db = log10Mult * MathF.Log10(mag);
+                *output = Math.Clamp(((db - minDb) / maxDbRange) * amp, 0, 1);
             }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector<float> VectorLog10(Vector<float> x) =>
-            VectorLog(x) * new Vector<float>(0.43429448190325f);
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector<float> VectorLog(Vector<float> x)
-        {
-            float[] values = new float[Vector<float>.Count];
-            x.CopyTo(values);
-
-            for (int i = 0; i < values.Length; i++)
-                values[i] = MathF.Log(values[i]);
-
-            return new Vector<float>(values);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector<float> VectorMin(Vector<float> a, Vector<float> b)
-        {
-            float[] result = new float[Vector<float>.Count];
-            for (int i = 0; i < result.Length; i++)
-                result[i] = MathF.Min(a[i], b[i]);
-            return new Vector<float>(result);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector<float> VectorMax(Vector<float> a, Vector<float> b)
-        {
-            float[] result = new float[Vector<float>.Count];
-            for (int i = 0; i < result.Length; i++)
-                result[i] = MathF.Max(a[i], b[i]);
-            return new Vector<float>(result);
         }
     }
 }
