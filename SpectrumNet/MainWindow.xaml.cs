@@ -240,6 +240,8 @@ namespace SpectrumNet
         public IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>();
         public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
             _spectrumStyles?.Styles ?? new Dictionary<string, StyleDefinition>();
+        public IEnumerable<FftWindowType> AvailableFftWindowTypes =>
+            Enum.GetValues(typeof(FftWindowType)).Cast<FftWindowType>();
         public SKElement? RenderElement { get; private set; }
         public bool CanStartCapture => _captureManager is not null && !IsRecording;
 
@@ -255,6 +257,7 @@ namespace SpectrumNet
                 SetupEventHandlers();
                 ConfigureTheme();
                 UpdateProperties();
+                SelectedFftWindowType = FftWindowType.Hann;
             }
             catch (Exception ex)
             {
@@ -276,25 +279,8 @@ namespace SpectrumNet
             _analyzer = new SpectrumAnalyzer(new FftProcessor(),
                 new SpectrumConverter(_gainParameters), SynchronizationContext.Current);
 
-            if (_analyzer == null)
-            {
-                Log.Fatal("[MainWindow] SpectrumAnalyzer initialization failed.");
-                throw new InvalidOperationException("Failed to initialize SpectrumAnalyzer.");
-            }
-
             _captureManager = new AudioCaptureManager(this);
-            if (_captureManager == null)
-            {
-                Log.Fatal("[MainWindow] AudioCaptureManager initialization failed.");
-                throw new InvalidOperationException("Failed to initialize AudioCaptureManager.");
-            }
-
             _renderer = new Renderer(_spectrumStyles, this, _analyzer, RenderElement);
-            if (_renderer == null)
-            {
-                Log.Fatal("[MainWindow] Renderer initialization failed.");
-                throw new InvalidOperationException("Failed to initialize Renderer.");
-            }
 
             SelectedStyle = MwConstants.DefaultStyle;
         }
@@ -310,220 +296,149 @@ namespace SpectrumNet
 
         private void ConfigureTheme()
         {
-            try
+            ThemeManager.Instance.RegisterWindow(this);
+            ThemeManager.Instance.PropertyChanged += (_, e) =>
             {
-                ThemeManager.Instance.RegisterWindow(this);
-                ThemeManager.Instance.PropertyChanged += (_, e) =>
-                {
-                    if (e.PropertyName == nameof(ThemeManager.IsDarkTheme))
-                        OnPropertyChanged(nameof(IsDarkTheme));
-                };
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error while configuring theme.");
-            }
+                if (e.PropertyName == nameof(ThemeManager.IsDarkTheme))
+                    OnPropertyChanged(nameof(IsDarkTheme));
+            };
         }
 
         private void UpdateProperties() => OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
 
-        private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
-        {
-            try
-            {
-                _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error during window size change.");
-            }
-        }
+        private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) =>
+            _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
-        {
-            try
-            {
-                _renderer?.RenderFrame(sender, e);
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error during paint surface rendering.");
-            }
-        }
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) =>
+            _renderer?.RenderFrame(sender, e);
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
+            if (sender == StyleComboBox && _renderer != null && SelectedStyle != null && _spectrumStyles != null)
             {
-                if (sender == StyleComboBox && _renderer != null && SelectedStyle != null && _spectrumStyles != null)
-                {
-                    var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
-                    _renderer.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
-                }
-                else if (sender == RenderStyleComboBox && RenderStyleComboBox.SelectedValue is RenderStyle renderStyle)
-                {
-                    _selectedDrawingType = renderStyle;
-                    _renderer?.UpdateRenderStyle(renderStyle);
-                }
-                InvalidateVisuals();
+                var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
+                _renderer.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
             }
-            catch (Exception ex)
+            else if (sender == RenderStyleComboBox && RenderStyleComboBox.SelectedValue is RenderStyle renderStyle)
             {
-                Log.Fatal(ex, "[MainWindow] Error during combo box selection change.");
+                _selectedDrawingType = renderStyle;
+                _renderer?.UpdateRenderStyle(renderStyle);
             }
+            else if (sender == FftWindowTypeComboBox && FftWindowTypeComboBox.SelectedValue is FftWindowType windowType)
+            {
+                SelectedFftWindowType = windowType;
+            }
+            InvalidateVisuals();
         }
 
         private void OnWindowClosed(object? sender, EventArgs e)
         {
-            try
-            {
-                if (IsOverlayActive) CloseOverlay();
-                _renderer?.Dispose();
-                _analyzer?.Dispose();
-                _captureManager?.Dispose();
-                _disposables?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error during window close event.");
-            }
+            if (IsOverlayActive) CloseOverlay();
+            _renderer?.Dispose();
+            _analyzer?.Dispose();
+            _captureManager?.Dispose();
+            _disposables?.Dispose();
         }
 
         private void OnOpenPopupButtonClick(object sender, RoutedEventArgs e) => IsPopupOpen = !IsPopupOpen;
 
-        private void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                new SettingsWindow().ShowDialog();
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error opening settings window.");
-            }
-        }
+        private void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e) =>
+            new SettingsWindow().ShowDialog();
 
         private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            try
+            if (sender is Slider slider)
             {
-                if (sender is Slider slider)
+                var value = slider.Value;
+                var updates = new Dictionary<string, Action>
                 {
-                    var value = slider.Value;
-                    var updates = new Dictionary<string, Action>
-                    {
-                        ["barWidthSlider"] = () => BarWidth = value,
-                        ["barSpacingSlider"] = () => BarSpacing = value,
-                        ["barCountSlider"] = () => BarCount = (int)value,
-                        ["minDbLevelSlider"] = () => MinDbLevel = (float)value,
-                        ["maxDbLevelSlider"] = () => MaxDbLevel = (float)value,
-                        ["adaptionRateSlider"] = () => AmplificationFactor = (float)value
-                    };
+                    ["barWidthSlider"] = () => BarWidth = value,
+                    ["barSpacingSlider"] = () => BarSpacing = value,
+                    ["barCountSlider"] = () => BarCount = (int)value,
+                    ["minDbLevelSlider"] = () => MinDbLevel = (float)value,
+                    ["maxDbLevelSlider"] = () => MaxDbLevel = (float)value,
+                    ["adaptionRateSlider"] = () => AmplificationFactor = (float)value
+                };
 
-                    if (updates.TryGetValue(slider.Name, out var action))
-                    {
-                        action();
-                        InvalidateVisuals();
-                    }
+                if (updates.TryGetValue(slider.Name, out var action))
+                {
+                    action();
+                    InvalidateVisuals();
                 }
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error during slider value change.");
             }
         }
 
         private async void OnButtonClick(object sender, RoutedEventArgs e)
         {
-            try
+            if (sender is Button button)
             {
-                if (sender is Button button)
+                switch (button.Name)
                 {
-                    switch (button.Name)
-                    {
-                        case "StartCaptureButton": await StartCaptureAsync(); break;
-                        case "StopCaptureButton": await StopCaptureAsync(); break;
-                        case "OverlayButton": OnOverlayButtonClick(sender, e); break;
-                        case "OpenSettingsButton": OnOpenSettingsButtonClick(sender, e); break;
-                        case "OpenPopupButton": OnOpenPopupButtonClick(sender, e); break;
-                    }
+                    case "StartCaptureButton": await StartCaptureAsync(); break;
+                    case "StopCaptureButton": await StopCaptureAsync(); break;
+                    case "OverlayButton": OnOverlayButtonClick(sender, e); break;
+                    case "OpenSettingsButton": OnOpenSettingsButtonClick(sender, e); break;
+                    case "OpenPopupButton": OnOpenPopupButtonClick(sender, e); break;
                 }
             }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error during button click event.");
-            }
         }
 
-        private void OnOverlayButtonClick(object sender, RoutedEventArgs e) => (IsOverlayActive ? (Action)CloseOverlay : OpenOverlay)();
+        private void OnOverlayButtonClick(object sender, RoutedEventArgs e) =>
+            (IsOverlayActive ? (Action)CloseOverlay : OpenOverlay)();
 
-        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                ThemeManager.Instance.ToggleTheme();
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error toggling theme.");
-            }
-        }
+        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e) =>
+            ThemeManager.Instance.ToggleTheme();
 
         private void OpenOverlay()
         {
-            try
+            _overlayWindow = new OverlayWindow(this, new OverlayConfiguration
             {
-                _overlayWindow = new OverlayWindow(this, new OverlayConfiguration { RenderInterval = MwConstants.RenderIntervalMs, IsTopmost = true, ShowInTaskbar = false });
-                _overlayWindow.Closed += (_, _) => OnOverlayClosed();
-                _overlayWindow.Show();
-                IsOverlayActive = true;
-                UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth, (int)SystemParameters.PrimaryScreenHeight);
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error opening overlay.");
-            }
+                RenderInterval = MwConstants.RenderIntervalMs,
+                IsTopmost = true,
+                ShowInTaskbar = false
+            });
+            _overlayWindow.Closed += (_, _) => OnOverlayClosed();
+            _overlayWindow.Show();
+            IsOverlayActive = true;
+            UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth, (int)SystemParameters.PrimaryScreenHeight);
         }
 
-        private void OnOverlayClosed()
-        {
-            try
-            {
-                IsOverlayActive = false;
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error while closing overlay.");
-            }
-        }
+        private void OnOverlayClosed() => IsOverlayActive = false;
 
         public void CloseOverlay()
         {
-            try
+            if (_overlayWindow != null)
             {
-                if (_overlayWindow != null)
-                {
-                    _overlayWindow.Close();
-                    _overlayWindow.Dispose();
-                    _overlayWindow = null;
-                }
-                IsOverlayActive = false;
+                _overlayWindow.Close();
+                _overlayWindow.Dispose();
+                _overlayWindow = null;
             }
-            catch (Exception ex)
+            IsOverlayActive = false;
+        }
+
+        private void UpdateRendererDimensions(int? width, int? height) =>
+            _renderer?.UpdateRenderDimensions(width ?? 0, height ?? 0);
+
+        private FftWindowType _selectedFftWindowType;
+        public FftWindowType SelectedFftWindowType
+        {
+            get => _selectedFftWindowType;
+            set
             {
-                Log.Fatal(ex, "[MainWindow] Error during overlay close.");
+                if (_selectedFftWindowType != value)
+                {
+                    _selectedFftWindowType = value;
+                    OnPropertyChanged(nameof(SelectedFftWindowType));
+                    UpdateFftWindowType(value);
+                }
             }
         }
 
-        private void UpdateRendererDimensions(int? width, int? height)
+        private void UpdateFftWindowType(FftWindowType windowType)
         {
-            try
+            if (_analyzer?.FftProcessor != null)
             {
-                _renderer?.UpdateRenderDimensions(width ?? 0, height ?? 0);
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error updating renderer dimensions.");
+                _analyzer.FftProcessor.WindowType = windowType;
             }
         }
 
@@ -544,17 +459,10 @@ namespace SpectrumNet
             get => _captureManager?.IsRecording ?? false;
             set
             {
-                try
+                if (_captureManager?.IsRecording != value)
                 {
-                    if (_captureManager?.IsRecording != value)
-                    {
-                        _ = value ? StartCaptureAsync() : StopCaptureAsync();
-                        OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Fatal(ex, "[MainWindow] Error setting IsRecording property.");
+                    _ = value ? StartCaptureAsync() : StopCaptureAsync();
+                    OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
                 }
             }
         }
@@ -620,100 +528,41 @@ namespace SpectrumNet
 
         private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName)
         {
-            try
-            {
-                setter(newValue);
-                OnPropertyChanged(propertyName);
-                InvalidateVisuals();
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, $"[MainWindow] Error updating gain parameter {propertyName}.");
-            }
+            setter(newValue);
+            OnPropertyChanged(propertyName);
+            InvalidateVisuals();
         }
 
         private void UpdateState(Func<WindowState, WindowState> updater, string propertyName, Action? callback = null)
         {
-            try
-            {
-                _state = updater(_state);
-                OnPropertyChanged(propertyName);
-                callback?.Invoke();
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, $"[MainWindow] Error updating state for property {propertyName}.");
-            }
+            _state = updater(_state);
+            OnPropertyChanged(propertyName);
+            callback?.Invoke();
         }
 
-        private void InvalidateVisuals()
-        {
-            try
-            {
-                RenderElement?.InvalidateVisual();
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error invalidating visuals.");
-            }
-        }
+        private void InvalidateVisuals() => RenderElement?.InvalidateVisual();
 
-        public Task StartCaptureAsync()
-        {
-            try
-            {
-                return _captureManager?.StartCaptureAsync() ?? Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error starting capture.");
-                return Task.FromException(ex);
-            }
-        }
+        public Task StartCaptureAsync() =>
+            _captureManager?.StartCaptureAsync() ?? Task.CompletedTask;
 
-        public Task StopCaptureAsync()
-        {
-            try
-            {
-                return _captureManager?.StopCaptureAsync() ?? Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error stopping capture.");
-                return Task.FromException(ex);
-            }
-        }
+        public Task StopCaptureAsync() =>
+            _captureManager?.StopCaptureAsync() ?? Task.CompletedTask;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
         public virtual void OnPropertyChanged(params string[] propertyNames)
         {
-            try
-            {
-                foreach (var name in propertyNames)
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error raising PropertyChanged event.");
-            }
+            foreach (var name in propertyNames)
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
         protected bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
         {
-            try
-            {
-                if (EqualityComparer<T>.Default.Equals(field, value)) return false;
-                field = value;
-                OnPropertyChanged(propertyName ?? string.Empty);
-                callback?.Invoke();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, $"[MainWindow] Error setting field for property {propertyName}.");
-                return false;
-            }
+            if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+            field = value;
+            OnPropertyChanged(propertyName ?? string.Empty);
+            callback?.Invoke();
+            return true;
         }
     }
 }

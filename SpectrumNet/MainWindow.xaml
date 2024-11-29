@@ -26,20 +26,20 @@
                 <!-- Header and Theme Toggle -->
                 <DockPanel Grid.Row="0" Margin="0,0,0,20">
                     <TextBlock Text="Анализатор спектра"
-                             FontSize="28"
-                             FontWeight="Bold"
-                             Foreground="{DynamicResource TextPrimaryBrush}"
-                             DockPanel.Dock="Left"
-                             VerticalAlignment="Center"
-                             Margin="0,0,20,0"/>
+                               FontSize="28"
+                               FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimaryBrush}"
+                               DockPanel.Dock="Left"
+                               VerticalAlignment="Center"
+                               Margin="0,0,20,0"/>
 
                     <ToggleButton x:Name="ThemeToggleButton"
-                                Checked="OnThemeToggleButtonChanged"
-                                Unchecked="OnThemeToggleButtonChanged"
-                                Style="{StaticResource ToggleSwitchStyle}"
-                                Width="100"
-                                DockPanel.Dock="Right"
-                                Margin="0,0,20,0"/>
+                                  Checked="OnThemeToggleButtonChanged"
+                                  Unchecked="OnThemeToggleButtonChanged"
+                                  Style="{StaticResource ToggleSwitchStyle}"
+                                  Width="100"
+                                  DockPanel.Dock="Right"
+                                  Margin="0,0,20,0"/>
                 </DockPanel>
 
                 <!-- Spectrum Visualization Area -->
@@ -49,8 +49,8 @@
                         Effect="{DynamicResource SurfaceShadowEffect}"
                         Margin="0,0,0,20">
                     <sk:SKElement x:Name="spectrumCanvas"
-                                PaintSurface="OnPaintSurface"
-                                Margin="16"/>
+                                  PaintSurface="OnPaintSurface"
+                                  Margin="16"/>
                 </Border>
 
                 <!-- Control Panel -->
@@ -69,18 +69,18 @@
 
                         <!-- Кнопки управления -->
                         <Border Grid.Column="0" 
-        CornerRadius="8" 
-        Background="{DynamicResource ControlsPanelBackgroundBrush}"
-        Effect="{DynamicResource ControlsPanelShadowEffect}"
-        Padding="16">
+                                CornerRadius="8" 
+                                Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                Effect="{DynamicResource ControlsPanelShadowEffect}"
+                                Padding="16">
                             <StackPanel>
                                 <Button x:Name="StartCaptureButton"
-                Click="OnButtonClick"
-                IsEnabled="{Binding CanStartCapture}"
-                Margin="0,0,0,12"
-                Width="180"
-                Height="40"
-                Style="{StaticResource ModernButtonStyle}">
+                                        Click="OnButtonClick"
+                                        IsEnabled="{Binding CanStartCapture}"
+                                        Margin="0,0,0,12"
+                                        Width="180"
+                                        Height="40"
+                                        Style="{StaticResource ModernButtonStyle}">
                                     <Grid Width="160">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
@@ -93,12 +93,12 @@
                                 </Button>
 
                                 <Button x:Name="StopCaptureButton"
-                Click="OnButtonClick"
-                IsEnabled="{Binding IsRecording}"
-                Margin="0,0,0,12"
-                Width="180"
-                Height="40"
-                Style="{StaticResource ModernButtonStyle}">
+                                        Click="OnButtonClick"
+                                        IsEnabled="{Binding IsRecording}"
+                                        Margin="0,0,0,12"
+                                        Width="180"
+                                        Height="40"
+                                        Style="{StaticResource ModernButtonStyle}">
                                     <Grid Width="160">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
@@ -111,11 +111,11 @@
                                 </Button>
 
                                 <Button x:Name="OverlayButton"
-                Click="OnButtonClick"
-                Margin="0,0,0,12"
-                Width="180"
-                Height="40"
-                Style="{StaticResource ModernButtonStyle}">
+                                        Click="OnButtonClick"
+                                        Margin="0,0,0,12"
+                                        Width="180"
+                                        Height="40"
+                                        Style="{StaticResource ModernButtonStyle}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="⚡" FontSize="16" Margin="0,0,8,0"/>
                                         <TextBlock Text="Режим наложения"/>
@@ -123,11 +123,11 @@
                                 </Button>
 
                                 <Button x:Name="OpenSettingsButton"
-                Click="OnButtonClick"
-                Margin="0,0,0,12"
-                Width="180"
-                Height="40"
-                Style="{StaticResource ModernButtonStyle}">
+                                        Click="OnButtonClick"
+                                        Margin="0,0,0,12"
+                                        Width="180"
+                                        Height="40"
+                                        Style="{StaticResource ModernButtonStyle}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="⚙" FontSize="16" Margin="0,0,8,0"/>
                                         <TextBlock Text="Настройки"/>
@@ -135,10 +135,10 @@
                                 </Button>
 
                                 <Button x:Name="OpenPopupButton"
-                Click="OnButtonClick"
-                Width="180"
-                Height="40"
-                Style="{StaticResource ModernButtonStyle}">
+                                        Click="OnButtonClick"
+                                        Width="180"
+                                        Height="40"
+                                        Style="{StaticResource ModernButtonStyle}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="🔧" FontSize="16" Margin="0,0,8,0"/>
                                         <TextBlock Text="Настройки усиления"/>
@@ -229,64 +229,79 @@
 
                         <!-- Выбор визуализации -->
                         <Border Grid.Column="2" 
-                                CornerRadius="8" 
-                                Background="{DynamicResource ControlsPanelBackgroundBrush}"
-                                Effect="{DynamicResource ControlsPanelShadowEffect}"
-                                Padding="12">
+        CornerRadius="8" 
+        Background="{DynamicResource ControlsPanelBackgroundBrush}"
+        Effect="{DynamicResource ControlsPanelShadowEffect}"
+        Padding="12">
                             <Grid>
+                                <!-- Определение строк и столбцов -->
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="*"/>
-                                    <!-- Пустое пространство -->
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <!-- Для кнопки -->
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
 
-                                <!-- Выбор типа отрисовки -->
+                                <!-- Блок выбора типа визуализации -->
                                 <TextBlock Grid.Row="0" 
-           Text="Тип визуализации:"
-           Foreground="{DynamicResource TextPrimaryBrush}"
-           Margin="0,0,8,0"/>
+                   Text="Тип визуализации:" 
+                   Foreground="{DynamicResource TextPrimaryBrush}" 
+                   Margin="0,0,8,0"/>
                                 <ComboBox Grid.Row="0" 
-          Grid.Column="1" 
-          x:Name="RenderStyleComboBox"
-          ItemsSource="{Binding AvailableDrawingTypes}"
-          SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"
-          Width="200"
-          Margin="0,0,0,12"
-          Style="{StaticResource ModernComboBoxStyle}"
-          SelectionChanged="OnComboBoxSelectionChanged"/>
+                  Grid.Column="1" 
+                  x:Name="RenderStyleComboBox" 
+                  ItemsSource="{Binding AvailableDrawingTypes}" 
+                  SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}" 
+                  Width="200" 
+                  Margin="0,0,0,12" 
+                  Style="{StaticResource ModernComboBoxStyle}" 
+                  SelectionChanged="OnComboBoxSelectionChanged"/>
 
-                                <!-- Выбор кисти отрисовки -->
+                                <!-- Блок выбора кисти отрисовки -->
                                 <TextBlock Grid.Row="1" 
-           Text="Кисть отрисовки:"
-           Foreground="{DynamicResource TextPrimaryBrush}"
-           Margin="0,0,8,0"/>
+                   Text="Кисть отрисовки:" 
+                   Foreground="{DynamicResource TextPrimaryBrush}" 
+                   Margin="0,0,8,0"/>
                                 <ComboBox Grid.Row="1" 
-          Grid.Column="1" 
-          x:Name="StyleComboBox"
-          ItemsSource="{Binding AvailableStyles.Keys}"
-          SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
-          Width="200"
-          Style="{StaticResource ModernComboBoxStyle}"
-          SelectionChanged="OnComboBoxSelectionChanged"/>
+                  Grid.Column="1" 
+                  x:Name="StyleComboBox" 
+                  ItemsSource="{Binding AvailableStyles.Keys}" 
+                  SelectedItem="{Binding SelectedStyle, Mode=TwoWay}" 
+                  Width="200" 
+                  Style="{StaticResource ModernComboBoxStyle}" 
+                  SelectionChanged="OnComboBoxSelectionChanged"
+                  Margin="0,12,0,12"/>
+                                
+                                <!-- Блок выбора типа окна FFT -->
+                                <TextBlock Grid.Row="2" 
+                   Text="Тип окна FFT:" 
+                   Foreground="{DynamicResource TextPrimaryBrush}" 
+                   Margin="0,0,8,0"/>
+                                <ComboBox Grid.Row="2" 
+                  Grid.Column="1" 
+                  x:Name="FftWindowTypeComboBox" 
+                  ItemsSource="{Binding AvailableFftWindowTypes}" 
+                  SelectedItem="{Binding SelectedFftWindowType, Mode=TwoWay}" 
+                  Width="200" 
+                  Style="{StaticResource ModernComboBoxStyle}" 
+                  SelectionChanged="OnComboBoxSelectionChanged"
+                  Margin="0,12,0,0"/>
                             </Grid>
                         </Border>
-                        
                     </Grid>
                 </Border>
 
                 <!-- Всплывающее окно настроек усиления -->
                 <Popup x:Name="GainControlsPopup"
-       Placement="Center"
-       StaysOpen="False"
-       AllowsTransparency="True"
-       IsOpen="{Binding IsPopupOpen, Mode=TwoWay}">
+                       Placement="Center"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       IsOpen="{Binding IsPopupOpen, Mode=TwoWay}">
                     <Popup.RenderTransform>
                         <TranslateTransform X="0" Y="0"/>
                     </Popup.RenderTransform>
@@ -298,9 +313,9 @@
                                         <BeginStoryboard>
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetProperty="(Popup.RenderTransform).(TranslateTransform.Y)"
-                                                 From="20" To="0" Duration="0:0:0.3" />
+                                                                 From="20" To="0" Duration="0:0:0.3" />
                                                 <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                 From="0" To="1" Duration="0:0:0.3" />
+                                                                 From="0" To="1" Duration="0:0:0.3" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </DataTrigger.EnterActions>
@@ -308,9 +323,9 @@
                                         <BeginStoryboard>
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetProperty="(Popup.RenderTransform).(TranslateTransform.Y)"
-                                                 From="0" To="20" Duration="0:0:0.3" />
+                                                                 From="0" To="20" Duration="0:0:0.3" />
                                                 <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                 From="1" To="0" Duration="0:0:0.3" />
+                                                                 From="1" To="0" Duration="0:0:0.3" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </DataTrigger.ExitActions>
@@ -319,18 +334,18 @@
                         </Style>
                     </Popup.Style>
                     <Border CornerRadius="16"
-            Background="{DynamicResource DarkSurfaceBrush}"
-            Padding="24"
-            Width="400"
-            BorderBrush="{DynamicResource DarkPopupBorderBrush}"
-            BorderThickness="1"
-            Effect="{StaticResource PopupShadowEffect}">
+                            Background="{DynamicResource DarkSurfaceBrush}"
+                            Padding="24"
+                            Width="400"
+                            BorderBrush="{DynamicResource DarkPopupBorderBrush}"
+                            BorderThickness="1"
+                            Effect="{StaticResource PopupShadowEffect}">
                         <StackPanel>
                             <TextBlock Text="Настройки усиления"
-                       FontSize="20"
-                       FontWeight="Bold"
-                       Foreground="{DynamicResource LightTextPrimaryBrush}"
-                       Margin="0,0,0,20"/>
+                                       FontSize="20"
+                                       FontWeight="Bold"
+                                       Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                       Margin="0,0,0,20"/>
                             <!-- Минимальный уровень дБ -->
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
@@ -339,16 +354,16 @@
                                     <ColumnDefinition Width="30"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Минимальный уровень дБ:"
-                           Foreground="{DynamicResource LightTextPrimaryBrush}"
-                           Margin="0,0,8,0"/>
+                                           Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
                                 <Slider Grid.Column="1" x:Name="minDbLevelSlider"
-                        Minimum="-200"
-                        Maximum="0"
-                        Value="{Binding MinDbLevel, Mode=TwoWay}"
-                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
+                                        Minimum="-200"
+                                        Maximum="0"
+                                        Value="{Binding MinDbLevel, Mode=TwoWay}"
+                                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
                                 <TextBlock Grid.Column="2" Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
-                           Foreground="{DynamicResource LightTextPrimaryBrush}"
-                           Margin="0,0,8,0"/>
+                                           Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
                             </Grid>
                             <!-- Максимальный уровень дБ -->
                             <Grid Margin="0,0,0,16">
@@ -358,16 +373,16 @@
                                     <ColumnDefinition Width="30"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Максимальный уровень дБ:"
-                           Foreground="{DynamicResource LightTextPrimaryBrush}"
-                           Margin="0,0,8,0"/>
+                                           Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
                                 <Slider Grid.Column="1" x:Name="maxDbLevelSlider"
-                        Minimum="-100"
-                        Maximum="0"
-                        Value="{Binding MaxDbLevel, Mode=TwoWay}"
-                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
+                                        Minimum="-100"
+                                        Maximum="0"
+                                        Value="{Binding MaxDbLevel, Mode=TwoWay}"
+                                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
                                 <TextBlock Grid.Column="2" Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
-                           Foreground="{DynamicResource LightTextPrimaryBrush}"
-                           Margin="0,0,8,0"/>
+                                           Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
                             </Grid>
                             <!-- Коэффициент усиления -->
                             <Grid>
@@ -377,16 +392,16 @@
                                     <ColumnDefinition Width="30"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Коэффициент усиления:"
-                           Foreground="{DynamicResource LightTextPrimaryBrush}"
-                           Margin="0,0,8,0"/>
+                                           Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
                                 <Slider Grid.Column="1" x:Name="amplificationFactorSlider"
-                        Minimum="0.01"
-                        Maximum="1"
-                        Value="{Binding AmplificationFactor, Mode=TwoWay}"
-                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
+                                        Minimum="0.01"
+                                        Maximum="1"
+                                        Value="{Binding AmplificationFactor, Mode=TwoWay}"
+                                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
                                 <TextBlock Grid.Column="2" Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
-                           Foreground="{DynamicResource LightTextPrimaryBrush}"
-                           Margin="0,0,8,0"/>
+                                           Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
                             </Grid>
                         </StackPanel>
                     </Border>

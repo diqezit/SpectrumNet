@@ -22,6 +22,7 @@ namespace SpectrumNet
         event EventHandler<FftEventArgs>? FftCalculated;
         ValueTask AddSamplesAsync(float[] samples, int sampleRate);
         ValueTask DisposeAsync();
+        FftWindowType WindowType { get; set; }
     }
 
     public interface IGainParametersProvider
@@ -108,6 +109,7 @@ namespace SpectrumNet
         private readonly SynchronizationContext? _context;
         private SpectralData? _lastData;
         private bool _disposed;
+        public IFftProcessor FftProcessor => _fftProcessor;
 
         public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
 
@@ -160,19 +162,28 @@ namespace SpectrumNet
         }
     }
 
+    public enum FftWindowType
+    {
+        Hann,
+        Hamming,
+        Blackman,
+        Rectangle
+    }
+
     public sealed class FftProcessor : IFftProcessor, IAsyncDisposable, IDisposable
     {
         private readonly ArrayPool<Complex> _bufferPool = ArrayPool<Complex>.Shared;
         private readonly Channel<(float[] Samples, int SampleRate)> _channel;
         private readonly CancellationTokenSource _cts = new();
         private readonly Complex[] _buffer;
-        private readonly float[] _hannWindow;
+        private readonly float[] _window;
         private readonly Task _processingTask;
         private readonly int _fftSize;
         private int _sampleCount;
         private static readonly bool _avxSupported = Avx.IsSupported;
 
         public event EventHandler<FftEventArgs>? FftCalculated;
+        public FftWindowType WindowType { get; set; } = FftWindowType.Hann;
 
         public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
@@ -181,10 +192,30 @@ namespace SpectrumNet
 
             _fftSize = fftSize;
             _buffer = _bufferPool.Rent(fftSize);
-            _hannWindow = GenerateHannWindow(fftSize); // Предвычисляем окно Hann
-            _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(
-                new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+            _window = GenerateWindow(fftSize, WindowType);
+            _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
             _processingTask = Task.Run(ProcessSamplesAsync, _cts.Token);
+        }
+
+        private static float[] GenerateWindow(int size, FftWindowType windowType)
+        {
+            var window = new float[size];
+            double factor = 2.0 * Math.PI / (size - 1); // common factor
+
+            // Generate the window values based on the selected type
+            for (int i = 0; i < size; i++)
+            {
+                double angle = i * factor;
+                window[i] = windowType switch
+                {
+                    FftWindowType.Hann => (float)(0.5 * (1.0 - Math.Cos(angle))),
+                    FftWindowType.Hamming => (float)(0.54 - 0.46 * Math.Cos(angle)),
+                    FftWindowType.Blackman => (float)(0.42 - 0.5 * Math.Cos(angle) + 0.08 * Math.Cos(2 * angle)),
+                    FftWindowType.Rectangle => 1.0f,
+                    _ => throw new ArgumentException("Unsupported window type")
+                };
+            }
+            return window;
         }
 
         public async ValueTask AddSamplesAsync(float[] samples, int sampleRate)
@@ -254,7 +285,7 @@ namespace SpectrumNet
                 int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
                 if (copyCount <= 0) break;
 
-                // Использование Span<T> для передачи части массива
+                // Используем Span<T> для передачи части массива
                 Span<float> sampleSpan = new Span<float>(samples, index, copyCount);
                 ApplyWindowAndCopyWithAvx(sampleSpan);
 
@@ -263,12 +294,9 @@ namespace SpectrumNet
 
                 if (_sampleCount >= _fftSize)
                 {
-                    // Преобразуем для Math.NET FFT
                     var mathNetBuffer = new Complex32[_fftSize];
                     for (int i = 0; i < _fftSize; i++)
-                    {
                         mathNetBuffer[i] = new Complex32((float)_buffer[i].X, (float)_buffer[i].Y);
-                    }
 
                     // FFT
                     Fourier.Forward(mathNetBuffer, FourierOptions.Matlab);
@@ -294,7 +322,7 @@ namespace SpectrumNet
             {
                 unsafe
                 {
-                    fixed (float* windowPtr = &_hannWindow[_sampleCount])
+                    fixed (float* windowPtr = &_window[_sampleCount])
                     {
                         while (i + Vector256<float>.Count <= samples.Length)
                         {
@@ -322,17 +350,9 @@ namespace SpectrumNet
             for (; i < samples.Length; i++)
             {
                 int bufferIndex = _sampleCount + i;
-                _buffer[bufferIndex].X = samples[i] * _hannWindow[bufferIndex];
+                _buffer[bufferIndex].X = samples[i] * _window[bufferIndex];
                 _buffer[bufferIndex].Y = 0;
             }
-        }
-
-        private static float[] GenerateHannWindow(int size)
-        {
-            float[] window = new float[size];
-            for (int i = 0; i < size; i++)
-                window[i] = (float)(0.5 * (1.0 - Math.Cos(2.0 * Math.PI * i / (size - 1))));
-            return window;
         }
     }
 
