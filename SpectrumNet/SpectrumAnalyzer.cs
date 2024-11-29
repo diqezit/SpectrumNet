@@ -1,6 +1,8 @@
 ﻿using Complex = NAudio.Dsp.Complex;
 using System.Runtime.Intrinsics.X86;
 using System.Runtime.Intrinsics;
+using MathNet.Numerics.IntegralTransforms;
+using MathNet.Numerics;
 
 #nullable enable
 
@@ -8,9 +10,9 @@ namespace SpectrumNet
 {
     public static class Constants
     {
-        public const float DefaultAmplificationFactor = 0.75f;
-        public const float DefaultMaxDbValue = 0f;
-        public const float DefaultMinDbValue = -200f;
+        public const float DefaultAmplificationFactor = 0.25f;
+        public const float DefaultMaxDbValue = -30f;
+        public const float DefaultMinDbValue = -130f;
         public const int DefaultFftSize = 2048;
         public const float Epsilon = float.Epsilon;
     }
@@ -164,9 +166,9 @@ namespace SpectrumNet
         private readonly Channel<(float[] Samples, int SampleRate)> _channel;
         private readonly CancellationTokenSource _cts = new();
         private readonly Complex[] _buffer;
+        private readonly float[] _hannWindow;
         private readonly Task _processingTask;
         private readonly int _fftSize;
-        private readonly int _log2FftSize;
         private int _sampleCount;
 
         public event EventHandler<FftEventArgs>? FftCalculated;
@@ -177,8 +179,8 @@ namespace SpectrumNet
                 throw new ArgumentException("FFT size must be a positive power of 2.");
 
             _fftSize = fftSize;
-            _log2FftSize = (int)Math.Log2(fftSize);
             _buffer = _bufferPool.Rent(fftSize);
+            _hannWindow = GenerateHannWindow(fftSize); // Предвычисляем окно Hann
             _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(
                 new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
             _processingTask = Task.Run(ProcessSamplesAsync, _cts.Token);
@@ -234,31 +236,87 @@ namespace SpectrumNet
         private void ProcessSampleBlock(float[] samples, int sampleRate)
         {
             int index = 0;
-            double multiplier = 2.0 * Math.PI / (_fftSize - 1);
 
             while (index < samples.Length)
             {
                 int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
                 if (copyCount <= 0) break;
 
-                for (int i = 0; i < copyCount; i++)
-                {
-                    int bufferIndex = _sampleCount + i;
-                    float windowValue = (float)(0.5 * (1.0 - Math.Cos((bufferIndex) * multiplier)));
-                    _buffer[bufferIndex].X = samples[index + i] * windowValue;
-                    _buffer[bufferIndex].Y = 0;
-                }
+                ApplyWindowAndCopyWithAvx(samples, index, copyCount);
 
                 index += copyCount;
                 _sampleCount += copyCount;
 
                 if (_sampleCount >= _fftSize)
                 {
-                    FastFourierTransform.FFT(true, _log2FftSize, _buffer);
+                    // Преобразуем для Math.NET FFT
+                    var mathNetBuffer = new Complex32[_fftSize];
+                    for (int i = 0; i < _fftSize; i++)
+                    {
+                        mathNetBuffer[i] = new Complex32((float)_buffer[i].X, (float)_buffer[i].Y);
+                    }
+
+                    // FFT
+                    Fourier.Forward(mathNetBuffer, FourierOptions.Matlab);
+
+                    // Обратно в _buffer
+                    for (int i = 0; i < _fftSize; i++)
+                    {
+                        _buffer[i].X = mathNetBuffer[i].Real;
+                        _buffer[i].Y = mathNetBuffer[i].Imaginary;
+                    }
+
                     FftCalculated?.Invoke(this, new FftEventArgs(_buffer, sampleRate));
                     _sampleCount = 0;
                 }
             }
+        }
+
+        private void ApplyWindowAndCopyWithAvx(float[] samples, int startIndex, int count)
+        {
+            int i = 0;
+
+            // SIMD обработка
+            if (Avx.IsSupported)
+            {
+                unsafe
+                {
+                    fixed (float* samplesPtr = &samples[startIndex])
+                    fixed (float* windowPtr = &_hannWindow[_sampleCount])
+                    {
+                        while (i + Vector256<float>.Count <= count)
+                        {
+                            var input = Avx.LoadVector256(samplesPtr + i);
+                            var window = Avx.LoadVector256(windowPtr + i);
+                            var result = Avx.Multiply(input, window);
+
+                            for (int j = 0; j < Vector256<float>.Count; j++)
+                            {
+                                _buffer[_sampleCount + i + j].X = result.GetElement(j);
+                                _buffer[_sampleCount + i + j].Y = 0;
+                            }
+
+                            i += Vector256<float>.Count;
+                        }
+                    }
+                }
+            }
+
+            // Оставшиеся элементы
+            for (; i < count; i++)
+            {
+                int bufferIndex = _sampleCount + i;
+                _buffer[bufferIndex].X = samples[startIndex + i] * _hannWindow[bufferIndex];
+                _buffer[bufferIndex].Y = 0;
+            }
+        }
+
+        private static float[] GenerateHannWindow(int size)
+        {
+            float[] window = new float[size];
+            for (int i = 0; i < size; i++)
+                window[i] = (float)(0.5 * (1.0 - Math.Cos(2.0 * Math.PI * i / (size - 1))));
+            return window;
         }
     }
 
