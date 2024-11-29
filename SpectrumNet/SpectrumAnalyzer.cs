@@ -170,6 +170,7 @@ namespace SpectrumNet
         private readonly Task _processingTask;
         private readonly int _fftSize;
         private int _sampleCount;
+        private static readonly bool _avxSupported = Avx.IsSupported;
 
         public event EventHandler<FftEventArgs>? FftCalculated;
 
@@ -186,16 +187,14 @@ namespace SpectrumNet
             _processingTask = Task.Run(ProcessSamplesAsync, _cts.Token);
         }
 
-        public ValueTask AddSamplesAsync(float[] samples, int sampleRate)
+        public async ValueTask AddSamplesAsync(float[] samples, int sampleRate)
         {
             if (samples == null || sampleRate <= 0 || samples.Any(float.IsNaN))
                 throw new ArgumentException("Invalid samples or sample rate.");
 
-            lock (_channel.Writer)
+            if (!_channel.Writer.TryWrite((samples, sampleRate)))
             {
-                return _channel.Writer.TryWrite((samples, sampleRate))
-                    ? default
-                    : new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
+                await _channel.Writer.WriteAsync((samples, sampleRate)).ConfigureAwait(false);
             }
         }
 
@@ -279,6 +278,7 @@ namespace SpectrumNet
                         _buffer[i].Y = mathNetBuffer[i].Imaginary;
                     }
 
+                    // Выполняем событие только после обработки блока
                     FftCalculated?.Invoke(this, new FftEventArgs(_buffer, sampleRate));
                     _sampleCount = 0;
                 }
@@ -288,9 +288,7 @@ namespace SpectrumNet
         private void ApplyWindowAndCopyWithAvx(float[] samples, int startIndex, int count)
         {
             int i = 0;
-
-            // SIMD обработка
-            if (Avx.IsSupported)
+            if (_avxSupported)
             {
                 unsafe
                 {
@@ -315,7 +313,7 @@ namespace SpectrumNet
                 }
             }
 
-            // Оставшиеся элементы
+            // Обработка оставшихся элементов без SIMD
             for (; i < count; i++)
             {
                 int bufferIndex = _sampleCount + i;
@@ -381,10 +379,16 @@ namespace SpectrumNet
                 var mags = Avx.Multiply(Avx.Add(Avx.Multiply(c0, c0), Avx.Multiply(c1, c1)), v.F4);
 
                 float* m = (float*)&mags;
-                var logs = Vector256.Create(MathF.Log(m[0]), MathF.Log(m[1]), MathF.Log(m[2]),
-                    MathF.Log(m[3]), MathF.Log(m[4]), MathF.Log(m[5]), MathF.Log(m[6]), MathF.Log(m[7]));
-                var norm = Avx.Multiply(Avx.Divide(Avx.Subtract(Avx.Multiply(v.L10, logs), v.MinDb), v.Range), v.Amp);
-                Avx.Store(outPtr + i, Avx.Min(Avx.Max(norm, v.Z), v.O));
+                Vector256<float> logs = Vector256<float>.Zero;
+
+                for (int j = 0; j < 8; j++)
+                {
+                    m[j] = m[j] < float.Epsilon ? 0f : (L10M * (float)MathF.Log(m[j]) - minDb) / range * amp;
+                    m[j] = Math.Min(Math.Max(m[j], 0f), 1f);
+                }
+
+                logs = Avx.LoadVector256(m);
+                Avx.Store(outPtr + i, logs);
             }
 
             for (; i < len; i++)
@@ -411,9 +415,16 @@ namespace SpectrumNet
                 var mags = Sse.Multiply(Sse.Add(Sse.Multiply(c, c), Sse.Multiply(c, c)), v.F4);
 
                 float* m = (float*)&mags;
-                var logs = Vector128.Create(MathF.Log(m[0]), MathF.Log(m[1]), MathF.Log(m[2]), MathF.Log(m[3]));
-                var norm = Sse.Multiply(Sse.Divide(Sse.Subtract(Sse.Multiply(v.L10, logs), v.MinDb), v.Range), v.Amp);
-                Sse.Store(outPtr + i, Sse.Min(Sse.Max(norm, v.Z), v.O));
+                Vector128<float> logs = Vector128<float>.Zero;
+
+                for (int j = 0; j < 4; j++)
+                {
+                    m[j] = m[j] < float.Epsilon ? 0f : (L10M * (float)MathF.Log(m[j]) - minDb) / range * amp;
+                    m[j] = Math.Min(Math.Max(m[j], 0f), 1f);
+                }
+
+                logs = Sse.LoadVector128(m);
+                Sse.Store(outPtr + i, logs);
             }
 
             for (; i < len; i++)
@@ -424,7 +435,8 @@ namespace SpectrumNet
         {
             float mag = inPtr.X * inPtr.X + inPtr.Y * inPtr.Y;
             if (i != 0 && i != len - 1) mag *= F4M;
-            *outPtr = mag < float.Epsilon ? Z : Math.Clamp((L10M * MathF.Log10(mag) - minDb) / range * amp, Z, O);
+            *outPtr = mag < float.Epsilon ? Z : (L10M * (float)MathF.Log10(mag) - minDb) / range * amp;
+            *outPtr = Math.Clamp(*outPtr, Z, O);
         }
     }
 }
