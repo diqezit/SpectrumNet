@@ -191,9 +191,12 @@ namespace SpectrumNet
             if (samples == null || sampleRate <= 0 || samples.Any(float.IsNaN))
                 throw new ArgumentException("Invalid samples or sample rate.");
 
-            return _channel.Writer.TryWrite((samples, sampleRate))
-                ? default
-                : new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
+            lock (_channel.Writer)
+            {
+                return _channel.Writer.TryWrite((samples, sampleRate))
+                    ? default
+                    : new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
+            }
         }
 
         public async ValueTask DisposeAsync()
@@ -213,7 +216,17 @@ namespace SpectrumNet
         private void DisposeResources()
         {
             _cts.Dispose();
-            _bufferPool.Return(_buffer);
+            if (_buffer != null)
+            {
+                try
+                {
+                    _bufferPool.Return(_buffer);
+                }
+                catch (ArgumentException ex)
+                {
+                    Log.Warning($"Attempted to return an invalid buffer: {ex.Message}");
+                }
+            }
         }
 
         private async Task ProcessSamplesAsync()
