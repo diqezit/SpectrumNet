@@ -393,95 +393,68 @@ namespace SpectrumNet
             fixed (float* outPtr = s)
             {
                 if (Avx.IsSupported && len >= 8)
-                    ProcAvx(inPtr, outPtr, len, minDb, range, amp);
+                    ProcessAvx(inPtr, outPtr, len, minDb, range, amp);
                 else if (Sse.IsSupported && len >= 4)
-                    ProcSse(inPtr, outPtr, len, minDb, range, amp);
+                    ProcessSse(inPtr, outPtr, len, minDb, range, amp);
                 else
-                    for (int i = 0; i < len; i++)
-                        ProcScalar(inPtr[i], outPtr + i, minDb, range, amp, i, len);
+                    ProcessScalar(inPtr, outPtr, len, minDb, range, amp);
             }
             return s;
         }
 
-        private static unsafe void ProcAvx(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
+        private static unsafe void ProcessAvx(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
         {
             int i = 0, aligned = len - (len % 8);
-            var v = new
-            {
-                MinDb = Vector256.Create(minDb),
-                Amp = Vector256.Create(amp),
-                Range = Vector256.Create(range),
-                F4 = Vector256.Create(F4M),
-                L10 = Vector256.Create(L10M),
-                O = Vector256.Create(O),
-                Z = Vector256<float>.Zero
-            };
 
             for (; i < aligned; i += 8)
             {
                 var c0 = Avx.LoadVector256((float*)(inPtr + i));
                 var c1 = Avx.LoadVector256((float*)(inPtr + i + 4));
-                var mags = Avx.Multiply(Avx.Add(Avx.Multiply(c0, c0), Avx.Multiply(c1, c1)), v.F4);
+                var mags = Avx.Multiply(Avx.Add(Avx.Multiply(c0, c0), Avx.Multiply(c1, c1)), Vector256.Create(F4M));
 
                 float* m = (float*)&mags;
-                Vector256<float> logs = Vector256<float>.Zero;
-
                 for (int j = 0; j < 8; j++)
                 {
-                    m[j] = m[j] < float.Epsilon ? 0f : (L10M * (float)MathF.Log(m[j]) - minDb) / range * amp;
-                    m[j] = Math.Min(Math.Max(m[j], 0f), 1f);
+                    m[j] = m[j] < float.Epsilon ? 0f : (L10M * MathF.Log(m[j]) - minDb) / range * amp;
+                    m[j] = Math.Clamp(m[j], Z, O);
                 }
 
-                logs = Avx.LoadVector256(m);
-                Avx.Store(outPtr + i, logs);
+                Avx.Store(outPtr + i, Avx.LoadVector256(m));
             }
 
-            for (; i < len; i++)
-                ProcScalar(inPtr[i], outPtr + i, minDb, range, amp, i, len);
+            ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp);
         }
 
-        private static unsafe void ProcSse(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
+        private static unsafe void ProcessSse(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
         {
             int i = 0, aligned = len - (len % 4);
-            var v = new
-            {
-                MinDb = Vector128.Create(minDb),
-                Amp = Vector128.Create(amp),
-                Range = Vector128.Create(range),
-                F4 = Vector128.Create(F4M),
-                L10 = Vector128.Create(L10M),
-                O = Vector128.Create(O),
-                Z = Vector128<float>.Zero
-            };
 
             for (; i < aligned; i += 4)
             {
                 var c = Sse.LoadVector128((float*)(inPtr + i));
-                var mags = Sse.Multiply(Sse.Add(Sse.Multiply(c, c), Sse.Multiply(c, c)), v.F4);
+                var mags = Sse.Multiply(Sse.Add(Sse.Multiply(c, c), Sse.Multiply(c, c)), Vector128.Create(F4M));
 
                 float* m = (float*)&mags;
-                Vector128<float> logs = Vector128<float>.Zero;
-
                 for (int j = 0; j < 4; j++)
                 {
-                    m[j] = m[j] < float.Epsilon ? 0f : (L10M * (float)MathF.Log(m[j]) - minDb) / range * amp;
-                    m[j] = Math.Min(Math.Max(m[j], 0f), 1f);
+                    m[j] = m[j] < float.Epsilon ? 0f : (L10M * MathF.Log(m[j]) - minDb) / range * amp;
+                    m[j] = Math.Clamp(m[j], Z, O);
                 }
 
-                logs = Sse.LoadVector128(m);
-                Sse.Store(outPtr + i, logs);
+                Sse.Store(outPtr + i, Sse.LoadVector128(m));
             }
 
-            for (; i < len; i++)
-                ProcScalar(inPtr[i], outPtr + i, minDb, range, amp, i, len);
+            ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp);
         }
 
-        private static unsafe void ProcScalar(Complex inPtr, float* outPtr, float minDb, float range, float amp, int i, int len)
+        private static unsafe void ProcessScalar(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
         {
-            float mag = inPtr.X * inPtr.X + inPtr.Y * inPtr.Y;
-            if (i != 0 && i != len - 1) mag *= F4M;
-            *outPtr = mag < float.Epsilon ? Z : (L10M * (float)MathF.Log10(mag) - minDb) / range * amp;
-            *outPtr = Math.Clamp(*outPtr, Z, O);
+            for (int i = 0; i < len; i++)
+            {
+                float mag = inPtr[i].X * inPtr[i].X + inPtr[i].Y * inPtr[i].Y;
+                if (i != 0 && i != len - 1) mag *= F4M;
+                outPtr[i] = mag < float.Epsilon ? Z : Math.Clamp((L10M * MathF.Log10(mag) - minDb) / range * amp, Z, O);
+            }
         }
     }
 
