@@ -11,8 +11,8 @@ namespace SpectrumNet
     public static class Constants
     {
         public const float DefaultAmplificationFactor = 0.25f;
-        public const float DefaultMaxDbValue = -30f;
-        public const float DefaultMinDbValue = -130f;
+        public const float DefaultMaxDbValue = -20f;
+        public const float DefaultMinDbValue = -110f;
         public const int DefaultFftSize = 2048;
         public const float Epsilon = float.Epsilon;
     }
@@ -254,7 +254,9 @@ namespace SpectrumNet
                 int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
                 if (copyCount <= 0) break;
 
-                ApplyWindowAndCopyWithAvx(samples, index, copyCount);
+                // Использование Span<T> для передачи части массива
+                Span<float> sampleSpan = new Span<float>(samples, index, copyCount);
+                ApplyWindowAndCopyWithAvx(sampleSpan);
 
                 index += copyCount;
                 _sampleCount += copyCount;
@@ -285,28 +287,31 @@ namespace SpectrumNet
             }
         }
 
-        private void ApplyWindowAndCopyWithAvx(float[] samples, int startIndex, int count)
+        private void ApplyWindowAndCopyWithAvx(Span<float> samples)
         {
             int i = 0;
             if (_avxSupported)
             {
                 unsafe
                 {
-                    fixed (float* samplesPtr = &samples[startIndex])
                     fixed (float* windowPtr = &_hannWindow[_sampleCount])
                     {
-                        while (i + Vector256<float>.Count <= count)
+                        while (i + Vector256<float>.Count <= samples.Length)
                         {
-                            var input = Avx.LoadVector256(samplesPtr + i);
-                            var window = Avx.LoadVector256(windowPtr + i);
-                            var result = Avx.Multiply(input, window);
-
-                            for (int j = 0; j < Vector256<float>.Count; j++)
+                            // Преобразуем Span<float> в указатель на float*
+                            fixed (float* samplesPtr = &samples[i])
                             {
-                                _buffer[_sampleCount + i + j].X = result.GetElement(j);
-                                _buffer[_sampleCount + i + j].Y = 0;
-                            }
+                                // Загружаем данные как Vector256<float>
+                                var input = Avx.LoadVector256(samplesPtr);
+                                var window = Avx.LoadVector256(windowPtr + i);
+                                var result = Avx.Multiply(input, window);
 
+                                for (int j = 0; j < Vector256<float>.Count; j++)
+                                {
+                                    _buffer[_sampleCount + i + j].X = result.GetElement(j);
+                                    _buffer[_sampleCount + i + j].Y = 0;
+                                }
+                            }
                             i += Vector256<float>.Count;
                         }
                     }
@@ -314,10 +319,10 @@ namespace SpectrumNet
             }
 
             // Обработка оставшихся элементов без SIMD
-            for (; i < count; i++)
+            for (; i < samples.Length; i++)
             {
                 int bufferIndex = _sampleCount + i;
-                _buffer[bufferIndex].X = samples[startIndex + i] * _hannWindow[bufferIndex];
+                _buffer[bufferIndex].X = samples[i] * _hannWindow[bufferIndex];
                 _buffer[bufferIndex].Y = 0;
             }
         }
