@@ -276,7 +276,7 @@
                   Style="{StaticResource ModernComboBoxStyle}" 
                   SelectionChanged="OnComboBoxSelectionChanged"
                   Margin="0,12,0,12"/>
-                                
+
                                 <!-- Блок выбора типа окна FFT -->
                                 <TextBlock Grid.Row="2" 
                    Text="Тип окна FFT:" 
