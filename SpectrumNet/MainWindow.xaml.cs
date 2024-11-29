@@ -257,7 +257,6 @@ namespace SpectrumNet
                 SetupEventHandlers();
                 ConfigureTheme();
                 UpdateProperties();
-                SelectedFftWindowType = FftWindowType.Hann;
             }
             catch (Exception ex)
             {

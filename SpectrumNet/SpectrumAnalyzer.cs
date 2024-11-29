@@ -1,8 +1,8 @@
-﻿using Complex = NAudio.Dsp.Complex;
-using System.Runtime.Intrinsics.X86;
-using System.Runtime.Intrinsics;
+﻿using MathNet.Numerics;
 using MathNet.Numerics.IntegralTransforms;
-using MathNet.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+using Complex = NAudio.Dsp.Complex;
 
 #nullable enable
 
@@ -164,137 +164,95 @@ namespace SpectrumNet
 
     public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
     {
-        private readonly ArrayPool<Complex> _bufferPool = ArrayPool<Complex>.Shared;
-        private readonly Channel<(float[] Samples, int SampleRate)> _channel;
-        private readonly CancellationTokenSource _cts = new();
+        private readonly int _fftSize;
         private readonly Complex[] _buffer;
         private readonly float[] _window;
-        private readonly Task _processingTask;
-        private readonly int _fftSize;
         private readonly Complex32[] _mathNetBuffer;
+        private readonly Channel<(float[] Samples, int SampleRate)> _processingChannel;
+        private readonly CancellationTokenSource _cancellationTokenSource;
+        private readonly Task _processingTask;
         private int _sampleCount;
-        private static readonly bool _avxSupported = Avx.IsSupported;
 
         public event EventHandler<FftEventArgs>? FftCalculated;
         public FftWindowType WindowType { get; set; } = FftWindowType.Hann;
 
         public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
-            if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
-                throw new ArgumentException("FFT size must be a positive power of 2.");
-
+            ValidateFftSize(fftSize);
             _fftSize = fftSize;
-            _buffer = _bufferPool.Rent(fftSize);
+            _buffer = ArrayPool<Complex>.Shared.Rent(fftSize);
             _window = GenerateWindow(fftSize);
             _mathNetBuffer = new Complex32[fftSize];
-            _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(
-                new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+            _processingChannel = Channel.CreateUnbounded<(float[], int)>(new UnboundedChannelOptions { SingleReader = true });
+            _cancellationTokenSource = new CancellationTokenSource();
             _processingTask = Task.Run(ProcessSamplesAsync);
+        }
+
+        private static void ValidateFftSize(int fftSize)
+        {
+            if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
+                throw new ArgumentException("FFT size must be a positive power of 2.");
         }
 
         private float[] GenerateWindow(int size)
         {
             var window = new float[size];
-            var factor = 2.0 * Math.PI / (size - 1);
-
-            if (_avxSupported && size >= Vector256<float>.Count)
+            Func<int, float> windowFunc = WindowType switch
             {
-                GenerateWindowAvx(window, factor);
+                FftWindowType.Hann => i => (float)(0.5 * (1.0 - Math.Cos(2.0 * Math.PI * i / (size - 1)))),
+                FftWindowType.Hamming => i => (float)(0.54 - 0.46 * Math.Cos(2.0 * Math.PI * i / (size - 1))),
+                FftWindowType.Blackman => i => (float)(0.42 - 0.5 * Math.Cos(2.0 * Math.PI * i / (size - 1)) + 0.08 * Math.Cos(4.0 * Math.PI * i / (size - 1))),
+                _ => _ => 1.0f
+            };
+
+            if (Avx.IsSupported && size >= Vector256<float>.Count)
+            {
+                unsafe
+                {
+                    fixed (float* windowPtr = window)
+                    {
+                        for (int i = 0; i <= size - Vector256<float>.Count; i += Vector256<float>.Count)
+                        {
+                            var vec = Vector256.Create(
+                                windowFunc(i), windowFunc(i + 1), windowFunc(i + 2), windowFunc(i + 3),
+                                windowFunc(i + 4), windowFunc(i + 5), windowFunc(i + 6), windowFunc(i + 7)
+                            );
+                            Avx.Store(windowPtr + i, vec);
+                        }
+                    }
+                }
+                for (int i = size - size % Vector256<float>.Count; i < size; i++)
+                {
+                    window[i] = windowFunc(i);
+                }
             }
             else
             {
-                GenerateWindowScalar(window, factor);
+                for (int i = 0; i < size; i++)
+                {
+                    window[i] = windowFunc(i);
+                }
             }
-
             return window;
         }
-
-        private unsafe void GenerateWindowAvx(float[] window, double factor)
-        {
-            fixed (float* windowPtr = window)
-            {
-                int i = 0;
-                for (; i <= window.Length - Vector256<float>.Count; i += Vector256<float>.Count)
-                {
-                    var angles = Vector256.Create(
-                        (float)(i * factor),
-                        (float)((i + 1) * factor),
-                        (float)((i + 2) * factor),
-                        (float)((i + 3) * factor),
-                        (float)((i + 4) * factor),
-                        (float)((i + 5) * factor),
-                        (float)((i + 6) * factor),
-                        (float)((i + 7) * factor)
-                    );
-
-                    var result = WindowType switch
-                    {
-                        FftWindowType.Hann => Vector256.Create(
-                            0.5f * (1.0f - MathF.Cos((float)(i * factor))),
-                            0.5f * (1.0f - MathF.Cos((float)((i + 1) * factor))),
-                            0.5f * (1.0f - MathF.Cos((float)((i + 2) * factor))),
-                            0.5f * (1.0f - MathF.Cos((float)((i + 3) * factor))),
-                            0.5f * (1.0f - MathF.Cos((float)((i + 4) * factor))),
-                            0.5f * (1.0f - MathF.Cos((float)((i + 5) * factor))),
-                            0.5f * (1.0f - MathF.Cos((float)((i + 6) * factor))),
-                            0.5f * (1.0f - MathF.Cos((float)((i + 7) * factor)))
-                        ),
-                        FftWindowType.Hamming => Vector256.Create(
-                            0.54f - 0.46f * MathF.Cos((float)(i * factor)),
-                            0.54f - 0.46f * MathF.Cos((float)((i + 1) * factor)),
-                            0.54f - 0.46f * MathF.Cos((float)((i + 2) * factor)),
-                            0.54f - 0.46f * MathF.Cos((float)((i + 3) * factor)),
-                            0.54f - 0.46f * MathF.Cos((float)((i + 4) * factor)),
-                            0.54f - 0.46f * MathF.Cos((float)((i + 5) * factor)),
-                            0.54f - 0.46f * MathF.Cos((float)((i + 6) * factor)),
-                            0.54f - 0.46f * MathF.Cos((float)((i + 7) * factor))
-                        ),
-                        _ => Vector256.Create(1.0f)
-                    };
-
-                    Avx.Store(windowPtr + i, result);
-                }
-
-                for (; i < window.Length; i++)
-                {
-                    window[i] = CalculateWindowValue(i * factor);
-                }
-            }
-        }
-
-        private void GenerateWindowScalar(float[] window, double factor)
-        {
-            for (int i = 0; i < window.Length; i++)
-            {
-                window[i] = CalculateWindowValue(i * factor);
-            }
-        }
-
-        private float CalculateWindowValue(double angle) => WindowType switch
-        {
-            FftWindowType.Hann => (float)(0.5 * (1.0 - Math.Cos(angle))),
-            FftWindowType.Hamming => (float)(0.54 - 0.46 * Math.Cos(angle)),
-            FftWindowType.Blackman => (float)(0.42 - 0.5 * Math.Cos(angle) + 0.08 * Math.Cos(2 * angle)),
-            _ => 1.0f
-        };
 
         public ValueTask AddSamplesAsync(float[] samples, int sampleRate)
         {
             ArgumentNullException.ThrowIfNull(samples);
             if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
 
-            return _channel.Writer.TryWrite((samples, sampleRate))
+            return _processingChannel.Writer.TryWrite((samples, sampleRate))
                 ? default
-                : new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
+                : new ValueTask(_processingChannel.Writer.WriteAsync((samples, sampleRate)).AsTask());
         }
 
         private async Task ProcessSamplesAsync()
         {
             try
             {
-                await foreach (var item in _channel.Reader.ReadAllAsync(_cts.Token))
+                await foreach (var (samples, sampleRate) in _processingChannel.Reader.ReadAllAsync(_cancellationTokenSource.Token))
                 {
-                    ProcessSampleBlock(item.Samples, item.SampleRate);
+                    ProcessSampleBlock(samples, sampleRate);
                 }
             }
             catch (OperationCanceledException) { }
@@ -307,14 +265,12 @@ namespace SpectrumNet
         private void ProcessSampleBlock(float[] samples, int sampleRate)
         {
             int index = 0;
-
             while (index < samples.Length)
             {
                 int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
                 if (copyCount <= 0) break;
 
-                Span<float> sampleSpan = new(samples, index, copyCount);
-                ApplyWindowAndCopyWithAvx(sampleSpan);
+                ApplyWindowAndCopy(samples.AsSpan(index, copyCount));
 
                 index += copyCount;
                 _sampleCount += copyCount;
@@ -329,45 +285,63 @@ namespace SpectrumNet
 
         private void ProcessFft(int sampleRate)
         {
-            for (int i = 0; i < _fftSize; i++)
-            {
-                _mathNetBuffer[i] = new Complex32((float)_buffer[i].X, (float)_buffer[i].Y);
-            }
-
+            ConvertToMathNetComplex();
             Fourier.Forward(_mathNetBuffer, FourierOptions.Matlab);
-
-            for (int i = 0; i < _fftSize; i++)
-            {
-                _buffer[i] = new Complex { X = _mathNetBuffer[i].Real, Y = _mathNetBuffer[i].Imaginary };
-            }
+            ConvertFromMathNetComplex();
 
             FftCalculated?.Invoke(this, new FftEventArgs(_buffer, sampleRate));
         }
 
-        private unsafe void ApplyWindowAndCopyWithAvx(Span<float> samples)
+        private void ConvertToMathNetComplex()
         {
-            int i = 0;
-            if (_avxSupported)
+            for (int i = 0; i < _fftSize; i++)
             {
-                fixed (float* windowPtr = &_window[_sampleCount])
-                fixed (float* samplesPtr = &MemoryMarshal.GetReference(samples))
-                {
-                    while (i + Vector256<float>.Count <= samples.Length)
-                    {
-                        var input = Avx.LoadVector256(samplesPtr + i);
-                        var window = Avx.LoadVector256(windowPtr + i);
-                        var result = Avx.Multiply(input, window);
+                _mathNetBuffer[i] = new Complex32((float)_buffer[i].X, (float)_buffer[i].Y);
+            }
+        }
 
-                        for (int j = 0; j < Vector256<float>.Count; j++)
-                        {
-                            _buffer[_sampleCount + i + j] = new Complex { X = result.GetElement(j), Y = 0 };
-                        }
-                        i += Vector256<float>.Count;
+        private void ConvertFromMathNetComplex()
+        {
+            for (int i = 0; i < _fftSize; i++)
+            {
+                _buffer[i] = new Complex { X = _mathNetBuffer[i].Real, Y = _mathNetBuffer[i].Imaginary };
+            }
+        }
+
+        private void ApplyWindowAndCopy(Span<float> samples)
+        {
+            if (Avx.IsSupported && samples.Length >= Vector256<float>.Count)
+                ApplyWindowWithAvx(samples);
+            else
+                ApplyWindowScalar(samples);
+        }
+
+        private unsafe void ApplyWindowWithAvx(Span<float> samples)
+        {
+            fixed (float* windowPtr = &_window[_sampleCount])
+            fixed (float* samplesPtr = &MemoryMarshal.GetReference(samples))
+            fixed (Complex* bufferPtr = &_buffer[_sampleCount])
+            {
+                int i = 0;
+                for (; i <= samples.Length - Vector256<float>.Count; i += Vector256<float>.Count)
+                {
+                    var input = Avx.LoadVector256(samplesPtr + i);
+                    var window = Avx.LoadVector256(windowPtr + i);
+                    var result = Avx.Multiply(input, window);
+
+                    for (int j = 0; j < Vector256<float>.Count; j++)
+                    {
+                        bufferPtr[i + j].X = result.GetElement(j);
+                        bufferPtr[i + j].Y = 0.0f;
                     }
                 }
+                ApplyWindowScalar(samples.Slice(i));
             }
+        }
 
-            for (; i < samples.Length; i++)
+        private void ApplyWindowScalar(Span<float> samples)
+        {
+            for (int i = 0; i < samples.Length; i++)
             {
                 int bufferIndex = _sampleCount + i;
                 _buffer[bufferIndex] = new Complex { X = samples[i] * _window[bufferIndex], Y = 0 };
@@ -378,8 +352,8 @@ namespace SpectrumNet
         {
             try
             {
-                _cts.Cancel();
-                _channel.Writer.Complete();
+                _cancellationTokenSource.Cancel();
+                _processingChannel.Writer.Complete();
                 await _processingTask.ConfigureAwait(false);
             }
             finally
@@ -392,11 +366,8 @@ namespace SpectrumNet
         {
             try
             {
-                _cts.Dispose();
-                if (_buffer != null)
-                {
-                    _bufferPool.Return(_buffer);
-                }
+                _cancellationTokenSource.Dispose();
+                ArrayPool<Complex>.Shared.Return(_buffer);
             }
             catch (Exception ex)
             {
@@ -519,6 +490,5 @@ namespace SpectrumNet
         Hann,
         Hamming,
         Blackman,
-        Rectangle
     }
 }
