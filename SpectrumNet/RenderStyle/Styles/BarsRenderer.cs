@@ -42,7 +42,7 @@
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
         {
             if (!_isInitialized)
             {
@@ -52,7 +52,7 @@
 
             if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, basePaint)) return;
 
-            int actualBarCount = Math.Min(spectrum!.Length / 2, barCount);
+            int actualBarCount = Math.Min(spectrum!.Length, barCount);
             float totalBarWidth = barWidth + barSpacing;
 
             using var barPaint = basePaint!.Clone();
@@ -63,8 +63,25 @@
                 Color = SKColors.White
             };
 
-            RenderBars(canvas!, spectrum.AsSpan(), actualBarCount, totalBarWidth, barWidth,
-                      barSpacing, info.Height, barPaint, highlightPaint);
+            // Масштабирование спектра
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
+
+            RenderBars(canvas!, scaledSpectrum.AsSpan(), actualBarCount, totalBarWidth, barWidth,
+                       barSpacing, info.Height, barPaint, highlightPaint);
+        }
+
+        private float[] ScaleSpectrum(float[] spectrum, int barCount)
+        {
+            int spectrumLength = spectrum.Length / 2;
+            float[] scaledSpectrum = new float[barCount];
+
+            for (int i = 0; i < barCount; i++)
+            {
+                int index = (int)((float)i / barCount * spectrumLength);
+                scaledSpectrum[i] = spectrum[index];
+            }
+
+            return scaledSpectrum;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

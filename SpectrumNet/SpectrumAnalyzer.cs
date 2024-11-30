@@ -509,15 +509,19 @@ namespace SpectrumNet
                 var s = GC.AllocateUninitializedArray<float>(len, pinned: true);
                 float minDb = _p.MinDbValue, range = _p.MaxDbValue - minDb, amp = _p.AmplificationFactor;
 
+                // Определяем индексы для 20 Гц и 20 кГц
+                int minIndex = (int)(20 * (fft.Length / (float)sr));
+                int maxIndex = (int)(20000 * (fft.Length / (float)sr));
+
                 fixed (Complex* inPtr = fft)
                 fixed (float* outPtr = s)
                 {
                     if (Avx.IsSupported && len >= 8)
-                        ProcessAvx(inPtr, outPtr, len, minDb, range, amp);
+                        ProcessAvx(inPtr, outPtr, len, minDb, range, amp, minIndex, maxIndex);
                     else if (Sse.IsSupported && len >= 4)
-                        ProcessSse(inPtr, outPtr, len, minDb, range, amp);
+                        ProcessSse(inPtr, outPtr, len, minDb, range, amp, minIndex, maxIndex);
                     else
-                        ProcessScalar(inPtr, outPtr, len, minDb, range, amp);
+                        ProcessScalar(inPtr, outPtr, len, minDb, range, amp, minIndex, maxIndex);
                 }
                 return s;
             }
@@ -533,7 +537,7 @@ namespace SpectrumNet
             }
         }
 
-        private static unsafe void ProcessAvx(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
+        private static unsafe void ProcessAvx(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp, int minIndex, int maxIndex)
         {
             try
             {
@@ -541,6 +545,9 @@ namespace SpectrumNet
 
                 for (; i < aligned; i += 8)
                 {
+                    if (i < minIndex || i > maxIndex)
+                        continue;
+
                     var c0 = Avx.LoadVector256((float*)(inPtr + i));
                     var c1 = Avx.LoadVector256((float*)(inPtr + i + 4));
                     var mags = Avx.Multiply(Avx.Add(Avx.Multiply(c0, c0), Avx.Multiply(c1, c1)), Vector256.Create(F4M));
@@ -555,7 +562,7 @@ namespace SpectrumNet
                     Avx.Store(outPtr + i, Avx.LoadVector256(m));
                 }
 
-                ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp);
+                ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp, minIndex, maxIndex);
             }
             catch (Exception ex)
             {
@@ -564,7 +571,7 @@ namespace SpectrumNet
             }
         }
 
-        private static unsafe void ProcessSse(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
+        private static unsafe void ProcessSse(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp, int minIndex, int maxIndex)
         {
             try
             {
@@ -572,6 +579,9 @@ namespace SpectrumNet
 
                 for (; i < aligned; i += 4)
                 {
+                    if (i < minIndex || i > maxIndex)
+                        continue;
+
                     var c = Sse.LoadVector128((float*)(inPtr + i));
                     var mags = Sse.Multiply(Sse.Add(Sse.Multiply(c, c), Sse.Multiply(c, c)), Vector128.Create(F4M));
 
@@ -585,7 +595,7 @@ namespace SpectrumNet
                     Sse.Store(outPtr + i, Sse.LoadVector128(m));
                 }
 
-                ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp);
+                ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp, minIndex, maxIndex);
             }
             catch (Exception ex)
             {
@@ -594,12 +604,15 @@ namespace SpectrumNet
             }
         }
 
-        private static unsafe void ProcessScalar(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp)
+        private static unsafe void ProcessScalar(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp, int minIndex, int maxIndex)
         {
             try
             {
                 for (int i = 0; i < len; i++)
                 {
+                    if (i < minIndex || i > maxIndex)
+                        continue;
+
                     float mag = inPtr[i].X * inPtr[i].X + inPtr[i].Y * inPtr[i].Y;
                     if (i != 0 && i != len - 1) mag *= F4M;
                     outPtr[i] = mag < float.Epsilon ? Z : Math.Clamp((L10M * MathF.Log10(mag) - minDb) / range * amp, Z, O);
