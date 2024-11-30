@@ -1,6 +1,6 @@
 ﻿namespace SpectrumNet
 {
-    public class CircularWaveRenderer : ISpectrumRenderer
+    public class CircularWaveRenderer : ISpectrumRenderer, IDisposable
     {
         private static CircularWaveRenderer? _instance;
         private bool _isInitialized;

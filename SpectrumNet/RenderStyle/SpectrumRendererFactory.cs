@@ -11,7 +11,6 @@
         Particles,
         SphereRenderer,
         GradientWave,
-        Starburst,
         CircularWave,
         Fire,
         Raindrops
@@ -74,7 +73,6 @@
                 RenderStyle.Particles => ParticlesRenderer.GetInstance(),
                 RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
                 RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
-                RenderStyle.Starburst => StarburstRenderer.GetInstance(),
                 RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
                 RenderStyle.Fire => FireRenderer.GetInstance(),
                 RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),

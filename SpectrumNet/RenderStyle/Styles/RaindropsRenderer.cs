@@ -1,11 +1,15 @@
-﻿namespace SpectrumNet
+﻿#nullable enable
+
+namespace SpectrumNet
 {
-    public class RaindropsRenderer : ISpectrumRenderer
+    public class RaindropsRenderer : ISpectrumRenderer, IDisposable
     {
         private static RaindropsRenderer? _instance;
         private bool _isInitialized;
         private readonly List<Raindrop> _raindrops = new();
         private readonly Random _random = new();
+
+        // Константы
         private const int MaxRaindrops = 100;
         private const float FallSpeed = 5f;
         private const float RippleExpandSpeed = 2f;
@@ -31,30 +35,60 @@
         public void Initialize()
         {
             if (_isInitialized) return;
+
             _isInitialized = true;
+            Log.Debug("RaindropsRenderer initialized");
         }
 
-        public void Configure(bool isOverlayActive) { }
-
-        private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
+        public void Configure(bool isOverlayActive)
         {
-            return canvas != null && !spectrum.IsEmpty && paint != null && info.Width > 0 && info.Height > 0;
+            // Настройка поведения рендера (опционально)
+            Log.Debug($"RaindropsRenderer configured. Overlay active: {isOverlayActive}");
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? paint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? paint)
         {
-            if (!_isInitialized) return;
+            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
+            {
+                Log.Warning("Invalid render parameters or RaindropsRenderer is not initialized.");
+                return;
+            }
 
-            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, paint)) return;
+            // Масштабирование спектра
+            int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
 
-            UpdateRaindrops(spectrum!, info.Width, info.Height);
-            RenderDrops(canvas!, info.Height, paint!);
+            UpdateRaindrops(scaledSpectrum, info.Width, info.Height);
+            RenderDrops(canvas, info.Height, paint);
+        }
+
+        private float[] ScaleSpectrum(float[] spectrum, int targetCount)
+        {
+            int spectrumLength = spectrum.Length / 2;
+            float[] scaledSpectrum = new float[targetCount];
+            float blockSize = (float)spectrumLength / targetCount;
+
+            for (int i = 0; i < targetCount; i++)
+            {
+                float sum = 0;
+                int start = (int)(i * blockSize);
+                int end = (int)((i + 1) * blockSize);
+
+                for (int j = start; j < end && j < spectrumLength; j++)
+                {
+                    sum += spectrum[j];
+                }
+
+                scaledSpectrum[i] = sum / (end - start); // Усреднение значений в блоке
+            }
+
+            return scaledSpectrum;
         }
 
         private void UpdateRaindrops(float[] spectrum, float width, float height)
         {
-            // Update existing raindrops
+            // Обновление существующих капель
             for (int i = _raindrops.Count - 1; i >= 0; i--)
             {
                 var drop = _raindrops[i];
@@ -80,11 +114,11 @@
                 }
             }
 
-            // Create new raindrops based on spectrum
+            // Создание новых капель на основе спектра
             if (_raindrops.Count < MaxRaindrops)
             {
-                float step = width / (spectrum.Length / 2);
-                for (int i = 0; i < spectrum.Length / 2; i++)
+                float step = width / spectrum.Length;
+                for (int i = 0; i < spectrum.Length; i++)
                 {
                     if (spectrum[i] > SpectrumThreshold && _random.NextDouble() < SpawnProbability)
                     {
@@ -128,6 +162,8 @@
         public void Dispose()
         {
             _raindrops.Clear();
+            _isInitialized = false;
+            Log.Debug("RaindropsRenderer disposed");
         }
     }
 }

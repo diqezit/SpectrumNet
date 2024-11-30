@@ -21,7 +21,8 @@ namespace SpectrumNet
 
         public void Configure(bool isOverlayActive)
         {
-            // Configuration logic can be added here if needed
+            // Optional configuration logic
+            Log.Debug($"GradientWaveRenderer configured. Overlay active: {isOverlayActive}");
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? paint)
@@ -32,23 +33,51 @@ namespace SpectrumNet
                 return;
             }
 
-            if (canvas == null || spectrum == null || paint == null)
+            if (canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
             {
                 Log.Warning("Invalid render parameters");
                 return;
             }
 
+            // Масштабирование спектра
+            int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
+
             using var gradientPaint = paint.Clone();
             ConfigureGradientPaint(gradientPaint, info.Width);
 
-            using var path = CreateSpectrumPath(spectrum, info);
+            using var path = CreateSpectrumPath(scaledSpectrum, info);
             canvas.DrawPath(path, gradientPaint);
+        }
+
+        private float[] ScaleSpectrum(float[] spectrum, int targetCount)
+        {
+            int spectrumLength = spectrum.Length / 2;
+            float[] scaledSpectrum = new float[targetCount];
+            float blockSize = (float)spectrumLength / targetCount;
+
+            for (int i = 0; i < targetCount; i++)
+            {
+                float sum = 0;
+                int start = (int)(i * blockSize);
+                int end = (int)((i + 1) * blockSize);
+
+                for (int j = start; j < end && j < spectrumLength; j++)
+                {
+                    sum += spectrum[j];
+                }
+
+                scaledSpectrum[i] = sum / (end - start); // Усреднение значений в блоке
+            }
+
+            return scaledSpectrum;
         }
 
         private void ConfigureGradientPaint(SKPaint gradientPaint, int width)
         {
             gradientPaint.Style = SKPaintStyle.Stroke;
-            gradientPaint.StrokeWidth = 2;
+            gradientPaint.StrokeWidth = 3; // Можно сделать ширину динамической
+            gradientPaint.IsAntialias = true;
             gradientPaint.Shader = SKShader.CreateLinearGradient(
                 new SKPoint(0, 0),
                 new SKPoint(width, 0),
@@ -60,15 +89,16 @@ namespace SpectrumNet
         private SKPath CreateSpectrumPath(float[] spectrum, SKImageInfo info)
         {
             var path = new SKPath();
-            path.MoveTo(0, info.Height / 2);
+            float centerY = info.Height / 2;
+            float step = info.Width / (float)(spectrum.Length - 1); // Шаг между точками
 
-            float step = info.Width / ((float)spectrum.Length / 2);
+            path.MoveTo(0, centerY);
 
-            for (int i = 0; i < spectrum.Length; i++)
+            for (int i = 1; i < spectrum.Length; i++)
             {
                 float x = i * step;
-                float y = info.Height / 2 - spectrum[i] * info.Height / 2;
-                path.LineTo(x, y);
+                float y = centerY - spectrum[i] * centerY;
+                path.LineTo(x, y); // Можно заменить на CubicTo для более плавных линий
             }
 
             return path;
@@ -76,7 +106,8 @@ namespace SpectrumNet
 
         public void Dispose()
         {
-            // Dispose resources if any
+            _isInitialized = false;
+            Log.Debug("GradientWaveRenderer disposed");
         }
     }
 }

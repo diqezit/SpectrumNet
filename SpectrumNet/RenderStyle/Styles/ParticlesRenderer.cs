@@ -2,7 +2,7 @@
 
 namespace SpectrumNet
 {
-    public class ParticlesRenderer : ISpectrumRenderer
+    public class ParticlesRenderer : ISpectrumRenderer, IDisposable
     {
         private int _frameCount = 0;
         private const int LogInterval = 300;
