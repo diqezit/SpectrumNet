@@ -96,7 +96,7 @@
 
             _currentState = new RenderState(
                 Paint: paint.Clone(),
-                Style: RenderStyle.Bars, // Используем существующий стиль вместо Default
+                Style: RenderStyle.Bars, // Используем существующий стиль по умолчанию вместо Default
                 StyleName: DEFAULT_STYLE
             );
         }
@@ -210,18 +210,40 @@
                 _mainWindow.IsOverlayActive
             );
 
+            // Вычисляем ширину и интервал баров
+            var totalWidth = info.Width;
+            var barCount = _mainWindow.BarCount;
+            var barSpacing = (float)_mainWindow.BarSpacing;
+
+            // Проверка на минимальную ширину бара
+            var minBarWidth = 1.0f; // Минимальная ширина бара
+            var maxBarSpacing = totalWidth / (barCount + 1); // Максимальный интервал между барами
+
+            if (barSpacing > maxBarSpacing)
+            {
+                barSpacing = maxBarSpacing;
+            }
+
+            var barWidth = (totalWidth - (barCount - 1) * barSpacing) / barCount;
+
+            if (barWidth < minBarWidth)
+            {
+                barWidth = minBarWidth;
+                barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
+            }
+
             renderer.Render(
                 canvas,
                 spectrum.Spectrum,
                 info,
-                (float)_mainWindow.BarWidth,
-                (float)_mainWindow.BarSpacing,
-                _mainWindow.BarCount,
+                barWidth,
+                barSpacing,
+                barCount,
                 _currentState.Paint
             );
         }
 
-        private void RenderPlaceholder(SKCanvas canvas)
+        private static void RenderPlaceholder(SKCanvas canvas)
         {
 
             using var paint = new SKPaint

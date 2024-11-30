@@ -165,19 +165,6 @@
                                         <ColumnDefinition Width="30"/>
                                         <!-- Фиксированная ширина для значения -->
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Ширина полос:"
-                                               VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextPrimaryBrush}"
-                                               Margin="0,0,8,0"/>
-                                    <Slider Grid.Column="1" x:Name="barWidthSlider"
-                                            Minimum="2"
-                                            Maximum="50"
-                                            Value="{Binding BarWidth, Mode=TwoWay}"
-                                            Style="{StaticResource ModernSliderStyle}" Height="20"/>
-                                    <TextBlock Grid.Column="2" Text="{Binding BarWidth, StringFormat='{}{0:F0}'}"
-                                               VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextPrimaryBrush}"
-                                               Margin="0,0,8,0"/>
                                 </Grid>
 
                                 <!-- Интервал между полосами -->
@@ -216,7 +203,7 @@
                                                Margin="0,0,8,0"/>
                                     <Slider Grid.Column="1" x:Name="barCountSlider"
                                             Minimum="10"
-                                            Maximum="200"
+                                            Maximum="500"
                                             Value="{Binding BarCount, Mode=TwoWay}"
                                             Style="{StaticResource ModernSliderStyle}" Height="20"/>
                                     <TextBlock Grid.Column="2" Text="{Binding BarCount, StringFormat='{}{0:F0}'}"

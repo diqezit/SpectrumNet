@@ -479,7 +479,6 @@ namespace SpectrumNet
                 var value = slider.Value;
                 var updates = new Dictionary<string, Action>
                 {
-                    ["barWidthSlider"] = () => BarWidth = value,
                     ["barSpacingSlider"] = () => BarSpacing = value,
                     ["barCountSlider"] = () => BarCount = (int)value,
                     ["minDbLevelSlider"] = () => MinDbLevel = (float)value,
@@ -631,12 +630,6 @@ namespace SpectrumNet
                     OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
                 }
             }
-        }
-
-        public double BarWidth
-        {
-            get => _state.BarWidth;
-            set => UpdateState(s => s with { BarWidth = value }, nameof(BarWidth), InvalidateVisuals);
         }
 
         public double BarSpacing
