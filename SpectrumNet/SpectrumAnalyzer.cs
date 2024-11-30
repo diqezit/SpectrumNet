@@ -207,215 +207,111 @@ namespace SpectrumNet
         private readonly float[] _window;
         private readonly Complex32[] _mathNetBuffer;
         private readonly Channel<(float[] Samples, int SampleRate)> _processingChannel;
-        private readonly CancellationTokenSource _cancellationTokenSource;
+        private readonly CancellationTokenSource _cts;
         private readonly Task _processingTask;
         private int _sampleCount;
+        private bool _isDisposed;
 
         public event EventHandler<FftEventArgs>? FftCalculated;
         public FftWindowType WindowType { get; set; } = FftWindowType.Hann;
 
         public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
-            try
-            {
-                ValidateFftSize(fftSize);
-                _fftSize = fftSize;
-                _buffer = ArrayPool<Complex>.Shared.Rent(fftSize);
-                _window = GenerateWindow(fftSize);
-                _mathNetBuffer = new Complex32[fftSize];
-                _processingChannel = Channel.CreateUnbounded<(float[], int)>(new UnboundedChannelOptions { SingleReader = true });
-                _cancellationTokenSource = new CancellationTokenSource();
-                _processingTask = Task.Run(ProcessSamplesAsync);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error during initialization: {ex}");
-                throw;
-            }
-        }
-
-        private static void ValidateFftSize(int fftSize)
-        {
             if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
                 throw new ArgumentException("FFT size must be a positive power of 2.");
+
+            _fftSize = fftSize;
+            _buffer = ArrayPool<Complex>.Shared.Rent(fftSize);
+            _window = GenerateWindow(fftSize);
+            _mathNetBuffer = new Complex32[fftSize];
+            _processingChannel = Channel.CreateUnbounded<(float[], int)>(new UnboundedChannelOptions { SingleReader = true });
+            _cts = new CancellationTokenSource();
+            _processingTask = Task.Run(ProcessSamplesAsync);
         }
 
         private float[] GenerateWindow(int size)
         {
-            try
+            var window = new float[size];
+            Func<int, float> windowFunc = WindowType switch
             {
-                var window = new float[size];
-                Func<int, float> windowFunc = WindowType switch
-                {
-                    FftWindowType.Hann => i => (float)(0.5 * (1.0 - Math.Cos(2.0 * Math.PI * i / (size - 1)))),
-                    FftWindowType.Hamming => i => (float)(0.54 - 0.46 * Math.Cos(2.0 * Math.PI * i / (size - 1))),
-                    FftWindowType.Blackman => i => (float)(0.42 - 0.5 * Math.Cos(2.0 * Math.PI * i / (size - 1)) + 0.08 * Math.Cos(4.0 * Math.PI * i / (size - 1))),
-                    _ => _ => 1.0f
-                };
+                FftWindowType.Hann => i => (float)(0.5 * (1.0 - Math.Cos(2.0 * Math.PI * i / (size - 1)))),
+                FftWindowType.Hamming => i => (float)(0.54 - 0.46 * Math.Cos(2.0 * Math.PI * i / (size - 1))),
+                FftWindowType.Blackman => i => (float)(0.42 - 0.5 * Math.Cos(2.0 * Math.PI * i / (size - 1)) + 0.08 * Math.Cos(4.0 * Math.PI * i / (size - 1))),
+                _ => _ => 1.0f
+            };
 
-                if (Avx.IsSupported && size >= Vector256<float>.Count)
+            if (Avx.IsSupported && size >= Vector256<float>.Count)
+            {
+                unsafe
                 {
-                    unsafe
+                    fixed (float* windowPtr = window)
                     {
-                        fixed (float* windowPtr = window)
+                        for (int i = 0; i <= size - Vector256<float>.Count; i += Vector256<float>.Count)
                         {
-                            for (int i = 0; i <= size - Vector256<float>.Count; i += Vector256<float>.Count)
-                            {
-                                var vec = Vector256.Create(
-                                    windowFunc(i), windowFunc(i + 1), windowFunc(i + 2), windowFunc(i + 3),
-                                    windowFunc(i + 4), windowFunc(i + 5), windowFunc(i + 6), windowFunc(i + 7)
-                                );
-                                Avx.Store(windowPtr + i, vec);
-                            }
+                            Avx.Store(windowPtr + i, Vector256.Create(
+                                windowFunc(i), windowFunc(i + 1), windowFunc(i + 2), windowFunc(i + 3),
+                                windowFunc(i + 4), windowFunc(i + 5), windowFunc(i + 6), windowFunc(i + 7)));
                         }
                     }
-                    for (int i = size - size % Vector256<float>.Count; i < size; i++)
-                    {
-                        window[i] = windowFunc(i);
-                    }
                 }
-                else
-                {
-                    for (int i = 0; i < size; i++)
-                    {
-                        window[i] = windowFunc(i);
-                    }
-                }
-                return window;
+                for (int i = size - size % Vector256<float>.Count; i < size; i++)
+                    window[i] = windowFunc(i);
             }
-            catch (Exception ex)
+            else
             {
-                Log.Error($"[FftProcessor] Error during window generation: {ex}");
-                throw;
+                for (int i = 0; i < size; i++)
+                    window[i] = windowFunc(i);
             }
+            return window;
         }
 
         public ValueTask AddSamplesAsync(float[] samples, int sampleRate)
         {
-            try
-            {
-                ArgumentNullException.ThrowIfNull(samples);
-                if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
+            if (_isDisposed)
+                throw new ObjectDisposedException(nameof(FftProcessor));
 
-                return _processingChannel.Writer.TryWrite((samples, sampleRate))
-                    ? default
-                    : new ValueTask(_processingChannel.Writer.WriteAsync((samples, sampleRate)).AsTask());
-            }
-            catch (Exception ex)
+            ArgumentNullException.ThrowIfNull(samples);
+            if (sampleRate <= 0)
+                throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
+
+            if (_processingChannel.Writer.TryWrite((samples, sampleRate)))
             {
-                Log.Error($"[FftProcessor] Error adding samples: {ex}");
-                throw;
+                return ValueTask.CompletedTask;
             }
+
+            return new ValueTask(_processingChannel.Writer.WriteAsync((samples, sampleRate)).AsTask());
         }
 
         private async Task ProcessSamplesAsync()
         {
             try
             {
-                await foreach (var (samples, sampleRate) in _processingChannel.Reader.ReadAllAsync(_cancellationTokenSource.Token))
+                await foreach (var (samples, sampleRate) in _processingChannel.Reader.ReadAllAsync(_cts.Token))
                 {
-                    ProcessSampleBlock(samples, sampleRate);
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error processing samples: {ex}");
-            }
-        }
-
-        private void ProcessSampleBlock(float[] samples, int sampleRate)
-        {
-            try
-            {
-                int index = 0;
-                while (index < samples.Length)
-                {
-                    int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
-                    if (copyCount <= 0) break;
-
-                    ApplyWindowAndCopy(samples.AsSpan(index, copyCount));
-
-                    index += copyCount;
-                    _sampleCount += copyCount;
-
-                    if (_sampleCount >= _fftSize)
+                    int index = 0;
+                    while (index < samples.Length)
                     {
-                        ProcessFft(sampleRate);
-                        _sampleCount = 0;
+                        int copyCount = Math.Min(_fftSize - _sampleCount, samples.Length - index);
+                        if (copyCount <= 0) break;
+
+                        ApplyWindowAndCopy(samples.AsSpan(index, copyCount));
+                        index += copyCount;
+                        _sampleCount += copyCount;
+
+                        if (_sampleCount >= _fftSize)
+                        {
+                            ProcessFft(sampleRate);
+                            _sampleCount = 0;
+                        }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error processing sample block: {ex}");
-            }
+            catch (OperationCanceledException) { /* ignore */ }
         }
 
-        private void ProcessFft(int sampleRate)
+        private unsafe void ApplyWindowAndCopy(Span<float> samples)
         {
-            try
-            {
-                ConvertToMathNetComplex();
-                Fourier.Forward(_mathNetBuffer, FourierOptions.Matlab);
-                ConvertFromMathNetComplex();
-
-                FftCalculated?.Invoke(this, new FftEventArgs(_buffer, sampleRate));
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error during FFT processing: {ex}");
-            }
-        }
-
-        private void ConvertToMathNetComplex()
-        {
-            try
-            {
-                for (int i = 0; i < _fftSize; i++)
-                {
-                    _mathNetBuffer[i] = new Complex32((float)_buffer[i].X, (float)_buffer[i].Y);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error converting to MathNet complex: {ex}");
-            }
-        }
-
-        private void ConvertFromMathNetComplex()
-        {
-            try
-            {
-                for (int i = 0; i < _fftSize; i++)
-                {
-                    _buffer[i] = new Complex { X = _mathNetBuffer[i].Real, Y = _mathNetBuffer[i].Imaginary };
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error converting from MathNet complex: {ex}");
-            }
-        }
-
-        private void ApplyWindowAndCopy(Span<float> samples)
-        {
-            try
-            {
-                if (Avx.IsSupported && samples.Length >= Vector256<float>.Count)
-                    ApplyWindowWithAvx(samples);
-                else
-                    ApplyWindowScalar(samples);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error applying window and copying: {ex}");
-            }
-        }
-
-        private unsafe void ApplyWindowWithAvx(Span<float> samples)
-        {
-            try
+            if (Avx.IsSupported && samples.Length >= Vector256<float>.Count)
             {
                 fixed (float* windowPtr = &_window[_sampleCount])
                 fixed (float* samplesPtr = &MemoryMarshal.GetReference(samples))
@@ -424,28 +320,24 @@ namespace SpectrumNet
                     int i = 0;
                     for (; i <= samples.Length - Vector256<float>.Count; i += Vector256<float>.Count)
                     {
-                        var input = Avx.LoadVector256(samplesPtr + i);
-                        var window = Avx.LoadVector256(windowPtr + i);
-                        var result = Avx.Multiply(input, window);
+                        var result = Avx.Multiply(
+                            Avx.LoadVector256(samplesPtr + i),
+                            Avx.LoadVector256(windowPtr + i));
 
                         for (int j = 0; j < Vector256<float>.Count; j++)
                         {
                             bufferPtr[i + j].X = result.GetElement(j);
-                            bufferPtr[i + j].Y = 0.0f;
+                            bufferPtr[i + j].Y = 0;
                         }
                     }
-                    ApplyWindowScalar(samples.Slice(i));
+                    for (; i < samples.Length; i++)
+                    {
+                        int bufferIndex = _sampleCount + i;
+                        _buffer[bufferIndex] = new Complex { X = samples[i] * _window[bufferIndex], Y = 0 };
+                    }
                 }
             }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error applying window with AVX: {ex}");
-            }
-        }
-
-        private void ApplyWindowScalar(Span<float> samples)
-        {
-            try
+            else
             {
                 for (int i = 0; i < samples.Length; i++)
                 {
@@ -453,41 +345,57 @@ namespace SpectrumNet
                     _buffer[bufferIndex] = new Complex { X = samples[i] * _window[bufferIndex], Y = 0 };
                 }
             }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error applying window scalar: {ex}");
-            }
+        }
+
+        private void ProcessFft(int sampleRate)
+        {
+            for (int i = 0; i < _fftSize; i++)
+                _mathNetBuffer[i] = new Complex32((float)_buffer[i].X, (float)_buffer[i].Y);
+
+            Fourier.Forward(_mathNetBuffer, FourierOptions.Matlab);
+
+            for (int i = 0; i < _fftSize; i++)
+                _buffer[i] = new Complex { X = _mathNetBuffer[i].Real, Y = _mathNetBuffer[i].Imaginary };
+
+            FftCalculated?.Invoke(this, new FftEventArgs(_buffer, sampleRate));
         }
 
         public async ValueTask DisposeAsync()
         {
+            if (_isDisposed)
+                return;
+
             try
             {
-                _cancellationTokenSource.Cancel();
-                _processingChannel.Writer.Complete();
-                await _processingTask.ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[FftProcessor] Error during disposal: {ex}");
+                _isDisposed = true;
+
+                // Отменяем обработку и ждем завершения задачи
+                if (!_cts.IsCancellationRequested)
+                {
+                    _cts.Cancel();
+                    _processingChannel.Writer.Complete();
+                    if (_processingTask != null)
+                    {
+                        await _processingTask.ConfigureAwait(false);
+                    }
+                }
             }
             finally
             {
-                DisposeResources();
+                // Освобождаем ресурсы
+                if (_buffer != null)
+                {
+                    ArrayPool<Complex>.Shared.Return(_buffer);
+                }
+
+                _cts?.Dispose();
             }
         }
 
-        private void DisposeResources()
+        private void ThrowIfDisposed()
         {
-            try
-            {
-                _cancellationTokenSource.Dispose();
-                ArrayPool<Complex>.Shared.Return(_buffer);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning($"Error during resource disposal: {ex.Message}");
-            }
+            if (_isDisposed)
+                throw new ObjectDisposedException(nameof(FftProcessor));
         }
     }
 
