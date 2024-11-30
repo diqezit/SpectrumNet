@@ -24,7 +24,7 @@ namespace SpectrumNet
             // Возможность настройки поведения рендера, если потребуется
         }
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? paint)
+        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized)
             {
@@ -47,6 +47,9 @@ namespace SpectrumNet
 
             using var path = CreateSpectrumPath(scaledSpectrum, info);
             canvas.DrawPath(path, gradientPaint);
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas, info);
         }
 
         private float[] ScaleSpectrum(float[] spectrum, int targetCount)

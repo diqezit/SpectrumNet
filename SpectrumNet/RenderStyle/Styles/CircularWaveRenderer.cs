@@ -31,7 +31,8 @@
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? paint)
+                         float barWidth, float barSpacing, int barCount, SKPaint? paint,
+                         Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized)
                 return;
@@ -49,6 +50,9 @@
 
             _rotation += RotationSpeed;
             if (_rotation >= 360f) _rotation -= 360f;
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas!, info);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

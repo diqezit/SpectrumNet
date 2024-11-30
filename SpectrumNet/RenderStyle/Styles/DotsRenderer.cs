@@ -26,7 +26,8 @@
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || basePaint == null)
             {
@@ -44,6 +45,9 @@
                 totalWidth *= 50f / actualBarCount;
 
             RenderDots(canvas, scaledSpectrum.AsSpan(), info, totalWidth, barWidth, actualBarCount, basePaint);
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas, info);
         }
 
         private float[] ScaleSpectrum(float[] spectrum, int targetCount)

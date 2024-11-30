@@ -1,4 +1,6 @@
-﻿namespace SpectrumNet
+﻿using System.Diagnostics;
+
+namespace SpectrumNet
 {
     /// <summary>
     /// Handles the rendering of spectrum visualization using SkiaSharp.
@@ -64,8 +66,10 @@
                 _currentState = new RenderState(paint.Clone(),
                     RenderStyle.Bars, DEFAULT_STYLE);
 
-                _renderTimer = new DispatcherTimer { 
-                Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS) };
+                _renderTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS)
+                };
                 _renderTimer.Tick += (_, _) => RequestRender();
                 _renderTimer.Start();
 
@@ -189,12 +193,13 @@
             var barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
             barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
 
-            renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint);
+            // Используем метод DrawPerformanceInfo из Renderer
+            renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint,
+                PerfomanceMetrics.DrawPerformanceInfo);
         }
 
         private static void RenderPlaceholder(SKCanvas canvas)
         {
-
             using var paint = new SKPaint
             {
                 Color = SKColors.OrangeRed,

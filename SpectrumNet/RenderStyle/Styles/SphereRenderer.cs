@@ -68,7 +68,8 @@ namespace SpectrumNet
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float unused1, float unused2, int unused3, SKPaint? paint)
+                           float unused1, float unused2, int unused3, SKPaint? paint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || _spherePaint == null || _cosValues == null || _sinValues == null || !AreRenderParamsValid(canvas, spectrum, info, paint))
             {
@@ -80,6 +81,9 @@ namespace SpectrumNet
             var scaledSpectrum = ScaleSpectrum(spectrum, sphereCount);
 
             RenderSpheres(canvas!, scaledSpectrum.AsSpan(), sphereCount, info.Width / 2f, info.Height / 2f, info.Height / 2f - (_sphereRadius + _sphereSpacing), paint!);
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas!, info);
         }
 
         private float[] ScaleSpectrum(float[] spectrum, int targetCount)

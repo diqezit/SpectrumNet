@@ -28,8 +28,10 @@
             return true;
         }
 
+
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                         float barWidth, float barSpacing, int barCount, SKPaint? paint)
+                         float barWidth, float barSpacing, int barCount, SKPaint? paint,
+                         Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized)
                 return;
@@ -42,6 +44,9 @@
                 return;
 
             RenderMeter(canvas!, info, loudness, paint!);
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas!, info);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

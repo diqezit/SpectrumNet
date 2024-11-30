@@ -30,7 +30,8 @@
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || basePaint == null)
             {
@@ -61,6 +62,9 @@
             {
                 _previousSpectrum[i] = Math.Max(spectrum[i], _previousSpectrum[i] - DecayRate);
             }
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas, info);
         }
 
         private float[] ScaleSpectrum(float[] spectrum, int targetCount)

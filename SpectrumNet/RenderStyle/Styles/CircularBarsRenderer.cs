@@ -32,7 +32,8 @@
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || basePaint == null)
             {
@@ -53,6 +54,12 @@
 
             EnsureTrigArrays(actualBarCount);
             RenderBars(canvas, scaledSpectrum.AsSpan(), actualBarCount, centerX, centerY, mainRadius, barWidth, barPaint);
+
+            // Отрисовка информации о производительности
+            if (canvas != null)
+            {
+                drawPerformanceInfo(canvas, info);
+            }
         }
 
         private float[] ScaleSpectrum(float[] spectrum, int targetCount)

@@ -30,7 +30,8 @@
         public void Configure(bool isOverlayActive) { }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum?.Length == 0 || basePaint == null || info.Width <= 0 || info.Height <= 0)
             {
@@ -60,6 +61,12 @@
 
                 RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
                 RenderHighlight(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, highlightPaint);
+            }
+
+            // Отрисовка информации о производительности
+            if (canvas != null)
+            {
+                drawPerformanceInfo(canvas, info);
             }
         }
 

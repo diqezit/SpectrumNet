@@ -36,7 +36,8 @@
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || basePaint == null)
             {
@@ -59,6 +60,12 @@
 
                 using var clonedPaint = basePaint.Clone();
                 RenderCube(canvas, x, y, barWidth, height, magnitude, clonedPaint);
+            }
+
+            // Отрисовка информации о производительности
+            if (canvas != null)
+            {
+                drawPerformanceInfo(canvas, info);
             }
         }
 

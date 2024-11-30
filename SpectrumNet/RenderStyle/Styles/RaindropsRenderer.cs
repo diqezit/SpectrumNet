@@ -46,7 +46,8 @@ namespace SpectrumNet
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? paint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? paint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
             {
@@ -60,6 +61,9 @@ namespace SpectrumNet
 
             UpdateRaindrops(scaledSpectrum, info.Width, info.Height);
             RenderDrops(canvas, info.Height, paint);
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas, info);
         }
 
         private float[] ScaleSpectrum(float[] spectrum, int targetCount)

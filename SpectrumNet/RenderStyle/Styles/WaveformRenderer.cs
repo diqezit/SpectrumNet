@@ -31,7 +31,8 @@ namespace SpectrumNet
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? paint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? paint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
             {
@@ -55,6 +56,9 @@ namespace SpectrumNet
             fillPaint.Color = fillPaint.Color.WithAlpha(FillAlpha);
 
             RenderWaveform(canvas, scaledSpectrum.AsSpan(), actualBarCount, midY, xStep, info.Width, waveformPaint, fillPaint);
+
+            // Отрисовка информации о производительности
+            drawPerformanceInfo(canvas, info);
         }
 
         private float[] ScaleSpectrum(float[] spectrum, int targetCount)

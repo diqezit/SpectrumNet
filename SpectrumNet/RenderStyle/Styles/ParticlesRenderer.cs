@@ -92,9 +92,9 @@ namespace SpectrumNet
             }
         }
 
-        private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
+        private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info)
         {
-            if (canvas == null || spectrum.IsEmpty || paint == null || info.Width <= 0 || info.Height <= 0)
+            if (canvas == null || spectrum.IsEmpty || info.Width <= 0 || info.Height <= 0)
             {
                 Log.Warning("Invalid render parameters");
                 return false;
@@ -110,7 +110,8 @@ namespace SpectrumNet
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? paint)
+                           float barWidth, float barSpacing, int barCount, SKPaint? paint,
+                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || _particles == null)
             {
@@ -118,7 +119,7 @@ namespace SpectrumNet
                 return;
             }
 
-            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info, paint)) return;
+            if (!AreRenderParamsValid(canvas, spectrum.AsSpan(), info)) return;
 
             _frameCount++;
             if (_frameCount % LogInterval == 0)
@@ -138,6 +139,12 @@ namespace SpectrumNet
             if (canvas != null && paint != null)
             {
                 RenderParticles(canvas, paint, upperBound, lowerBound);
+            }
+
+            // Отрисовка информации о производительности
+            if (canvas != null)
+            {
+                drawPerformanceInfo(canvas, info);
             }
         }
 
