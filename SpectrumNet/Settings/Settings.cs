@@ -47,7 +47,6 @@
 
     public class Settings : ISettings, INotifyPropertyChanged
     {
-        private readonly Serilog.ILogger _logger;
 
         // Существующие поля
         private int _maxParticles;
@@ -67,12 +66,11 @@
         private float _overlayOffsetMultiplier;
         private float _overlayHeightMultiplier;
 
-        private static readonly Lazy<Settings> _instance = new(() => new Settings(Log.Logger));
+        private static readonly Lazy<Settings> _instance = new(() => new Settings());
         public static Settings Instance => _instance.Value;
 
-        public Settings(Serilog.ILogger logger)
+        public Settings()
         {
-            _logger = logger;
             ResetToDefaults();
         }
 
@@ -109,7 +107,7 @@
             OverlayOffsetMultiplier = DefaultSettings.OverlayOffsetMultiplier;
             OverlayHeightMultiplier = DefaultSettings.OverlayHeightMultiplier;
 
-            _logger.Information("Settings have been reset to defaults");
+            Log.Information("Settings have been reset to defaults");
         }
 
         // Реализация новых свойств

@@ -6,7 +6,6 @@ namespace SpectrumNet
     {
         private const string LogDirectoryPath = "logs";
         private const string LatestLogFileName = "latest.log";
-        private const string MainLogFilePattern = "SpectrumNet_{0:yyyyMMdd_HHmmss}.log";
         private const int MaxFileSizeMB = 5;
         private const int RetainedFileCount = 10;
         private const string OutputTemplate = "{Timestamp:HH:mm:ss} [{Level:u3}] [Thread:{ThreadId}] {Message:lj}{NewLine}{Exception}";
@@ -23,7 +22,7 @@ namespace SpectrumNet
             {
                 InitializeLogging();
                 _loggerFactory = new LoggerFactory();
-                _loggerFactory.AddSerilog(); // Добавляем Serilog как провайдер логгирования
+                _loggerFactory.AddSerilog(); // Add Serilog as logging provider
 
                 var logger = _loggerFactory.CreateLogger<App>();
                 logger.LogInformation("Application '{Application}' version '{Version}' started", "SpectrumNet", ApplicationVersion);
@@ -31,11 +30,9 @@ namespace SpectrumNet
                 AppDomain.CurrentDomain.UnhandledException += (_, args) =>
                 {
                     logger.LogCritical(args.ExceptionObject as Exception, "Unhandled exception in application");
-                    FlushToMainLog();
                 };
 
                 base.OnStartup(e);
-
             }
             catch (Exception ex)
             {
@@ -67,19 +64,11 @@ namespace SpectrumNet
         {
             loggerConfig.WriteTo.Console(outputTemplate: OutputTemplate);
 
-            var mainLogFileName = string.Format(MainLogFilePattern, DateTime.Now);
-            loggerConfig.WriteTo.File(
-                Path.Combine(LogDirectoryPath, mainLogFileName),
-                outputTemplate: OutputTemplate,
-                fileSizeLimitBytes: MaxFileSizeMB * 1024 * 1024,
-                retainedFileCountLimit: RetainedFileCount,
-                buffered: false,
-                flushToDiskInterval: TimeSpan.FromSeconds(1));
-
             loggerConfig.WriteTo.File(
                 Path.Combine(LogDirectoryPath, LatestLogFileName),
                 outputTemplate: OutputTemplate,
                 fileSizeLimitBytes: MaxFileSizeMB * 1024 * 1024,
+                retainedFileCountLimit: RetainedFileCount,
                 buffered: false,
                 flushToDiskInterval: TimeSpan.FromSeconds(1));
         }
@@ -110,44 +99,11 @@ namespace SpectrumNet
             }
         }
 
-        private void FlushToMainLog()
-        {
-            int retryCount = 5;
-            int delayInMilliseconds = 1000;
-            string filePath = Path.Combine(LogDirectoryPath, LatestLogFileName);
-
-            for (int i = 0; i < retryCount; i++)
-            {
-                try
-                {
-                    using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    using (var reader = new StreamReader(fileStream))
-                    {
-                        string logContent = reader.ReadToEnd();
-                        break;
-                    }
-                }
-                catch (IOException ex)
-                {
-                    Log.Error(ex, $"Error transferring contents of {filePath}. Attempt {i + 1} of {retryCount}.");
-                    if (i == retryCount - 1)
-                    {
-                        Log.Error("Maximum number of attempts to access file {filePath} exceeded.");
-                    }
-                    else
-                    {
-                        Thread.Sleep(delayInMilliseconds);
-                    }
-                }
-            }
-        }
-
         protected override void OnExit(ExitEventArgs e)
         {
             try
             {
                 Log.Information("Application '{Application}' version '{Version}' closed", "SpectrumNet", ApplicationVersion);
-                FlushToMainLog();
             }
             finally
             {

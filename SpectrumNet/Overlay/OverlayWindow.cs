@@ -18,15 +18,13 @@ namespace SpectrumNet
         private readonly CancellationTokenSource _disposalTokenSource = new();
         private RenderContext? _renderContext;
         private bool _isDisposed;
-        private readonly Serilog.ILogger _logger;
 
         public bool IsInitialized => _renderContext != null;
 
-        public OverlayWindow(MainWindow mainWindow, OverlayConfiguration? configuration = null, Serilog.ILogger? logger = null)
+        public OverlayWindow(MainWindow mainWindow, OverlayConfiguration? configuration = null)
         {
             if (mainWindow == null) throw new ArgumentNullException(nameof(mainWindow));
             _configuration = configuration ?? new();
-            _logger = logger ?? Log.ForContext<OverlayWindow>();
             InitializeOverlay(mainWindow);
         }
 
@@ -38,7 +36,7 @@ namespace SpectrumNet
             _renderContext = new(mainWindow, skElement, renderTimer);
             Content = skElement;
             SubscribeToEvents();
-            _logger.Information("[OverlayWindow] Overlay window initialized");
+            Log.Information("[OverlayWindow] Overlay window initialized");
         }
 
         private void ConfigureWindowProperties()
@@ -48,7 +46,7 @@ namespace SpectrumNet
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 new SystemBackdrop().SetTransparentBackground(this);
-                _logger.Debug("[OverlayWindow] Transparent background set for Windows");
+                Log.Debug("[OverlayWindow] Transparent background set for Windows");
             }
         }
 
@@ -56,7 +54,7 @@ namespace SpectrumNet
         {
             if (_renderContext is null)
             {
-                _logger.Error("[OverlayWindow] Failed to subscribe to events: RenderContext is null");
+                Log.Error("[OverlayWindow] Failed to subscribe to events: RenderContext is null");
                 return;
             }
             _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
@@ -65,13 +63,13 @@ namespace SpectrumNet
             {
                 _renderContext?.RenderTimer.Stop();
                 Dispose();
-                _logger.Information("[OverlayWindow] Overlay window closing");
+                Log.Information("[OverlayWindow] Overlay window closing");
             };
             SourceInitialized += (_, _) =>
             {
                 ConfigureWindowStyleEx();
                 _renderContext?.RenderTimer.Start();
-                _logger.Information("[OverlayWindow] Overlay window source initialized");
+                Log.Information("[OverlayWindow] Overlay window source initialized");
             };
             KeyDown += (_, e) =>
             {
@@ -79,7 +77,7 @@ namespace SpectrumNet
                 {
                     Close();
                     e.Handled = true;
-                    _logger.Information("[OverlayWindow] Overlay window closed by Escape key");
+                    Log.Information("[OverlayWindow] Overlay window closed by Escape key");
                 }
             };
             DpiChanged += (_, _) => _renderContext?.SkElement.InvalidateVisual();
@@ -89,12 +87,12 @@ namespace SpectrumNet
         {
             if (_isDisposed)
             {
-                _logger.Warning("[OverlayWindow] Attempted to paint surface after disposal");
+                Log.Warning("[OverlayWindow] Attempted to paint surface after disposal");
                 return;
             }
             if (_renderContext is null)
             {
-                _logger.Error("[OverlayWindow] Failed to handle paint surface: RenderContext is null");
+                Log.Error("[OverlayWindow] Failed to handle paint surface: RenderContext is null");
                 return;
             }
             _renderContext.Value.MainWindow.OnPaintSurface(sender, args);
@@ -105,12 +103,12 @@ namespace SpectrumNet
             var hwnd = new WindowInteropHelper(this).Handle;
             if (hwnd == IntPtr.Zero)
             {
-                _logger.Error("[OverlayWindow] Failed to configure window style: Invalid window handle");
+                Log.Error("[OverlayWindow] Failed to configure window style: Invalid window handle");
                 return;
             }
             var extendedStyle = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
             _ = NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE, extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED);
-            _logger.Debug("[OverlayWindow] Window style configured");
+            Log.Debug("[OverlayWindow] Window style configured");
         }
 
         public void Dispose()
@@ -121,7 +119,7 @@ namespace SpectrumNet
             _renderContext?.RenderTimer.Stop();
             _renderContext = null;
             _disposalTokenSource.Dispose();
-            _logger.Information("[OverlayWindow] Overlay window disposed");
+            Log.Information("[OverlayWindow] Overlay window disposed");
         }
     }
 
