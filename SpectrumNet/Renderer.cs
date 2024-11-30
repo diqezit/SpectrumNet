@@ -175,10 +175,8 @@
 
         private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
         {
-            // Очищаем канвас в любом случае
             canvas.Clear(SKColors.Transparent);
 
-            // Проверяем необходимость отображения плейсхолдера
             if (_shouldShowPlaceholder || _isAnalyzerDisposed)
             {
                 RenderPlaceholder(canvas);
@@ -205,42 +203,14 @@
                 return;
             }
 
-            var renderer = SpectrumRendererFactory.CreateRenderer(
-                _currentState.Style,
-                _mainWindow.IsOverlayActive
-            );
-
-            // Вычисляем ширину и интервал баров
+            var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _mainWindow.IsOverlayActive);
             var totalWidth = info.Width;
             var barCount = _mainWindow.BarCount;
-            var barSpacing = (float)_mainWindow.BarSpacing;
+            var barSpacing = Math.Min((float)_mainWindow.BarSpacing, totalWidth / (barCount + 1));
+            var barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
+            barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
 
-            // Проверка на минимальную ширину бара
-            var minBarWidth = 1.0f; // Минимальная ширина бара
-            var maxBarSpacing = totalWidth / (barCount + 1); // Максимальный интервал между барами
-
-            if (barSpacing > maxBarSpacing)
-            {
-                barSpacing = maxBarSpacing;
-            }
-
-            var barWidth = (totalWidth - (barCount - 1) * barSpacing) / barCount;
-
-            if (barWidth < minBarWidth)
-            {
-                barWidth = minBarWidth;
-                barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
-            }
-
-            renderer.Render(
-                canvas,
-                spectrum.Spectrum,
-                info,
-                barWidth,
-                barSpacing,
-                barCount,
-                _currentState.Paint
-            );
+            renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint);
         }
 
         private static void RenderPlaceholder(SKCanvas canvas)
