@@ -213,19 +213,11 @@
 
         #region Style Management
 
-        // Обновление стиля рендеринга происходит в даном методе
         public void UpdateRenderStyle(RenderStyle style)
         {
             EnsureNotDisposed();
-
-            var currentPaint = _currentState.Paint;
-            _currentState = new RenderState(
-                Paint: currentPaint,
-                Style: style,
-                StyleName: _currentState.StyleName
-            );
+            _currentState = _currentState with { Style = style };
             RequestRender();
-
             Log.Debug("[Renderer] Обновлен стиль рендеринга: {Style}", style);
         }
 
@@ -237,23 +229,18 @@
                 return;
 
             var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(styleName);
-            if (paint is null)
+            if (paint == null)
             {
-                Log.Error("[Renderer] Кисть для рисования не настроена на стиль {StyleName}", styleName);
+                Log.Error("[Renderer] Кисть для стиля {StyleName} не настроена", styleName);
                 return;
             }
 
             var oldPaint = _currentState.Paint;
-            _currentState = new RenderState(
-                Paint: paint.Clone(),
-                Style: _currentState.Style,
-                StyleName: styleName
-            );
-
+            _currentState = new RenderState(paint.Clone(), _currentState.Style, styleName);
             oldPaint.Dispose();
-            RequestRender();
 
-            Log.Debug("[Renderer] Обновленный стиль Spectrum: {StyleName}", styleName);
+            RequestRender();
+            Log.Debug("[Renderer] Обновлен стиль спектра: {StyleName}", styleName);
         }
 
         #endregion
