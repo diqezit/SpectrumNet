@@ -33,7 +33,6 @@
         public void Configure(bool isOverlayActive)
         {
             // Возможность настройки поведения рендера, если потребуется
-            Log.Debug($"CubesRenderer configured. Overlay active: {isOverlayActive}");
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,

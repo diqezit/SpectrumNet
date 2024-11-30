@@ -26,8 +26,7 @@
 
         public void Configure(bool isOverlayActive)
         {
-            // Настройка рендера (можно добавить логику при необходимости)
-            Log.Debug($"FireRenderer configured. Overlay active: {isOverlayActive}");
+            // Возможность настройки поведения рендера, если потребуется
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,

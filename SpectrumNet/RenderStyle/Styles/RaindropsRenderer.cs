@@ -42,8 +42,7 @@ namespace SpectrumNet
 
         public void Configure(bool isOverlayActive)
         {
-            // Настройка поведения рендера (опционально)
-            Log.Debug($"RaindropsRenderer configured. Overlay active: {isOverlayActive}");
+            // Возможность настройки поведения рендера, если потребуется
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,

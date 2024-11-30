@@ -36,24 +36,18 @@
 
         #region Construction & Initialization
 
-        public Renderer(
-            SpectrumBrushes spectrumStyles,
-            MainWindow mainWindow,
-            SpectrumAnalyzer analyzer,
-            SKElement skElement)
+        public Renderer(SpectrumBrushes styles, MainWindow window, SpectrumAnalyzer analyzer, SKElement element)
         {
-            _spectrumStyles = spectrumStyles ?? throw new ArgumentNullException(nameof(spectrumStyles));
-            _mainWindow = mainWindow ?? throw new ArgumentNullException(nameof(mainWindow));
+            _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
+            _mainWindow = window ?? throw new ArgumentNullException(nameof(window));
             _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
-            _skElement = skElement ?? throw new ArgumentNullException(nameof(skElement));
+            _skElement = element ?? throw new ArgumentNullException(nameof(element));
 
             _performanceMonitor = new Stopwatch();
-            _shouldShowPlaceholder = true; // Изначально показываем плейсхолдер
+            _shouldShowPlaceholder = true;
 
-            if (_analyzer is IComponent component)
-            {
-                component.Disposed += (s, e) => _isAnalyzerDisposed = true;
-            }
+            if (_analyzer is IComponent c)
+                c.Disposed += (s, e) => _isAnalyzerDisposed = true;
 
             InitializeRenderer();
             Log.Information($"{nameof(Renderer)} успешно инициализирован.");
@@ -63,53 +57,37 @@
         {
             try
             {
-                InitializeRenderState();
-                ConfigureRenderTimer();
+                var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(DEFAULT_STYLE);
+                if (paint == null)
+                    throw new InvalidOperationException($"Failed to initialize {DEFAULT_STYLE} style");
+
+                _currentState = new RenderState(paint.Clone(),
+                    RenderStyle.Bars, DEFAULT_STYLE);
+
+                _renderTimer = new DispatcherTimer { 
+                Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS) };
+                _renderTimer.Tick += (_, _) => RequestRender();
+                _renderTimer.Start();
+
                 SubscribeToEvents();
                 _performanceMonitor.Start();
-                _mainWindow.PropertyChanged += HandleMainWindowPropertyChanged;
+                _mainWindow.PropertyChanged += OnMainWindowPropertyChanged;
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "Не удалось инициализировать рендерер");
-                throw new RendererInitializationException("Не удалось инициализировать рендерер", ex);
+                throw new InvalidOperationException("Не удалось инициализировать рендерер", ex);
             }
         }
 
-        private void HandleMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        private void OnMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             if (e.PropertyName == nameof(MainWindow.IsRecording))
             {
                 _shouldShowPlaceholder = !_mainWindow.IsRecording;
-                RequestRender(); // Принудительно вызываем перерисовку
-                Log.Debug("Состояние плейсхолдера обновлено: {ShouldShow}", _shouldShowPlaceholder);
+                RequestRender();
+                Log.Debug("[Renderer] Состояние плейсхолдера обновлено: {ShouldShow}", _shouldShowPlaceholder);
             }
-        }
-
-        private void InitializeRenderState()
-        {
-            var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(DEFAULT_STYLE);
-            if (paint is null)
-            {
-                throw new RendererInitializationException($"Failed to initialize {DEFAULT_STYLE} style");
-            }
-
-            _currentState = new RenderState(
-                Paint: paint.Clone(),
-                Style: RenderStyle.Bars, // Используем существующий стиль по умолчанию вместо Default
-                StyleName: DEFAULT_STYLE
-            );
-        }
-
-        private void ConfigureRenderTimer()
-        {
-            _renderTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS)
-            };
-
-            _renderTimer.Tick += (_, _) => RequestRender();
-            _renderTimer.Start();
         }
 
         #endregion
@@ -160,7 +138,7 @@
             catch (ObjectDisposedException)
             {
                 _isAnalyzerDisposed = true;
-                Log.Warning("SpectrumAnalyzer was disposed, stopping render loop");
+                Log.Warning("[Renderer] SpectrumAnalyzer was disposed, stopping render loop");
                 _renderTimer?.Stop();
             }
             catch (Exception ex)
@@ -192,7 +170,7 @@
             {
                 _isAnalyzerDisposed = true;
                 _shouldShowPlaceholder = true;
-                Log.Warning("SpectrumAnalyzer was disposed during spectrum acquisition");
+                Log.Warning("[Renderer] SpectrumAnalyzer was disposed during spectrum acquisition");
                 RenderPlaceholder(canvas);
                 return;
             }
@@ -203,6 +181,7 @@
                 return;
             }
 
+            // Реализация динамической ширины рендера
             var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _mainWindow.IsOverlayActive);
             var totalWidth = info.Width;
             var barCount = _mainWindow.BarCount;
@@ -247,7 +226,7 @@
             );
             RequestRender();
 
-            Log.Debug("Обновлен стиль рендеринга: {Style}", style);
+            Log.Debug("[Renderer] Обновлен стиль рендеринга: {Style}", style);
         }
 
         public void UpdateSpectrumStyle(string styleName, SKColor startColor, SKColor endColor)
@@ -260,7 +239,7 @@
             var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(styleName);
             if (paint is null)
             {
-                Log.Error("Кисть для рисования не настроена на стиль {StyleName}", styleName);
+                Log.Error("[Renderer] Кисть для рисования не настроена на стиль {StyleName}", styleName);
                 return;
             }
 
@@ -274,7 +253,7 @@
             oldPaint.Dispose();
             RequestRender();
 
-            Log.Debug("Обновленный стиль Spectrum: {StyleName}", styleName);
+            Log.Debug("[Renderer] Обновленный стиль Spectrum: {StyleName}", styleName);
         }
 
         #endregion
@@ -302,12 +281,12 @@
         {
             if (width <= 0 || height <= 0)
             {
-                Log.Warning("Invalid render dimensions: {Width}x{Height}", width, height);
+                Log.Warning("[Renderer] Invalid render dimensions: {Width}x{Height}", width, height);
                 return;
             }
 
             RequestRender();
-            Log.Debug("Render dimensions updated: {Width}x{Height}", width, height);
+            Log.Debug("[Renderer] Render dimensions updated: {Width}x{Height}", width, height);
         }
 
         private void EnsureNotDisposed()
@@ -331,17 +310,16 @@
             _renderTimer?.Stop();
             _performanceMonitor.Stop();
 
-            // Отписываемся от событий
-            if (_mainWindow != null)
+            if (_mainWindow is INotifyPropertyChanged notifier)
             {
-                _mainWindow.PropertyChanged -= HandleMainWindowPropertyChanged;
+                notifier.PropertyChanged -= OnMainWindowPropertyChanged;
             }
 
             _currentState.Paint.Dispose();
             _renderLock.Dispose();
             _disposalTokenSource.Dispose();
 
-            if (_skElement is not null)
+            if (_skElement != null)
             {
                 _skElement.PaintSurface -= RenderFrame;
                 _skElement.Loaded -= HandleElementLoaded;
@@ -349,7 +327,7 @@
                 _skElement = null;
             }
 
-            Log.Information("Рендерер успешно утилизирован");
+            Log.Information("[Renderer] Рендерер успешно утилизирован");
         }
 
         #endregion
@@ -359,10 +337,4 @@
         double FrameTime,
         double Fps
     );
-
-    public class RendererInitializationException : Exception
-    {
-        public RendererInitializationException(string message) : base(message) { }
-        public RendererInitializationException(string message, Exception inner) : base(message, inner) { }
-    }
 }

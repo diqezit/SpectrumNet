@@ -21,8 +21,7 @@ namespace SpectrumNet
 
         public void Configure(bool isOverlayActive)
         {
-            // Optional configuration logic
-            Log.Debug($"GradientWaveRenderer configured. Overlay active: {isOverlayActive}");
+            // Возможность настройки поведения рендера, если потребуется
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? paint)

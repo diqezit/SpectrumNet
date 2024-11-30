@@ -5,9 +5,8 @@ namespace SpectrumNet
     {
         public const int RenderIntervalMs = 16;
         public const int MonitorDelay = 16;
-        public const int BarCount = 120;
-        public const double BarWidth = 8;
-        public const double BarSpacing = 2;
+        public const int BarCount = 60;
+        public const double BarSpacing = 4;
         public const string DefaultStyle = "Gradient";
         public const string ReadyStatus = "Готово";
         public const string RecordingStatus = "Запись...";
@@ -219,7 +218,6 @@ namespace SpectrumNet
         private record WindowState(
             string Style = MwConstants.DefaultStyle,
             double BarSpacing = MwConstants.BarSpacing,
-            double BarWidth = MwConstants.BarWidth,
             int BarCount = MwConstants.BarCount,
             string StatusText = MwConstants.ReadyStatus);
 

@@ -22,8 +22,7 @@
 
         public void Configure(bool isOverlayActive)
         {
-            // Возможность настроить рендерер
-            Log.Debug($"DotsRenderer configured. Overlay active: {isOverlayActive}");
+            // Возможность настройки поведения рендера, если потребуется
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,

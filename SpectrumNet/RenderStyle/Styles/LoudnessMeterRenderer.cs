@@ -16,9 +16,12 @@
             _isInitialized = true;
         }
 
-        public void Configure(bool isOverlayActive) { }
+        public void Configure(bool isOverlayActive)
+        {
+            // Возможность настройки поведения рендера, если потребуется}
+        }
 
-        private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
+            private bool AreRenderParamsValid(SKCanvas? canvas, ReadOnlySpan<float> spectrum, SKImageInfo info, SKPaint? paint)
         {
             if (canvas == null || spectrum.IsEmpty || paint == null || info.Width <= 0 || info.Height <= 0)
                 return false;

@@ -29,7 +29,6 @@
         public void Configure(bool isOverlayActive)
         {
             // В будущем можно добавить обработку конфигураций
-            Log.Debug($"CircularBarsRenderer configured. Overlay active: {isOverlayActive}");
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
