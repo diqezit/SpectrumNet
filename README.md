@@ -25,7 +25,7 @@ SpectrumNet is a real-time audio visualization application that captures audio f
 
 To run SpectrumNet, you need to have the following prerequisites installed:
 
-- .NET SDK (version 5.0 or later)
+- .NET SDK (version 6.0)
 - Visual Studio (optional, for development)
 
 ### Steps to Run
@@ -77,7 +77,7 @@ Contributions are welcome! Please feel free to submit a pull request or open an 
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. 
 
 ## Acknowledgments
 
