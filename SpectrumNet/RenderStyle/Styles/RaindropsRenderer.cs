@@ -2,170 +2,218 @@
 
 namespace SpectrumNet
 {
-    public class RaindropsRenderer : ISpectrumRenderer, IDisposable
+    public static class RaindropsSettings
     {
-        private static RaindropsRenderer? _instance;
-        private bool _isInitialized;
-        private readonly List<Raindrop> _raindrops = new();
+        public const int MaxRaindrops = 1000, MaxRipples = 150;
+        public const float
+            BaseFallSpeed = 2f,
+            RippleExpandSpeed = 2f,
+            SpectrumThreshold = 0.1f,
+            RippleStrokeWidth = 2f,
+            InitialRadius = 3f,
+            InitialAlpha = 1f,
+            RippleAlphaThreshold = 0.1f,
+            RippleAlphaDecay = 0.95f,
+            OverlayLowerBoundOffset = 4.75f;
+        public const double SpawnProbability = 0.15;
+    }
+
+    public sealed class RaindropsRenderer : ISpectrumRenderer, IDisposable
+    {
+        private static readonly Lazy<RaindropsRenderer> _instance = new(() => new RaindropsRenderer());
+        private bool _isInitialized, _isOverlayActive, _isDisposed;
+        private readonly ArrayPool<Raindrop> _raindropPool = ArrayPool<Raindrop>.Shared;
+        private readonly ArrayPool<Ripple> _ripplePool = ArrayPool<Ripple>.Shared;
+        private Raindrop[] _raindrops;
+        private Ripple[] _activeRipples;
+        private int _raindropCount;
+        private int _activeRippleCount;
         private readonly Random _random = new();
 
-        // Константы
-        private const int MaxRaindrops = 100;
-        private const float FallSpeed = 5f;
-        private const float RippleExpandSpeed = 2f;
-        private const float SpectrumThreshold = 0.5f;
-        private const double SpawnProbability = 0.1;
-        private const float RippleStrokeWidth = 2f;
-        private const float InitialRadius = 2f;
-        private const float InitialAlpha = 1f;
-
-        private RaindropsRenderer() { }
-
-        public static RaindropsRenderer GetInstance() => _instance ??= new RaindropsRenderer();
-
-        private class Raindrop
+        private RaindropsRenderer()
         {
-            public float X { get; set; }
-            public float Y { get; set; }
-            public float Radius { get; set; }
-            public float Alpha { get; set; }
-            public bool IsRipple { get; set; }
+            _raindrops = _raindropPool.Rent(RaindropsSettings.MaxRaindrops);
+            _activeRipples = _ripplePool.Rent(RaindropsSettings.MaxRipples);
         }
+
+        public static RaindropsRenderer GetInstance() => _instance.Value;
+
+        private struct Raindrop { public float X, Y, FallSpeed; }
+        private struct Ripple { public float X, Y, Radius, Alpha; }
 
         public void Initialize()
         {
-            if (_isInitialized) return;
-
-            _isInitialized = true;
-            Log.Debug("RaindropsRenderer initialized");
+            ThrowIfDisposed();
+            if (!_isInitialized) { _isInitialized = true; Log.Debug("RaindropsRenderer initialized"); }
         }
 
-        public void Configure(bool isOverlayActive)
+        public void Configure(bool isOverlayActive) { ThrowIfDisposed(); _isOverlayActive = isOverlayActive; }
+
+        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
+            float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            // Возможность настройки поведения рендера, если потребуется
+            ThrowIfDisposed();
+            if (!ValidateRenderParameters(canvas, spectrum, paint)) return;
+
+            var (_, _, adjustedLowerBound) = GetOverlayDimensions(info.Height);
+            int actualBarCount = Math.Min(spectrum!.Length / 2, barCount);
+            Span<float> scaledSpectrum = stackalloc float[actualBarCount];
+            ScaleSpectrum(spectrum, scaledSpectrum, actualBarCount);
+
+            UpdateRaindrops(scaledSpectrum, info.Width, adjustedLowerBound, 0);
+            RenderDrops(canvas!, adjustedLowerBound, paint!);
+
+            drawPerformanceInfo(canvas!, info);
         }
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? paint,
-                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? paint) =>
+            _isInitialized && canvas != null && spectrum != null && paint != null && spectrum.Length != 0;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private (float overlayHeight, float baseY, float adjustedLowerBound) GetOverlayDimensions(float totalHeight) =>
+            _isOverlayActive ? (totalHeight * RaindropsSettings.OverlayLowerBoundOffset,
+            totalHeight, totalHeight * RaindropsSettings.OverlayLowerBoundOffset) : (totalHeight, totalHeight, totalHeight);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void ScaleSpectrum(float[] spectrum, Span<float> scaledSpectrum, int targetCount)
         {
-            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
-            {
-                Log.Warning("Invalid render parameters or RaindropsRenderer is not initialized.");
-                return;
-            }
-
-            // Масштабирование спектра
-            int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
-
-            UpdateRaindrops(scaledSpectrum, info.Width, info.Height);
-            RenderDrops(canvas, info.Height, paint);
-
-            // Отрисовка информации о производительности
-            drawPerformanceInfo(canvas, info);
-        }
-
-        private float[] ScaleSpectrum(float[] spectrum, int targetCount)
-        {
-            int spectrumLength = spectrum.Length / 2;
-            float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)spectrumLength / targetCount;
-
+            float blockSize = (float)(spectrum.Length / 2) / targetCount;
             for (int i = 0; i < targetCount; i++)
             {
-                float sum = 0;
                 int start = (int)(i * blockSize);
-                int end = (int)((i + 1) * blockSize);
-
-                for (int j = start; j < end && j < spectrumLength; j++)
-                {
-                    sum += spectrum[j];
-                }
-
-                scaledSpectrum[i] = sum / (end - start); // Усреднение значений в блоке
+                int end = Math.Min((int)((i + 1) * blockSize), spectrum.Length / 2);
+                scaledSpectrum[i] = CalculateAverage(spectrum.AsSpan(start, end - start));
             }
-
-            return scaledSpectrum;
         }
 
-        private void UpdateRaindrops(float[] spectrum, float width, float height)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float CalculateAverage(Span<float> values)
         {
-            // Обновление существующих капель
-            for (int i = _raindrops.Count - 1; i >= 0; i--)
+            if (values.IsEmpty)
+                return 0;
+
+            float sum = 0;
+            for (int i = 0; i < values.Length; i++)
             {
-                var drop = _raindrops[i];
+                sum += values[i];
+            }
+            return sum / values.Length;
+        }
 
-                if (drop.IsRipple)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void UpdateRaindrops(Span<float> spectrum, float width, float lowerBound, float upperBound)
+        {
+            for (int i = _raindropCount - 1; i >= 0; i--)
+            {
+                ref var drop = ref _raindrops[i];
+                drop.Y += drop.FallSpeed;
+                if (drop.Y >= lowerBound)
                 {
-                    drop.Radius += RippleExpandSpeed;
-                    drop.Alpha *= 0.95f;
-
-                    if (drop.Alpha < 0.1f)
-                        _raindrops.RemoveAt(i);
-                }
-                else
-                {
-                    drop.Y += FallSpeed;
-
-                    if (drop.Y >= height)
+                    CreateRipple(drop.X, lowerBound);
+                    _raindropCount--;
+                    if (i < _raindropCount)
                     {
-                        drop.IsRipple = true;
-                        drop.Radius = InitialRadius;
-                        drop.Y = height;
+                        _raindrops[i] = _raindrops[_raindropCount];
                     }
                 }
             }
 
-            // Создание новых капель на основе спектра
-            if (_raindrops.Count < MaxRaindrops)
+            UpdateRipples();
+            SpawnNewRaindrops(spectrum, width, upperBound);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void CreateRipple(float x, float y)
+        {
+            if (_activeRippleCount >= RaindropsSettings.MaxRipples) return;
+            _activeRipples[_activeRippleCount++] = new Ripple
             {
-                float step = width / spectrum.Length;
-                for (int i = 0; i < spectrum.Length; i++)
+                X = x,
+                Y = y,
+                Radius = RaindropsSettings.InitialRadius,
+                Alpha = RaindropsSettings.InitialAlpha
+            };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void UpdateRipples()
+        {
+            for (int i = _activeRippleCount - 1; i >= 0; i--)
+            {
+                ref var ripple = ref _activeRipples[i];
+                ripple.Radius += RaindropsSettings.RippleExpandSpeed;
+                ripple.Alpha *= RaindropsSettings.RippleAlphaDecay;
+                if (ripple.Alpha < RaindropsSettings.RippleAlphaThreshold)
                 {
-                    if (spectrum[i] > SpectrumThreshold && _random.NextDouble() < SpawnProbability)
+                    _activeRippleCount--;
+                    if (i < _activeRippleCount)
                     {
-                        _raindrops.Add(new Raindrop
-                        {
-                            X = i * step + (float)_random.NextDouble() * 10,
-                            Y = 0,
-                            Radius = InitialRadius,
-                            Alpha = InitialAlpha,
-                            IsRipple = false
-                        });
+                        _activeRipples[i] = _activeRipples[_activeRippleCount];
                     }
                 }
             }
         }
 
-        private void RenderDrops(SKCanvas canvas, float height, SKPaint paint)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SpawnNewRaindrops(Span<float> spectrum, float width, float upperBound)
+        {
+            if (_raindropCount >= RaindropsSettings.MaxRaindrops) return;
+            float step = width / spectrum.Length;
+            for (int i = 0; i < spectrum.Length; i++)
+            {
+                float intensity = Math.Clamp(spectrum[i], 0f, 1f); // Нормализуем значение спектра
+                if (_random.NextDouble() < intensity * RaindropsSettings.SpawnProbability)
+                {
+                    _raindrops[_raindropCount++] = new Raindrop
+                    {
+                        X = i * step + (float)_random.NextDouble() * step,
+                        Y = upperBound,
+                        FallSpeed = RaindropsSettings.BaseFallSpeed * (1f + intensity)
+                    };
+                    if (_raindropCount >= RaindropsSettings.MaxRaindrops) break;
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void RenderDrops(SKCanvas canvas, float lowerBound, SKPaint paint)
         {
             using var dropPaint = paint.Clone();
-
-            foreach (var drop in _raindrops)
+            dropPaint.Style = SKPaintStyle.Fill;
+            for (int i = 0; i < _raindropCount; i++)
             {
-                dropPaint.Color = dropPaint.Color.WithAlpha((byte)(255 * drop.Alpha));
-
-                if (drop.IsRipple)
-                {
-                    using var ripplePaint = paint.Clone();
-                    ripplePaint.Style = SKPaintStyle.Stroke;
-                    ripplePaint.StrokeWidth = RippleStrokeWidth;
-                    ripplePaint.Color = ripplePaint.Color.WithAlpha((byte)(255 * drop.Alpha));
-
-                    canvas.DrawCircle(drop.X, drop.Y, drop.Radius, ripplePaint);
-                }
-                else
-                {
-                    canvas.DrawCircle(drop.X, drop.Y, drop.Radius, dropPaint);
-                }
+                var drop = _raindrops[i];
+                canvas.DrawCircle(drop.X, drop.Y, RaindropsSettings.InitialRadius, dropPaint);
             }
+
+            dropPaint.Style = SKPaintStyle.Stroke;
+            dropPaint.StrokeWidth = RaindropsSettings.RippleStrokeWidth;
+            for (int i = 0; i < _activeRippleCount; i++)
+            {
+                var ripple = _activeRipples[i];
+                dropPaint.Color = dropPaint.Color.WithAlpha((byte)(255 * ripple.Alpha));
+                canvas.DrawCircle(ripple.X, ripple.Y, ripple.Radius, dropPaint);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void ThrowIfDisposed()
+        {
+            if (_isDisposed) throw new ObjectDisposedException(nameof(RaindropsRenderer));
         }
 
         public void Dispose()
         {
-            _raindrops.Clear();
+            if (_isDisposed) return;
+            _raindropPool.Return(_raindrops);
+            _ripplePool.Return(_activeRipples);
+            _raindrops = null!;
+            _activeRipples = null!;
+            _raindropCount = 0;
+            _activeRippleCount = 0;
             _isInitialized = false;
+            _isDisposed = true;
             Log.Debug("RaindropsRenderer disposed");
         }
     }
