@@ -4,7 +4,7 @@ namespace SpectrumNet;
 public sealed class Renderer : IDisposable
 {
     private const int RENDER_TIMEOUT_MS = 16;
-    private const string DEFAULT_STYLE = "Gradient", MESSAGE = "Нажми старт чтобы начать...";
+    private const string DEFAULT_STYLE = "Gradient", MESSAGE = "Push start to begin record...";
     private readonly record struct RenderState(SKPaint Paint, RenderStyle Style, string StyleName);
 
     private readonly SemaphoreSlim _renderLock = new(1, 1);
