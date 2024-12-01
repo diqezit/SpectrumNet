@@ -15,6 +15,7 @@
     <SolidColorBrush x:Key="LightSurfaceBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="LightPopupBorderBrush" Color="#D0D0D0"/>
     <SolidColorBrush x:Key="DarkTextPrimaryBrush" Color="#212121"/>
+    <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#E0E0E0"/>
 
     <!-- Цвета для кнопок -->
     <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#D0D0D0"/>
@@ -33,7 +34,7 @@
     <DropShadowEffect x:Key="ButtonShadowEffect" BlurRadius="8" Color="#60000000" Direction="315" ShadowDepth="2"/>
     <DoubleAnimation x:Key="ButtonHoverAnimation" To="1.05" Duration="0:0:0.2" AutoReverse="True"/>
     <DropShadowEffect x:Key="PopupShadowEffect" BlurRadius="12" Color="#60000000" Direction="270" ShadowDepth="2"/>
-    
+
     <!-- Цвета для TextBox -->
     <SolidColorBrush x:Key="TextBoxBackgroundBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="TextBoxBorderBrush" Color="#D0D0D0"/>
@@ -85,5 +86,5 @@
     <!-- Добавленные ресурсы -->
     <SolidColorBrush x:Key="WindowBorderBrush" Color="#D0D0D0"/>
     <SolidColorBrush x:Key="ControlsPanelBackgroundBrush" Color="#FFFFFF"/>
-
+    <SolidColorBrush x:Key="TitleBarBackgroundBrush" Color="#0078D7"/>
 </ResourceDictionary>

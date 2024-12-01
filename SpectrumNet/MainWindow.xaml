@@ -8,42 +8,122 @@
         Width="1000" 
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
-        WindowStyle="SingleBorderWindow"
-        ResizeMode="CanResize">
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ResizeMode="CanResize"
+        StateChanged="OnStateChanged">
+
+    <Window.Resources>
+        <Style x:Key="WindowControlButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="WindowCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowControlButtonStyle}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#FF4136"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
 
     <Border BorderThickness="1" 
             BorderBrush="{DynamicResource WindowBorderBrush}" 
             CornerRadius="12">
         <Grid>
-            <!-- Main Content -->
-            <Grid Margin="24">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+            <!-- Drag Area for Moving Window -->
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-                <!-- Header and Theme Toggle -->
-                <DockPanel Grid.Row="0" Margin="0,0,0,20">
-                    <TextBlock Text="Анализатор спектра"
-                               FontSize="28"
-                               FontWeight="Bold"
-                               Foreground="{DynamicResource TextPrimaryBrush}"
-                               DockPanel.Dock="Left"
-                               VerticalAlignment="Center"
-                               Margin="0,0,20,0"/>
+            <!-- Window Header with Custom Controls -->
+            <Grid Grid.Row="0" 
+                  Background="Transparent" 
+                  MouseLeftButtonDown="OnWindowDrag"
+                  Height="50">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
+                <TextBlock Grid.Column="0"
+                           Text="Анализатор спектра"
+                           FontSize="20"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource TextPrimaryBrush}"
+                           VerticalAlignment="Center"
+                           Margin="24,0,0,0"/>
+
+                <StackPanel Grid.Column="2" 
+                            Orientation="Horizontal" 
+                            HorizontalAlignment="Right" 
+                            Margin="0,0,12,0">
                     <ToggleButton x:Name="ThemeToggleButton"
                                   Checked="OnThemeToggleButtonChanged"
                                   Unchecked="OnThemeToggleButtonChanged"
                                   Style="{StaticResource ToggleSwitchStyle}"
                                   Width="100"
-                                  DockPanel.Dock="Right"
                                   Margin="0,0,20,0"/>
-                </DockPanel>
+
+                    <Button x:Name="MinimizeButton" 
+                            Click="OnButtonClick" 
+                            Style="{StaticResource WindowControlButtonStyle}">
+                        <Path Data="M0,10 H20" 
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" 
+                              StrokeThickness="2"/>
+                    </Button>
+
+                    <Button x:Name="MaximizeButton" 
+                            Click="OnButtonClick" 
+                            Style="{StaticResource WindowControlButtonStyle}">
+                        <Path x:Name="MaximizeIcon" 
+                              Data="M2,2 H18 V18 H2 Z" 
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" 
+                              StrokeThickness="2" 
+                              Fill="Transparent"/>
+                    </Button>
+
+                    <Button x:Name="CloseButton" 
+                            Click="OnButtonClick" 
+                            Style="{StaticResource WindowCloseButtonStyle}">
+                        <Path Data="M4,4 L16,16 M16,4 L4,16" 
+                            Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                            StrokeThickness="2"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- Main Content Grid -->
+            <Grid Grid.Row="1" Margin="24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
                 <!-- Spectrum Visualization Area -->
-                <Border Grid.Row="1"
+                <Border Grid.Row="0"
                         CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
                         Effect="{DynamicResource SurfaceShadowEffect}"
@@ -54,7 +134,7 @@
                 </Border>
 
                 <!-- Control Panel -->
-                <Border Grid.Row="2"
+                <Border Grid.Row="1"
                         CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
                         Effect="{DynamicResource SurfaceShadowEffect}"

@@ -15,6 +15,7 @@
     <SolidColorBrush x:Key="DarkSurfaceBrush" Color="#424242"/>
     <SolidColorBrush x:Key="DarkPopupBorderBrush" Color="#616161"/>
     <SolidColorBrush x:Key="LightTextPrimaryBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#383838"/>
 
     <!-- Цвета для кнопок -->
     <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#616161"/>

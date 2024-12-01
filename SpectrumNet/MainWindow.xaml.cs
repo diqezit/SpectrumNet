@@ -1,4 +1,6 @@
 ﻿#nullable enable
+using System.Windows.Media;
+
 namespace SpectrumNet
 {
     public static class MwConstants
@@ -215,14 +217,14 @@ namespace SpectrumNet
 
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        private record WindowState(
+        private record MainWindowSettings(
             string Style = MwConstants.DefaultStyle,
             double BarSpacing = MwConstants.BarSpacing,
             int BarCount = MwConstants.BarCount,
             string StatusText = MwConstants.ReadyStatus);
 
         private readonly object _lock = new();
-        private WindowState _state = new();
+        private MainWindowSettings _state = new();
         private bool _isOverlayActive, _isPopupOpen;
         private RenderStyle _selectedDrawingType;
         private OverlayWindow? _overlayWindow;
@@ -389,12 +391,30 @@ namespace SpectrumNet
                     Log.Warning("[MainWindow] RenderStyleComboBox is null. Cannot subscribe to SelectionChanged event.");
                 }
 
+                this.StateChanged += OnStateChanged;
+                Log.Information("[MainWindow] Subscribed to StateChanged event.");
+
                 Closed += OnWindowClosed;
                 Log.Information("[MainWindow] Subscribed to Closed event.");
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "[MainWindow] Error during SetupEventHandlers.");
+            }
+        }
+
+        private void OnStateChanged(object sender, EventArgs e)
+        {
+            if (MaximizeButton != null && MaximizeIcon != null)
+            {
+                if (this.WindowState == WindowState.Maximized)
+                {
+                    MaximizeIcon.Data = Geometry.Parse("M0,0 L20,0 L20,20 L0,20 Z");
+                }
+                else
+                {
+                    MaximizeIcon.Data = Geometry.Parse("M2,2 H18 V18 H2 Z");
+                }
             }
         }
 
@@ -465,10 +485,38 @@ namespace SpectrumNet
             _disposables?.Dispose();
         }
 
+        private void CloseWindow()
+        {
+            this.Close();
+        }
+
         private void OnOpenPopupButtonClick(object sender, RoutedEventArgs e) => IsPopupOpen = !IsPopupOpen;
 
         private void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e) =>
             new SettingsWindow().ShowDialog();
+
+        private void OnWindowDrag(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+                this.DragMove();
+        }
+
+        private void MinimizeWindow()
+        {
+            this.WindowState = WindowState.Minimized;
+        }
+
+        private void MaximizeWindow()
+        {
+            if (this.WindowState == WindowState.Maximized)
+            {
+                this.WindowState = WindowState.Normal;
+            }
+            else
+            {
+                this.WindowState = WindowState.Maximized;
+            }
+        }
 
         private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
@@ -498,11 +546,30 @@ namespace SpectrumNet
             {
                 switch (button.Name)
                 {
-                    case "StartCaptureButton": await StartCaptureAsync(); break;
-                    case "StopCaptureButton": await StopCaptureAsync(); break;
-                    case "OverlayButton": OnOverlayButtonClick(sender, e); break;
-                    case "OpenSettingsButton": OnOpenSettingsButtonClick(sender, e); break;
-                    case "OpenPopupButton": OnOpenPopupButtonClick(sender, e); break;
+                    case "StartCaptureButton":
+                        await StartCaptureAsync();
+                        break;
+                    case "StopCaptureButton":
+                        await StopCaptureAsync();
+                        break;
+                    case "OverlayButton":
+                        OnOverlayButtonClick(sender, e);
+                        break;
+                    case "OpenSettingsButton":
+                        OnOpenSettingsButtonClick(sender, e);
+                        break;
+                    case "OpenPopupButton":
+                        OnOpenPopupButtonClick(sender, e);
+                        break;
+                    case "MinimizeButton":
+                        MinimizeWindow();
+                        break;
+                    case "MaximizeButton":
+                        MaximizeWindow();
+                        break;
+                    case "CloseButton":
+                        CloseWindow();
+                        break;
                 }
             }
         }
@@ -690,7 +757,9 @@ namespace SpectrumNet
             InvalidateVisuals();
         }
 
-        private void UpdateState(Func<WindowState, WindowState> updater, string propertyName, Action? callback = null)
+        private void UpdateState(Func<MainWindowSettings, 
+            MainWindowSettings> updater, string propertyName,
+            Action? callback = null)
         {
             _state = updater(_state);
             OnPropertyChanged(propertyName);
@@ -755,7 +824,8 @@ namespace SpectrumNet
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
-        protected bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
+        protected bool SetField<T>(ref T field, T value, Action? callback = null,
+            [CallerMemberName] string? propertyName = null)
         {
             if (EqualityComparer<T>.Default.Equals(field, value)) return false;
             field = value;
