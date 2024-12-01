@@ -10,106 +10,70 @@ namespace SpectrumNet
         public const int BarCount = 60;
         public const double BarSpacing = 4;
         public const string DefaultStyle = "Gradient";
-        public const string ReadyStatus = "Готово";
-        public const string RecordingStatus = "Запись...";
+        public const string ReadyStatus = "Ready";
+        public const string RecordingStatus = "Record...";
     }
 
     public sealed class AudioCaptureManager : IDisposable
     {
         private readonly MainWindow _mainWindow;
         private readonly object _lock = new();
-        private record CaptureState(
-            SpectrumAnalyzer Analyzer,
-            WasapiLoopbackCapture Capture,
-            CancellationTokenSource Cts);
+        private record CaptureState(SpectrumAnalyzer Analyzer, WasapiLoopbackCapture Capture, CancellationTokenSource Cts);
 
         private CaptureState? _state;
         private bool _isDisposed;
 
         public bool IsRecording { get; private set; }
 
-        public AudioCaptureManager(MainWindow mainWindow)
-        {
-            if (mainWindow == null)
-            {
-                Log.Fatal("[AudioCaptureManager] MainWindow is null in AudioCaptureManager constructor.");
-                throw new ArgumentNullException(nameof(mainWindow));
-            }
-            _mainWindow = mainWindow;
-        }
+        #region Constructor
+        public AudioCaptureManager(MainWindow mainWindow) => _mainWindow = mainWindow ?? throw new ArgumentNullException(nameof(mainWindow));
+        #endregion
 
+        #region Public Methods
         public async Task StartCaptureAsync()
         {
             lock (_lock)
             {
-                if (_isDisposed)
-                {
-                    Log.Fatal("[AudioCaptureManager] Attempted to start capture on a disposed AudioCaptureManager.");
-                    throw new ObjectDisposedException(nameof(AudioCaptureManager));
-                }
-
+                if (_isDisposed) throw new ObjectDisposedException(nameof(AudioCaptureManager));
                 InitializeCapture();
             }
 
-            if (_state?.Cts == null)
-            {
-                Log.Fatal("[AudioCaptureManager] CancellationTokenSource is null in StartCaptureAsync.");
-                throw new InvalidOperationException("Capture state is not properly initialized.");
-            }
-
-            await MonitorCaptureAsync(_state.Cts.Token);
+            await MonitorCaptureAsync(_state!.Cts.Token);
         }
 
         public Task StopCaptureAsync()
         {
             lock (_lock)
             {
-                if (_state?.Cts == null)
-                {
-                    Log.Fatal("[AudioCaptureManager] CancellationTokenSource is null in StopCaptureAsync.");
-                }
-                else
-                {
-                    _state.Cts.Cancel();
-                    _state.Capture?.StopRecording();
-                }
+                _state?.Cts.Cancel();
+                _state?.Capture.StopRecording();
                 DisposeState();
             }
-
             UpdateStatus(false);
             return Task.CompletedTask;
         }
 
+        public void Dispose()
+        {
+            if (_isDisposed) return;
+
+            lock (_lock)
+            {
+                if (_isDisposed) return;
+                StopCaptureAsync().GetAwaiter().GetResult();
+                _isDisposed = true;
+            }
+        }
+        #endregion
+
+        #region Private Methods
         private void InitializeCapture()
         {
             DisposeState();
-
             var capture = new WasapiLoopbackCapture();
             var analyzer = InitializeAnalyzer();
 
-            if (capture == null || analyzer == null)
-            {
-                Log.Fatal("[AudioCaptureManager] Failed to initialize capture or analyzer in InitializeCapture.");
-                throw new InvalidOperationException("Failed to initialize capture or analyzer.");
-            }
-
-            _state = new CaptureState(
-                analyzer,
-                capture,
-                new CancellationTokenSource());
-
-            if (_state.Capture == null)
-            {
-                Log.Fatal("[AudioCaptureManager] WasapiLoopbackCapture is null after initialization.");
-                throw new InvalidOperationException("Capture initialization failed.");
-            }
-
-            if (_state.Analyzer == null)
-            {
-                Log.Fatal("[AudioCaptureManager] SpectrumAnalyzer is null after initialization.");
-                throw new InvalidOperationException("Analyzer initialization failed.");
-            }
-
+            _state = new CaptureState(analyzer, capture, new CancellationTokenSource());
             _state.Capture.DataAvailable += OnDataAvailable;
             UpdateStatus(true);
             _state.Capture.StartRecording();
@@ -117,46 +81,21 @@ namespace SpectrumNet
 
         private SpectrumAnalyzer InitializeAnalyzer() => _mainWindow.Dispatcher.Invoke(() =>
         {
-            var analyzer = new SpectrumAnalyzer(
-                new FftProcessor(),
-                new SpectrumConverter(_mainWindow._gainParameters),
-                SynchronizationContext.Current);
-
+            var analyzer = new SpectrumAnalyzer(new FftProcessor(), new SpectrumConverter(_mainWindow._gainParameters), SynchronizationContext.Current);
             if (_mainWindow.RenderElement is { ActualWidth: > 0, ActualHeight: > 0 })
             {
                 _mainWindow._renderer?.Dispose();
-                _mainWindow._renderer = new Renderer(
-                    _mainWindow._spectrumStyles ?? new SpectrumBrushes(),
-                    _mainWindow,
-                    analyzer,
-                    _mainWindow.RenderElement);
+                _mainWindow._renderer = new Renderer(_mainWindow._spectrumStyles ?? new SpectrumBrushes(), _mainWindow, analyzer, _mainWindow.RenderElement);
             }
-            else
-            {
-                Log.Fatal("[AudioCaptureManager] RenderElement has null dimensions or is not properly initialized.");
-            }
-
             return analyzer;
         });
 
         private void OnDataAvailable(object? sender, WaveInEventArgs e)
         {
-            if (e.BytesRecorded <= 0 || _state?.Analyzer == null || _state.Capture == null)
-            {
-                Log.Fatal("[AudioCaptureManager] DataAvailable event received with invalid state or no data.");
-                return;
-            }
+            if (e.BytesRecorded <= 0 || _state?.Analyzer == null) return;
 
             var samples = new float[e.BytesRecorded / 4];
-            try
-            {
-                Buffer.BlockCopy(e.Buffer, 0, samples, 0, e.BytesRecorded);
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[AudioCaptureManager] Error copying buffer in OnDataAvailable.");
-            }
-
+            try { Buffer.BlockCopy(e.Buffer, 0, samples, 0, e.BytesRecorded); } catch { }
             _ = _state.Analyzer.AddSamplesAsync(samples, _state.Capture.WaveFormat.SampleRate);
         }
 
@@ -171,10 +110,6 @@ namespace SpectrumNet
                 }
             }
             catch (TaskCanceledException) { }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[AudioCaptureManager] Unexpected error in MonitorCaptureAsync.");
-            }
         }
 
         private void UpdateStatus(bool isRecording) => _mainWindow.Dispatcher.Invoke(() =>
@@ -182,48 +117,28 @@ namespace SpectrumNet
             IsRecording = isRecording;
             _mainWindow.IsRecording = isRecording;
             _mainWindow.StatusText = isRecording ? MwConstants.RecordingStatus : MwConstants.ReadyStatus;
-            _mainWindow.OnPropertyChanged(
-                nameof(_mainWindow.IsRecording),
-                nameof(_mainWindow.CanStartCapture),
-                nameof(_mainWindow.StatusText));
+            _mainWindow.OnPropertyChanged(nameof(_mainWindow.IsRecording), nameof(_mainWindow.CanStartCapture), nameof(_mainWindow.StatusText));
         });
 
         private void DisposeState()
         {
-            if (_state == null)
-            {
-                Log.Fatal("[AudioCaptureManager] DisposeState called with a null state.");
-                return;
-            }
-
-            _state.Cts?.Dispose();
-            _state.Capture?.Dispose();
-            _state.Analyzer?.Dispose();
+            _state?.Cts.Dispose();
+            _state?.Capture.Dispose();
+            _state?.Analyzer.Dispose();
             _state = null;
         }
-
-        public void Dispose()
-        {
-            if (_isDisposed) return;
-
-            lock (_lock)
-            {
-                if (_isDisposed) return;
-                StopCaptureAsync().GetAwaiter().GetResult();
-                _isDisposed = true;
-            }
-        }
+        #endregion
     }
 
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
+        #region Private Fields
         private record MainWindowSettings(
             string Style = MwConstants.DefaultStyle,
             double BarSpacing = MwConstants.BarSpacing,
             int BarCount = MwConstants.BarCount,
             string StatusText = MwConstants.ReadyStatus);
 
-        private readonly object _lock = new();
         private MainWindowSettings _state = new();
         private bool _isOverlayActive, _isPopupOpen;
         private RenderStyle _selectedDrawingType;
@@ -235,174 +150,84 @@ namespace SpectrumNet
         internal AudioCaptureManager? _captureManager;
         internal GainParameters _gainParameters;
         internal CompositeDisposable? _disposables;
+        #endregion
 
-        public bool IsDarkTheme => ThemeManager.Instance.IsDarkTheme;
-        public IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>();
-        public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
-            _spectrumStyles?.Styles ?? new Dictionary<string, StyleDefinition>();
-        public IEnumerable<FftWindowType> AvailableFftWindowTypes =>
-            Enum.GetValues(typeof(FftWindowType)).Cast<FftWindowType>();
+        #region Public Properties
+        public static bool IsDarkTheme => ThemeManager.Instance.IsDarkTheme;
+        public static IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>();
+        public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles => _spectrumStyles?.Styles ?? new Dictionary<string, StyleDefinition>();
+        public static IEnumerable<FftWindowType> AvailableFftWindowTypes => Enum.GetValues(typeof(FftWindowType)).Cast<FftWindowType>();
         public SKElement? RenderElement { get; private set; }
         public bool CanStartCapture => _captureManager is not null && !IsRecording;
+        #endregion
 
+        #region Constructor
         public MainWindow()
         {
             InitializeComponent();
 
-            try
-            {
-                Log.Information("[MainWindow] Initializing MainWindow.");
-
-                _gainParameters = new GainParameters(SynchronizationContext.Current);
-                if (_gainParameters == null)
-                {
-                    Log.Warning("[MainWindow] _gainParameters is null after initialization.");
-                }
-                else
-                {
-                    Log.Information("[MainWindow] _gainParameters initialized successfully.");
-                }
-
-                DataContext = this;
-
-                Log.Information("[MainWindow] Initializing components.");
-                InitializeComponents();
-
-                Log.Information("[MainWindow] Setting up event handlers.");
-                SetupEventHandlers();
-
-                Log.Information("[MainWindow] Configuring theme.");
-                ConfigureTheme();
-
-                Log.Information("[MainWindow] Updating properties.");
-                UpdateProperties();
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "[MainWindow] Error during MainWindow initialization.");
-                throw;
-            }
+            _gainParameters = new GainParameters(SynchronizationContext.Current);
+            DataContext = this;
+            InitializeComponents();
+            SetupEventHandlers();
+            ConfigureTheme();
+            UpdateProperties();
         }
+        #endregion
 
+        #region Initialization Methods
         private void InitializeComponents()
         {
-            try
+            if (spectrumCanvas != null)
             {
-                Log.Information("[MainWindow] Initializing components.");
-
-                if (spectrumCanvas != null)
-                {
-                    RenderElement = spectrumCanvas;
-                    Log.Information("[MainWindow] RenderElement set to spectrumCanvas.");
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] spectrumCanvas is null. RenderElement not set.");
-                }
-
-                _spectrumStyles = new SpectrumBrushes();
-                Log.Information("[MainWindow] SpectrumBrushes initialized.");
-
-                _disposables = new CompositeDisposable();
-                Log.Information("[MainWindow] CompositeDisposable initialized.");
-
-                var renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(MwConstants.RenderIntervalMs) };
-                renderTimer.Tick += (_, _) => RenderElement?.InvalidateVisual();
-                renderTimer.Start();
-                Log.Information("[MainWindow] Render timer started.");
-
-                if (_gainParameters != null)
-                {
-                    _analyzer = new SpectrumAnalyzer(new FftProcessor(),
-                        new SpectrumConverter(_gainParameters), SynchronizationContext.Current);
-                    Log.Information("[MainWindow] SpectrumAnalyzer initialized.");
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] _gainParameters is null. SpectrumAnalyzer not initialized.");
-                }
-
-                if (this != null)
-                {
-                    _captureManager = new AudioCaptureManager(this);
-                    Log.Information("[MainWindow] AudioCaptureManager initialized.");
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] MainWindow is null. AudioCaptureManager not initialized.");
-                }
-
-                if (_spectrumStyles != null && RenderElement != null)
-                {
-                    _renderer = new Renderer(_spectrumStyles, this, _analyzer 
-                        ?? throw new ArgumentNullException(nameof(_analyzer)), RenderElement);
-                    Log.Information("[MainWindow] Renderer initialized.");
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] _spectrumStyles or RenderElement is null. Renderer not initialized.");
-                }
-
-                SelectedStyle = MwConstants.DefaultStyle;
-                Log.Information("[MainWindow] Default style set.");
+                RenderElement = spectrumCanvas;
             }
-            catch (Exception ex)
+
+            _spectrumStyles = new SpectrumBrushes();
+            _disposables = new CompositeDisposable();
+
+            var renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(MwConstants.RenderIntervalMs) };
+            renderTimer.Tick += (_, _) => RenderElement?.InvalidateVisual();
+            renderTimer.Start();
+
+            if (_gainParameters != null)
             {
-                Log.Error(ex, "[MainWindow] Error during InitializeComponents.");
+                _analyzer = new SpectrumAnalyzer(new FftProcessor(), new SpectrumConverter(_gainParameters), SynchronizationContext.Current);
             }
+
+            if (this != null)
+            {
+                _captureManager = new AudioCaptureManager(this);
+            }
+
+            if (_spectrumStyles != null && RenderElement != null)
+            {
+                _renderer = new Renderer(_spectrumStyles, this, _analyzer ?? throw new ArgumentNullException(nameof(_analyzer)), RenderElement);
+            }
+
+            SelectedStyle = MwConstants.DefaultStyle;
         }
 
         private void SetupEventHandlers()
         {
-            try
-            {
-                Log.Information("[MainWindow] Setting up event handlers.");
+            RenderElement!.PaintSurface += OnPaintSurface;
+            SizeChanged += OnWindowSizeChanged;
+            StateChanged += OnStateChanged;
+            MouseDoubleClick += OnWindowMouseDoubleClick;
+            Closed += OnWindowClosed;
 
-                if (RenderElement != null)
-                {
-                    Log.Information("[MainWindow] Subscribing to PaintSurface event.");
-                    RenderElement.PaintSurface += OnPaintSurface;
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] RenderElement is null. Cannot subscribe to PaintSurface event.");
-                }
-
-                SizeChanged += OnWindowSizeChanged;
-                Log.Information("[MainWindow] Subscribed to SizeChanged event.");
-
-                if (StyleComboBox != null)
-                {
-                    Log.Information("[MainWindow] Subscribing to StyleComboBox.SelectionChanged event.");
-                    StyleComboBox.SelectionChanged += OnComboBoxSelectionChanged;
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] StyleComboBox is null. Cannot subscribe to SelectionChanged event.");
-                }
-
-                if (RenderStyleComboBox != null)
-                {
-                    Log.Information("[MainWindow] Subscribing to RenderStyleComboBox.SelectionChanged event.");
-                    RenderStyleComboBox.SelectionChanged += OnComboBoxSelectionChanged;
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] RenderStyleComboBox is null. Cannot subscribe to SelectionChanged event.");
-                }
-
-                this.StateChanged += OnStateChanged;
-                Log.Information("[MainWindow] Subscribed to StateChanged event.");
-
-                Closed += OnWindowClosed;
-                Log.Information("[MainWindow] Subscribed to Closed event.");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[MainWindow] Error during SetupEventHandlers.");
-            }
+            RegisterComboBoxHandler(StyleComboBox);
+            RegisterComboBoxHandler(RenderStyleComboBox);
         }
 
+        private void RegisterComboBoxHandler(ComboBox? comboBox)
+        {
+            if (comboBox != null)
+                comboBox.SelectionChanged += OnComboBoxSelectionChanged;
+        }
+        #endregion
+
+        #region Event Handlers
         private void OnStateChanged(object sender, EventArgs e)
         {
             if (MaximizeButton != null && MaximizeIcon != null)
@@ -430,50 +255,29 @@ namespace SpectrumNet
 
         private void UpdateProperties() => OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
 
-        private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) =>
-            _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+        private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) => _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) =>
-            _renderer?.RenderFrame(sender, e);
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) => _renderer?.RenderFrame(sender, e);
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
+            switch (sender)
             {
-                Log.Debug("[MainWindow] ComboBox selection changed. Sender: {SenderType}", sender?.GetType().Name);
-
-                if (sender == StyleComboBox && _renderer != null && SelectedStyle != null && _spectrumStyles != null)
-                {
-                    Log.Debug("[MainWindow] Selected StyleComboBox. SelectedStyle: {SelectedStyle}", SelectedStyle);
-
+                case ComboBox { Name: nameof(StyleComboBox) } when SelectedStyle != null:
                     var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
-
-                    Log.Debug("[MainWindow] Updating spectrum style. StartColor: {StartColor}, EndColor: {EndColor}", startColor, endColor);
                     _renderer.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
-                }
-                else if (sender == RenderStyleComboBox && RenderStyleComboBox.SelectedValue is RenderStyle renderStyle)
-                {
-                    Log.Debug("[MainWindow] Selected RenderStyleComboBox. RenderStyle: {RenderStyle}", renderStyle);
+                    break;
 
+                case ComboBox { Name: nameof(RenderStyleComboBox) } when RenderStyleComboBox.SelectedValue is RenderStyle renderStyle:
                     _selectedDrawingType = renderStyle;
-
-                    Log.Debug("[MainWindow] Updating render style: {RenderStyle}", renderStyle);
                     _renderer?.UpdateRenderStyle(renderStyle);
-                }
-                else if (sender == FftWindowTypeComboBox && FftWindowTypeComboBox.SelectedValue is FftWindowType windowType)
-                {
-                    Log.Debug("[MainWindow] Selected FftWindowTypeComboBox. FftWindowType: {WindowType}", windowType);
+                    break;
 
+                case ComboBox { Name: nameof(FftWindowTypeComboBox) } when FftWindowTypeComboBox.SelectedValue is FftWindowType windowType:
                     SelectedFftWindowType = windowType;
-                }
-
-                Log.Debug("[MainWindow] Invalidating visuals...");
-                InvalidateVisuals();
+                    break;
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[MainWindow] Error during ComboBox selection change.");
-            }
+            InvalidateVisuals();
         }
 
         private void OnWindowClosed(object? sender, EventArgs e)
@@ -485,15 +289,11 @@ namespace SpectrumNet
             _disposables?.Dispose();
         }
 
-        private void CloseWindow()
-        {
-            this.Close();
-        }
+        private void CloseWindow() => this.Close();
 
         private void OnOpenPopupButtonClick(object sender, RoutedEventArgs e) => IsPopupOpen = !IsPopupOpen;
 
-        private void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e) =>
-            new SettingsWindow().ShowDialog();
+        private void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e) => new SettingsWindow().ShowDialog();
 
         private void OnWindowDrag(object sender, MouseButtonEventArgs e)
         {
@@ -501,10 +301,7 @@ namespace SpectrumNet
                 this.DragMove();
         }
 
-        private void MinimizeWindow()
-        {
-            this.WindowState = WindowState.Minimized;
-        }
+        private void MinimizeWindow() => this.WindowState = WindowState.Minimized;
 
         private void MaximizeWindow()
         {
@@ -518,59 +315,56 @@ namespace SpectrumNet
             }
         }
 
+        private void ToggleWindowState() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+        private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                e.Handled = true;
+                ToggleWindowState();
+            }
+        }
+
         private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (sender is Slider slider)
-            {
-                var value = slider.Value;
-                var updates = new Dictionary<string, Action>
-                {
-                    ["barSpacingSlider"] = () => BarSpacing = value,
-                    ["barCountSlider"] = () => BarCount = (int)value,
-                    ["minDbLevelSlider"] = () => MinDbLevel = (float)value,
-                    ["maxDbLevelSlider"] = () => MaxDbLevel = (float)value,
-                    ["adaptionRateSlider"] = () => AmplificationFactor = (float)value
-                };
+            if (sender is not Slider slider) return;
 
-                if (updates.TryGetValue(slider.Name, out var action))
-                {
-                    action();
-                    InvalidateVisuals();
-                }
+            var sliderActions = new Dictionary<string, Action<double>>
+            {
+                ["barSpacingSlider"] = value => BarSpacing = value,
+                ["barCountSlider"] = value => BarCount = (int)value,
+                ["minDbLevelSlider"] = value => MinDbLevel = (float)value,
+                ["maxDbLevelSlider"] = value => MaxDbLevel = (float)value,
+                ["adaptionRateSlider"] = value => AmplificationFactor = (float)value
+            };
+
+            if (sliderActions.TryGetValue(slider.Name, out var action))
+            {
+                action(slider.Value);
+                InvalidateVisuals();
             }
         }
 
         private async void OnButtonClick(object sender, RoutedEventArgs e)
         {
-            if (sender is Button button)
+            if (sender is not Button button) return;
+
+            var actions = new Dictionary<string, Func<Task>>
+        {
+            { "StartCaptureButton", StartCaptureAsync },
+            { "StopCaptureButton", StopCaptureAsync },
+            { "OverlayButton", () => { OnOverlayButtonClick(sender, e); return Task.CompletedTask; } },
+            { "OpenSettingsButton", () => { OnOpenSettingsButtonClick(sender, e); return Task.CompletedTask; } },
+            { "OpenPopupButton", () => { OnOpenPopupButtonClick(sender, e); return Task.CompletedTask; } },
+            { "MinimizeButton", () => { MinimizeWindow(); return Task.CompletedTask; } },
+            { "MaximizeButton", () => { MaximizeWindow(); return Task.CompletedTask; } },
+            { "CloseButton", () => { CloseWindow(); return Task.CompletedTask; } }
+        };
+
+            if (actions.TryGetValue(button.Name, out var action))
             {
-                switch (button.Name)
-                {
-                    case "StartCaptureButton":
-                        await StartCaptureAsync();
-                        break;
-                    case "StopCaptureButton":
-                        await StopCaptureAsync();
-                        break;
-                    case "OverlayButton":
-                        OnOverlayButtonClick(sender, e);
-                        break;
-                    case "OpenSettingsButton":
-                        OnOpenSettingsButtonClick(sender, e);
-                        break;
-                    case "OpenPopupButton":
-                        OnOpenPopupButtonClick(sender, e);
-                        break;
-                    case "MinimizeButton":
-                        MinimizeWindow();
-                        break;
-                    case "MaximizeButton":
-                        MaximizeWindow();
-                        break;
-                    case "CloseButton":
-                        CloseWindow();
-                        break;
-                }
+                await action();
             }
         }
 
@@ -582,73 +376,41 @@ namespace SpectrumNet
 
         private void OpenOverlay()
         {
-            try
+            if (_overlayWindow == null)
             {
-                Log.Information("[MainWindow] Attempting to open overlay.");
-
-                if (_overlayWindow == null)
+                _overlayWindow = new OverlayWindow(this, new OverlayConfiguration
                 {
-                    _overlayWindow = new OverlayWindow(this, new OverlayConfiguration
-                    {
-                        RenderInterval = MwConstants.RenderIntervalMs,
-                        IsTopmost = true,
-                        ShowInTaskbar = false
-                    });
+                    RenderInterval = MwConstants.RenderIntervalMs,
+                    IsTopmost = true,
+                    ShowInTaskbar = false
+                });
 
-                    _overlayWindow.Closed += (_, _) => OnOverlayClosed();
-                    _overlayWindow.Show();
-                    IsOverlayActive = true;
-                    Log.Information("[MainWindow] Overlay window opened and set to active.");
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] Overlay window is already open.");
-                }
+                _overlayWindow.Closed += (_, _) => OnOverlayClosed();
+                _overlayWindow.Show();
+                IsOverlayActive = true;
+            }
 
-                UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth, (int)SystemParameters.PrimaryScreenHeight);
-                Log.Information("[MainWindow] Renderer dimensions updated.");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[MainWindow] Error during OpenOverlay.");
-            }
+            UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth, (int)SystemParameters.PrimaryScreenHeight);
         }
 
-        private void OnOverlayClosed()
-        {
-            Log.Information("[MainWindow] Overlay closed.");
-            IsOverlayActive = false;
-        }
+        private void OnOverlayClosed() => IsOverlayActive = false;
 
         public void CloseOverlay()
         {
-            try
+            if (_overlayWindow != null)
             {
-                Log.Information("[MainWindow] Attempting to close overlay.");
-
-                if (_overlayWindow != null)
-                {
-                    _overlayWindow.Close();
-                    _overlayWindow.Dispose();
-                    _overlayWindow = null;
-                    Log.Information("[MainWindow] Overlay window closed and disposed.");
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] Overlay window is already null.");
-                }
-
-                IsOverlayActive = false;
+                _overlayWindow.Close();
+                _overlayWindow.Dispose();
+                _overlayWindow = null;
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[MainWindow] Error during CloseOverlay.");
-            }
+
+            IsOverlayActive = false;
         }
 
-        private void UpdateRendererDimensions(int? width, int? height) =>
-            _renderer?.UpdateRenderDimensions(width ?? 0, height ?? 0);
+        private void UpdateRendererDimensions(int? width, int? height) => _renderer?.UpdateRenderDimensions(width ?? 0, height ?? 0);
+        #endregion
 
+        #region Property Handlers
         private FftWindowType _selectedFftWindowType;
         public FftWindowType SelectedFftWindowType
         {
@@ -749,7 +511,9 @@ namespace SpectrumNet
             get => _gainParameters.AmplificationFactor;
             set => UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
         }
+        #endregion
 
+        #region Helper Methods
         private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName)
         {
             setter(newValue);
@@ -757,9 +521,7 @@ namespace SpectrumNet
             InvalidateVisuals();
         }
 
-        private void UpdateState(Func<MainWindowSettings, 
-            MainWindowSettings> updater, string propertyName,
-            Action? callback = null)
+        private void UpdateState(Func<MainWindowSettings, MainWindowSettings> updater, string propertyName, Action? callback = null)
         {
             _state = updater(_state);
             OnPropertyChanged(propertyName);
@@ -770,52 +532,24 @@ namespace SpectrumNet
 
         public Task StartCaptureAsync()
         {
-            try
+            if (_captureManager != null)
             {
-                Log.Information("[MainWindow] Attempting to start capture.");
-
-                if (_captureManager != null)
-                {
-                    Log.Information("[MainWindow] Starting capture.");
-                    return _captureManager.StartCaptureAsync();
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] _captureManager is null, cannot start capture.");
-                    return Task.CompletedTask;
-                }
+                return _captureManager.StartCaptureAsync();
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[MainWindow] Error during StartCaptureAsync.");
-                return Task.CompletedTask;
-            }
+            return Task.CompletedTask;
         }
 
         public Task StopCaptureAsync()
         {
-            try
+            if (_captureManager != null)
             {
-                Log.Information("[MainWindow] Attempting to stop capture.");
-
-                if (_captureManager != null)
-                {
-                    Log.Information("[MainWindow] Stopping capture.");
-                    return _captureManager.StopCaptureAsync();
-                }
-                else
-                {
-                    Log.Warning("[MainWindow] _captureManager is null, cannot stop capture.");
-                    return Task.CompletedTask;
-                }
+                return _captureManager.StopCaptureAsync();
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[MainWindow] Error during StopCaptureAsync.");
-                return Task.CompletedTask;
-            }
+            return Task.CompletedTask;
         }
+        #endregion
 
+        #region INotifyPropertyChanged Implementation
         public event PropertyChangedEventHandler? PropertyChanged;
 
         public virtual void OnPropertyChanged(params string[] propertyNames)
@@ -824,8 +558,7 @@ namespace SpectrumNet
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
-        protected bool SetField<T>(ref T field, T value, Action? callback = null,
-            [CallerMemberName] string? propertyName = null)
+        protected bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
         {
             if (EqualityComparer<T>.Default.Equals(field, value)) return false;
             field = value;
@@ -833,5 +566,6 @@ namespace SpectrumNet
             callback?.Invoke();
             return true;
         }
+        #endregion
     }
 }

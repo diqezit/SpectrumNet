@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:local="clr-namespace:SpectrumNet"
-        Title="Анализатор спектра" 
+        Title="Spectrum Analyser" 
         Height="700" 
         Width="1000" 
         WindowStartupLocation="CenterScreen"
@@ -11,7 +11,8 @@
         WindowStyle="None"
         AllowsTransparency="True"
         ResizeMode="CanResize"
-        StateChanged="OnStateChanged">
+        StateChanged="OnStateChanged"
+        MouseDoubleClick="OnWindowMouseDoubleClick">
 
     <Window.Resources>
         <Style x:Key="WindowControlButtonStyle" TargetType="Button">
@@ -69,7 +70,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0"
-                           Text="Анализатор спектра"
+                           Text="Spectrum Analyser"
                            FontSize="20"
                            FontWeight="Bold"
                            Foreground="{DynamicResource TextPrimaryBrush}"
@@ -168,7 +169,7 @@
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="▶" FontSize="16" Margin="0,0,8,0" Grid.Column="0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Начать запись" VerticalAlignment="Center" Grid.Column="1" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Start" VerticalAlignment="Center" Grid.Column="1" HorizontalAlignment="Center"/>
                                     </Grid>
                                 </Button>
 
@@ -186,7 +187,7 @@
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="⏹" FontSize="16" Margin="0,0,8,0" Grid.Column="0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Остановить" VerticalAlignment="Center" Grid.Column="1" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Stop" VerticalAlignment="Center" Grid.Column="1" HorizontalAlignment="Center"/>
                                     </Grid>
                                 </Button>
 
@@ -198,7 +199,7 @@
                                         Style="{StaticResource ModernButtonStyle}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="⚡" FontSize="16" Margin="0,0,8,0"/>
-                                        <TextBlock Text="Режим наложения"/>
+                                        <TextBlock Text="Overlay"/>
                                     </StackPanel>
                                 </Button>
 
@@ -210,7 +211,7 @@
                                         Style="{StaticResource ModernButtonStyle}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="⚙" FontSize="16" Margin="0,0,8,0"/>
-                                        <TextBlock Text="Настройки"/>
+                                        <TextBlock Text="Settings"/>
                                     </StackPanel>
                                 </Button>
 
@@ -221,7 +222,7 @@
                                         Style="{StaticResource ModernButtonStyle}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="🔧" FontSize="16" Margin="0,0,8,0"/>
-                                        <TextBlock Text="Настройки усиления"/>
+                                        <TextBlock Text="Gain Control"/>
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
@@ -254,7 +255,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="30"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Интервал:"
+                                    <TextBlock Grid.Column="0" Text="Interval:"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,8,0"/>
@@ -277,7 +278,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="30"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Количество полос:"
+                                    <TextBlock Grid.Column="0" Text="Number of strips:"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,8,0"/>
@@ -316,7 +317,7 @@
 
                                 <!-- Блок выбора типа визуализации -->
                                 <TextBlock Grid.Row="0" 
-                   Text="Тип визуализации:" 
+                   Text="Renderer:" 
                    Foreground="{DynamicResource TextPrimaryBrush}" 
                    Margin="0,0,8,0"/>
                                 <ComboBox Grid.Row="0" 
@@ -331,7 +332,7 @@
 
                                 <!-- Блок выбора кисти отрисовки -->
                                 <TextBlock Grid.Row="1" 
-                   Text="Кисть отрисовки:" 
+                   Text="Paint:" 
                    Foreground="{DynamicResource TextPrimaryBrush}" 
                    Margin="0,0,8,0"/>
                                 <ComboBox Grid.Row="1" 
@@ -346,7 +347,7 @@
 
                                 <!-- Блок выбора типа окна FFT -->
                                 <TextBlock Grid.Row="2" 
-                   Text="Тип окна FFT:" 
+                   Text="Window FFT:" 
                    Foreground="{DynamicResource TextPrimaryBrush}" 
                    Margin="0,0,8,0"/>
                                 <ComboBox Grid.Row="2" 
