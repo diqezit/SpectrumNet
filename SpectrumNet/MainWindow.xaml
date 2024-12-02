@@ -110,8 +110,8 @@
                             Click="OnButtonClick" 
                             Style="{StaticResource WindowCloseButtonStyle}">
                         <Path Data="M4,4 L16,16 M16,4 L4,16" 
-                            Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                            StrokeThickness="2"/>
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="2"/>
                     </Button>
                 </StackPanel>
             </Grid>

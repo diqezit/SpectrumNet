@@ -1,87 +1,111 @@
 ﻿#nullable enable
-namespace SpectrumNet;
 
-public static class PerfomanceMetrics
+namespace SpectrumNet
 {
-    private static readonly object _lock = new();
-    private static readonly Queue<long> _frameTimestamps = new(MAX_FRAMES);
-    private static readonly int MAX_FRAMES = 120, _processorCount = Environment.ProcessorCount;
-    private static float _previousFps, _previousCpuUsage;
-    private static long _previousCpuTime;
-    private static TimeSpan _previousTotalTime;
-    private static readonly Stopwatch _stopwatch = Stopwatch.StartNew();
-    private static DateTime _lastCpuUpdate = DateTime.UtcNow;
-    private static double _currentCpuUsage;
-    private const float SMOOTHING_FACTOR_CPU = 0.1f;
-    private const double MIN_TIME_DELTA = 1e-6;
-
-    public static void DrawPerformanceInfo(SKCanvas canvas, SKImageInfo info)
+    public static class PerfomanceMetrics
     {
-        try
+        private const int MaxFrames = 120;
+        private const float CpuSmoothing = 0.2f;
+        private static readonly object Lock = new();
+        private static readonly int ProcessorCount = Environment.ProcessorCount;
+        private static readonly double[] FrameTimes = new double[MaxFrames];
+        private static readonly Stopwatch Timer = Stopwatch.StartNew();
+
+        private static int FrameIndex;
+        private static float FpsCache;
+        private static TimeSpan LastCpuTime = TimeSpan.Zero;
+        private static double LastTotalTime;
+        private static DateTime LastCpuUpdate = DateTime.UtcNow;
+        private static double CpuUsage;
+
+        public static void DrawPerformanceInfo(SKCanvas canvas, SKImageInfo info)
         {
-            var fps = GetFPS();
-            if ((DateTime.UtcNow - _lastCpuUpdate).TotalSeconds >= 0.25)
+            try
             {
-                _currentCpuUsage = GetCpuUsage();
-                _lastCpuUpdate = DateTime.UtcNow;
+                float fps = CalculateFps();
+                UpdateCpuUsage();
+
+                using var paint = new SKPaint
+                {
+                    TextSize = 12,
+                    IsAntialias = true,
+                    Color = fps < 30 ? SKColors.Red : SKColors.White
+                };
+
+                string infoText = $"RAM: {GetResourceUsage(ResourceType.Ram):F1} MB | " +
+                                  $"CPU: {CpuUsage:F1}% | FPS: {fps:F0}";
+                canvas.DrawText(infoText, 10, 20, paint);
             }
-            using var paint = new SKPaint { TextSize = 10, IsAntialias = true, Color = fps < 30 ? SKColors.Red : SKColors.White };
-            canvas.DrawText($"RAM: {GetResourceUsage(ResourceType.Ram):F1} MB | CPU: {_currentCpuUsage:F1}% | FPS: {fps:F0}", 5, 15, paint);
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[PerformanceMetrics] Error drawing performance info");
+            }
         }
-        catch (Exception ex) { Log.Error(ex, "[PerfomanceMetrics] Ошибка при рисовании информации о производительности"); }
-    }
 
-    private static float GetFPS()
-    {
-        lock (_lock)
+        private static float CalculateFps()
         {
-            var currentTime = _stopwatch.ElapsedTicks;
-            _frameTimestamps.Enqueue(currentTime);
-            while (_frameTimestamps.TryPeek(out var oldestTime) && oldestTime < currentTime - (2 * Stopwatch.Frequency))
-                _frameTimestamps.Dequeue();
-            if (_frameTimestamps.Count > MAX_FRAMES) _frameTimestamps.Dequeue();
-            if (_frameTimestamps.Count >= 2)
-                _previousFps = (float)(_frameTimestamps.Count / ((_frameTimestamps.Last() - _frameTimestamps.Peek()) / (double)Stopwatch.Frequency));
-            return _previousFps;
-        }
-    }
+            lock (Lock)
+            {
+                double now = Timer.Elapsed.TotalSeconds;
+                FrameTimes[FrameIndex++ % MaxFrames] = now;
 
-    private static double GetCpuUsage()
-    {
-        lock (_lock)
+                if (FrameIndex < MaxFrames) return FpsCache;
+
+                double delta = now - FrameTimes[(FrameIndex - MaxFrames) % MaxFrames];
+                return delta > 0 ? FpsCache = FpsCache * 0.9f + (float)(MaxFrames / delta) * 0.1f : FpsCache;
+            }
+        }
+
+        private static void UpdateCpuUsage()
+        {
+            if ((DateTime.UtcNow - LastCpuUpdate).TotalSeconds < 0.1) return;
+
+            lock (Lock)
+            {
+                try
+                {
+                    using var process = Process.GetCurrentProcess();
+                    var cpuTime = process.TotalProcessorTime;
+                    double elapsed = Timer.Elapsed.TotalSeconds;
+
+                    if (LastCpuTime != TimeSpan.Zero)
+                    {
+                        double cpuDelta = (cpuTime - LastCpuTime).TotalSeconds;
+                        double timeDelta = elapsed - LastTotalTime;
+
+                        if (timeDelta > 0)
+                            CpuUsage = CpuUsage * (1 - CpuSmoothing) +
+                                       (cpuDelta / (timeDelta * ProcessorCount) * 100) * CpuSmoothing;
+                    }
+
+                    LastCpuTime = cpuTime;
+                    LastTotalTime = elapsed;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[PerformanceMetrics] Error updating CPU usage");
+                }
+
+                LastCpuUpdate = DateTime.UtcNow;
+            }
+        }
+
+        private static double GetResourceUsage(ResourceType type)
         {
             try
             {
                 using var process = Process.GetCurrentProcess();
-                var currentCpuTime = process.TotalProcessorTime;
-                var currentTotalTime = _stopwatch.Elapsed;
-                if (_previousCpuTime == 0)
-                {
-                    _previousCpuTime = currentCpuTime.Ticks;
-                    _previousTotalTime = currentTotalTime;
-                    return _previousCpuUsage;
-                }
-                var cpuTimeDelta = currentCpuTime.Ticks - _previousCpuTime;
-                var totalTimeDelta = currentTotalTime.TotalSeconds - _previousTotalTime.TotalSeconds;
-                _previousCpuTime = currentCpuTime.Ticks;
-                _previousTotalTime = currentTotalTime;
-                return totalTimeDelta <= MIN_TIME_DELTA ? _previousCpuUsage :
-                    _previousCpuUsage = (float)(_previousCpuUsage * (1 - SMOOTHING_FACTOR_CPU) +
-                    ((cpuTimeDelta / (double)TimeSpan.TicksPerSecond) / (totalTimeDelta * _processorCount)) * 100 * SMOOTHING_FACTOR_CPU);
+                return type == ResourceType.Ram
+                    ? process.PagedMemorySize64 / (1024.0 * 1024.0)
+                    : Math.Max(process.PagedMemorySize64 / (1024.0 * 1024.0), GC.GetTotalMemory(false) / (1024.0 * 1024.0));
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "[PerfomanceMetrics] Ошибка при получении использования CPU");
-                return _previousCpuUsage;
+                Log.Error(ex, "[PerformanceMetrics] Error calculating resource usage");
+                return 0;
             }
         }
+
+        private enum ResourceType { Ram, ManagedRam }
     }
-
-    private static double GetResourceUsage(ResourceType type) => type switch
-    {
-        ResourceType.Ram => Process.GetCurrentProcess().WorkingSet64 / (1024.0 * 1024.0),
-        _ => throw new ArgumentException($"[PerfomanceMetrics] Неподдерживаемый тип ресурса: {type}", nameof(type))
-    };
-
-    private enum ResourceType { Ram }
 }
