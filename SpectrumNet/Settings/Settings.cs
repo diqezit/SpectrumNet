@@ -24,24 +24,82 @@
         event PropertyChangedEventHandler? PropertyChanged;
     }
 
+    /// <summary>
+    /// Class containing default settings for rendering (particle render at this time) in the app.
+    /// These settings define various parameters such as the number of particles,
+    /// spawn thresholds, movement parameters, visual parameters,
+    /// particle lifecycle parameters, and spawn and overlay parameters.
+    /// </summary>
     public class DefaultSettings
     {
-        // Существующие настройки
+        /// <summary>
+        /// Maximum number of particles allowed on the canvas in time.
+        /// </summary>
         public const int MaxParticles = 2500;
-        public const float SpawnThresholdOverlay = 0.03f;
-        public const float SpawnThresholdNormal = 0.08f;
-        public const float ParticleVelocityMin = 0.5f;
-        public const float ParticleVelocityMax = 2.0f;
-        public const float ParticleSizeOverlay = 2.5f;
-        public const float ParticleSizeNormal = 2.0f;
-        public const float ParticleLife = 3.0f;
-        public const float ParticleLifeDecay = 0.01f;
 
-        // Новые настройки
-        public const float VelocityMultiplier = 0.8f;
-        public const float AlphaDecayExponent = 1.3f;
-        public const float SpawnProbability = 0.08f;
+        /// <summary>
+        /// Spawn threshold for particles when the overlay is active.
+        /// </summary>
+        public const float SpawnThresholdOverlay = 0.02f;
+
+        /// <summary>
+        /// Spawn threshold for particles when the overlay is not active.
+        /// </summary>
+        public const float SpawnThresholdNormal = 0.06f;
+
+        /// <summary>
+        /// Minimum velocity for particles.
+        /// </summary>
+        public const float ParticleVelocityMin = 0.4f;
+
+        /// <summary>
+        /// Maximum velocity for particles.
+        /// </summary>
+        public const float ParticleVelocityMax = 1.8f;
+
+        /// <summary>
+        /// Multiplier for particle velocity.
+        /// </summary>
+        public const float VelocityMultiplier = 0.85f;
+
+        /// <summary>
+        /// Size of particles when the overlay is active.
+        /// </summary>
+        public const float ParticleSizeOverlay = 3.0f;
+
+        /// <summary>
+        /// Size of particles when the overlay is not active.
+        /// </summary>
+        public const float ParticleSizeNormal = 2.2f;
+
+        /// <summary>
+        /// Initial life of particles.
+        /// </summary>
+        public const float ParticleLife = 4.0f;
+
+        /// <summary>
+        /// Decay rate of particle life.
+        /// </summary>
+        public const float ParticleLifeDecay = 0.008f;
+
+        /// <summary>
+        /// Exponent for alpha decay of particles.
+        /// </summary>
+        public const float AlphaDecayExponent = 1.5f;
+
+        /// <summary>
+        /// Probability of spawning a new particle.
+        /// </summary>
+        public const float SpawnProbability = 0.1f;
+
+        /// <summary>
+        /// Multiplier for the overlay offset. Configure for 1920x1080.
+        /// </summary>
         public const float OverlayOffsetMultiplier = 1.0f;
+
+        /// <summary>
+        /// Multiplier for the overlay height. Configure for 1920x1080.
+        /// </summary>
         public const float OverlayHeightMultiplier = 0.7f;
     }
 
