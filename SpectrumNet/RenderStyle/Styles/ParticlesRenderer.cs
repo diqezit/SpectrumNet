@@ -6,16 +6,13 @@ namespace SpectrumNet
     {
         #region Fields
         private static readonly object _lock = new();
-        private static ParticlesRenderer? _instance;
         private readonly Random _random = new();
         private const int VelocityLookupSize = 1024;
 
-        private float[] _spectrumBuffer, _velocityLookup, _alphaCurve, _velocityLookupCached;
-        private Particle[]? _particles;
-        private ParticlePool _particlePool;
+        private float[] _spectrumBuffer, _velocityLookup, _alphaCurve;
+        private CircularParticleBuffer? _particleBuffer;
 
         private bool _isOverlayActive, _isInitialized, _isDisposed;
-        private int _activeParticleCount;
 
         private readonly float _velocityRange, _particleLife, _particleLifeDecay, _alphaDecayExponent,
                                _spawnThresholdOverlay, _spawnThresholdNormal, _spawnProbability,
@@ -26,20 +23,6 @@ namespace SpectrumNet
             public float X, Y, Velocity, Life, Alpha, Size;
             public bool IsActive;
         }
-
-        private class ParticlePool
-        {
-            private readonly Particle[] _particles;
-            private readonly bool[] _isAvailable;
-            private readonly object _lock = new();
-
-            public ParticlePool(int maxParticles)
-            {
-                _particles = new Particle[maxParticles];
-                _isAvailable = new bool[maxParticles];
-                for (int i = 0; i < _isAvailable.Length; i++) _isAvailable[i] = true;
-            }
-        }
         #endregion
 
         #region Constructor
@@ -49,7 +32,7 @@ namespace SpectrumNet
 
             _spectrumBuffer = new float[2048];
             _velocityLookup = new float[VelocityLookupSize];
-            _particlePool = new ParticlePool((int)s.MaxParticles);
+            _alphaCurve = new float[101]; // Initialize to match PrecomputeAlphaCurve
             _velocityRange = s.ParticleVelocityMax - s.ParticleVelocityMin;
             _particleLife = s.ParticleLife;
             _particleLifeDecay = s.ParticleLifeDecay;
@@ -77,8 +60,12 @@ namespace SpectrumNet
             if (_isDisposed) throw new ObjectDisposedException(nameof(ParticlesRenderer));
             if (_isInitialized) return;
 
-            _particles = new Particle[(int)Settings.Instance.MaxParticles];
-            _activeParticleCount = 0;
+            _particleBuffer = new CircularParticleBuffer(
+                (int)Settings.Instance.MaxParticles,
+                _particleLife,
+                _particleLifeDecay,
+                _velocityMultiplier
+            );
             _isInitialized = true;
         }
 
@@ -108,8 +95,7 @@ namespace SpectrumNet
         {
             if (!_isDisposed)
             {
-                _particles = null;
-                _activeParticleCount = 0;
+                _particleBuffer = null;
                 _isInitialized = false;
                 _isDisposed = true;
                 GC.SuppressFinalize(this);
@@ -118,10 +104,11 @@ namespace SpectrumNet
         #endregion
 
         #region Private Methods
-        private void PrecomputeAlphaCurve() =>
-            _alphaCurve = Enumerable.Range(0, 101)
-                                    .Select(i => MathF.Pow(i / 100f, _alphaDecayExponent))
-                                    .ToArray();
+        private void PrecomputeAlphaCurve()
+        {
+            for (int i = 0; i <= 100; i++)
+                _alphaCurve[i] = MathF.Pow(i / 100f, _alphaDecayExponent);
+        }
 
         private void InitializeVelocityLookup(float minVelocity)
         {
@@ -135,25 +122,14 @@ namespace SpectrumNet
 
         private void UpdateParticles(float upperBound, float lowerBound)
         {
-            if (_particles == null) return;
+            if (_particleBuffer == null) return;
 
-            var span = _particles.AsSpan(0, _activeParticleCount);
-            int count = 0;
-
-            foreach (ref var particle in span)
-            {
-                particle.Y -= particle.Velocity * _velocityMultiplier;
-                particle.Life -= _particleLifeDecay;
-                particle.Alpha = GetCachedAlpha(particle.Life / _particleLife);
-                if (particle.Alpha > 0.01f && particle.Y >= upperBound)
-                    span[count++] = particle;
-            }
-            _activeParticleCount = count;
+            _particleBuffer.Update(upperBound, _alphaDecayExponent);
         }
 
         private void SpawnNewParticles(ReadOnlySpan<float> spectrum, float spawnY, float canvasWidth, float barWidth)
         {
-            if (_particles == null || _activeParticleCount >= _particles.Length) return;
+            if (_particleBuffer == null) return;
 
             float threshold = _isOverlayActive ? _spawnThresholdOverlay : _spawnThresholdNormal;
             float size = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
@@ -161,7 +137,7 @@ namespace SpectrumNet
             ScaleSpectrum(spectrum, _spectrumBuffer.AsSpan(0, targetCount));
             float xStep = canvasWidth / targetCount;
 
-            for (int i = 0; i < targetCount && _activeParticleCount < _particles.Length; i++)
+            for (int i = 0; i < targetCount; i++)
             {
                 if (_spectrumBuffer[i] <= threshold) continue;
 
@@ -169,7 +145,7 @@ namespace SpectrumNet
                 if (_random.NextDouble() >= probability) continue;
 
                 float factor = Math.Min(_spectrumBuffer[i] / threshold, 2f);
-                _particles[_activeParticleCount++] = new Particle
+                _particleBuffer.Add(new Particle
                 {
                     X = i * xStep + (float)_random.NextDouble() * barWidth,
                     Y = spawnY,
@@ -178,7 +154,7 @@ namespace SpectrumNet
                     Life = _particleLife,
                     Alpha = 1f,
                     IsActive = true
-                };
+                });
             }
         }
 
@@ -209,25 +185,33 @@ namespace SpectrumNet
 
         private void UpdateParticleSizes()
         {
-            if (_particles == null) return;
+            if (_particleBuffer == null) return;
 
             float size = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
-            foreach (ref var particle in _particles.AsSpan(0, _activeParticleCount))
-                if (particle.IsActive) particle.Size = size;
+            var particles = _particleBuffer.GetActiveParticles();
+
+            foreach (ref var particle in particles)
+                particle.Size = size;
         }
 
         private void RenderParticles(SKCanvas canvas, SKPaint paint, float upperBound, float lowerBound)
         {
-            if (_particles == null) return;
+            if (_particleBuffer == null) return;
 
-            var originalColor = paint.Color;
-            foreach (ref readonly var particle in _particles.AsSpan(0, _activeParticleCount))
+            var activeParticles = _particleBuffer.GetActiveParticles();
+            if (activeParticles.Length == 0) return;
+
+            using var pointPaint = paint.Clone();
+            pointPaint.Style = SKPaintStyle.Fill;
+            pointPaint.StrokeCap = SKStrokeCap.Round;
+            pointPaint.StrokeWidth = 0; // Ensure no stroke
+
+            foreach (ref readonly var particle in activeParticles)
             {
                 if (particle.Y < upperBound || particle.Y > lowerBound) continue;
-                paint.Color = originalColor.WithAlpha((byte)(particle.Alpha * 255));
-                canvas.DrawCircle(particle.X, particle.Y, particle.Size, paint);
+                pointPaint.Color = paint.Color.WithAlpha((byte)(particle.Alpha * 255));
+                canvas.DrawCircle(particle.X, particle.Y, particle.Size / 2, pointPaint);
             }
-            paint.Color = originalColor;
         }
 
         private (float upperBound, float lowerBound) CalculateBounds(float height)
@@ -242,10 +226,90 @@ namespace SpectrumNet
 
         private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
             SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo) =>
-            !_isDisposed && _isInitialized && _particles != null && canvas != null &&
+            !_isDisposed && _isInitialized && canvas != null &&
             spectrum != null && paint != null && drawPerformanceInfo != null &&
             spectrum.Length >= 2 && info.Width > 0 && info.Height > 0;
         #endregion
 
+        #region Nested Classes
+        private class CircularParticleBuffer
+        {
+            private Particle[] _buffer;
+            private int _head, _tail, _count;
+            private readonly float _particleLife;
+            private readonly float _particleLifeDecay;
+            private readonly float _velocityMultiplier;
+
+            public CircularParticleBuffer(int capacity, float particleLife,
+                float particleLifeDecay, float velocityMultiplier)
+            {
+                _buffer = new Particle[capacity];
+                _head = 0; // Initialize _head
+                _tail = 0;
+                _count = 0;
+                _particleLife = particleLife;
+                _particleLifeDecay = particleLifeDecay;
+                _velocityMultiplier = velocityMultiplier;
+            }
+
+            public void Add(Particle particle)
+            {
+                if (_count < _buffer.Length)
+                {
+                    _buffer[_tail] = particle;
+                    _tail = (_tail + 1) % _buffer.Length;
+                    _count++;
+                }
+            }
+
+            public Span<Particle> GetActiveParticles()
+            {
+                return _buffer.AsSpan(0, _count);
+            }
+
+            public void Update(float upperBound, float alphaDecayExponent)
+            {
+                int activeCount = 0;
+                int consecutiveInactive = 0;
+                const int maxConsecutiveInactive = 10; // Define a threshold
+
+                for (int i = 0; i < _count; i++)
+                {
+                    int index = (_head + i) % _buffer.Length;
+                    ref var particle = ref _buffer[index];
+
+                    // Skip inactive particles
+                    if (!particle.IsActive)
+                    {
+                        consecutiveInactive++;
+                        if (consecutiveInactive >= maxConsecutiveInactive)
+                            break;
+                        continue;
+                    }
+
+                    // Update particle properties
+                    particle.Y -= particle.Velocity * _velocityMultiplier;
+                    particle.Life -= _particleLifeDecay;
+                    particle.Alpha = MathF.Pow(particle.Life / _particleLife, alphaDecayExponent);
+
+                    // Check if particle is still active
+                    if (particle.Alpha <= 0.01f || particle.Y < upperBound)
+                    {
+                        particle.IsActive = false;
+                        consecutiveInactive++;
+                        if (consecutiveInactive >= maxConsecutiveInactive)
+                            break;
+                    }
+                    else
+                    {
+                        _buffer[activeCount++] = particle;
+                        consecutiveInactive = 0;
+                    }
+                }
+
+                _count = activeCount;
+            }
+        }
+        #endregion
     }
 }
