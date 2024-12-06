@@ -225,14 +225,6 @@ namespace SpectrumNet
             MouseDoubleClick += OnWindowMouseDoubleClick;
             Closed += OnWindowClosed;
 
-            RegisterComboBoxHandler(StyleComboBox);
-            RegisterComboBoxHandler(RenderStyleComboBox);
-        }
-
-        private void RegisterComboBoxHandler(ComboBox? comboBox)
-        {
-            if (comboBox != null)
-                comboBox.SelectionChanged += OnComboBoxSelectionChanged;
         }
         #endregion
 
