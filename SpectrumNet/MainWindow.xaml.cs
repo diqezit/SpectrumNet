@@ -1,5 +1,6 @@
-﻿#nullable enable
-using System.Windows.Media;
+﻿using System.Windows.Media;
+
+#nullable enable
 
 namespace SpectrumNet
 {
@@ -187,10 +188,7 @@ namespace SpectrumNet
         #region Initialization Methods
         private void InitializeComponents()
         {
-            if (spectrumCanvas != null)
-            {
-                RenderElement = spectrumCanvas;
-            }
+            RenderElement = spectrumCanvas ?? throw new InvalidOperationException("spectrumCanvas is null");
 
             _spectrumStyles = new SpectrumBrushes();
             _disposables = new CompositeDisposable();
@@ -199,83 +197,98 @@ namespace SpectrumNet
             renderTimer.Tick += (_, _) => RenderElement?.InvalidateVisual();
             renderTimer.Start();
 
-            if (_gainParameters != null)
-            {
-                _analyzer = new SpectrumAnalyzer(new FftProcessor(), new SpectrumConverter(_gainParameters), SynchronizationContext.Current);
-            }
+            _gainParameters ??= new GainParameters();
+            _analyzer = new SpectrumAnalyzer(
+                new FftProcessor(),
+                new SpectrumConverter(_gainParameters),
+                SynchronizationContext.Current ?? throw new InvalidOperationException("SynchronizationContext.Current is null"));
 
-            if (this != null)
-            {
-                _captureManager = new AudioCaptureManager(this);
-            }
+            _captureManager = new AudioCaptureManager(this);
 
-            if (_spectrumStyles != null && RenderElement != null)
-            {
-                _renderer = new Renderer(_spectrumStyles, this, _analyzer ?? throw new ArgumentNullException(nameof(_analyzer)), RenderElement);
-            }
+            _renderer = new Renderer(
+                _spectrumStyles ?? throw new InvalidOperationException("_spectrumStyles is null"),
+                this,
+                _analyzer,
+                RenderElement);
 
             SelectedStyle = MwConstants.DefaultStyle;
         }
 
         private void SetupEventHandlers()
         {
-            RenderElement!.PaintSurface += OnPaintSurface;
+            if (RenderElement is null)
+                throw new InvalidOperationException("RenderElement is null");
+
+            RenderElement.PaintSurface += OnPaintSurface;
             SizeChanged += OnWindowSizeChanged;
             StateChanged += OnStateChanged;
             MouseDoubleClick += OnWindowMouseDoubleClick;
             Closed += OnWindowClosed;
-
         }
         #endregion
 
         #region Event Handlers
-        private void OnStateChanged(object sender, EventArgs e)
+        private void OnStateChanged(object? sender, EventArgs e)
         {
-            if (MaximizeButton != null && MaximizeIcon != null)
-            {
-                if (this.WindowState == WindowState.Maximized)
-                {
-                    MaximizeIcon.Data = Geometry.Parse("M0,0 L20,0 L20,20 L0,20 Z");
-                }
-                else
-                {
-                    MaximizeIcon.Data = Geometry.Parse("M2,2 H18 V18 H2 Z");
-                }
-            }
+            if (MaximizeButton is null || MaximizeIcon is null) return;
+
+            MaximizeIcon.Data = Geometry.Parse(WindowState == WindowState.Maximized
+                ? "M0,0 L20,0 L20,20 L0,20 Z"
+                : "M2,2 H18 V18 H2 Z");
         }
 
         private void ConfigureTheme()
         {
-            ThemeManager.Instance.RegisterWindow(this);
-            ThemeManager.Instance.PropertyChanged += (_, e) =>
+            var themeManager = ThemeManager.Instance;
+            themeManager.RegisterWindow(this);
+            themeManager.PropertyChanged += (_, e) =>
             {
                 if (e.PropertyName == nameof(ThemeManager.IsDarkTheme))
+                {
                     OnPropertyChanged(nameof(IsDarkTheme));
+                }
             };
         }
 
-        private void UpdateProperties() => OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
+        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e) =>
+            ThemeManager.Instance.ToggleTheme();
 
-        private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) => _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+        private void UpdateProperties() =>
+            OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) => _renderer?.RenderFrame(sender, e);
+        private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) =>
+            _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) =>
+            _renderer?.RenderFrame(sender, e);
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            switch (sender)
+            if (sender is not ComboBox comboBox) return;
+
+            switch (comboBox.Name)
             {
-                case ComboBox { Name: nameof(StyleComboBox) } when SelectedStyle != null:
-                    var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
-                    _renderer.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
+                case nameof(StyleComboBox):
+                    if (SelectedStyle != null && _spectrumStyles != null)
+                    {
+                        var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
+                        _renderer?.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
+                    }
                     break;
 
-                case ComboBox { Name: nameof(RenderStyleComboBox) } when RenderStyleComboBox.SelectedValue is RenderStyle renderStyle:
-                    _selectedDrawingType = renderStyle;
-                    _renderer?.UpdateRenderStyle(renderStyle);
+                case nameof(RenderStyleComboBox):
+                    if (RenderStyleComboBox?.SelectedValue is RenderStyle renderStyle)
+                    {
+                        _selectedDrawingType = renderStyle;
+                        _renderer?.UpdateRenderStyle(renderStyle);
+                    }
                     break;
 
-                case ComboBox { Name: nameof(FftWindowTypeComboBox) } when FftWindowTypeComboBox.SelectedValue is FftWindowType windowType:
-                    SelectedFftWindowType = windowType;
+                case nameof(FftWindowTypeComboBox):
+                    if (FftWindowTypeComboBox?.SelectedValue is FftWindowType windowType)
+                    {
+                        SelectedFftWindowType = windowType;
+                    }
                     break;
             }
             InvalidateVisuals();
@@ -284,46 +297,30 @@ namespace SpectrumNet
         private void OnWindowClosed(object? sender, EventArgs e)
         {
             if (IsOverlayActive) CloseOverlay();
+
             _renderer?.Dispose();
             _analyzer?.Dispose();
             _captureManager?.Dispose();
             _disposables?.Dispose();
         }
 
-        private void CloseWindow() => this.Close();
-
-        private void OnOpenPopupButtonClick(object sender, RoutedEventArgs e) => IsPopupOpen = !IsPopupOpen;
-
-        private void OnOpenSettingsButtonClick(object sender, RoutedEventArgs e) => new SettingsWindow().ShowDialog();
+        private void CloseWindow() => Close();
+        private void MinimizeWindow() => WindowState = WindowState.Minimized;
+        private void MaximizeWindow() => WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
 
         private void OnWindowDrag(object sender, MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left)
-                this.DragMove();
+            if (e.ChangedButton == MouseButton.Left) DragMove();
         }
 
-        private void MinimizeWindow() => this.WindowState = WindowState.Minimized;
-
-        private void MaximizeWindow()
-        {
-            if (this.WindowState == WindowState.Maximized)
-            {
-                this.WindowState = WindowState.Normal;
-            }
-            else
-            {
-                this.WindowState = WindowState.Maximized;
-            }
-        }
-
-        private void ToggleWindowState() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-
-        private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e)
+        private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton == MouseButton.Left)
             {
                 e.Handled = true;
-                ToggleWindowState();
+                MaximizeWindow();
             }
         }
 
@@ -347,68 +344,69 @@ namespace SpectrumNet
             }
         }
 
-        private async void OnButtonClick(object sender, RoutedEventArgs e)
+        private void OnButtonClick(object sender, RoutedEventArgs e)
         {
             if (sender is not Button button) return;
 
-            var actions = new Dictionary<string, Func<Task>>
-        {
-            { "StartCaptureButton", StartCaptureAsync },
-            { "StopCaptureButton", StopCaptureAsync },
-            { "OverlayButton", () => { OnOverlayButtonClick(sender, e); return Task.CompletedTask; } },
-            { "OpenSettingsButton", () => { OnOpenSettingsButtonClick(sender, e); return Task.CompletedTask; } },
-            { "OpenPopupButton", () => { OnOpenPopupButtonClick(sender, e); return Task.CompletedTask; } },
-            { "MinimizeButton", () => { MinimizeWindow(); return Task.CompletedTask; } },
-            { "MaximizeButton", () => { MaximizeWindow(); return Task.CompletedTask; } },
-            { "CloseButton", () => { CloseWindow(); return Task.CompletedTask; } }
-        };
-
-            if (actions.TryGetValue(button.Name, out var action))
+            var buttonActions = new Dictionary<string, Action>
             {
-                await action();
-            }
+                ["StartCaptureButton"] = async () => await StartCaptureAsync(),
+                ["StopCaptureButton"] = async () => await StopCaptureAsync(),
+                ["OverlayButton"] = () => OnOverlayButtonClick(sender, e),
+                ["OpenSettingsButton"] = () => Dispatcher.Invoke(() => new SettingsWindow().ShowDialog()),
+                ["OpenPopupButton"] = () => { IsPopupOpen = !IsPopupOpen; },
+                ["MinimizeButton"] = () => Dispatcher.Invoke(MinimizeWindow),
+                ["MaximizeButton"] = () => Dispatcher.Invoke(MaximizeWindow),
+                ["CloseButton"] = () => Dispatcher.Invoke(CloseWindow)
+            };
+
+            if (buttonActions.TryGetValue(button.Name, out var action))
+                action();
         }
 
-        private void OnOverlayButtonClick(object sender, RoutedEventArgs e) =>
-            (IsOverlayActive ? (Action)CloseOverlay : OpenOverlay)();
-
-        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e) =>
-            ThemeManager.Instance.ToggleTheme();
-
-        private void OpenOverlay()
+        private void OnOverlayButtonClick(object sender, RoutedEventArgs e)
         {
-            if (_overlayWindow == null)
-            {
-                _overlayWindow = new OverlayWindow(this, new OverlayConfiguration
-                {
-                    RenderInterval = MwConstants.RenderIntervalMs,
-                    IsTopmost = true,
-                    ShowInTaskbar = false
-                });
-
-                _overlayWindow.Closed += (_, _) => OnOverlayClosed();
-                _overlayWindow.Show();
-                IsOverlayActive = true;
-            }
-
-            UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth, (int)SystemParameters.PrimaryScreenHeight);
+            if (IsOverlayActive)
+                CloseOverlay();
+            else
+                Dispatcher.Invoke(OpenOverlay);
         }
+
 
         private void OnOverlayClosed() => IsOverlayActive = false;
 
-        public void CloseOverlay()
+        private void OpenOverlay()
         {
-            if (_overlayWindow != null)
-            {
-                _overlayWindow.Close();
-                _overlayWindow.Dispose();
-                _overlayWindow = null;
-            }
+            if (_overlayWindow != null) return;
 
+            _overlayWindow = new OverlayWindow(this, new OverlayConfiguration
+            {
+                RenderInterval = MwConstants.RenderIntervalMs,
+                IsTopmost = true,
+                ShowInTaskbar = false
+            });
+
+            _overlayWindow.Closed += (_, _) => OnOverlayClosed();
+            _overlayWindow.Show();
+            IsOverlayActive = true;
+
+            UpdateRendererDimensions(
+                (int)SystemParameters.PrimaryScreenWidth,
+                (int)SystemParameters.PrimaryScreenHeight);
+        }
+
+        private void CloseOverlay()
+        {
+            if (_overlayWindow == null) return;
+
+            _overlayWindow.Close();
+            _overlayWindow.Dispose();
+            _overlayWindow = null;
             IsOverlayActive = false;
         }
 
-        private void UpdateRendererDimensions(int? width, int? height) => _renderer?.UpdateRenderDimensions(width ?? 0, height ?? 0);
+        private void UpdateRendererDimensions(int? width, int? height) =>
+            _renderer?.UpdateRenderDimensions(width ?? 0, height ?? 0);
         #endregion
 
         #region Property Handlers
