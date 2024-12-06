@@ -1,4 +1,5 @@
 ﻿global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.ObjectPool;
 global using NAudio.Dsp;
 global using NAudio.Wave;
 global using Newtonsoft.Json;
