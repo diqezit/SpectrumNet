@@ -51,20 +51,18 @@ namespace SpectrumNet
 
     public static class StyleFactory
     {
-        private static readonly IStyleCommand[] StyleCommands = new IStyleCommand[9];
-
-        static StyleFactory()
+        private static readonly IStyleCommand[] StyleCommands = new IStyleCommand[]
         {
-            StyleCommands[(int)StyleType.Gradient] = new GradientStyleCommand();
-            StyleCommands[(int)StyleType.Solid] = new SolidStyleCommand();
-            StyleCommands[(int)StyleType.Radial] = new RadialStyleCommand();
-            StyleCommands[(int)StyleType.Neon] = new NeonStyleCommand();
-            StyleCommands[(int)StyleType.Glass] = new GlassStyleCommand();
-            StyleCommands[(int)StyleType.Pattern] = new PatternStyleCommand();
-            StyleCommands[(int)StyleType.Metallic] = new MetallicStyleCommand();
-            StyleCommands[(int)StyleType.NeonOutline] = new NeonOutlineStyleCommand();
-            StyleCommands[(int)StyleType.BlueRedGradient] = new BlueRedGradientStyleCommand();
-        }
+            new GradientStyleCommand(),
+            new SolidStyleCommand(),
+            new RadialStyleCommand(),
+            new NeonStyleCommand(),
+            new GlassStyleCommand(),
+            new PatternStyleCommand(),
+            new MetallicStyleCommand(),
+            new NeonOutlineStyleCommand(),
+            new BlueRedGradientStyleCommand()
+        };
 
         public static IStyleCommand CreateStyleCommand(StyleType styleType)
         {

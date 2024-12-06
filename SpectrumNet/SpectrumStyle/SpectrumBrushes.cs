@@ -22,10 +22,17 @@ namespace SpectrumNet
         {
             var styleTypes = Enum.GetValues<StyleType>();
             if (styleTypes.Length > 10)
-                Parallel.ForEach(styleTypes, styleType => RegisterStyle(StyleFactory.CreateStyleCommand(styleType).Name, StyleFactory.CreateStyleCommand(styleType).CreateStyle()));
+                Parallel.ForEach(styleTypes, styleType =>
+                {
+                    var command = StyleFactory.CreateStyleCommand(styleType);
+                    RegisterStyle(command.Name, command.CreateStyle());
+                });
             else
                 foreach (var styleType in styleTypes)
-                    RegisterStyle(StyleFactory.CreateStyleCommand(styleType).Name, StyleFactory.CreateStyleCommand(styleType).CreateStyle());
+                {
+                    var command = StyleFactory.CreateStyleCommand(styleType);
+                    RegisterStyle(command.Name, command.CreateStyle());
+                }
         }
 
         public void RegisterStyle(string styleName, StyleDefinition definition, bool overwriteIfExists = false)
@@ -38,7 +45,7 @@ namespace SpectrumNet
                 return;
 
             if (_styles.TryAdd(styleName, definition) || overwriteIfExists)
-                _paintCache.TryRemove(styleName, out var oldPaint);
+                _paintCache.TryRemove(styleName, out _);
         }
 
         public (SKColor startColor, SKColor endColor, SKPaint paint) GetColorsAndBrush(string styleName)
@@ -63,7 +70,9 @@ namespace SpectrumNet
 
             bool removed = _styles.TryRemove(styleName, out _);
             if (removed && _paintCache.TryRemove(styleName, out var paint))
+            {
                 paint.Dispose();
+            }
             return removed;
         }
 
@@ -114,7 +123,7 @@ namespace SpectrumNet
             _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         }
 
-        public (SKColor, SKColor) GetColors() => (_startColor, _endColor);
+        public (SKColor startColor, SKColor endColor) GetColors() => (_startColor, _endColor);
 
         public SKPaint CreatePaint()
         {
@@ -122,8 +131,10 @@ namespace SpectrumNet
                 return _cachedPaint;
 
             lock (_cacheLock)
+            {
                 _cachedPaint ??= _factory(_startColor, _endColor);
-            return _cachedPaint;
+                return _cachedPaint;
+            }
         }
     }
 }
