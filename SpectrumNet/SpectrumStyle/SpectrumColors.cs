@@ -9,17 +9,19 @@ namespace SpectrumNet
 
         public static SKColor MixColors(SKColor color1, SKColor color2, float amount)
         {
-            float inverse = 1 - amount;
-            return new SKColor(
-                (byte)(color1.Red * inverse + color2.Red * amount),
-                (byte)(color1.Green * inverse + color2.Green * amount),
-                (byte)(color1.Blue * inverse + color2.Blue * amount),
-                (byte)(color1.Alpha * inverse + color2.Alpha * amount)
-            );
+            byte red = (byte)((1 - amount) * color1.Red + amount * color2.Red);
+            byte green = (byte)((1 - amount) * color1.Green + amount * color2.Green);
+            byte blue = (byte)((1 - amount) * color1.Blue + amount * color2.Blue);
+            byte alpha = (byte)((1 - amount) * color1.Alpha + amount * color2.Alpha);
+
+            return new SKColor(red, green, blue, alpha);
         }
 
-        public static SKColor ApplyOpacity(SKColor color, float opacity) =>
-            new(color.Red, color.Green, color.Blue, (byte)(AlphaMultiplier * opacity));
+        public static SKColor ApplyOpacity(SKColor color, float opacity)
+        {
+            byte alpha = (byte)(AlphaMultiplier * opacity);
+            return new SKColor(color.Red, color.Green, color.Blue, alpha);
+        }
     }
 
     public static class ColorConstants
@@ -35,45 +37,24 @@ namespace SpectrumNet
     {
         public abstract string Name { get; }
 
-        protected static SKPaint CreateBasePaint() => new()
+        protected static SKPaint CreateBasePaint()
         {
-            IsAntialias = true
-        };
+            return new SKPaint { IsAntialias = true };
+        }
 
         public abstract StyleDefinition CreateStyle();
 
-        protected static SKPaint CreateLinearGradient(
-            SKColor start,
-            SKColor end,
-            SKPoint startPoint,
-            SKPoint endPoint,
-            SKShaderTileMode tileMode = SKShaderTileMode.Clamp)
+        protected static SKPaint CreateLinearGradient(SKColor start, SKColor end, SKPoint startPoint, SKPoint endPoint, SKShaderTileMode tileMode = SKShaderTileMode.Clamp)
         {
             var paint = CreateBasePaint();
-            paint.Shader = SKShader.CreateLinearGradient(
-                startPoint,
-                endPoint,
-                new[] { start, end },
-                null,
-                tileMode
-            );
+            paint.Shader = SKShader.CreateLinearGradient(startPoint, endPoint, new SKColor[] { start, end }, null, tileMode);
             return paint;
         }
 
-        protected static SKPaint CreateRadialGradient(
-            SKColor start,
-            SKColor end,
-            SKPoint center,
-            float radius)
+        protected static SKPaint CreateRadialGradient(SKColor start, SKColor end, SKPoint center, float radius)
         {
             var paint = CreateBasePaint();
-            paint.Shader = SKShader.CreateRadialGradient(
-                center,
-                radius,
-                new[] { start, end },
-                new float[] { 0, 1 },
-                SKShaderTileMode.Clamp
-            );
+            paint.Shader = SKShader.CreateRadialGradient(center, radius, new SKColor[] { start, end }, new float[] { 0f, 1f }, SKShaderTileMode.Clamp);
             return paint;
         }
     }
@@ -197,23 +178,20 @@ namespace SpectrumNet
 
     public sealed class NeonOutlineStyleCommand : BaseStyleCommand
     {
+        private static readonly SKPoint GradientStart = new(0, 0), GradientEnd = new(0, 1);
+        private static readonly SKMaskFilter NeonBlurFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Solid, 4.0f);
+
         public override string Name => "NeonOutline";
 
-        public override StyleDefinition CreateStyle() =>
-            new(SKColors.Green, SKColors.Magenta, (start, end) =>
+        public override StyleDefinition CreateStyle() => new(
+            SKColors.Green, SKColors.Magenta, (start, end) =>
             {
-                var paint = CreateLinearGradient(
-                    start, end,
-                    new SKPoint(0, 0),
-                    new SKPoint(0, 1)
-                );
-                // Configure for outline effect
+                var paint = CreateLinearGradient(start, end, GradientStart, GradientEnd);
                 paint.Style = SKPaintStyle.Stroke;
                 paint.StrokeWidth = 4;
                 paint.StrokeCap = SKStrokeCap.Round;
                 paint.StrokeJoin = SKStrokeJoin.Round;
-                // Add neon-like blur effect
-                paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Solid, 4.0f);
+                paint.MaskFilter = NeonBlurFilter;
                 return paint;
             });
     }
@@ -285,20 +263,20 @@ namespace SpectrumNet
             var paint = CreateBasePaint();
 
             paint.Shader = SKShader.CreateLinearGradient(
-                new SKPoint(0, 0),   
-                new SKPoint(1, 1),   
+                new SKPoint(0, 0),
+                new SKPoint(1, 1),
                 new[]
                 {
-                baseColor,       
-                highlightColor,   
-                baseColor         
+                baseColor,
+                highlightColor,
+                baseColor
                 },
                 new float[] { 0f, 0.3f, 1f },
                 SKShaderTileMode.Clamp
             );
 
             paint.ColorFilter = SKColorFilter.CreateBlendMode(
-                SKColors.White.WithAlpha(50),  
+                SKColors.White.WithAlpha(50),
                 SKBlendMode.Overlay
             );
 
@@ -447,20 +425,23 @@ namespace SpectrumNet
 
     public sealed class ShadowedStyleCommand : BaseStyleCommand
     {
+        private static readonly SKPoint GradientStart = new(0, 0), GradientEnd = new(0, 1);
+        private static readonly SKMaskFilter BlurMaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Outer, 5.0f);
+
         public override string Name => "Shadowed";
 
-        public override StyleDefinition CreateStyle() =>
-            new(SKColors.Gray, SKColors.DarkGray, (start, end) =>
+        public override StyleDefinition CreateStyle() => new(
+            SKColors.Gray, SKColors.DarkGray, (start, end) =>
             {
                 var paint = CreateBasePaint();
                 paint.Shader = SKShader.CreateLinearGradient(
-                    new SKPoint(0, 0),
-                    new SKPoint(0, 1),
+                    GradientStart,
+                    GradientEnd,
                     new[] { start, end },
                     null,
                     SKShaderTileMode.Clamp
-                );
-                paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Outer, 5.0f);
+                    );
+                paint.MaskFilter = BlurMaskFilter;
                 return paint;
             });
     }

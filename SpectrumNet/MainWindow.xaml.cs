@@ -154,9 +154,18 @@ namespace SpectrumNet
 
         #region Public Properties
         public static bool IsDarkTheme => ThemeManager.Instance.IsDarkTheme;
-        public static IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>();
-        public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles => _spectrumStyles?.Styles ?? new Dictionary<string, StyleDefinition>();
-        public static IEnumerable<FftWindowType> AvailableFftWindowTypes => Enum.GetValues(typeof(FftWindowType)).Cast<FftWindowType>();
+        public static IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>()
+            .Cast<RenderStyle>()
+            .OrderBy(style => style.ToString());
+
+        public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles => _spectrumStyles!.Styles
+            .OrderBy(kvp => kvp.Key)
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+        public static IEnumerable<FftWindowType> AvailableFftWindowTypes => Enum.GetValues(typeof(FftWindowType))
+            .Cast<FftWindowType>()
+            .OrderBy(windowType => windowType.ToString());
+
         public SKElement? RenderElement { get; private set; }
         public bool CanStartCapture => _captureManager is not null && !IsRecording;
         #endregion
