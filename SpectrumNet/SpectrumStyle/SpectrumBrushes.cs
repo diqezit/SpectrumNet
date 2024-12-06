@@ -20,17 +20,17 @@ namespace SpectrumNet
 
         private void RegisterDefaultStyles()
         {
-            var styleTypes = Enum.GetValues<StyleType>();
-            if (styleTypes.Length > 10)
-                Parallel.ForEach(styleTypes, styleType =>
+            var styleNames = StyleFactory.GetAllStyleNames();
+            if (styleNames.Count() > 10)
+                Parallel.ForEach(styleNames, styleName =>
                 {
-                    var command = StyleFactory.CreateStyleCommand(styleType);
+                    var command = StyleFactory.CreateStyleCommand(styleName);
                     RegisterStyle(command.Name, command.CreateStyle());
                 });
             else
-                foreach (var styleType in styleTypes)
+                foreach (var styleName in styleNames)
                 {
-                    var command = StyleFactory.CreateStyleCommand(styleType);
+                    var command = StyleFactory.CreateStyleCommand(styleName);
                     RegisterStyle(command.Name, command.CreateStyle());
                 }
         }
@@ -71,7 +71,7 @@ namespace SpectrumNet
             bool removed = _styles.TryRemove(styleName, out _);
             if (removed && _paintCache.TryRemove(styleName, out var paint))
             {
-                paint.Dispose();
+                paint?.Dispose();
             }
             return removed;
         }
@@ -80,7 +80,7 @@ namespace SpectrumNet
         {
             ValidateDisposed();
             foreach (var paint in _paintCache.Values)
-                paint.Dispose();
+                paint?.Dispose();
             _styles.Clear();
             _paintCache.Clear();
         }
@@ -98,7 +98,7 @@ namespace SpectrumNet
 
             _disposed = true;
             foreach (var paint in _paintCache.Values)
-                paint.Dispose();
+                paint?.Dispose();
             _styles.Clear();
             _paintCache.Clear();
             GC.SuppressFinalize(this);
@@ -127,14 +127,47 @@ namespace SpectrumNet
 
         public SKPaint CreatePaint()
         {
-            if (_cachedPaint != null)
+            if (_cachedPaint is not null)
                 return _cachedPaint;
 
             lock (_cacheLock)
             {
                 _cachedPaint ??= _factory(_startColor, _endColor);
-                return _cachedPaint;
+                return _cachedPaint ?? throw new InvalidOperationException("Factory failed to create paint.");
             }
         }
+    }
+
+    public static class StyleFactory
+    {
+        private static readonly Dictionary<string, IStyleCommand> StyleCommands = new Dictionary<string, IStyleCommand>();
+
+        static StyleFactory()
+        {
+            var commandTypes = Assembly.GetCallingAssembly().GetTypes()
+                .Where(type => typeof(IStyleCommand).IsAssignableFrom(type) && !type.IsAbstract);
+
+            foreach (var type in commandTypes)
+            {
+                var command = (IStyleCommand)Activator.CreateInstance(type);
+                StyleCommands[command.Name] = command;
+            }
+        }
+
+        public static IStyleCommand CreateStyleCommand(string styleName)
+        {
+            if (StyleCommands.TryGetValue(styleName, out var command))
+                return command;
+            else
+                throw new ArgumentException($"Unknown style name: {styleName}", nameof(styleName));
+        }
+
+        public static IEnumerable<string> GetAllStyleNames() => StyleCommands.Keys;
+    }
+
+    public interface IStyleCommand
+    {
+        string Name { get; }
+        StyleDefinition CreateStyle();
     }
 }

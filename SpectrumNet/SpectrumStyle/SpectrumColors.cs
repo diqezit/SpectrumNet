@@ -2,41 +2,6 @@
 
 namespace SpectrumNet
 {
-    public enum StyleType
-    {
-        Gradient,
-        Solid,
-        Radial,
-        Neon,
-        RadiantGlass,
-        Minimalist,
-        Metallic,
-        NeonOutline,
-        EnhancedGradient,
-
-        // New styles
-        Shiny,
-        DarkGradient,
-        LightPattern,
-        FrostedGlass,
-        MetallicGradient,
-        Rainbow,
-        Shadowed,
-        Texture,
-        Glow,
-        Mosaic,
-        Sparkle,
-        SoftGradient,
-        DarkNeon,
-        Vaporwave,
-        EmeraldGlow,
-    }
-
-    public interface IStyleCommand
-    {
-        string Name { get; }
-        StyleDefinition CreateStyle();
-    }
 
     public static class ColorUtilities
     {
@@ -64,44 +29,6 @@ namespace SpectrumNet
         public static readonly SKColor Secondary = new(0xFF, 0x40, 0x81, 0xFF);
         public static readonly SKColor Background = new(0x1E, 0x1E, 0x1E, 0xFF);
         public static readonly SKColor Surface = new(0x25, 0x25, 0x25, 0xFF);
-    }
-
-    public static class StyleFactory
-    {
-        private static readonly IStyleCommand[] StyleCommands = new IStyleCommand[]
-        {
-        new GradientStyleCommand(),
-        new SolidStyleCommand(),
-        new RadialStyleCommand(),
-        new NeonStyleCommand(),
-        new RadiantGlassStyleCommand(),
-        new MinimalistPatternStyleCommand(),
-        new MetallicStyleCommand(),
-        new NeonOutlineStyleCommand(),
-        new EnhancedGradientStyleCommand(),
-        new ShinyStyleCommand(),
-        new DarkGradientStyleCommand(),
-        new LightPatternStyleCommand(),
-        new FrostedGlassStyleCommand(),
-        new MetallicGradientStyleCommand(),
-        new RainbowStyleCommand(),
-        new ShadowedStyleCommand(),
-        new TextureStyleCommand(),
-        new GlowStyleCommand(),
-        new MosaicStyleCommand(),
-        new SparkleStyleCommand(),
-        new SoftGradientStyleCommand(),
-        new DarkNeonStyleCommand(),
-        new VaporwaveStyleCommand(),
-        new EmeraldGlowStyleCommand(),
-        };
-
-        public static IStyleCommand CreateStyleCommand(StyleType styleType)
-        {
-            if (!Enum.IsDefined(typeof(StyleType), styleType))
-                throw new ArgumentException($"Unknown style type: {styleType}", nameof(styleType));
-            return StyleCommands[(int)styleType];
-        }
     }
 
     public abstract class BaseStyleCommand : IStyleCommand
