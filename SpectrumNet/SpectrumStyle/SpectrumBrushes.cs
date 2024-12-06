@@ -21,18 +21,26 @@ namespace SpectrumNet
         private void RegisterDefaultStyles()
         {
             var styleNames = StyleFactory.GetAllStyleNames();
+
+            if (styleNames.Any(name => name is null))
+                throw new InvalidOperationException("StyleFactory returned null style names.");
+
             if (styleNames.Count() > 10)
+            {
                 Parallel.ForEach(styleNames, styleName =>
                 {
                     var command = StyleFactory.CreateStyleCommand(styleName);
                     RegisterStyle(command.Name, command.CreateStyle());
                 });
+            }
             else
+            {
                 foreach (var styleName in styleNames)
                 {
                     var command = StyleFactory.CreateStyleCommand(styleName);
                     RegisterStyle(command.Name, command.CreateStyle());
                 }
+            }
         }
 
         public void RegisterStyle(string styleName, StyleDefinition definition, bool overwriteIfExists = false)
@@ -133,7 +141,9 @@ namespace SpectrumNet
             lock (_cacheLock)
             {
                 _cachedPaint ??= _factory(_startColor, _endColor);
-                return _cachedPaint ?? throw new InvalidOperationException("Factory failed to create paint.");
+                if (_cachedPaint == null)
+                    throw new InvalidOperationException("Factory failed to create paint.");
+                return _cachedPaint;
             }
         }
     }
@@ -149,17 +159,21 @@ namespace SpectrumNet
 
             foreach (var type in commandTypes)
             {
-                var command = (IStyleCommand)Activator.CreateInstance(type);
+                if (Activator.CreateInstance(type) is not IStyleCommand command)
+                    throw new InvalidOperationException($"Failed to create instance of {type.FullName}.");
+
+                if (command.Name is null)
+                    throw new InvalidOperationException("IStyleCommand implementation has null Name.");
+
                 StyleCommands[command.Name] = command;
             }
         }
 
         public static IStyleCommand CreateStyleCommand(string styleName)
         {
-            if (StyleCommands.TryGetValue(styleName, out var command))
-                return command;
-            else
-                throw new ArgumentException($"Unknown style name: {styleName}", nameof(styleName));
+            return StyleCommands.TryGetValue(styleName, out var command) && command is not null
+                ? command
+                : throw new ArgumentException($"Unknown style name: {styleName}", nameof(styleName));
         }
 
         public static IEnumerable<string> GetAllStyleNames() => StyleCommands.Keys;
