@@ -81,31 +81,5 @@
                 _ => throw new ArgumentException($"Unknown render style: {style}")
             };
         }
-
-        public static void Cleanup()
-        {
-            lock (_lock)
-            {
-                foreach (var (style, renderer) in _rendererCache.ToList())
-                {
-                    renderer.Dispose();
-                    _rendererCache.Remove(style);
-                    _initializedRenderers.Remove(style);
-                }
-            }
-        }
-
-        public static void RemoveRenderer(RenderStyle style)
-        {
-            lock (_lock)
-            {
-                if (_rendererCache.TryGetValue(style, out var renderer))
-                {
-                    renderer.Dispose();
-                    _rendererCache.Remove(style);
-                    _initializedRenderers.Remove(style);
-                }
-            }
-        }
     }
 }
