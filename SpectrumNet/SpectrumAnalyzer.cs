@@ -1,8 +1,4 @@
-﻿using MathNet.Numerics;
-using MathNet.Numerics.IntegralTransforms;
-using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
-using Complex = NAudio.Dsp.Complex;
+﻿using Complex = NAudio.Dsp.Complex;
 
 #nullable enable
 
@@ -203,9 +199,8 @@ namespace SpectrumNet
     public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
     {
         private readonly int _fftSize;
-        private readonly Complex[] _buffer;
+        private readonly Complex[] _buffer; // Используем NAudio.Dsp.Complex
         private readonly float[] _window;
-        private readonly Complex32[] _mathNetBuffer;
         private readonly Channel<(float[] Samples, int SampleRate)> _processingChannel;
         private readonly CancellationTokenSource _cts;
         private readonly Task _processingTask;
@@ -221,9 +216,8 @@ namespace SpectrumNet
                 throw new ArgumentException("FFT size must be a positive power of 2.");
 
             _fftSize = fftSize;
-            _buffer = ArrayPool<Complex>.Shared.Rent(fftSize);
+            _buffer = new Complex[fftSize]; // Используем NAudio.Dsp.Complex
             _window = GenerateWindow(fftSize);
-            _mathNetBuffer = new Complex32[fftSize];
             _processingChannel = Channel.CreateUnbounded<(float[], int)>(new UnboundedChannelOptions { SingleReader = true });
             _cts = new CancellationTokenSource();
             _processingTask = Task.Run(ProcessSamplesAsync);
@@ -231,38 +225,48 @@ namespace SpectrumNet
 
         private float[] GenerateWindow(int size)
         {
-            var window = new float[size];
-            Func<int, float> windowFunc = WindowType switch
-            {
-                FftWindowType.Hann => i => (float)(0.5 * (1.0 - Math.Cos(2.0 * Math.PI * i / (size - 1)))),
-                FftWindowType.Hamming => i => (float)(0.54 - 0.46 * Math.Cos(2.0 * Math.PI * i / (size - 1))),
-                FftWindowType.Blackman => i => (float)(0.42 - 0.5 * Math.Cos(2.0 * Math.PI * i / (size - 1)) + 0.08 * Math.Cos(4.0 * Math.PI * i / (size - 1))),
-                _ => _ => 1.0f
-            };
+            // Карта оконных функций для удобства добавления новых
+            var windowFunctions = new Dictionary<FftWindowType, Func<int, int, float>>
+        {
+            { FftWindowType.Hann, (i, n) => 0.5f * (1f - MathF.Cos(2f * MathF.PI * i / (n - 1))) },
+            { FftWindowType.Hamming, (i, n) => 0.54f - 0.46f * MathF.Cos(2f * MathF.PI * i / (n - 1)) },
+            { FftWindowType.Blackman, (i, n) => 0.42f - 0.5f * MathF.Cos(2f * MathF.PI * i / (n - 1)) + 0.08f * MathF.Cos(4f * MathF.PI * i / (n - 1)) },
+            { FftWindowType.Bartlett, (i, n) => 2f / (n - 1) * ((n - 1) / 2f - MathF.Abs(i - (n - 1) / 2f)) },
+            { FftWindowType.Kaiser, (i, n) => KaiserWindow(i, n, beta: 5f) }
+        };
 
-            if (Avx.IsSupported && size >= Vector256<float>.Count)
+            if (!windowFunctions.TryGetValue(WindowType, out var windowFunc))
+                throw new NotSupportedException($"Window type {WindowType} is not supported.");
+
+            var window = new float[size];
+            for (int i = 0; i < size; i++)
             {
-                unsafe
-                {
-                    fixed (float* windowPtr = window)
-                    {
-                        for (int i = 0; i <= size - Vector256<float>.Count; i += Vector256<float>.Count)
-                        {
-                            Avx.Store(windowPtr + i, Vector256.Create(
-                                windowFunc(i), windowFunc(i + 1), windowFunc(i + 2), windowFunc(i + 3),
-                                windowFunc(i + 4), windowFunc(i + 5), windowFunc(i + 6), windowFunc(i + 7)));
-                        }
-                    }
-                }
-                for (int i = size - size % Vector256<float>.Count; i < size; i++)
-                    window[i] = windowFunc(i);
+                window[i] = windowFunc(i, size);
             }
-            else
-            {
-                for (int i = 0; i < size; i++)
-                    window[i] = windowFunc(i);
-            }
+
             return window;
+        }
+
+        private static float KaiserWindow(int i, int n, float beta)
+        {
+            // Реализация окна Кайзера
+            float alpha = (n - 1) / 2f;
+            float t = (i - alpha) / alpha;
+            return BesselI0(beta * MathF.Sqrt(1 - t * t)) / BesselI0(beta);
+        }
+
+        private static float BesselI0(float x)
+        {
+            // Аппроксимация модифицированной функции Бесселя I0
+            float sum = 1f;
+            float y = x * x / 4f;
+            float term = y;
+            for (int k = 1; term > 1e-10; k++)
+            {
+                sum += term;
+                term *= y / (k * k);
+            }
+            return sum;
         }
 
         public ValueTask AddSamplesAsync(float[] samples, int sampleRate)
@@ -309,53 +313,23 @@ namespace SpectrumNet
             catch (OperationCanceledException) { /* ignore */ }
         }
 
-        private unsafe void ApplyWindowAndCopy(Span<float> samples)
+        private void ApplyWindowAndCopy(Span<float> samples)
         {
-            if (Avx.IsSupported && samples.Length >= Vector256<float>.Count)
+            for (int i = 0; i < samples.Length; i++)
             {
-                fixed (float* windowPtr = &_window[_sampleCount])
-                fixed (float* samplesPtr = &MemoryMarshal.GetReference(samples))
-                fixed (Complex* bufferPtr = &_buffer[_sampleCount])
+                int bufferIndex = _sampleCount + i;
+                _buffer[bufferIndex] = new Complex
                 {
-                    int i = 0;
-                    for (; i <= samples.Length - Vector256<float>.Count; i += Vector256<float>.Count)
-                    {
-                        var result = Avx.Multiply(
-                            Avx.LoadVector256(samplesPtr + i),
-                            Avx.LoadVector256(windowPtr + i));
-
-                        for (int j = 0; j < Vector256<float>.Count; j++)
-                        {
-                            bufferPtr[i + j].X = result.GetElement(j);
-                            bufferPtr[i + j].Y = 0;
-                        }
-                    }
-                    for (; i < samples.Length; i++)
-                    {
-                        int bufferIndex = _sampleCount + i;
-                        _buffer[bufferIndex] = new Complex { X = samples[i] * _window[bufferIndex], Y = 0 };
-                    }
-                }
-            }
-            else
-            {
-                for (int i = 0; i < samples.Length; i++)
-                {
-                    int bufferIndex = _sampleCount + i;
-                    _buffer[bufferIndex] = new Complex { X = samples[i] * _window[bufferIndex], Y = 0 };
-                }
+                    X = samples[i] * _window[bufferIndex], // X: действительная часть
+                    Y = 0 // Y: мнимая часть
+                };
             }
         }
 
         private void ProcessFft(int sampleRate)
         {
-            for (int i = 0; i < _fftSize; i++)
-                _mathNetBuffer[i] = new Complex32((float)_buffer[i].X, (float)_buffer[i].Y);
-
-            Fourier.Forward(_mathNetBuffer, FourierOptions.Matlab);
-
-            for (int i = 0; i < _fftSize; i++)
-                _buffer[i] = new Complex { X = _mathNetBuffer[i].Real, Y = _mathNetBuffer[i].Imaginary };
+            // Выполняем FFT с использованием NAudio
+            FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
 
             FftCalculated?.Invoke(this, new FftEventArgs(_buffer, sampleRate));
         }
@@ -382,12 +356,6 @@ namespace SpectrumNet
             }
             finally
             {
-                // Освобождаем ресурсы
-                if (_buffer != null)
-                {
-                    ArrayPool<Complex>.Shared.Return(_buffer);
-                }
-
                 _cts?.Dispose();
             }
         }
@@ -399,145 +367,48 @@ namespace SpectrumNet
         }
     }
 
+    public enum FftWindowType
+    {
+        Hann,
+        Hamming,
+        Blackman,
+        Bartlett,
+        Kaiser
+    }
+
     public sealed class SpectrumConverter : ISpectrumConverter
     {
         private readonly IGainParametersProvider _p;
-        private const float L10M = 10f, F4M = 4f, Z = 0f, O = 1f;
 
         public SpectrumConverter(IGainParametersProvider p)
         {
             _p = p ?? throw new ArgumentNullException(nameof(p));
         }
 
-        public unsafe float[] ConvertToSpectrum(Complex[] fft, int sr)
+        public float[] ConvertToSpectrum(Complex[] fft, int sampleRate)
         {
-            try
+            int len = fft.Length / 2;
+            var spectrum = new float[len];
+            float minDb = _p.MinDbValue, range = _p.MaxDbValue - minDb, amp = _p.AmplificationFactor;
+
+            int minIndex = Math.Max((int)(20 * (fft.Length / (float)sampleRate)), 0);
+            int maxIndex = Math.Min((int)(20000 * (fft.Length / (float)sampleRate)), len - 1);
+
+            for (int i = 0; i < len; i++)
             {
-                int len = fft.Length / 2;
-                var s = GC.AllocateUninitializedArray<float>(len, pinned: true);
-                float minDb = _p.MinDbValue, range = _p.MaxDbValue - minDb, amp = _p.AmplificationFactor;
-
-                // Определяем индексы для 20 Гц и 20 кГц
-                int minIndex = (int)(20 * (fft.Length / (float)sr));
-                int maxIndex = (int)(20000 * (fft.Length / (float)sr));
-
-                fixed (Complex* inPtr = fft)
-                fixed (float* outPtr = s)
+                if (i < minIndex || i > maxIndex)
                 {
-                    if (Avx.IsSupported && len >= 8)
-                        ProcessAvx(inPtr, outPtr, len, minDb, range, amp, minIndex, maxIndex);
-                    else if (Sse.IsSupported && len >= 4)
-                        ProcessSse(inPtr, outPtr, len, minDb, range, amp, minIndex, maxIndex);
-                    else
-                        ProcessScalar(inPtr, outPtr, len, minDb, range, amp, minIndex, maxIndex);
-                }
-                return s;
-            }
-            catch (ArgumentNullException ex)
-            {
-                Log.Error(ex, "ArgumentNullException in ConvertToSpectrum: {Message}", ex.Message);
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Unexpected error in ConvertToSpectrum: {Message}", ex.Message);
-                throw;
-            }
-        }
-
-        private static unsafe void ProcessAvx(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp, int minIndex, int maxIndex)
-        {
-            try
-            {
-                int i = 0, aligned = len - (len % 8);
-
-                for (; i < aligned; i += 8)
-                {
-                    if (i < minIndex || i > maxIndex)
-                        continue;
-
-                    var c0 = Avx.LoadVector256((float*)(inPtr + i));
-                    var c1 = Avx.LoadVector256((float*)(inPtr + i + 4));
-                    var mags = Avx.Multiply(Avx.Add(Avx.Multiply(c0, c0), Avx.Multiply(c1, c1)), Vector256.Create(F4M));
-
-                    float* m = (float*)&mags;
-                    for (int j = 0; j < 8; j++)
-                    {
-                        m[j] = m[j] < float.Epsilon ? 0f : (L10M * MathF.Log(m[j]) - minDb) / range * amp;
-                        m[j] = Math.Clamp(m[j], Z, O);
-                    }
-
-                    Avx.Store(outPtr + i, Avx.LoadVector256(m));
+                    spectrum[i] = 0;
+                    continue;
                 }
 
-                ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp, minIndex, maxIndex);
+                float magnitude = fft[i].X * fft[i].X + fft[i].Y * fft[i].Y;
+                magnitude = magnitude == 0 ? float.Epsilon : magnitude;
+                float db = 10 * MathF.Log10(magnitude);
+                spectrum[i] = Math.Clamp((db - minDb) / range * amp, 0, 1);
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Error in ProcessAvx: {Message}", ex.Message);
-                throw;
-            }
+
+            return spectrum;
         }
-
-        private static unsafe void ProcessSse(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp, int minIndex, int maxIndex)
-        {
-            try
-            {
-                int i = 0, aligned = len - (len % 4);
-
-                for (; i < aligned; i += 4)
-                {
-                    if (i < minIndex || i > maxIndex)
-                        continue;
-
-                    var c = Sse.LoadVector128((float*)(inPtr + i));
-                    var mags = Sse.Multiply(Sse.Add(Sse.Multiply(c, c), Sse.Multiply(c, c)), Vector128.Create(F4M));
-
-                    float* m = (float*)&mags;
-                    for (int j = 0; j < 4; j++)
-                    {
-                        m[j] = m[j] < float.Epsilon ? 0f : (L10M * MathF.Log(m[j]) - minDb) / range * amp;
-                        m[j] = Math.Clamp(m[j], Z, O);
-                    }
-
-                    Sse.Store(outPtr + i, Sse.LoadVector128(m));
-                }
-
-                ProcessScalar(inPtr + i, outPtr + i, len - i, minDb, range, amp, minIndex, maxIndex);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Error in ProcessSse: {Message}", ex.Message);
-                throw;
-            }
-        }
-
-        private static unsafe void ProcessScalar(Complex* inPtr, float* outPtr, int len, float minDb, float range, float amp, int minIndex, int maxIndex)
-        {
-            try
-            {
-                for (int i = 0; i < len; i++)
-                {
-                    if (i < minIndex || i > maxIndex)
-                        continue;
-
-                    float mag = inPtr[i].X * inPtr[i].X + inPtr[i].Y * inPtr[i].Y;
-                    if (i != 0 && i != len - 1) mag *= F4M;
-                    outPtr[i] = mag < float.Epsilon ? Z : Math.Clamp((L10M * MathF.Log10(mag) - minDb) / range * amp, Z, O);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Error in ProcessScalar: {Message}", ex.Message);
-                throw;
-            }
-        }
-    }
-
-    public enum FftWindowType
-    {
-        Hann,
-        Hamming,
-        Blackman,
     }
 }
