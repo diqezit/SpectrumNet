@@ -4,10 +4,28 @@
     {
         private static DotsRenderer? _instance;
         private bool _isInitialized;
+        private float _dotRadiusMultiplier = 1f;
+        private volatile bool _disposed;
 
-        // Константы
         private const float MinIntensityThreshold = 0.01f;
         private const float MinDotRadius = 2f;
+        private const float MaxDotMultiplier = 0.5f;
+        private const float AlphaMultiplier = 255f;
+        private const int AlphaBins = 16;
+
+        // Smoothing constants and previous spectrum storage
+        private const float SmoothingFactorNormal = 0.3f;
+        private const float SmoothingFactorOverlay = 0.5f;
+        private float _smoothingFactor = SmoothingFactorNormal;
+        private float[]? _previousSpectrum;
+
+        private struct CircleData
+        {
+            public float X;
+            public float Y;
+            public float Radius;
+            public float Intensity;
+        }
 
         private DotsRenderer() { }
 
@@ -15,96 +33,175 @@
 
         public void Initialize()
         {
-            if (_isInitialized) return;
-            _isInitialized = true;
-            Log.Debug("DotsRenderer initialized");
+            if (!_isInitialized)
+            {
+                _isInitialized = true;
+                Log.Debug("DotsRenderer initialized");
+                _previousSpectrum = null; // Initialize previous spectrum
+            }
         }
 
         public void Configure(bool isOverlayActive)
         {
-            // Возможность настройки поведения рендера, если потребуется
+            _dotRadiusMultiplier = isOverlayActive ? 1.5f : 1f;
+            _smoothingFactor = isOverlayActive ? SmoothingFactorOverlay : SmoothingFactorNormal;
         }
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
-                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? basePaint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || basePaint == null)
+            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 ||
+                basePaint == null || info.Width <= 0 || info.Height <= 0)
             {
-                Log.Warning("Invalid render parameters or DotsRenderer is not initialized.");
+                Log.Warning("Invalid render parameters or renderer not initialized.");
                 return;
             }
 
-            // Масштабирование спектра
-            int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
+            int halfSpectrumLength = spectrum.Length / 2;
+            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            float[] smoothedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
+            float canvasHeight = info.Height;
 
-            // Динамическая настройка ширины точек
-            float totalWidth = barWidth + barSpacing;
-            if (actualBarCount < 50)
-                totalWidth *= 50f / actualBarCount;
+            using var dotPaint = basePaint.Clone();
+            dotPaint.IsAntialias = true;
+            dotPaint.FilterQuality = SKFilterQuality.High;
 
-            RenderDots(canvas, scaledSpectrum.AsSpan(), info, totalWidth, barWidth, actualBarCount, basePaint);
+            List<CircleData> circles = CalculateCircleData(smoothedSpectrum, info, barWidth * MaxDotMultiplier * _dotRadiusMultiplier, barWidth + barSpacing, canvasHeight);
+            List<List<CircleData>> circleBins = GroupCirclesByAlphaBin(circles);
 
-            // Отрисовка информации о производительности
-            drawPerformanceInfo(canvas, info);
+            DrawCircles(canvas, circleBins, dotPaint);
+
+            drawPerformanceInfo?.Invoke(canvas, info);
         }
 
-        private float[] ScaleSpectrum(float[] spectrum, int targetCount)
+        private List<CircleData> CalculateCircleData(float[] smoothedSpectrum, SKImageInfo info, float multiplier, float totalWidth, float canvasHeight)
         {
-            int spectrumLength = spectrum.Length / 2;
+            List<CircleData> circles = new List<CircleData>();
+            for (int i = 0; i < smoothedSpectrum.Length; i++)
+            {
+                float intensity = smoothedSpectrum[i];
+                if (intensity < MinIntensityThreshold) continue;
+
+                float dotRadius = multiplier * intensity;
+                if (dotRadius < MinDotRadius)
+                    dotRadius = MinDotRadius;
+
+                float x = i * totalWidth + dotRadius;
+                float y = canvasHeight - (intensity * canvasHeight);
+
+                circles.Add(new CircleData { X = x, Y = y, Radius = dotRadius, Intensity = intensity });
+            }
+            return circles;
+        }
+
+        private List<List<CircleData>> GroupCirclesByAlphaBin(List<CircleData> circles)
+        {
+            List<List<CircleData>> circleBins = new List<List<CircleData>>(AlphaBins);
+            for (int i = 0; i < AlphaBins; i++)
+            {
+                circleBins.Add(new List<CircleData>());
+            }
+
+            foreach (var circle in circles)
+            {
+                byte alpha = (byte)(circle.Intensity * AlphaMultiplier);
+                if (alpha > 255)
+                    alpha = 255;
+
+                int binIndex = (int)(alpha / (255f / (AlphaBins - 1)));
+                if (binIndex >= AlphaBins)
+                    binIndex = AlphaBins - 1;
+
+                circleBins[binIndex].Add(circle);
+            }
+
+            return circleBins;
+        }
+
+        private void DrawCircles(SKCanvas canvas, List<List<CircleData>> circleBins, SKPaint dotPaint)
+        {
+            for (int binIndex = 0; binIndex < AlphaBins; binIndex++)
+            {
+                if (circleBins[binIndex].Count == 0)
+                    continue;
+
+                byte binAlpha = (byte)(binIndex * (255f / (AlphaBins - 1)));
+                dotPaint.Color = dotPaint.Color.WithAlpha(binAlpha);
+
+                using var path = new SKPath();
+                foreach (var circle in circleBins[binIndex])
+                {
+                    path.AddCircle(circle.X, circle.Y, circle.Radius);
+                }
+
+                canvas.DrawPath(path, dotPaint);
+            }
+        }
+
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        {
             float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)spectrumLength / targetCount;
+            float blockSize = (float)halfSpectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
-                float sum = 0;
-                int start = (int)(i * blockSize);
-                int end = (int)((i + 1) * blockSize);
+                float startFloat = i * blockSize;
+                float endFloat = (i + 1) * blockSize;
 
-                for (int j = start; j < end && j < spectrumLength; j++)
+                int start = (int)Math.Floor(startFloat);
+                int end = (int)Math.Ceiling(endFloat);
+
+                end = Math.Min(end, halfSpectrumLength);
+
+                if (start >= end)
+                    scaledSpectrum[i] = 0f;
+                else
                 {
-                    sum += spectrum[j];
+                    float sum = 0f;
+                    for (int j = start; j < end; j++)
+                        sum += spectrum[j];
+                    scaledSpectrum[i] = sum / (end - start);
                 }
-
-                scaledSpectrum[i] = sum / (end - start); // Усреднение значений в блоке
             }
 
             return scaledSpectrum;
         }
 
-        private void RenderDots(SKCanvas canvas, ReadOnlySpan<float> spectrum, SKImageInfo info,
-                                float totalWidth, float barWidth, int barCount, SKPaint basePaint)
+        private float[] SmoothSpectrum(float[] spectrum, int targetCount)
         {
-            for (int i = 0; i < barCount; i++)
+            if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
+                _previousSpectrum = new float[targetCount];
+
+            var smoothedSpectrum = new float[targetCount];
+
+            for (int i = 0; i < targetCount; i++)
             {
-                float intensity = spectrum[i];
-                if (intensity < MinIntensityThreshold) continue;
-
-                // Рассчитываем радиус точки
-                float dotRadius = Math.Max(barWidth / 2 * intensity, MinDotRadius);
-
-                // Позиция точки
-                float x = i * totalWidth + dotRadius;
-                float y = info.Height - (intensity * info.Height);
-
-                RenderMainDot(canvas, x, y, dotRadius, intensity, basePaint);
+                float currentValue = spectrum[i];
+                float smoothedValue = _previousSpectrum[i] + (currentValue - _previousSpectrum[i]) * _smoothingFactor;
+                smoothedSpectrum[i] = smoothedValue;
+                _previousSpectrum[i] = smoothedValue;
             }
+
+            return smoothedSpectrum;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void RenderMainDot(SKCanvas canvas, float x, float y, float dotRadius,
-                                   float intensity, SKPaint basePaint)
+        protected virtual void Dispose(bool disposing)
         {
-            using var dotPaint = basePaint.Clone();
-            dotPaint.Color = basePaint.Color.WithAlpha((byte)(255 * intensity));
-            canvas.DrawCircle(x, y, dotRadius, dotPaint);
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    _previousSpectrum = null;
+                }
+                _disposed = true;
+                Log.Debug("DotsRenderer disposed");
+            }
         }
 
         public void Dispose()
         {
-            _isInitialized = false;
-            Log.Debug("DotsRenderer disposed");
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
     }
 }

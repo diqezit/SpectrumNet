@@ -84,18 +84,28 @@ namespace SpectrumNet
             drawPerformanceInfo(canvas!, info);
         }
 
+        private void Dispose(bool disposing)
+        {
+            if (_isDisposed)
+                return;
+
+            if (disposing)
+            {
+                // Освобождение управляемых ресурсов
+                if (_spectrumBuffer != null) ArrayPool<float>.Shared.Return(_spectrumBuffer);
+                if (_velocityLookup != null) ArrayPool<float>.Shared.Return(_velocityLookup);
+                if (_alphaCurve != null) ArrayPool<float>.Shared.Return(_alphaCurve);
+                _particleBuffer = null;
+            }
+
+            _isInitialized = false;
+            _isDisposed = true;
+        }
+
         public void Dispose()
         {
-            if (!_isDisposed)
-            {
-                if (_spectrumBuffer is not null) ArrayPool<float>.Shared.Return(_spectrumBuffer);
-                if (_velocityLookup is not null) ArrayPool<float>.Shared.Return(_velocityLookup);
-                if (_alphaCurve is not null) ArrayPool<float>.Shared.Return(_alphaCurve);
-                _particleBuffer = null;
-                _isInitialized = false;
-                _isDisposed = true;
-                GC.SuppressFinalize(this);
-            }
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
         #endregion
 

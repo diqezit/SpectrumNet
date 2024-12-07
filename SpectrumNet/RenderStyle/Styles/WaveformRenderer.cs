@@ -9,10 +9,13 @@ namespace SpectrumNet
         private readonly SKPath _topPath = new();
         private readonly SKPath _bottomPath = new();
         private readonly SKPath _fillPath = new();
-
-        // Constants
-        private const float StrokeWidth = 2f;
-        private const byte FillAlpha = 64;
+        private float[]? _previousSpectrum;
+        private const float SmoothingFactorNormal = 0.3f;
+        private const float SmoothingFactorOverlay = 0.5f;
+        private float _smoothingFactor = SmoothingFactorNormal;
+        private const float MinMagnitudeThreshold = 0.01f;
+        private const float MaxSpectrumValue = 1.5f;
+        private bool _disposed = false;
 
         private WaveformRenderer() { }
 
@@ -27,41 +30,45 @@ namespace SpectrumNet
 
         public void Configure(bool isOverlayActive)
         {
-            // Возможность настройки поведения рендера, если потребуется
+            _smoothingFactor = isOverlayActive ? SmoothingFactorOverlay : SmoothingFactorNormal;
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
                            float barWidth, float barSpacing, int barCount, SKPaint? paint,
-                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+                           Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
+            if (!_isInitialized || canvas is null || spectrum is null || spectrum.Length == 0 || paint is null)
             {
                 Log.Warning("Invalid render parameters or WaveformRenderer is not initialized.");
                 return;
             }
 
-            // Масштабирование спектра
             int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
+            float[] scaledSpectrum = ScaleSpectrum(spectrum.AsSpan(), actualBarCount);
+            float[] smoothedSpectrum = SmoothSpectrum(scaledSpectrum.AsSpan(), actualBarCount);
 
             float midY = info.Height / 2;
             float xStep = (float)info.Width / actualBarCount;
 
             using var waveformPaint = paint.Clone();
             waveformPaint.Style = SKPaintStyle.Stroke;
-            waveformPaint.StrokeWidth = Math.Max(StrokeWidth, 50f / actualBarCount); // Динамическая ширина линии
+            waveformPaint.StrokeWidth = Math.Max(2f, 50f / actualBarCount);
 
             using var fillPaint = paint.Clone();
             fillPaint.Style = SKPaintStyle.Fill;
-            fillPaint.Color = fillPaint.Color.WithAlpha(FillAlpha);
+            fillPaint.Color = fillPaint.Color.WithAlpha(64);
 
-            RenderWaveform(canvas, scaledSpectrum.AsSpan(), actualBarCount, midY, xStep, info.Width, waveformPaint, fillPaint);
+            CreateWavePaths(smoothedSpectrum.AsSpan(), actualBarCount, midY, xStep);
+            CreateFillPath(info.Width, midY);
 
-            // Отрисовка информации о производительности
-            drawPerformanceInfo(canvas, info);
+            canvas.DrawPath(_fillPath, fillPaint);
+            canvas.DrawPath(_topPath, waveformPaint);
+            canvas.DrawPath(_bottomPath, waveformPaint);
+
+            drawPerformanceInfo?.Invoke(canvas, info);
         }
 
-        private float[] ScaleSpectrum(float[] spectrum, int targetCount)
+        private float[] ScaleSpectrum(Span<float> spectrum, int targetCount)
         {
             int spectrumLength = spectrum.Length / 2;
             float[] scaledSpectrum = new float[targetCount];
@@ -72,33 +79,45 @@ namespace SpectrumNet
                 float sum = 0;
                 int start = (int)(i * blockSize);
                 int end = (int)((i + 1) * blockSize);
+                int actualEnd = Math.Min(end, spectrumLength);
+                int count = actualEnd - start;
 
-                for (int j = start; j < end && j < spectrumLength; j++)
+                if (count <= 0)
+                {
+                    scaledSpectrum[i] = 0;
+                    continue;
+                }
+
+                for (int j = start; j < actualEnd; j++)
                 {
                     sum += spectrum[j];
                 }
 
-                scaledSpectrum[i] = sum / (end - start); // Усреднение значений в блоке
+                scaledSpectrum[i] = sum / count;
             }
 
             return scaledSpectrum;
         }
 
-        private void RenderWaveform(SKCanvas canvas, ReadOnlySpan<float> spectrum,
-                                    int barCount, float midY, float xStep, float width,
-                                    SKPaint waveformPaint, SKPaint fillPaint)
+        private float[] SmoothSpectrum(Span<float> spectrum, int targetCount)
         {
-            CreateWavePaths(spectrum, barCount, midY, xStep);
-            CreateFillPath(width, midY);
+            if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
+                _previousSpectrum = new float[targetCount];
 
-            canvas.DrawPath(_fillPath, fillPaint);
-            canvas.DrawPath(_topPath, waveformPaint);
-            canvas.DrawPath(_bottomPath, waveformPaint);
+            var smoothedSpectrum = new float[targetCount];
+
+            for (int i = 0; i < targetCount; i++)
+            {
+                float currentValue = spectrum[i];
+                float smoothedValue = _previousSpectrum[i] + (currentValue - _previousSpectrum[i]) * _smoothingFactor;
+                smoothedSpectrum[i] = Math.Clamp(smoothedValue, MinMagnitudeThreshold, MaxSpectrumValue);
+                _previousSpectrum[i] = smoothedSpectrum[i];
+            }
+
+            return smoothedSpectrum;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CreateWavePaths(ReadOnlySpan<float> spectrum, int barCount,
-                                     float midY, float xStep)
+        private void CreateWavePaths(Span<float> spectrum, int barCount, float midY, float xStep)
         {
             _topPath.Reset();
             _bottomPath.Reset();
@@ -120,14 +139,12 @@ namespace SpectrumNet
                 topY = midY - (spectrum[i] * midY);
                 bottomY = midY + (spectrum[i] * midY);
 
-                // Плавные кривые через CubicTo
                 float controlX = (prevX + x) / 2;
                 _topPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
                 _bottomPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void CreateFillPath(float width, float midY)
         {
             _fillPath.Reset();
@@ -139,11 +156,33 @@ namespace SpectrumNet
 
         public void Dispose()
         {
-            _topPath.Dispose();
-            _bottomPath.Dispose();
-            _fillPath.Dispose();
-            _isInitialized = false;
-            Log.Debug("WaveformRenderer disposed");
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                // Dispose managed resources
+                _topPath.Dispose();
+                _bottomPath.Dispose();
+                _fillPath.Dispose();
+                _previousSpectrum = null;
+            }
+
+            // Release unmanaged resources here
+            // Not applicable in this case
+
+            _disposed = true;
+        }
+
+        ~WaveformRenderer()
+        {
+            Dispose(disposing: false);
         }
     }
 }

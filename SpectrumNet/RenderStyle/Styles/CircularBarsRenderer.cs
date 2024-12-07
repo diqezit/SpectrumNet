@@ -5,15 +5,11 @@
         private static CircularBarsRenderer? _instance;
         private bool _isInitialized;
         private readonly SKPath _path = new();
-        private float[]? _cosValues;
-        private float[]? _sinValues;
-        private int _lastBarCount;
+        private float[]? _cosValues, _sinValues, _previousSpectrum;
+        private volatile bool _disposed;
 
-        // Константы
-        private const float RadiusProportion = 0.8f;
-        private const float SpectrumMultiplier = 0.5f;
-        private const float HighlightRadiusMultiplier = 0.1f;
-        private const float HighlightWidthProportion = 0.6f;
+        private const float RadiusProportion = 0.8f, SpectrumMultiplier = 0.5f, SmoothingFactor = 0.3f;
+        private const float MinMagnitudeThreshold = 0.01f, MaxBarHeight = 1.5f, MinBarHeight = 0.01f;
 
         private CircularBarsRenderer() { }
 
@@ -26,51 +22,65 @@
             Log.Debug("CircularBarsRenderer initialized");
         }
 
-        public void Configure(bool isOverlayActive)
-        {
-            // В будущем можно добавить обработку конфигураций
-        }
+        public void Configure(bool isOverlayActive) { }
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
-                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? basePaint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || basePaint == null)
+            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 || basePaint == null || info.Width <= 0 || info.Height <= 0)
             {
-                Log.Warning("Invalid render parameters or CircularBarsRenderer is not initialized.");
+                Log.Warning("Invalid render parameters or renderer not initialized.");
                 return;
             }
 
-            float centerX = info.Width / 2;
-            float centerY = info.Height / 2;
-            float mainRadius = Math.Min(centerX, centerY) * RadiusProportion;
+            float centerX = info.Width / 2, centerY = info.Height / 2, mainRadius = Math.Min(centerX, centerY) * RadiusProportion;
+            int halfSpectrumLength = spectrum.Length / 2, actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            float[] downscaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            float[] scaledSpectrum = SmoothSpectrum(downscaledSpectrum, actualBarCount);
+
+            EnsureTrigArrays(actualBarCount);
 
             using var barPaint = basePaint.Clone();
+            barPaint.IsAntialias = true;
             barPaint.Style = SKPaintStyle.Stroke;
             barPaint.StrokeWidth = barWidth;
 
-            int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
-
-            EnsureTrigArrays(actualBarCount);
             RenderBars(canvas, scaledSpectrum.AsSpan(), actualBarCount, centerX, centerY, mainRadius, barWidth, barPaint);
-
-            // Отрисовка информации о производительности
-            if (canvas != null)
-            {
-                drawPerformanceInfo(canvas, info);
-            }
+            drawPerformanceInfo?.Invoke(canvas, info);
         }
 
-        private float[] ScaleSpectrum(float[] spectrum, int targetCount)
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
-            int spectrumLength = spectrum.Length / 2;
+            float blockSize = (float)halfSpectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
-                int index = (int)((float)i / targetCount * spectrumLength);
-                scaledSpectrum[i] = spectrum[index];
+                int start = (int)(i * blockSize);
+                int end = (int)((i + 1) * blockSize);
+                end = Math.Min(end, halfSpectrumLength);
+
+                float sum = 0;
+                for (int j = start; j < end; j++)
+                    sum += spectrum[j];
+
+                scaledSpectrum[i] = sum / (end - start);
+            }
+
+            return scaledSpectrum;
+        }
+        private float[] SmoothSpectrum(float[] spectrum, int targetCount)
+        {
+            if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
+                _previousSpectrum = new float[targetCount];
+
+            var scaledSpectrum = new float[targetCount];
+
+            for (int i = 0; i < targetCount; i++)
+            {
+                float currentValue = spectrum[i];
+                float smoothedValue = _previousSpectrum[i] + (currentValue - _previousSpectrum[i]) * SmoothingFactor;
+                scaledSpectrum[i] = Math.Clamp(smoothedValue, MinBarHeight, MaxBarHeight);
+                _previousSpectrum[i] = scaledSpectrum[i];
             }
 
             return scaledSpectrum;
@@ -78,7 +88,7 @@
 
         private void EnsureTrigArrays(int barCount)
         {
-            if (_cosValues == null || _sinValues == null || _lastBarCount != barCount)
+            if (_cosValues == null || _sinValues == null || _cosValues.Length != barCount)
             {
                 _cosValues = new float[barCount];
                 _sinValues = new float[barCount];
@@ -89,62 +99,52 @@
                     _cosValues[i] = (float)Math.Cos(angle);
                     _sinValues[i] = (float)Math.Sin(angle);
                 }
-
-                _lastBarCount = barCount;
             }
         }
 
-        private void RenderBars(SKCanvas canvas, ReadOnlySpan<float> spectrum, int barCount,
-                                float centerX, float centerY, float mainRadius, float barWidth, SKPaint barPaint)
+        private void RenderBars(SKCanvas canvas, ReadOnlySpan<float> spectrum, int barCount, float centerX, float centerY, float mainRadius, float barWidth, SKPaint barPaint)
         {
             _path.Reset();
 
             for (int i = 0; i < barCount; i++)
             {
                 float magnitude = spectrum[i];
-                float radius = mainRadius + magnitude * mainRadius * SpectrumMultiplier;
+                if (magnitude < MinMagnitudeThreshold) continue;
 
-                AddBarToPath(i, centerX, centerY, mainRadius, radius, magnitude, barWidth);
+                float radius = mainRadius + magnitude * mainRadius * SpectrumMultiplier;
+                AddBarToPath(i, centerX, centerY, mainRadius, radius);
             }
 
             canvas.DrawPath(_path, barPaint);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void AddBarToPath(int index, float centerX, float centerY, float mainRadius, float radius, float magnitude, float barWidth)
+        private void AddBarToPath(int index, float centerX, float centerY, float mainRadius, float radius)
         {
-            float startX = centerX + mainRadius * _cosValues![index];
-            float startY = centerY + mainRadius * _sinValues![index];
-            float endX = centerX + radius * _cosValues![index];
-            float endY = centerY + radius * _sinValues![index];
-
-            _path.MoveTo(startX, startY);
-            _path.LineTo(endX, endY);
-
-            if (radius - mainRadius > barWidth * 2)
-                AddHighlight(index, centerX, centerY, mainRadius, magnitude, barWidth);
+            _path.MoveTo(centerX + mainRadius * _cosValues![index], centerY + mainRadius * _sinValues![index]);
+            _path.LineTo(centerX + radius * _cosValues![index], centerY + radius * _sinValues![index]);
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void AddHighlight(int index, float centerX, float centerY, float mainRadius, float magnitude, float barWidth)
+        protected virtual void Dispose(bool disposing)
         {
-            float highlightRadius = mainRadius + magnitude * mainRadius * HighlightRadiusMultiplier;
-            float highlightStartX = centerX + highlightRadius * _cosValues![index];
-            float highlightStartY = centerY + highlightRadius * _sinValues![index];
-            float highlightEndX = centerX + (highlightRadius + barWidth * HighlightWidthProportion) * _cosValues![index];
-            float highlightEndY = centerY + (highlightRadius + barWidth * HighlightWidthProportion) * _sinValues![index];
+            if (_disposed) return;
 
-            _path.MoveTo(highlightStartX, highlightStartY);
-            _path.LineTo(highlightEndX, highlightEndY);
+            if (disposing)
+            {
+                _path.Dispose();
+                _cosValues = null;
+                _sinValues = null;
+                _previousSpectrum = null;
+            }
+
+            _disposed = true;
+            Log.Debug("CircularBarsRenderer disposed");
         }
 
         public void Dispose()
         {
-            _path.Dispose();
-            _cosValues = null;
-            _sinValues = null;
-            _isInitialized = false;
-            Log.Debug("CircularBarsRenderer disposed");
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
     }
 }

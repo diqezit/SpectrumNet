@@ -13,7 +13,8 @@
         GradientWave,
         CircularWave,
         Fire,
-        Raindrops
+        Raindrops,
+        Gauge
     }
 
     public interface ISpectrumRenderer : IDisposable
@@ -76,6 +77,7 @@
                 RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
                 RenderStyle.Fire => FireRenderer.GetInstance(),
                 RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
+                RenderStyle.Gauge => GaugeRenderer.GetInstance(),
                 _ => throw new ArgumentException($"Unknown render style: {style}")
             };
         }
