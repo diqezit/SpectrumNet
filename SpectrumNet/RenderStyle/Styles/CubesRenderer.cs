@@ -5,12 +5,13 @@
         private static CubesRenderer? _instance;
         private bool _isInitialized;
         private readonly SKPath _cubePath = new();
-        private SKPaint? _cubePaint;
+        private volatile bool _disposed;
 
         // Константы
         private const float MinMagnitudeThreshold = 0.01f;
         private const float CubeTopWidthProportion = 0.75f;
         private const float CubeTopHeightProportion = 0.25f;
+        private const float AlphaMultiplier = 255f;
 
         private CubesRenderer() { }
 
@@ -20,64 +21,60 @@
         {
             if (_isInitialized) return;
 
-            _cubePaint = new SKPaint
-            {
-                IsAntialias = true,
-                Style = SKPaintStyle.Fill
-            };
-
             _isInitialized = true;
             Log.Debug("CubesRenderer initialized");
         }
 
         public void Configure(bool isOverlayActive)
         {
-            // Возможность настройки поведения рендера, если потребуется
+            // Возможность настройки поведения рендера
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
                            float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
                            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length == 0 || basePaint == null)
+            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 ||
+                basePaint == null || info.Width <= 0 || info.Height <= 0)
             {
-                Log.Warning("Invalid render parameters or CubesRenderer is not initialized.");
+                Log.Warning("Invalid render parameters or renderer not initialized.");
                 return;
             }
 
-            int actualBarCount = Math.Min(spectrum.Length / 2, barCount); // Используем половину спектра
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
+            int halfSpectrumLength = spectrum.Length / 2;
+            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
             float totalWidth = barWidth + barSpacing;
+
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            float canvasHeight = info.Height;
+
+            using var cubePaint = basePaint.Clone();
+            cubePaint.IsAntialias = true;
 
             for (int i = 0; i < actualBarCount; i++)
             {
                 float magnitude = scaledSpectrum[i];
                 if (magnitude < MinMagnitudeThreshold) continue;
 
-                float height = magnitude * info.Height;
+                float height = magnitude * canvasHeight;
                 float x = i * totalWidth;
-                float y = info.Height - height;
+                float y = canvasHeight - height;
 
-                using var clonedPaint = basePaint.Clone();
-                RenderCube(canvas, x, y, barWidth, height, magnitude, clonedPaint);
+                cubePaint.Color = cubePaint.Color.WithAlpha((byte)(magnitude * AlphaMultiplier));
+                RenderCube(canvas, x, y, barWidth, height, magnitude, cubePaint);
             }
 
-            // Отрисовка информации о производительности
-            if (canvas != null)
-            {
-                drawPerformanceInfo(canvas, info);
-            }
+            drawPerformanceInfo?.Invoke(canvas, info);
         }
 
-        private float[] ScaleSpectrum(float[] spectrum, int targetCount)
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
-            int spectrumLength = spectrum.Length / 2; // Берём только половину спектра
+            int step = halfSpectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
-                int index = (int)((float)i / targetCount * spectrumLength);
-                scaledSpectrum[i] = spectrum[index];
+                scaledSpectrum[i] = spectrum[i * step];
             }
 
             return scaledSpectrum;
@@ -86,9 +83,10 @@
         private void RenderCube(SKCanvas canvas, float x, float y, float barWidth,
                                 float height, float magnitude, SKPaint paint)
         {
-            paint.Color = paint.Color.WithAlpha((byte)(magnitude * 255));
+            // Отрисовка базового прямоугольника (куба)
             canvas.DrawRect(x, y, barWidth, height, paint);
 
+            // Отрисовка верхней части куба
             RenderCubeTop(canvas, x, y, barWidth, magnitude, paint);
         }
 
@@ -102,19 +100,18 @@
             _cubePath.LineTo(x - barWidth * CubeTopHeightProportion, y - barWidth * CubeTopHeightProportion);
             _cubePath.Close();
 
-            paint.Color = paint.Color.WithAlpha((byte)(magnitude * 200));
+            // Осветляем цвет верхней части куба
+            paint.Color = paint.Color.WithAlpha((byte)(magnitude * AlphaMultiplier * 0.8f));
             canvas.DrawPath(_cubePath, paint);
         }
 
         public void Dispose()
         {
-            if (_isInitialized)
-            {
-                _cubePath.Dispose();
-                _cubePaint?.Dispose();
-                _isInitialized = false;
-                Log.Debug("CubesRenderer disposed");
-            }
+            if (_disposed) return;
+
+            _cubePath.Dispose();
+            _disposed = true;
+            Log.Debug("CubesRenderer disposed");
         }
     }
 }

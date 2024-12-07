@@ -33,16 +33,23 @@
                            float barWidth, float barSpacing, int barCount, SKPaint? basePaint,
                            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            if (!_isInitialized || canvas == null || spectrum?.Length == 0 || basePaint == null || info.Width <= 0 || info.Height <= 0)
+            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 ||
+                basePaint == null || info.Width <= 0 || info.Height <= 0)
             {
                 Log.Warning("Invalid render parameters or renderer not initialized.");
                 return;
             }
 
-            int actualBarCount = Math.Min(spectrum.Length, barCount);
+            int halfSpectrumLength = spectrum.Length / 2;
+            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
             float totalBarWidth = barWidth + barSpacing;
 
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            float canvasHeight = info.Height;
+
             using var barPaint = basePaint.Clone();
+            barPaint.IsAntialias = true;
+
             using var highlightPaint = new SKPaint
             {
                 IsAntialias = true,
@@ -50,33 +57,44 @@
                 Color = SKColors.White
             };
 
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
-            float canvasHeight = info.Height;
+            float maxAlpha = 255f * AlphaMultiplier;
 
             for (int i = 0; i < actualBarCount; i++)
             {
-                float barHeight = Math.Max(scaledSpectrum[i] * canvasHeight, 1);
+                float barHeight = MathF.Max(scaledSpectrum[i] * canvasHeight, 1f);
                 float x = i * totalBarWidth;
-                float cornerRadius = Math.Min(barWidth * DefaultCornerRadiusFactor, MaxCornerRadius);
+                float cornerRadius = MathF.Min(barWidth * DefaultCornerRadiusFactor, MaxCornerRadius);
+
+                // Вычисление альфа-канала
+                byte alpha = (byte)MathF.Min(barHeight / canvasHeight * maxAlpha, 255f);
+                barPaint.Color = barPaint.Color.WithAlpha(alpha);
 
                 RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
-                RenderHighlight(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, highlightPaint);
+
+                if (barHeight > cornerRadius * 2)
+                {
+                    float highlightWidth = barWidth * HighlightWidthProportion;
+                    float highlightHeight = MathF.Min(barHeight * HighlightHeightProportion, MaxHighlightHeight);
+
+                    byte highlightAlpha = (byte)(alpha / HighlightAlphaDivisor);
+                    highlightPaint.Color = highlightPaint.Color.WithAlpha(highlightAlpha);
+
+                    RenderHighlight(canvas, x, barWidth, barHeight, canvasHeight, highlightWidth, highlightHeight, highlightPaint);
+                }
             }
 
-            // Отрисовка информации о производительности
-            if (canvas != null)
-            {
-                drawPerformanceInfo(canvas, info);
-            }
+            drawPerformanceInfo?.Invoke(canvas, info);
         }
 
-        private float[] ScaleSpectrum(float[] spectrum, int barCount)
+        private static float[] ScaleSpectrum(float[] spectrum, int barCount, int halfSpectrumLength)
         {
             float[] scaledSpectrum = new float[barCount];
-            int spectrumLength = spectrum.Length / 2;
+            int step = halfSpectrumLength / barCount;
 
             for (int i = 0; i < barCount; i++)
-                scaledSpectrum[i] = spectrum[(int)((float)i / barCount * spectrumLength)];
+            {
+                scaledSpectrum[i] = spectrum[i * step];
+            }
 
             return scaledSpectrum;
         }
@@ -87,32 +105,18 @@
             _path.Reset();
             _path.AddRoundRect(new SKRoundRect(
                 new SKRect(x, canvasHeight - barHeight, x + barWidth, canvasHeight),
-                cornerRadius, 0
+                cornerRadius, cornerRadius
             ));
-
-            barPaint.Color = barPaint.Color.WithAlpha((byte)(255 * Math.Min(barHeight / canvasHeight * AlphaMultiplier, 1.0f)));
             canvas.DrawPath(_path, barPaint);
         }
 
         private void RenderHighlight(SKCanvas canvas, float x, float barWidth, float barHeight,
-                                     float canvasHeight, float cornerRadius, SKPaint highlightPaint)
+                                     float canvasHeight, float highlightWidth, float highlightHeight, SKPaint highlightPaint)
         {
-            if (barHeight <= cornerRadius * 2) return;
+            float highlightX = x + (barWidth - highlightWidth) / 2;
+            float highlightY = canvasHeight - barHeight;
 
-            float highlightWidth = barWidth * HighlightWidthProportion;
-            float highlightHeight = Math.Min(barHeight * HighlightHeightProportion, MaxHighlightHeight);
-
-            highlightPaint.Color = highlightPaint.Color.WithAlpha(
-                (byte)(255 * Math.Min(barHeight / canvasHeight * AlphaMultiplier, 1.0f) / HighlightAlphaDivisor)
-            );
-
-            canvas.DrawRect(
-                x + (barWidth - highlightWidth) / 2,
-                canvasHeight - barHeight + cornerRadius,
-                highlightWidth,
-                highlightHeight,
-                highlightPaint
-            );
+            canvas.DrawRect(highlightX, highlightY, highlightWidth, highlightHeight, highlightPaint);
         }
 
         public void Dispose()
