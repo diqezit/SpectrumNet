@@ -6,6 +6,7 @@
 ![image](https://github.com/user-attachments/assets/d9728eae-9c78-4c7f-aaf5-89b2d124e259)
 ![image](https://github.com/user-attachments/assets/01769dd2-a089-4cba-8ceb-abd5683ead45)
 ![image](https://github.com/user-attachments/assets/ea4090fd-f939-491e-97e8-bb5b17d5a1e0)
+![image](https://github.com/user-attachments/assets/94bef9dc-d9fd-4526-8248-e11a1c373c5a)
 
 
 # SpectrumNet
@@ -65,7 +66,7 @@ To run SpectrumNet, you need to have the following prerequisites installed:
 
 ## Configuration
 
-The application uses constants defined in the `MwConstants` class for various settings such as render interval, FFT size, and default styles. These constants can be modified to adjust the behavior of the application.
+The application uses constants defined for various settings such as render interval, FFT size, and default styles. These constants can be modified to adjust the behavior of the application.
 
 ## Error Handling
 
