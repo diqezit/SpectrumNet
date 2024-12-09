@@ -17,7 +17,7 @@ SpectrumNet is a real-time audio visualization application that captures audio f
 
 - **Real-time Audio Capture**: Captures audio from the system's loopback device.
 - **Spectrum Analysis**: Processes the captured audio to generate a frequency spectrum.
-- **Customizable Visualization**: Allows customization of the spectrum visualization, including bar width, spacing, and style.
+- **Customizable Visualization**: Allows customization of the spectrum visualization, color/styles, rendering, including bar width and spacing.
 - **Overlay Mode**: Supports an overlay mode that can be displayed on top of other applications.
 - **Theme Support**: Supports both light and dark themes.
 - **Error Handling**: Comprehensive error handling and logging to ensure robustness.
