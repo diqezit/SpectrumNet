@@ -7,9 +7,9 @@ namespace SpectrumNet
 {
     public static class Constants
     {
-        public const float DefaultAmplificationFactor = 0.6f;  // Немного увеличиваем для лучшей видимости сигнала
-        public const float DefaultMaxDbValue = -30f;           // Максимально громкий сигнал отображается до
-        public const float DefaultMinDbValue = -120f;          // Игнорируем шум ниже 
+        public const float DefaultAmplificationFactor = 0.5f;
+        public const float DefaultMaxDbValue = 0f;           // Максимально громкий сигнал отображается до
+        public const float DefaultMinDbValue = -130f;          // Игнорируем шум ниже 
         public const int DefaultFftSize = 2048;
         public const float Epsilon = float.Epsilon;
     }
@@ -249,8 +249,7 @@ namespace SpectrumNet
         #region Constructor
         public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
-            if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
-                throw new ArgumentException("FFT size must be a positive power of 2.");
+            ValidateFftSize(fftSize);
 
             _fftSize = fftSize;
             _buffer = new Complex[fftSize];
@@ -258,36 +257,41 @@ namespace SpectrumNet
             _vecSize = Vector<float>.Count;
             _parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
 
-            (_cosCache, _sinCache) = PrecomputeTrig(fftSize);
+            (_cosCache, _sinCache) = PrecomputeTrigonometricValues(fftSize);
             _window = GenerateWindow(fftSize);
 
-            _channel = Channel.CreateUnbounded<(float[], int)>(new UnboundedChannelOptions
+            _channel = CreateUnboundedChannel();
+            _cts = new CancellationTokenSource();
+            _processTask = Task.Run(ProcessAsync);
+        }
+
+        private static void ValidateFftSize(int fftSize)
+        {
+            if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
+                throw new ArgumentException("FFT size must be a positive power of 2.");
+        }
+
+        private static Channel<(float[], int)> CreateUnboundedChannel()
+        {
+            return Channel.CreateUnbounded<(float[], int)>(new UnboundedChannelOptions
             {
                 SingleReader = true,
                 AllowSynchronousContinuations = true
             });
-
-            _cts = new CancellationTokenSource();
-            _processTask = Task.Run(ProcessAsync);
         }
         #endregion
 
-        #region Events
+        #region Events and Properties
         public event EventHandler<FftEventArgs>? FftCalculated;
-        #endregion
-
-        #region Properties
         public FftWindowType WindowType { get; set; } = FftWindowType.Hann;
         #endregion
 
         #region Public Methods
         public ValueTask AddSamplesAsync(Memory<float> samples, int sampleRate)
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(FftProcessor));
-            ArgumentNullException.ThrowIfNull(samples);
-            if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
+            ValidateInput(samples, sampleRate);
 
-            return _channel.Writer.TryWrite((samples.ToArray(), sampleRate))   // Пример преобразования, если нужно
+            return _channel.Writer.TryWrite((samples.ToArray(), sampleRate))
                 ? ValueTask.CompletedTask
                 : new ValueTask(_channel.Writer.WriteAsync((samples.ToArray(), sampleRate)).AsTask());
         }
@@ -306,91 +310,141 @@ namespace SpectrumNet
             finally
             {
                 _cts.Dispose();
-                Array.Clear(_buffer, 0, _buffer.Length);
-                Array.Clear(_window, 0, _window.Length);
-                Array.Clear(_cosCache, 0, _cosCache.Length);
-                Array.Clear(_sinCache, 0, _sinCache.Length);
+                ClearArrays();
             }
         }
         #endregion
 
         #region Private Helper Methods
-        private (float[] cos, float[] sin) PrecomputeTrig(int size)
+        private void ValidateInput(Memory<float> samples, int sampleRate)
         {
-            var cos = new float[size];
-            var sin = new float[size];
+            if (_disposed) throw new ObjectDisposedException(nameof(FftProcessor));
+            ArgumentNullException.ThrowIfNull(samples);
+            if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
+        }
+
+        private void ClearArrays()
+        {
+            Array.Clear(_buffer, 0, _buffer.Length);
+            Array.Clear(_window, 0, _window.Length);
+            Array.Clear(_cosCache, 0, _cosCache.Length);
+            Array.Clear(_sinCache, 0, _sinCache.Length);
+        }
+
+        private static (float[] cos, float[] sin) PrecomputeTrigonometricValues(int size)
+        {
+            var cos = ArrayPool<float>.Shared.Rent(size);
+            var sin = ArrayPool<float>.Shared.Rent(size);
             float invSize = TWO_PI / (size - 1);
-            Parallel.For(0, size, i =>
+
+            int vecSize = Vector<float>.Count;
+            int vecCount = size / vecSize;
+
+            ComputeTrigonometricValuesVectorized(cos, sin, vecSize, vecCount, invSize);
+            ComputeTrigonometricValuesRemainder(cos, sin, vecCount, vecSize, invSize, size);
+
+            return (cos, sin);
+        }
+
+        private static void ComputeTrigonometricValuesVectorized(float[] cos, float[] sin, int vecSize, int vecCount, float invSize)
+        {
+            Parallel.For(0, vecCount, i =>
+            {
+                int offset = i * vecSize;
+                var indices = new Vector<float>(Enumerable.Range(offset, vecSize).Select(x => (float)x).ToArray());
+                var angles = indices * invSize;
+
+                for (int j = 0; j < vecSize; j++)
+                {
+                    cos[offset + j] = MathF.Cos(angles[j]);
+                    sin[offset + j] = MathF.Sin(angles[j]);
+                }
+            });
+        }
+
+        private static void ComputeTrigonometricValuesRemainder(float[] cos, float[] sin, int vecCount, int vecSize, float invSize, int size)
+        {
+            for (int i = vecCount * vecSize; i < size; i++)
             {
                 float angle = invSize * i;
                 cos[i] = MathF.Cos(angle);
                 sin[i] = MathF.Sin(angle);
-            });
-            return (cos, sin);
+            }
         }
 
         private float[] GenerateWindow(int size)
         {
-            var window = new float[size];
-            var windowFunctions = new Dictionary<FftWindowType, Func<int, float>>
-            {
-                [FftWindowType.Hann] = i => 0.5f * (1f - _cosCache[i]),
-                [FftWindowType.Hamming] = i => 0.54f - 0.46f * _cosCache[i],
-                [FftWindowType.Blackman] = i => 0.42f - 0.5f * _cosCache[i] + 0.08f * MathF.Cos(TWO_PI * 2 * i / (size - 1)),
-                [FftWindowType.Bartlett] = i => 2f / (size - 1) * ((size - 1) / 2f - MathF.Abs(i - (size - 1) / 2f)),
-                [FftWindowType.Kaiser] = i => KaiserWindow(i, size, KAISER_BETA)
-            };
+            var window = ArrayPool<float>.Shared.Rent(size);
+            var windowFunc = GetWindowFunction(size);
 
-            if (!windowFunctions.TryGetValue(WindowType, out var func))
-                throw new NotSupportedException($"Window type {WindowType} is not supported.");
-
-            Parallel.For(0, size, _parallelOpts, i => window[i] = func(i));
+            ApplyWindowFunction(window, size, windowFunc);
             return window;
         }
 
-        private void ProcessChunk(ReadOnlySpan<float> chunk)
+        private Func<int, float> GetWindowFunction(int size)
         {
-            var temp = _pool.Rent(_vecSize);
-            try
+            return WindowType switch
             {
-                int vecCount = chunk.Length / _vecSize;
-                ProcessVectorized(chunk, temp, vecCount);
-                ProcessRemaining(chunk, vecCount * _vecSize, chunk.Length % _vecSize);
+                FftWindowType.Hann => i => 0.5f * (1f - _cosCache[i]),
+                FftWindowType.Hamming => i => 0.54f - 0.46f * _cosCache[i],
+                FftWindowType.Blackman => i => 0.42f - 0.5f * _cosCache[i] + 0.08f * MathF.Cos(TWO_PI * 2 * i / (size - 1)),
+                FftWindowType.Bartlett => i => 2f / (size - 1) * ((size - 1) / 2f - MathF.Abs(i - (size - 1) / 2f)),
+                FftWindowType.Kaiser => i => KaiserWindow(i, size, KAISER_BETA),
+                _ => throw new NotSupportedException($"Window type {WindowType} is not supported.")
+            };
+        }
+
+        private void ApplyWindowFunction(float[] window, int size, Func<int, float> windowFunc)
+        {
+            if (WindowType == FftWindowType.Hann || WindowType == FftWindowType.Hamming)
+            {
+                ApplyOptimizedWindowFunction(window, size, windowFunc);
             }
-            finally
+            else
             {
-                _pool.Return(temp);
+                ApplyScalarWindowFunction(window, size, windowFunc);
             }
         }
 
-        private void ProcessVectorized(ReadOnlySpan<float> data, float[] temp, int vecCount)
+        private void ApplyOptimizedWindowFunction(float[] window, int size, Func<int, float> windowFunc)
         {
-            for (int i = 0; i < vecCount; i++)
-            {
-                data.Slice(i * _vecSize, _vecSize).CopyTo(temp);
-                var sampleVec = new Vector<float>(temp);
-                var windowVec = new Vector<float>(_window.AsSpan(_sampleCount + i * _vecSize, _vecSize));
-                (sampleVec * windowVec).CopyTo(temp);
+            int vecSize = Vector<float>.Count;
+            int vecCount = size / vecSize;
 
-                for (int j = 0; j < _vecSize; j++)
-                    _buffer[_sampleCount + i * _vecSize + j] = new Complex { X = temp[j] };
+            Parallel.For(0, vecCount, i =>
+            {
+                int offset = i * vecSize;
+                var cosVec = new Vector<float>(_cosCache.AsSpan(offset, vecSize));
+
+                Vector<float> result = WindowType switch
+                {
+                    FftWindowType.Hann => 0.5f * (Vector<float>.One - cosVec),
+                    FftWindowType.Hamming => new Vector<float>(0.54f) - new Vector<float>(0.46f) * cosVec,
+                    _ => throw new NotSupportedException("SIMD optimization not implemented for this window type.")
+                };
+
+                result.CopyTo(window, offset);
+            });
+
+            for (int i = vecCount * vecSize; i < size; i++)
+            {
+                window[i] = windowFunc(i);
             }
         }
 
-        private void ProcessRemaining(ReadOnlySpan<float> data, int start, int count)
+        private void ApplyScalarWindowFunction(float[] window, int size, Func<int, float> windowFunc)
         {
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < size; i++)
             {
-                int idx = _sampleCount + start + i;
-                _buffer[idx] = new Complex { X = data[start + i] * _window[idx] };
+                window[i] = windowFunc(i);
             }
         }
 
-        private static float KaiserWindow(int i, int n, float beta)
+        private static float KaiserWindow(int i, int size, float beta)
         {
-            float a = (n - 1) / 2f;
+            float a = (size - 1) / 2f;
             float t = (i - a) / a;
-            return BesselI0(beta * MathF.Sqrt(Math.Max(1 - t * t, 0))) / BesselI0(beta);
+            return BesselI0(beta * MathF.Sqrt(1 - t * t)) / BesselI0(beta);
         }
 
         private static float BesselI0(float x)
@@ -433,17 +487,62 @@ namespace SpectrumNet
 
                 if (_sampleCount >= _fftSize)
                 {
-                    if (FftCalculated != null)
-                    {
-                        FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
-                        FftCalculated?.Invoke(this, new FftEventArgs(_buffer, rate));
-                    }
+                    PerformFftCalculation(rate);
                     _sampleCount = 0;
                 }
             }
-            #endregion
-
         }
+
+        private void ProcessChunk(ReadOnlySpan<float> chunk)
+        {
+            var temp = ArrayPool<float>.Shared.Rent(_vecSize);
+            try
+            {
+                int vecCount = chunk.Length / _vecSize;
+                ProcessVectorized(chunk, temp, vecCount);
+                ProcessRemaining(chunk, vecCount * _vecSize, chunk.Length % _vecSize);
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(temp);
+            }
+        }
+
+        private void ProcessVectorized(ReadOnlySpan<float> data, float[] temp, int vecCount)
+        {
+            for (int i = 0; i < vecCount; i++)
+            {
+                int offset = i * _vecSize;
+                data.Slice(offset, _vecSize).CopyTo(temp);
+                var sampleVec = new Vector<float>(temp);
+                var windowVec = new Vector<float>(_window.AsSpan(_sampleCount + offset, _vecSize));
+                var resultVec = sampleVec * windowVec;
+
+                for (int j = 0; j < _vecSize; j++)
+                {
+                    _buffer[_sampleCount + offset + j] = new Complex { X = resultVec[j] };
+                }
+            }
+        }
+
+        private void ProcessRemaining(ReadOnlySpan<float> data, int start, int count)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                int idx = _sampleCount + start + i;
+                _buffer[idx] = new Complex { X = data[start + i] * _window[idx] };
+            }
+        }
+
+        private void PerformFftCalculation(int rate)
+        {
+            if (FftCalculated != null)
+            {
+                FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
+                FftCalculated?.Invoke(this, new FftEventArgs(_buffer, rate));
+            }
+        }
+        #endregion
     }
 
     public sealed class SpectrumConverter : ISpectrumConverter
@@ -462,6 +561,7 @@ namespace SpectrumNet
         private readonly Vector<float> _tenVec;
         private readonly Vector<float> _oneVec;
         private readonly Vector<float> _zeroVec;
+        private readonly Vector<float> _invLog10Vec;
         private readonly ParallelOptions _parallelOpts;
         #endregion
 
@@ -471,10 +571,14 @@ namespace SpectrumNet
             _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
             _pool = ArrayPool<float>.Shared;
             _vectorSize = Vector<float>.Count;
+
+            // Initialize vector constants
             _epsilonVec = new Vector<float>(float.Epsilon);
             _tenVec = new Vector<float>(10f);
             _oneVec = Vector<float>.One;
             _zeroVec = Vector<float>.Zero;
+            _invLog10Vec = new Vector<float>(INV_LOG10);
+
             _parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
         }
         #endregion
@@ -482,18 +586,18 @@ namespace SpectrumNet
         #region Public Methods
         public float[] ConvertToSpectrum(Complex[] fft, int sampleRate)
         {
-            ArgumentNullException.ThrowIfNull(fft);
-            if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
+            ValidateInput(fft, sampleRate);
 
-            int fullLen = fft.Length;
-            int len = fullLen / 2;
-            var spectrum = _pool.Rent(len);
+            int fftSize = fft.Length;
+            SpectrumRange range = CalculateSpectrumRange(fftSize, sampleRate);
 
+            var spectrum = _pool.Rent(range.Length);
             try
             {
-                ProcessSpectrum(fft, sampleRate, spectrum, len);
-                var result = new float[len];
-                Array.Copy(spectrum, result, len);
+                ProcessSpectrum(fft, sampleRate, spectrum, range);
+
+                var result = new float[range.Length];
+                Array.Copy(spectrum, result, range.Length);
                 return result;
             }
             finally
@@ -503,71 +607,133 @@ namespace SpectrumNet
         }
         #endregion
 
-        #region Private Methods
-        private void ProcessSpectrum(Complex[] fft, int sampleRate, float[] spectrum, int len)
+        #region Private Helper Methods
+        private void ValidateInput(Complex[] fft, int sampleRate)
+        {
+            ArgumentNullException.ThrowIfNull(fft);
+            if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
+        }
+
+        private SpectrumRange CalculateSpectrumRange(int fftSize, int sampleRate)
+        {
+            int len = fftSize / 2; // Use only the first half of the spectrum
+            int minIdx = (int)(MIN_FREQ * fftSize / sampleRate);
+            int maxIdx = (int)(MAX_FREQ * fftSize / sampleRate);
+
+            minIdx = Math.Clamp(minIdx, 0, len - 1);
+            maxIdx = Math.Clamp(maxIdx, 0, len - 1);
+
+            return new SpectrumRange(minIdx, maxIdx);
+        }
+
+        private void ProcessSpectrum(Complex[] fft, int sampleRate, float[] spectrum, SpectrumRange range)
         {
             float minDb = _params.MinDbValue;
-            float range = _params.MaxDbValue - minDb;
+            float dbRange = _params.MaxDbValue - minDb;
             float amp = _params.AmplificationFactor;
 
-            int minIdx = (int)(MIN_FREQ * fft.Length / sampleRate).Clamp(0, len - 1);
-            int maxIdx = (int)(MAX_FREQ * fft.Length / sampleRate).Clamp(0, len - 1);
+            int vectorEnd = range.MinIndex + ((range.MaxIndex - range.MinIndex) / _vectorSize) * _vectorSize;
 
+            // Vectorized parallel processing
+            ProcessVectorizedSpectrum(fft, spectrum, range, minDb, dbRange, amp, vectorEnd);
+
+            // Process remaining elements
+            ProcessRemainingSpectrum(fft, spectrum, range, minDb, dbRange, amp, vectorEnd);
+        }
+
+        private void ProcessVectorizedSpectrum(Complex[] fft, float[] spectrum, SpectrumRange range,
+            float minDb, float dbRange, float amp, int vectorEnd)
+        {
+            Parallel.For(range.MinIndex, vectorEnd, _parallelOpts, i =>
+            {
+                if (i % _vectorSize == 0)
+                {
+                    ProcessSpectrumVector(fft, spectrum, i, range.MinIndex, minDb, dbRange, amp);
+                }
+            });
+        }
+
+        private void ProcessRemainingSpectrum(Complex[] fft, float[] spectrum, SpectrumRange range,
+            float minDb, float dbRange, float amp, int vectorEnd)
+        {
+            for (int i = vectorEnd; i <= range.MaxIndex; i++)
+            {
+                float mag = CalculateMagnitude(fft[i]);
+                spectrum[i - range.MinIndex] = CalculateSpectrumValue(mag, minDb, dbRange, amp);
+            }
+        }
+
+        private void ProcessSpectrumVector(Complex[] fft, float[] spectrum, int index, int minIdx,
+            float minDb, float range, float amp)
+        {
+            var realVec = CreateVectorFromComplex(fft, index, (c) => c.X);
+            var imagVec = CreateVectorFromComplex(fft, index, (c) => c.Y);
+
+            var magVec = realVec * realVec + imagVec * imagVec;
+            magVec = Vector.ConditionalSelect(Vector.Equals(magVec, _zeroVec), _epsilonVec, magVec);
+
+            var logMagVec = CreateLogMagnitudeVector(magVec);
+
+            var dbVec = CalculateNormalizedDecibels(logMagVec, minDb, range, amp);
+
+            dbVec.CopyTo(spectrum, index - minIdx);
+        }
+
+        private Vector<float> CreateLogMagnitudeVector(Vector<float> magVec)
+        {
+            var values = new float[Vector<float>.Count];
+            for (int j = 0; j < values.Length; j++)
+            {
+                values[j] = MathF.Log(magVec[j]);
+            }
+            return new Vector<float>(values);
+        }
+
+        private Vector<float> CreateVectorFromComplex(Complex[] fft, int index, Func<Complex, float> selector)
+        {
+            var values = new float[Vector<float>.Count];
+            for (int j = 0; j < values.Length; j++)
+            {
+                values[j] = selector(fft[index + j]);
+            }
+            return new Vector<float>(values);
+        }
+
+        private Vector<float> CalculateNormalizedDecibels(Vector<float> logMagVec, float minDb, float range, float amp)
+        {
+            // Convert to decibels
+            var dbVec = _tenVec * _invLog10Vec * logMagVec;
+
+            // Normalize and clamp
             var minDbVec = new Vector<float>(minDb);
             var rangeVec = new Vector<float>(range);
             var ampVec = new Vector<float>(amp);
 
-            int vectorEnd = minIdx + ((maxIdx - minIdx) / _vectorSize) * _vectorSize;
-
-            // Векторизованная параллельная обработка
-            Parallel.For(minIdx, vectorEnd, _parallelOpts, i =>
-            {
-                if (i % _vectorSize == 0)
-                    ProcessVector(fft, spectrum, i, minDbVec, rangeVec, ampVec);
-            });
-
-            // Обработка оставшихся элементов
-            for (int i = vectorEnd; i <= maxIdx; i++)
-            {
-                float mag = fft[i].X * fft[i].X + fft[i].Y * fft[i].Y;
-                spectrum[i] = CalculateSpectrumValue(mag == 0 ? float.Epsilon : mag, minDb, range, amp);
-            }
-
-            // Очистка вне диапазона
-            if (minIdx > 0) Array.Clear(spectrum, 0, minIdx);
-            if (maxIdx + 1 < len) Array.Clear(spectrum, maxIdx + 1, len - maxIdx - 1);
+            return Vector.Min(
+                Vector.Max(
+                    Vector.Divide(dbVec - minDbVec, rangeVec) * ampVec,
+                    _zeroVec
+                ),
+                _oneVec
+            );
         }
 
-        private void ProcessVector(Complex[] fft, float[] spectrum, int index,
-            Vector<float> minDbVec, Vector<float> rangeVec, Vector<float> ampVec)
+        private float CalculateMagnitude(Complex complex)
         {
-            var mags = new float[_vectorSize];
-            for (int j = 0; j < _vectorSize; j++)
-            {
-                var complex = fft[index + j];
-                mags[j] = complex.X * complex.X + complex.Y * complex.Y;
-            }
-
-            var magVec = new Vector<float>(mags);
-            magVec = Vector.ConditionalSelect(Vector.Equals(magVec, _zeroVec), _epsilonVec, magVec);
-
-            // Здесь логарифмирование выполняется поэлементно
-            for (int j = 0; j < _vectorSize; j++)
-            {
-                mags[j] = 10 * INV_LOG10 * MathF.Log(mags[j]);
-            }
-
-            var dbVec = new Vector<float>(mags);
-            var normVec = Vector.Min(Vector.Max((dbVec - minDbVec) / rangeVec * ampVec, _zeroVec), _oneVec);
-
-            for (int j = 0; j < _vectorSize; j++)
-                spectrum[index + j] = normVec[j];
+            return complex.X * complex.X + complex.Y * complex.Y;
         }
 
         private static float CalculateSpectrumValue(float magnitude, float minDb, float range, float amp)
         {
-            float db = 10 * INV_LOG10 * MathF.Log(magnitude);
+            float db = 10 * INV_LOG10 * MathF.Log(magnitude == 0 ? float.Epsilon : magnitude);
             return ((db - minDb) / range * amp).Clamp(0, 1);
+        }
+        #endregion
+
+        #region Supporting Types
+        private record SpectrumRange(int MinIndex, int MaxIndex)
+        {
+            public int Length => MaxIndex - MinIndex + 1;
         }
         #endregion
     }
