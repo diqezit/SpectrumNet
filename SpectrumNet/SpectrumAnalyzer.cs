@@ -316,19 +316,21 @@ namespace SpectrumNet
         #endregion
 
         #region Private Helper Methods
+
         private void ValidateInput(Memory<float> samples, int sampleRate)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(FftProcessor));
             ArgumentNullException.ThrowIfNull(samples);
-            if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
+            if (sampleRate <= 0)
+                throw new ArgumentException($"Invalid sample rate: {sampleRate}", nameof(sampleRate));
         }
 
         private void ClearArrays()
         {
             Array.Clear(_buffer, 0, _buffer.Length);
             Array.Clear(_window, 0, _window.Length);
-            Array.Clear(_cosCache, 0, _cosCache.Length);
-            Array.Clear(_sinCache, 0, _sinCache.Length);
+            ArrayPool<float>.Shared.Return(_cosCache, clearArray: true);
+            ArrayPool<float>.Shared.Return(_sinCache, clearArray: true);
         }
 
         private static (float[] cos, float[] sin) PrecomputeTrigonometricValues(int size)
@@ -337,21 +339,20 @@ namespace SpectrumNet
             var sin = ArrayPool<float>.Shared.Rent(size);
             float invSize = TWO_PI / (size - 1);
 
-            int vecSize = Vector<float>.Count;
-            int vecCount = size / vecSize;
-
-            ComputeTrigonometricValuesVectorized(cos, sin, vecSize, vecCount, invSize);
-            ComputeTrigonometricValuesRemainder(cos, sin, vecCount, vecSize, invSize, size);
-
+            ComputeTrigonometricValuesVectorized(cos, sin, invSize, size);
             return (cos, sin);
         }
 
-        private static void ComputeTrigonometricValuesVectorized(float[] cos, float[] sin, int vecSize, int vecCount, float invSize)
+        private static void ComputeTrigonometricValuesVectorized(float[] cos, float[] sin, float invSize, int size)
         {
+            int vecSize = Vector<float>.Count;
+            int vecCount = size / vecSize;
+            var indexVector = new Vector<float>(Enumerable.Range(0, vecSize).Select(i => (float)i).ToArray());
+
             Parallel.For(0, vecCount, i =>
             {
                 int offset = i * vecSize;
-                var indices = new Vector<float>(Enumerable.Range(offset, vecSize).Select(x => (float)x).ToArray());
+                var indices = indexVector + new Vector<float>(offset);
                 var angles = indices * invSize;
 
                 for (int j = 0; j < vecSize; j++)
@@ -360,10 +361,7 @@ namespace SpectrumNet
                     sin[offset + j] = MathF.Sin(angles[j]);
                 }
             });
-        }
 
-        private static void ComputeTrigonometricValuesRemainder(float[] cos, float[] sin, int vecCount, int vecSize, float invSize, int size)
-        {
             for (int i = vecCount * vecSize; i < size; i++)
             {
                 float angle = invSize * i;
@@ -396,45 +394,18 @@ namespace SpectrumNet
 
         private void ApplyWindowFunction(float[] window, int size, Func<int, float> windowFunc)
         {
-            if (WindowType == FftWindowType.Hann || WindowType == FftWindowType.Hamming)
-            {
-                ApplyOptimizedWindowFunction(window, size, windowFunc);
-            }
-            else
-            {
-                ApplyScalarWindowFunction(window, size, windowFunc);
-            }
-        }
-
-        private void ApplyOptimizedWindowFunction(float[] window, int size, Func<int, float> windowFunc)
-        {
             int vecSize = Vector<float>.Count;
             int vecCount = size / vecSize;
 
             Parallel.For(0, vecCount, i =>
             {
                 int offset = i * vecSize;
-                var cosVec = new Vector<float>(_cosCache.AsSpan(offset, vecSize));
-
-                Vector<float> result = WindowType switch
-                {
-                    FftWindowType.Hann => 0.5f * (Vector<float>.One - cosVec),
-                    FftWindowType.Hamming => new Vector<float>(0.54f) - new Vector<float>(0.46f) * cosVec,
-                    _ => throw new NotSupportedException("SIMD optimization not implemented for this window type.")
-                };
-
+                var indices = new Vector<float>(_cosCache.AsSpan(offset, vecSize));
+                var result = new Vector<float>(Enumerable.Range(offset, vecSize).Select(windowFunc).ToArray());
                 result.CopyTo(window, offset);
             });
 
             for (int i = vecCount * vecSize; i < size; i++)
-            {
-                window[i] = windowFunc(i);
-            }
-        }
-
-        private void ApplyScalarWindowFunction(float[] window, int size, Func<int, float> windowFunc)
-        {
-            for (int i = 0; i < size; i++)
             {
                 window[i] = windowFunc(i);
             }
@@ -458,6 +429,7 @@ namespace SpectrumNet
             }
             return sum;
         }
+
         #endregion
 
         #region Processing Methods
@@ -616,12 +588,14 @@ namespace SpectrumNet
 
         private SpectrumRange CalculateSpectrumRange(int fftSize, int sampleRate)
         {
-            int len = fftSize / 2; // Use only the first half of the spectrum
-            int minIdx = (int)(MIN_FREQ * fftSize / sampleRate);
-            int maxIdx = (int)(MAX_FREQ * fftSize / sampleRate);
+            int len = fftSize / 2;
+            int minIdx = Math.Clamp((int)(MIN_FREQ * fftSize / sampleRate), 0, len - 1);
+            int maxIdx = Math.Clamp((int)(MAX_FREQ * fftSize / sampleRate), 0, len - 1);
 
-            minIdx = Math.Clamp(minIdx, 0, len - 1);
-            maxIdx = Math.Clamp(maxIdx, 0, len - 1);
+            if (minIdx > maxIdx)
+            {
+                throw new ArgumentException("Invalid frequency range: min index exceeds max index.");
+            }
 
             return new SpectrumRange(minIdx, maxIdx);
         }
@@ -656,11 +630,11 @@ namespace SpectrumNet
         private void ProcessRemainingSpectrum(Complex[] fft, float[] spectrum, SpectrumRange range,
             float minDb, float dbRange, float amp, int vectorEnd)
         {
-            for (int i = vectorEnd; i <= range.MaxIndex; i++)
+            Parallel.For(vectorEnd, range.MaxIndex + 1, i =>
             {
                 float mag = CalculateMagnitude(fft[i]);
                 spectrum[i - range.MinIndex] = CalculateSpectrumValue(mag, minDb, dbRange, amp);
-            }
+            });
         }
 
         private void ProcessSpectrumVector(Complex[] fft, float[] spectrum, int index, int minIdx,
@@ -691,7 +665,7 @@ namespace SpectrumNet
 
         private Vector<float> CreateVectorFromComplex(Complex[] fft, int index, Func<Complex, float> selector)
         {
-            var values = new float[Vector<float>.Count];
+            Span<float> values = stackalloc float[Vector<float>.Count];
             for (int j = 0; j < values.Length; j++)
             {
                 values[j] = selector(fft[index + j]);
@@ -718,10 +692,7 @@ namespace SpectrumNet
             );
         }
 
-        private float CalculateMagnitude(Complex complex)
-        {
-            return complex.X * complex.X + complex.Y * complex.Y;
-        }
+        private static float CalculateMagnitude(Complex complex) => complex.X * complex.X + complex.Y * complex.Y;
 
         private static float CalculateSpectrumValue(float magnitude, float minDb, float range, float amp)
         {
