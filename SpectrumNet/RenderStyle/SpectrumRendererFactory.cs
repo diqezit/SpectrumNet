@@ -1,5 +1,14 @@
 ﻿namespace SpectrumNet
 {
+    internal struct RenderCache
+    {
+        public float Width;
+        public float Height;
+        public float LowerBound;
+        public float UpperBound;
+        public float StepSize;
+    }
+
     public enum RenderStyle
     {
         Bars,

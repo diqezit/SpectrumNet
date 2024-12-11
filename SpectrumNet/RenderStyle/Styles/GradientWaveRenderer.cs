@@ -45,7 +45,8 @@ namespace SpectrumNet
             _smoothingFactor = isOverlayActive ? SmoothingFactorOverlay : SmoothingFactorNormal;
         }
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing,
+            int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
             if (_disposed)
             {
@@ -143,11 +144,9 @@ namespace SpectrumNet
                 return points;
             }
 
-            float step = spectrumLength > 1 ? info.Width / (spectrumLength - 1) : 0;
-
             for (int i = 0; i < spectrumLength; i++)
             {
-                float x = i * step;
+                float x = (i / (spectrumLength - 1f)) * info.Width;
                 float y = max_y - (spectrum[i] * (max_y - min_y));
                 points.Add(new SKPoint(x, y));
             }
