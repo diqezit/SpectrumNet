@@ -517,6 +517,20 @@ namespace SpectrumNet
         #endregion
     }
 
+    public readonly struct SpectrumParameters
+    {
+        public float MinDb { get; }
+        public float DbRange { get; }
+        public float AmplificationFactor { get; }
+
+        public SpectrumParameters(float minDb, float dbRange, float ampFactor)
+        {
+            MinDb = minDb;
+            DbRange = dbRange;
+            AmplificationFactor = ampFactor;
+        }
+    }
+
     public sealed class SpectrumConverter : ISpectrumConverter
     {
         #region Constants
@@ -580,13 +594,13 @@ namespace SpectrumNet
         #endregion
 
         #region Private Helper Methods
-        private void ValidateInput(Complex[] fft, int sampleRate)
+        private static void ValidateInput(Complex[] fft, int sampleRate)
         {
             ArgumentNullException.ThrowIfNull(fft);
             if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
         }
 
-        private SpectrumRange CalculateSpectrumRange(int fftSize, int sampleRate)
+        private static SpectrumRange CalculateSpectrumRange(int fftSize, int sampleRate)
         {
             int len = fftSize / 2;
             int minIdx = Math.Clamp((int)(MIN_FREQ * fftSize / sampleRate), 0, len - 1);
@@ -602,43 +616,47 @@ namespace SpectrumNet
 
         private void ProcessSpectrum(Complex[] fft, int sampleRate, float[] spectrum, SpectrumRange range)
         {
-            float minDb = _params.MinDbValue;
-            float dbRange = _params.MaxDbValue - minDb;
-            float amp = _params.AmplificationFactor;
+            // Получение параметров спектра из провайдера
+            var spectrumParams = new SpectrumParameters(
+                _params.MinDbValue,
+                _params.MaxDbValue - _params.MinDbValue,
+                _params.AmplificationFactor
+            );
 
             int vectorEnd = range.MinIndex + ((range.MaxIndex - range.MinIndex) / _vectorSize) * _vectorSize;
 
-            // Vectorized parallel processing
-            ProcessVectorizedSpectrum(fft, spectrum, range, minDb, dbRange, amp, vectorEnd);
+            // Обработка векторизированной части
+            ProcessVectorizedSpectrum(fft, spectrum, range, spectrumParams, vectorEnd);
 
-            // Process remaining elements
-            ProcessRemainingSpectrum(fft, spectrum, range, minDb, dbRange, amp, vectorEnd);
+            // Обработка оставшихся элементов
+            ProcessRemainingSpectrum(fft, spectrum, range, spectrumParams, vectorEnd);
         }
 
         private void ProcessVectorizedSpectrum(Complex[] fft, float[] spectrum, SpectrumRange range,
-            float minDb, float dbRange, float amp, int vectorEnd)
+            SpectrumParameters spectrumParams, int vectorEnd)
         {
-            Parallel.For(range.MinIndex, vectorEnd, _parallelOpts, i =>
+            var partitioner = Partitioner.Create(range.MinIndex, vectorEnd, _vectorSize);
+            Parallel.ForEach(partitioner, _parallelOpts, (partition) =>
             {
-                if (i % _vectorSize == 0)
+                for (int i = partition.Item1; i < partition.Item2; i += _vectorSize)
                 {
-                    ProcessSpectrumVector(fft, spectrum, i, range.MinIndex, minDb, dbRange, amp);
+                    ProcessSpectrumVector(fft, spectrum, i, range.MinIndex, spectrumParams);
                 }
             });
         }
 
-        private void ProcessRemainingSpectrum(Complex[] fft, float[] spectrum, SpectrumRange range,
-            float minDb, float dbRange, float amp, int vectorEnd)
+        private static void ProcessRemainingSpectrum(Complex[] fft, float[] spectrum, SpectrumRange range,
+            SpectrumParameters spectrumParams, int vectorEnd)
         {
             Parallel.For(vectorEnd, range.MaxIndex + 1, i =>
             {
                 float mag = CalculateMagnitude(fft[i]);
-                spectrum[i - range.MinIndex] = CalculateSpectrumValue(mag, minDb, dbRange, amp);
+                spectrum[i - range.MinIndex] = CalculateSpectrumValue(mag, spectrumParams);
             });
         }
 
         private void ProcessSpectrumVector(Complex[] fft, float[] spectrum, int index, int minIdx,
-            float minDb, float range, float amp)
+            SpectrumParameters spectrumParams)
         {
             var realVec = CreateVectorFromComplex(fft, index, (c) => c.X);
             var imagVec = CreateVectorFromComplex(fft, index, (c) => c.Y);
@@ -648,40 +666,47 @@ namespace SpectrumNet
 
             var logMagVec = CreateLogMagnitudeVector(magVec);
 
-            var dbVec = CalculateNormalizedDecibels(logMagVec, minDb, range, amp);
+            var dbVec = CalculateNormalizedDecibels(logMagVec, spectrumParams);
 
             dbVec.CopyTo(spectrum, index - minIdx);
         }
 
-        private Vector<float> CreateLogMagnitudeVector(Vector<float> magVec)
+
+        private static Vector<float> CreateLogMagnitudeVector(Vector<float> magVec)
         {
-            var values = new float[Vector<float>.Count];
-            for (int j = 0; j < values.Length; j++)
+            // Создаем массив для хранения значений логарифма
+            float[] logValues = new float[Vector<float>.Count];
+
+            // Вычисляем логарифмы элементов вектора
+            for (int j = 0; j < Vector<float>.Count; j++)
             {
-                values[j] = MathF.Log(magVec[j]);
+                logValues[j] = MathF.Log(magVec[j]);
             }
-            return new Vector<float>(values);
+
+            // Возвращаем новый вектор, созданный из вычисленных значений
+            return new Vector<float>(logValues);
         }
 
         private Vector<float> CreateVectorFromComplex(Complex[] fft, int index, Func<Complex, float> selector)
         {
-            Span<float> values = stackalloc float[Vector<float>.Count];
-            for (int j = 0; j < values.Length; j++)
+            var values = fft.AsSpan(index, _vectorSize);
+            float[] result = new float[_vectorSize];
+            for (int i = 0; i < _vectorSize; i++)
             {
-                values[j] = selector(fft[index + j]);
+                result[i] = selector(values[i]);
             }
-            return new Vector<float>(values);
+            return new Vector<float>(result);
         }
 
-        private Vector<float> CalculateNormalizedDecibels(Vector<float> logMagVec, float minDb, float range, float amp)
+        private Vector<float> CalculateNormalizedDecibels(Vector<float> logMagVec, SpectrumParameters spectrumParams)
         {
             // Convert to decibels
             var dbVec = _tenVec * _invLog10Vec * logMagVec;
 
             // Normalize and clamp
-            var minDbVec = new Vector<float>(minDb);
-            var rangeVec = new Vector<float>(range);
-            var ampVec = new Vector<float>(amp);
+            var minDbVec = new Vector<float>(spectrumParams.MinDb);
+            var rangeVec = new Vector<float>(spectrumParams.DbRange);
+            var ampVec = new Vector<float>(spectrumParams.AmplificationFactor);
 
             return Vector.Min(
                 Vector.Max(
@@ -694,10 +719,11 @@ namespace SpectrumNet
 
         private static float CalculateMagnitude(Complex complex) => complex.X * complex.X + complex.Y * complex.Y;
 
-        private static float CalculateSpectrumValue(float magnitude, float minDb, float range, float amp)
+        private static float CalculateSpectrumValue(float magnitude, SpectrumParameters spectrumParams)
         {
-            float db = 10 * INV_LOG10 * MathF.Log(magnitude == 0 ? float.Epsilon : magnitude);
-            return ((db - minDb) / range * amp).Clamp(0, 1);
+            if (magnitude == 0) magnitude = float.Epsilon;
+            float db = 10 * INV_LOG10 * MathF.Log(magnitude);
+            return ((db - spectrumParams.MinDb) / spectrumParams.DbRange * spectrumParams.AmplificationFactor).Clamp(0, 1);
         }
         #endregion
 
