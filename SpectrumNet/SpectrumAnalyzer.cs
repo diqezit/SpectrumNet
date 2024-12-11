@@ -231,6 +231,7 @@ namespace SpectrumNet
 
         #region Fields
         private readonly int _fftSize;
+        private readonly Dictionary<(int size, FftWindowType type), float[]> _windowCache = new();
         private readonly Complex[] _buffer;
         private readonly float[] _window;
         private readonly Channel<(float[] Samples, int SampleRate)> _channel;
@@ -335,11 +336,25 @@ namespace SpectrumNet
 
         private static (float[] cos, float[] sin) PrecomputeTrigonometricValues(int size)
         {
-            var cos = ArrayPool<float>.Shared.Rent(size);
-            var sin = ArrayPool<float>.Shared.Rent(size);
-            float invSize = TWO_PI / (size - 1);
+            float[] angles = ArrayPool<float>.Shared.Rent(size);
+            float step = TWO_PI / (size - 1);
 
-            ComputeTrigonometricValuesVectorized(cos, sin, invSize, size);
+            // Векторизованный расчет углов
+            Parallel.For(0, size, i =>
+            {
+                angles[i] = i * step;
+            });
+
+            float[] cos = ArrayPool<float>.Shared.Rent(size);
+            float[] sin = ArrayPool<float>.Shared.Rent(size);
+
+            Parallel.For(0, size, i =>
+            {
+                cos[i] = MathF.Cos(angles[i]);
+                sin[i] = MathF.Sin(angles[i]);
+            });
+
+            ArrayPool<float>.Shared.Return(angles);
             return (cos, sin);
         }
 
@@ -372,10 +387,15 @@ namespace SpectrumNet
 
         private float[] GenerateWindow(int size)
         {
+            if (_windowCache.TryGetValue((size, WindowType), out var cachedWindow))
+                return cachedWindow;
+
             var window = ArrayPool<float>.Shared.Rent(size);
             var windowFunc = GetWindowFunction(size);
 
             ApplyWindowFunction(window, size, windowFunc);
+
+            _windowCache[(size, WindowType)] = window;
             return window;
         }
 
@@ -400,11 +420,11 @@ namespace SpectrumNet
             Parallel.For(0, vecCount, i =>
             {
                 int offset = i * vecSize;
-                var indices = new Vector<float>(_cosCache.AsSpan(offset, vecSize));
-                var result = new Vector<float>(Enumerable.Range(offset, vecSize).Select(windowFunc).ToArray());
-                result.CopyTo(window, offset);
+                var indices = new Vector<float>(Enumerable.Range(offset, vecSize).Select(windowFunc).ToArray());
+                indices.CopyTo(window, offset);
             });
 
+            // Обработка оставшихся элементов
             for (int i = vecCount * vecSize; i < size; i++)
             {
                 window[i] = windowFunc(i);
@@ -439,10 +459,23 @@ namespace SpectrumNet
             {
                 await foreach (var (samples, rate) in _channel.Reader.ReadAllAsync(_cts.Token))
                 {
+                    if (samples.Length == 0)
+                    {
+                        Log.Warning("[FftProcessor] Received empty sample data, skipping processing.");
+                        continue;
+                    }
+
                     ProcessBatch(samples, rate);
                 }
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+                Log.Information("[FftProcessor] Processing was canceled.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[FftProcessor] Error occurred during FFT processing.");
+            }
         }
 
         private void ProcessBatch(float[] samples, int rate)
@@ -457,6 +490,12 @@ namespace SpectrumNet
                 pos += count;
                 _sampleCount += count;
 
+                if (_sampleCount > _fftSize)
+                {
+                    Log.Warning("Sample count exceeded FFT size. Resetting.");
+                    _sampleCount = 0;
+                }
+
                 if (_sampleCount >= _fftSize)
                 {
                     PerformFftCalculation(rate);
@@ -467,16 +506,13 @@ namespace SpectrumNet
 
         private void ProcessChunk(ReadOnlySpan<float> chunk)
         {
-            var temp = ArrayPool<float>.Shared.Rent(_vecSize);
-            try
+            int vecCount = chunk.Length / _vecSize;
+            ProcessVectorized(chunk, _cosCache, vecCount);
+
+            int remaining = chunk.Length % _vecSize;
+            if (remaining > 0)
             {
-                int vecCount = chunk.Length / _vecSize;
-                ProcessVectorized(chunk, temp, vecCount);
-                ProcessRemaining(chunk, vecCount * _vecSize, chunk.Length % _vecSize);
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(temp);
+                ProcessRemaining(chunk, vecCount * _vecSize, remaining);
             }
         }
 
@@ -508,11 +544,10 @@ namespace SpectrumNet
 
         private void PerformFftCalculation(int rate)
         {
-            if (FftCalculated != null)
-            {
-                FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
-                FftCalculated?.Invoke(this, new FftEventArgs(_buffer, rate));
-            }
+            if (FftCalculated == null) return;
+
+            FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
+            FftCalculated?.Invoke(this, new FftEventArgs(_buffer, rate));
         }
         #endregion
     }
