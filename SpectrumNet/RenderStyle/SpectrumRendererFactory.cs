@@ -1,14 +1,13 @@
 ﻿namespace SpectrumNet
 {
+    #region RenderCache Struct
     internal struct RenderCache
     {
-        public float Width;
-        public float Height;
-        public float LowerBound;
-        public float UpperBound;
-        public float StepSize;
+        public float Width, Height, LowerBound, UpperBound, StepSize, OverlayHeight;
     }
+    #endregion
 
+    #region RenderStyle Enum
     public enum RenderStyle
     {
         Bars,
@@ -25,20 +24,30 @@
         Raindrops,
         Gauge
     }
+    #endregion
 
+    #region ISpectrumRenderer Interface
     public interface ISpectrumRenderer : IDisposable
     {
         void Initialize();
-        void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
+        void Render(SKCanvas canvas, float[] spectrum,
+                    SKImageInfo info, float barWidth,
+                    float barSpacing, int barCount, SKPaint paint,
+                    Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
         void Configure(bool isOverlayActive);
     }
+    #endregion
 
+    #region SpectrumRendererFactory Class
     public static class SpectrumRendererFactory
     {
+        #region Private Fields
         private static readonly object _lock = new();
         private static readonly Dictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
         private static readonly HashSet<RenderStyle> _initializedRenderers = new();
+        #endregion
 
+        #region Public Methods
         public static ISpectrumRenderer CreateRenderer(RenderStyle style, bool isOverlayActive)
         {
             if (_rendererCache.TryGetValue(style, out var cachedRenderer))
@@ -69,7 +78,9 @@
                 return renderer;
             }
         }
+        #endregion
 
+        #region Private Methods
         private static ISpectrumRenderer CreateNewRenderer(RenderStyle style)
         {
             return style switch
@@ -90,5 +101,7 @@
                 _ => throw new ArgumentException($"Unknown render style: {style}")
             };
         }
+        #endregion
     }
+    #endregion
 }

@@ -3,8 +3,12 @@ namespace SpectrumNet;
 
 public sealed class Renderer : IDisposable
 {
+    #region Constants
     private const int RENDER_TIMEOUT_MS = 16;
     private const string DEFAULT_STYLE = "Gradient", MESSAGE = "Push start to begin record...";
+    #endregion
+
+    #region Private Fields
     private readonly record struct RenderState(SKPaint Paint, RenderStyle Style, string StyleName);
 
     private readonly SemaphoreSlim _renderLock = new(1, 1);
@@ -18,10 +22,14 @@ public sealed class Renderer : IDisposable
     private DispatcherTimer? _renderTimer;
     private RenderState _currentState;
     private volatile bool _isDisposed, _isAnalyzerDisposed, _shouldShowPlaceholder;
+    #endregion
 
+    #region Public Properties
     public string CurrentStyleName => _currentState.StyleName;
     public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
+    #endregion
 
+    #region Constructor
     public Renderer(SpectrumBrushes styles, MainWindow window, SpectrumAnalyzer analyzer, SKElement element)
     {
         _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
@@ -35,7 +43,9 @@ public sealed class Renderer : IDisposable
         InitializeRenderer();
         Log.Information("[Renderer] успешно инициализирован.");
     }
+    #endregion
 
+    #region Initialization
     private void InitializeRenderer()
     {
         try
@@ -58,7 +68,9 @@ public sealed class Renderer : IDisposable
             throw new InvalidOperationException("[Renderer] Не удалось инициализировать рендерер", ex);
         }
     }
+    #endregion
 
+    #region Event Handlers
     private void OnMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainWindow.IsRecording))
@@ -76,7 +88,9 @@ public sealed class Renderer : IDisposable
         _skElement.Loaded += (s, e) => UpdateRenderDimensions((int)_skElement.ActualWidth, (int)_skElement.ActualHeight);
         _skElement.Unloaded += (s, e) => { _renderTimer?.Stop(); _performanceMonitor.Stop(); };
     }
+    #endregion
 
+    #region Render Methods
     public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
     {
         if (_isDisposed || !_renderLock.Wait(RENDER_TIMEOUT_MS)) return;
@@ -136,7 +150,9 @@ public sealed class Renderer : IDisposable
         canvas.Clear(SKColors.Transparent);
         canvas.DrawText(MESSAGE, 50, 100, paint);
     }
+    #endregion
 
+    #region Public Methods
     public void UpdateRenderStyle(RenderStyle style)
     {
         EnsureNotDisposed();
@@ -164,13 +180,6 @@ public sealed class Renderer : IDisposable
         Log.Debug("[Renderer] Обновлен стиль спектра: {StyleName}", styleName);
     }
 
-    private void EmitPerformanceMetrics()
-    {
-        var elapsed = _performanceMonitor.Elapsed;
-        _performanceMonitor.Restart();
-        PerformanceUpdate?.Invoke(this, new(elapsed.TotalMilliseconds, 1000.0 / elapsed.TotalMilliseconds));
-    }
-
     public void RequestRender() => _skElement?.InvalidateVisual();
 
     public void UpdateRenderDimensions(int width, int height)
@@ -183,12 +192,23 @@ public sealed class Renderer : IDisposable
         RequestRender();
         Log.Debug("[Renderer] Render dimensions updated: {Width}x{Height}", width, height);
     }
+    #endregion
+
+    #region Private Methods
+    private void EmitPerformanceMetrics()
+    {
+        var elapsed = _performanceMonitor.Elapsed;
+        _performanceMonitor.Restart();
+        PerformanceUpdate?.Invoke(this, new(elapsed.TotalMilliseconds, 1000.0 / elapsed.TotalMilliseconds));
+    }
 
     private void EnsureNotDisposed()
     {
         if (_isDisposed) throw new ObjectDisposedException(nameof(Renderer));
     }
+    #endregion
 
+    #region IDisposable Implementation
     public void Dispose()
     {
         if (_isDisposed) return;
@@ -214,6 +234,9 @@ public sealed class Renderer : IDisposable
         }
         Log.Information("[Renderer] Рендерер успешно утилизирован");
     }
+    #endregion
 }
 
+#region PerformanceMetrics Struct
 public readonly record struct PerformanceMetrics(double FrameTime, double Fps);
+#endregion

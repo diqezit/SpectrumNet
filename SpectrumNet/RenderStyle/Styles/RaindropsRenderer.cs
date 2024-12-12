@@ -22,6 +22,8 @@ namespace SpectrumNet
     {
         private static readonly Lazy<RaindropsRenderer> _instance = new(() => new RaindropsRenderer());
 
+        #region Structs
+
         [StructLayout(LayoutKind.Sequential)]
         private readonly struct Raindrop
         {
@@ -59,6 +61,10 @@ namespace SpectrumNet
                 new(X, Y, newRadius, newAlpha);
         }
 
+        #endregion
+
+        #region Fields
+
         private RenderCache _renderCache;
         private readonly Raindrop[] _raindrops;
         private readonly Ripple[] _ripples;
@@ -72,7 +78,12 @@ namespace SpectrumNet
 
         private bool _isInitialized;
         private bool _isOverlayActive;
+        private bool _overlayStatusChanged;
         private bool _isDisposed;
+
+        #endregion
+
+        #region Constructors
 
         private RaindropsRenderer()
         {
@@ -82,7 +93,12 @@ namespace SpectrumNet
             _ripplesPath = new SKPath();
             _random = new Random();
             _scaledSpectrumCache = new float[RaindropsSettings.MaxRaindrops];
+            _overlayStatusChanged = false;
         }
+
+        #endregion
+
+        #region Public Methods
 
         public static RaindropsRenderer GetInstance() => _instance.Value;
 
@@ -100,31 +116,43 @@ namespace SpectrumNet
         public void Configure(bool isOverlayActive)
         {
             EnsureNotDisposed();
-            _isOverlayActive = isOverlayActive;
+            if (_isOverlayActive != isOverlayActive)
+            {
+                _isOverlayActive = isOverlayActive;
+                _overlayStatusChanged = true;
+            }
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
             float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             EnsureNotDisposed();
-            if (!IsValidRenderInput(canvas, spectrum, paint)) return;
+            if (canvas == null || spectrum == null || paint == null || spectrum.Length == 0) return;
 
-            // Обновляем кэш только при изменении размеров
-            if (_renderCache.Width != info.Width || _renderCache.Height != info.Height)
+            // Update render cache if overlay status has changed or dimensions have changed
+            if (_overlayStatusChanged ||
+                _renderCache.Width != info.Width ||
+                _renderCache.Height != info.Height)
             {
                 UpdateRenderCache(info);
+                _overlayStatusChanged = false;
             }
 
-            int actualBarCount = Math.Min(spectrum!.Length / 2, barCount);
+            int actualBarCount = Math.Min(spectrum.Length / 2, barCount);
             Span<float> scaledSpectrum = _scaledSpectrumCache.AsSpan(0, actualBarCount);
             ScaleSpectrum(spectrum, scaledSpectrum, actualBarCount);
 
             UpdateRaindrops(scaledSpectrum, _renderCache.Width, _renderCache.LowerBound, _renderCache.UpperBound);
             UpdateRipples();
 
-            drawPerformanceInfo(canvas!, info);
-            RenderDropsAndRipples(canvas!, paint!);
+            RenderDropsAndRipples(canvas, paint);
+
+            drawPerformanceInfo!(canvas!, info);
         }
+
+        #endregion
+
+        #region Private Methods
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateRenderCache(SKImageInfo info)
@@ -134,97 +162,88 @@ namespace SpectrumNet
                 Width = info.Width,
                 Height = info.Height,
                 LowerBound = _isOverlayActive ? info.Height * RaindropsSettings.OverlayBottomMultiplier : info.Height,
-                UpperBound = _isOverlayActive ? info.Height * 0.1f : 0,
-                StepSize = info.Width / RaindropsSettings.MaxRaindrops
+                UpperBound = _isOverlayActive ? info.Height * 0.1f : 0f,
+                StepSize = info.Width / (float)RaindropsSettings.MaxRaindrops
             };
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool IsValidRenderInput(SKCanvas? canvas, float[]? spectrum, SKPaint? paint) =>
-            canvas != null && spectrum != null && paint != null && spectrum.Length > 0;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private (float overlayHeight, float baseY, float adjustedLowerBound) CalculateOverlayDimensions(float totalHeight)
-        {
-            if (_isOverlayActive)
-            {
-                float overlayHeight = totalHeight;
-                float adjustedLowerBound = totalHeight * RaindropsSettings.OverlayBottomMultiplier;
-                return (overlayHeight, totalHeight, adjustedLowerBound);
-            }
-            return (totalHeight, totalHeight, totalHeight);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ScaleSpectrum(ReadOnlySpan<float> source, Span<float> destination, int targetCount)
         {
-            float blockSize = (source.Length / 2f) / targetCount;
+            if (source.IsEmpty || destination.IsEmpty || targetCount <= 0)
+                return;
+
+            float blockSize = source.Length / (2f * targetCount);
             int halfSourceLength = source.Length / 2;
 
             for (int i = 0; i < targetCount; i++)
             {
-                int start = (int)(i * blockSize);
-                int length = Math.Min((int)((i + 1) * blockSize) - start, halfSourceLength - start);
+                int startIndex = (int)(i * blockSize);
+                int endIndex = Math.Min((int)((i + 1) * blockSize), halfSourceLength);
 
-                destination[i] = CalculateAverage(source.Slice(start, length));
+                destination[i] = endIndex > startIndex
+                    ? CalculateAverageSpan(source.Slice(startIndex, endIndex - startIndex))
+                    : 0f;
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float CalculateAverage(ReadOnlySpan<float> values)
+        private static float CalculateAverageSpan(ReadOnlySpan<float> values)
         {
-            if (values.Length == 0) return 0f;
-
             float sum = 0f;
             for (int i = 0; i < values.Length; i++)
             {
                 sum += values[i];
             }
-            return sum / values.Length;
+            return values.Length > 0 ? sum / values.Length : 0f;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateRaindrops(ReadOnlySpan<float> spectrum, float width, float lowerBound, float upperBound)
         {
-            // Обновление существующих капель
-            for (int i = _raindropCount - 1; i >= 0; i--)
+            int writeIndex = 0;
+            for (int i = 0; i < _raindropCount; i++)
             {
-                var drop = _raindrops[i];
+                ref var drop = ref _raindrops[i];
                 float newY = drop.Y + drop.FallSpeed;
 
-                if (newY >= lowerBound)
+                if (newY < lowerBound)
                 {
-                    if (_rippleCount < RaindropsSettings.MaxRipples)
-                    {
-                        CreateRipple(drop.X, lowerBound);
-                    }
-                    RemoveRaindrop(i);
+                    _raindrops[writeIndex] = drop.WithNewY(newY);
+                    writeIndex++;
                 }
-                else
+                else if (_rippleCount < RaindropsSettings.MaxRipples)
                 {
-                    _raindrops[i] = drop.WithNewY(newY);
+                    CreateRipple(drop.X, lowerBound);
                 }
             }
+            _raindropCount = writeIndex;
 
-            // Создание новых капель
-            if (_raindropCount < RaindropsSettings.MaxRaindrops)
+            SpawnRaindropsFromSpectrum(spectrum, width / spectrum.Length, upperBound);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SpawnRaindropsFromSpectrum(ReadOnlySpan<float> spectrum, float step, float upperBound)
+        {
+            for (int i = 0; i < spectrum.Length && _raindropCount < RaindropsSettings.MaxRaindrops; i++)
             {
-                float step = width / spectrum.Length;
+                float intensity = Math.Clamp(spectrum[i], 0f, 1f);
 
-                for (int i = 0; i < spectrum.Length && _raindropCount < RaindropsSettings.MaxRaindrops; i++)
+                if (_random.NextDouble() < intensity * RaindropsSettings.SpawnProbability)
                 {
-                    float intensity = Math.Min(spectrum[i], 1f);
-
-                    if (_random.NextDouble() < intensity * RaindropsSettings.SpawnProbability)
-                    {
-                        _raindrops[_raindropCount++] = new Raindrop(
-                            i * step + (float)_random.NextDouble() * step,
-                            upperBound,
-                            RaindropsSettings.BaseFallSpeed * (1f + intensity)
-                        );
-                    }
+                    _raindrops[_raindropCount++] = CreateRaindrop(i * step, upperBound, intensity);
                 }
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Raindrop CreateRaindrop(float baseX, float upperBound, float intensity)
+        {
+            return new Raindrop(
+                baseX + (float)_random.NextDouble() * _renderCache.StepSize,
+                upperBound,
+                RaindropsSettings.BaseFallSpeed * (1f + intensity)
+            );
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -252,7 +271,6 @@ namespace SpectrumNet
         {
             if (_rippleCount >= RaindropsSettings.MaxRipples) return;
 
-            // Используем предварительно созданную структуру для уменьшения аллокаций
             _ripples[_rippleCount++] = new Ripple(
                 x,
                 y,
@@ -262,20 +280,8 @@ namespace SpectrumNet
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void RemoveRaindrop(int index)
-        {
-            // Оптимизированное удаление с перемещением последнего элемента
-            int lastIndex = --_raindropCount;
-            if (index < lastIndex)
-            {
-                _raindrops[index] = _raindrops[lastIndex];
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void RemoveRipple(int index)
         {
-            // Оптимизированное удаление с перемещением последнего элемента
             int lastIndex = --_rippleCount;
             if (index < lastIndex)
             {
@@ -289,39 +295,42 @@ namespace SpectrumNet
 
             try
             {
-                _dropsPath.Reset();
-                _ripplesPath.Reset();
+                using var dropPaint = paint.Clone();
 
-                // Отрисовка капель
-                for (int i = 0; i < _raindropCount; i++)
-                {
-                    var drop = _raindrops[i];
-                    _dropsPath.AddCircle(drop.X, drop.Y, RaindropsSettings.InitialRadius);
-                }
-
-                using (var dropPaint = paint.Clone())
-                {
-                    dropPaint.Style = SKPaintStyle.Fill;
-                    canvas.DrawPath(_dropsPath, dropPaint);
-
-                    // Отрисовка ряби
-                    dropPaint.Style = SKPaintStyle.Stroke;
-                    dropPaint.StrokeWidth = RaindropsSettings.RippleStrokeWidth;
-
-                    for (int i = 0; i < _rippleCount; i++)
-                    {
-                        var ripple = _ripples[i];
-                        dropPaint.Color = dropPaint.Color.WithAlpha((byte)(255 * ripple.Alpha));
-                        _ripplesPath.AddCircle(ripple.X, ripple.Y, ripple.Radius);
-                    }
-
-                    canvas.DrawPath(_ripplesPath, dropPaint);
-                }
+                RenderRaindrops(canvas, dropPaint);
+                RenderRipples(canvas, dropPaint);
             }
             catch (Exception ex)
             {
                 Log.Error($"Error in RenderDropsAndRipples: {ex.Message}");
             }
+        }
+
+        private void RenderRaindrops(SKCanvas canvas, SKPaint dropPaint)
+        {
+            dropPaint.Style = SKPaintStyle.Fill;
+            _dropsPath.Reset();
+
+            for (int i = 0; i < _raindropCount; i++)
+                _dropsPath.AddCircle(_raindrops[i].X, _raindrops[i].Y, RaindropsSettings.InitialRadius);
+
+            canvas.DrawPath(_dropsPath, dropPaint);
+        }
+
+        private void RenderRipples(SKCanvas canvas, SKPaint dropPaint)
+        {
+            dropPaint.Style = SKPaintStyle.Stroke;
+            dropPaint.StrokeWidth = RaindropsSettings.RippleStrokeWidth;
+            _ripplesPath.Reset();
+
+            for (int i = 0; i < _rippleCount; i++)
+            {
+                var ripple = _ripples[i];
+                dropPaint.Color = dropPaint.Color.WithAlpha((byte)(255 * ripple.Alpha));
+                _ripplesPath.AddCircle(ripple.X, ripple.Y, ripple.Radius);
+            }
+
+            canvas.DrawPath(_ripplesPath, dropPaint);
         }
 
         private void EnsureNotDisposed()
@@ -330,14 +339,18 @@ namespace SpectrumNet
                 throw new ObjectDisposedException(nameof(RaindropsRenderer));
         }
 
+        #endregion
+
+        #region IDisposable
+
         public void Dispose()
         {
             if (_isDisposed) return;
 
             try
             {
-                _dropsPath.Dispose();
-                _ripplesPath.Dispose();
+                _dropsPath?.Dispose();
+                _ripplesPath?.Dispose();
             }
             finally
             {
@@ -349,5 +362,7 @@ namespace SpectrumNet
                 Log.Debug("RaindropsRenderer disposed");
             }
         }
+
+        #endregion
     }
 }
