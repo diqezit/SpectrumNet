@@ -263,27 +263,31 @@ namespace SpectrumNet
         #region Nested Classes
         private class CircularParticleBuffer
         {
-            private readonly Particle[] _buffer;
-            private int _head, _tail, _count;
-            private readonly float _particleLife, _particleLifeDecay, _velocityMultiplier;
+            private Particle[] _buffer;
+            private int _head;
+            private int _tail;
+            private int _count;
+            private readonly int _capacity;
+            private readonly float _particleLife;
+            private readonly float _particleLifeDecay;
+            private readonly float _velocityMultiplier;
 
             public CircularParticleBuffer(int capacity, float particleLife, float particleLifeDecay, float velocityMultiplier)
             {
+                _capacity = capacity;
                 _buffer = new Particle[capacity];
-                _head = 0;
-                _tail = 0;
-                _count = 0;
                 _particleLife = particleLife;
                 _particleLifeDecay = particleLifeDecay;
                 _velocityMultiplier = velocityMultiplier;
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void Add(Particle particle)
             {
-                if (_count < _buffer.Length)
+                if (_count < _capacity)
                 {
                     _buffer[_tail] = particle;
-                    _tail = (_tail + 1) % _buffer.Length;
+                    _tail = (_tail + 1) % _capacity;
                     _count++;
                 }
             }
@@ -295,27 +299,43 @@ namespace SpectrumNet
 
             public void Update(float upperBound, float alphaDecayExponent)
             {
-                int activeCount = 0;
+                int writeIndex = 0;
+                int readIndex = _head;
+
                 for (int i = 0; i < _count; i++)
                 {
-                    int index = (_head + i) % _buffer.Length;
-                    ref var particle = ref _buffer[index];
-                    if (!particle.IsActive || particle.Y < upperBound || particle.Alpha <= 0.01f)
+                    ref var particle = ref _buffer[readIndex];
+
+                    // Агрессивная оптимизация условий жизни частицы
+                    if (particle.IsActive &&
+                        particle.Y >= upperBound &&
+                        particle.Alpha > 0.01f)
                     {
-                        particle.IsActive = false;
-                    }
-                    else
-                    {
+                        // Inline обновление свойств частицы
                         particle.Y -= particle.Velocity * _velocityMultiplier;
                         particle.Life -= _particleLifeDecay;
-                        particle.Alpha = (float)Math.Pow(particle.Life / _particleLife, alphaDecayExponent);
+                        particle.Alpha = MathF.Pow(particle.Life / _particleLife, alphaDecayExponent);
                         particle.Size *= 0.99f;
-                        _buffer[activeCount++] = particle;
+
+                        // Перемещение активных частиц в начало буфера
+                        if (writeIndex != readIndex)
+                        {
+                            _buffer[writeIndex] = particle;
+                        }
+                        writeIndex++;
                     }
+
+                    readIndex = (readIndex + 1) % _capacity;
                 }
-                _count = activeCount;
+
+                // Обновление состояния буфера
+                _count = writeIndex;
                 _head = 0;
+                _tail = writeIndex;
             }
+
+            // Дополнительный метод для прямого доступа к емкости буфера
+            public int Capacity => _capacity;
         }
         #endregion
 
