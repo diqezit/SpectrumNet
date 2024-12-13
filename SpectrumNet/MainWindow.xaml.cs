@@ -107,7 +107,11 @@ namespace SpectrumNet
                 while (!token.IsCancellationRequested)
                 {
                     await Task.Delay(MwConstants.MonitorDelay, token);
-                    _mainWindow.Dispatcher.Invoke(() => _mainWindow.RenderElement?.InvalidateVisual());
+                    if (!token.IsCancellationRequested)
+                    {
+                        _mainWindow.Dispatcher.Invoke(() => 
+                        _mainWindow.RenderElement?.InvalidateVisual());
+                    }
                 }
             }
             catch (TaskCanceledException) { }

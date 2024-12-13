@@ -1,6 +1,7 @@
 ﻿namespace SpectrumNet
 {
     #region RenderCache Struct
+    [StructLayout(LayoutKind.Sequential)]
     internal struct RenderCache
     {
         public float Width, Height, LowerBound, UpperBound, StepSize, OverlayHeight;
