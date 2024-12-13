@@ -11,19 +11,8 @@
     #region RenderStyle Enum
     public enum RenderStyle
     {
-        Bars,
-        Dots,
-        Cubes,
-        Waveform,
-        Loudness,
-        CircularBars,
-        Particles,
-        SphereRenderer,
-        GradientWave,
-        CircularWave,
-        Fire,
-        Raindrops,
-        Gauge
+        Bars, Dots, Cubes, Waveform, Loudness, CircularBars, Particles, SphereRenderer,
+        GradientWave, CircularWave, Fire, Raindrops, Gauge
     }
     #endregion
 
@@ -31,10 +20,8 @@
     public interface ISpectrumRenderer : IDisposable
     {
         void Initialize();
-        void Render(SKCanvas canvas, float[] spectrum,
-                    SKImageInfo info, float barWidth,
-                    float barSpacing, int barCount, SKPaint paint,
-                    Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
+        void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth,
+                    float barSpacing, int barCount, SKPaint paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
         void Configure(bool isOverlayActive);
     }
     #endregion
@@ -42,13 +29,10 @@
     #region SpectrumRendererFactory Class
     public static class SpectrumRendererFactory
     {
-        #region Private Fields
         private static readonly object _lock = new();
         private static readonly Dictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
         private static readonly HashSet<RenderStyle> _initializedRenderers = new();
-        #endregion
 
-        #region Public Methods
         public static ISpectrumRenderer CreateRenderer(RenderStyle style, bool isOverlayActive)
         {
             if (_rendererCache.TryGetValue(style, out var cachedRenderer))
@@ -65,7 +49,23 @@
                     return cachedRenderer;
                 }
 
-                var renderer = CreateNewRenderer(style);
+                var renderer = (ISpectrumRenderer)(style switch
+                {
+                    RenderStyle.Bars => BarsRenderer.GetInstance(),
+                    RenderStyle.Dots => DotsRenderer.GetInstance(),
+                    RenderStyle.Cubes => CubesRenderer.GetInstance(),
+                    RenderStyle.Waveform => WaveformRenderer.GetInstance(),
+                    RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
+                    RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
+                    RenderStyle.Particles => ParticlesRenderer.GetInstance(),
+                    RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
+                    RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
+                    RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
+                    RenderStyle.Fire => FireRenderer.GetInstance(),
+                    RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
+                    RenderStyle.Gauge => GaugeRenderer.GetInstance(),
+                    _ => throw new ArgumentException($"Unknown render style: {style}")
+                });
 
                 if (!_initializedRenderers.Contains(style))
                 {
@@ -79,30 +79,6 @@
                 return renderer;
             }
         }
-        #endregion
-
-        #region Private Methods
-        private static ISpectrumRenderer CreateNewRenderer(RenderStyle style)
-        {
-            return style switch
-            {
-                RenderStyle.Bars => BarsRenderer.GetInstance(),
-                RenderStyle.Dots => DotsRenderer.GetInstance(),
-                RenderStyle.Cubes => CubesRenderer.GetInstance(),
-                RenderStyle.Waveform => WaveformRenderer.GetInstance(),
-                RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
-                RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
-                RenderStyle.Particles => ParticlesRenderer.GetInstance(),
-                RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
-                RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
-                RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
-                RenderStyle.Fire => FireRenderer.GetInstance(),
-                RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
-                RenderStyle.Gauge => GaugeRenderer.GetInstance(),
-                _ => throw new ArgumentException($"Unknown render style: {style}")
-            };
-        }
-        #endregion
     }
     #endregion
 }
