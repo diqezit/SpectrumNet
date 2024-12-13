@@ -109,7 +109,7 @@ namespace SpectrumNet
                     await Task.Delay(MwConstants.MonitorDelay, token);
                     if (!token.IsCancellationRequested)
                     {
-                        _mainWindow.Dispatcher.Invoke(() => 
+                        _mainWindow.Dispatcher.Invoke(() =>
                         _mainWindow.RenderElement?.InvalidateVisual());
                     }
                 }

@@ -199,6 +199,31 @@
                         </Grid>
                     </GroupBox>
 
+                    <!-- Глубина залегания -->
+                    <GroupBox Header="Глубина залегания" Style="{StaticResource SettingsGroupBoxStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="255"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Максимальная глубина Z:" Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="0" Grid.Column="1" Minimum="100" Maximum="1000"
+                                    Value="{Binding MaxZDepth, Mode=TwoWay}" Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxZDepth, StringFormat='{}{0:F2}'}" Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Минимальная глубина Z:" Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="1" Grid.Column="1" Minimum="100" Maximum="1000"
+                                    Value="{Binding MinZDepth, Mode=TwoWay}" Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MinZDepth, StringFormat='{}{0:F2}'}" Style="{StaticResource SettingsTextBlockStyle}"/>
+                        </Grid>
+                    </GroupBox>
+
                     <!-- Дополнительные настройки -->
                     <GroupBox Header="Дополнительные параметры" 
                               Style="{DynamicResource SettingsGroupBoxStyle}">

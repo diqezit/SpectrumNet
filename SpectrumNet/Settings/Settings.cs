@@ -12,13 +12,16 @@
         float ParticleSizeNormal { get; set; }
         float ParticleLife { get; set; }
         float ParticleLifeDecay { get; set; }
-
-        // Новые свойства
         float VelocityMultiplier { get; set; }
         float AlphaDecayExponent { get; set; }
         float SpawnProbability { get; set; }
         float OverlayOffsetMultiplier { get; set; }
         float OverlayHeightMultiplier { get; set; }
+
+
+        // Новые свойства
+        float MaxZDepth { get; set; }
+        float MinZDepth { get; set; }
 
         void ResetToDefaults();
         event PropertyChangedEventHandler? PropertyChanged;
@@ -36,13 +39,15 @@
         public const float ParticleSizeNormal = 2.0f;
         public const float ParticleLife = 3.0f;
         public const float ParticleLifeDecay = 0.01f;
-
-        // Новые настройки
         public const float VelocityMultiplier = 0.8f;
         public const float AlphaDecayExponent = 1.3f;
         public const float SpawnProbability = 0.08f;
         public const float OverlayOffsetMultiplier = 1.0f;
         public const float OverlayHeightMultiplier = 0.7f;
+
+        // Новые настройки
+        public const float MaxZDepth = 1000f;
+        public const float MinZDepth = 100f;
     }
 
     public class Settings : ISettings, INotifyPropertyChanged
@@ -58,13 +63,16 @@
         private float _particleSizeNormal;
         private float _particleLife;
         private float _particleLifeDecay;
-
-        // Новые поля
         private float _velocityMultiplier;
         private float _alphaDecayExponent;
         private float _spawnProbability;
         private float _overlayOffsetMultiplier;
         private float _overlayHeightMultiplier;
+
+        // Новые поля
+        private float _maxZDepth;
+        private float _minZDepth;
+
 
         private static readonly Lazy<Settings> _instance = new(() => new Settings());
         public static Settings Instance => _instance.Value;
@@ -100,17 +108,18 @@
             ParticleSizeNormal = DefaultSettings.ParticleSizeNormal;
             ParticleLife = DefaultSettings.ParticleLife;
             ParticleLifeDecay = DefaultSettings.ParticleLifeDecay;
-
             VelocityMultiplier = DefaultSettings.VelocityMultiplier;
             AlphaDecayExponent = DefaultSettings.AlphaDecayExponent;
             SpawnProbability = DefaultSettings.SpawnProbability;
             OverlayOffsetMultiplier = DefaultSettings.OverlayOffsetMultiplier;
             OverlayHeightMultiplier = DefaultSettings.OverlayHeightMultiplier;
 
+            MaxZDepth = DefaultSettings.MaxZDepth;
+            MinZDepth = DefaultSettings.MinZDepth;
+
             Log.Information("Settings have been reset to defaults");
         }
 
-        // Реализация новых свойств
         public float VelocityMultiplier
         {
             get => _velocityMultiplier;
@@ -193,6 +202,19 @@
         {
             get => _particleLifeDecay;
             set => SetProperty(ref _particleLifeDecay, value);
+        }
+
+        // Реализация новых свойств
+        public float MaxZDepth
+        {
+            get => _maxZDepth;
+            set => SetProperty(ref _maxZDepth, value);
+        }
+
+        public float MinZDepth
+        {
+            get => _minZDepth;
+            set => SetProperty(ref _minZDepth, value);
         }
     }
 }

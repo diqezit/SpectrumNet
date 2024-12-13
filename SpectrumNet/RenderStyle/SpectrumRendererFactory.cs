@@ -12,7 +12,7 @@
     public enum RenderStyle
     {
         Bars, Dots, Cubes, Waveform, Loudness, CircularBars, Particles, SphereRenderer,
-        GradientWave, CircularWave, Fire, Raindrops, Gauge
+        GradientWave, CircularWave, Fire, Raindrops, Gauge, Heartbeat, TextParticles, CosmicEcho, AsciiDonut,
     }
     #endregion
 
@@ -64,6 +64,13 @@
                     RenderStyle.Fire => FireRenderer.GetInstance(),
                     RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
                     RenderStyle.Gauge => GaugeRenderer.GetInstance(),
+
+                    // New renderers
+
+                    RenderStyle.Heartbeat => HeartbeatRenderer.GetInstance(),
+                    RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
+                    RenderStyle.CosmicEcho => CosmicEchoRenderer.GetInstance(),
+                    RenderStyle.AsciiDonut => AsciiDonutRenderer.GetInstance(),
                     _ => throw new ArgumentException($"Unknown render style: {style}")
                 });
 
