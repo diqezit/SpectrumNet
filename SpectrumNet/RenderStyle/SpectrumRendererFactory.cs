@@ -11,8 +11,22 @@
     #region RenderStyle Enum
     public enum RenderStyle
     {
-        Bars, Dots, Cubes, Waveform, Loudness, CircularBars, Particles, SphereRenderer,
-        GradientWave, CircularWave, Fire, Raindrops, Gauge, Heartbeat, TextParticles, CosmicEcho, AsciiDonut,
+        AsciiDonut,
+        Bars,
+        CircularBars,
+        CircularWave,
+        Cubes,
+        Fire,
+        Gauge,
+        GradientWave,
+        Heartbeat,
+        Loudness,
+        Particles,
+        Raindrops,
+        Speaker,
+        SphereRenderer,
+        TextParticles,
+        Waveform,
     }
     #endregion
 
@@ -51,26 +65,22 @@
 
                 var renderer = (ISpectrumRenderer)(style switch
                 {
-                    RenderStyle.Bars => BarsRenderer.GetInstance(),
-                    RenderStyle.Dots => DotsRenderer.GetInstance(),
-                    RenderStyle.Cubes => CubesRenderer.GetInstance(),
-                    RenderStyle.Waveform => WaveformRenderer.GetInstance(),
-                    RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
-                    RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
-                    RenderStyle.Particles => ParticlesRenderer.GetInstance(),
-                    RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
-                    RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
-                    RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
-                    RenderStyle.Fire => FireRenderer.GetInstance(),
-                    RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
-                    RenderStyle.Gauge => GaugeRenderer.GetInstance(),
-
-                    // New renderers
-
-                    RenderStyle.Heartbeat => HeartbeatRenderer.GetInstance(),
-                    RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
-                    RenderStyle.CosmicEcho => CosmicEchoRenderer.GetInstance(),
                     RenderStyle.AsciiDonut => AsciiDonutRenderer.GetInstance(),
+                    RenderStyle.Bars => BarsRenderer.GetInstance(),
+                    RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
+                    RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
+                    RenderStyle.Cubes => CubesRenderer.GetInstance(),
+                    RenderStyle.Fire => FireRenderer.GetInstance(),
+                    RenderStyle.Gauge => GaugeRenderer.GetInstance(),
+                    RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
+                    RenderStyle.Heartbeat => HeartbeatRenderer.GetInstance(),
+                    RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
+                    RenderStyle.Particles => ParticlesRenderer.GetInstance(),
+                    RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
+                    RenderStyle.Speaker => Speaker3DRenderer.GetInstance(),
+                    RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
+                    RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
+                    RenderStyle.Waveform => WaveformRenderer.GetInstance(),
                     _ => throw new ArgumentException($"Unknown render style: {style}")
                 });
 

@@ -5,7 +5,7 @@ namespace SpectrumNet
     public sealed class TextParticlesRenderer : ISpectrumRenderer, IDisposable
     {
         #region Fields
-
+        [StructLayout(LayoutKind.Sequential, Pack = 16)]
         private struct Particle
         {
             public float X, Y, Z, Velocity, Size, Life, Alpha;
@@ -17,71 +17,81 @@ namespace SpectrumNet
         private readonly Random _random = new();
         private const int VelocityLookupSize = 1024;
         private float[] SpectrumBuffer => _spectrumBuffer ??= ArrayPool<float>.Shared.Rent(2048);
+
         private CircularParticleBuffer? _particleBuffer;
         private RenderCache _renderCache = new();
         private float[]? _spectrumBuffer, _velocityLookup, _alphaCurve;
-        private readonly string _characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        private readonly float _velocityRange = Settings.Instance.ParticleVelocityMax - Settings.Instance.ParticleVelocityMin,
-                              _particleLife = Settings.Instance.ParticleLife,
-                              _particleLifeDecay = Settings.Instance.ParticleLifeDecay,
-                              _alphaDecayExponent = Settings.Instance.AlphaDecayExponent,
-                              _spawnThresholdOverlay = Settings.Instance.SpawnThresholdOverlay,
-                              _spawnThresholdNormal = Settings.Instance.SpawnThresholdNormal,
-                              _spawnProbability = Settings.Instance.SpawnProbability,
-                              _particleSizeOverlay = Settings.Instance.ParticleSizeOverlay,
-                              _particleSizeNormal = Settings.Instance.ParticleSizeNormal,
-                              _velocityMultiplier = Settings.Instance.VelocityMultiplier,
-                              _zRange = Settings.Instance.MaxZDepth - Settings.Instance.MinZDepth;
-        private bool _isOverlayActive, _isInitialized, _isDisposed;
+        private readonly string _characters = "01";
 
+        private readonly float
+            _velocityRange = Settings.Instance.ParticleVelocityMax - Settings.Instance.ParticleVelocityMin,
+            _particleLife = Settings.Instance.ParticleLife,
+            _particleLifeDecay = Settings.Instance.ParticleLifeDecay,
+            _alphaDecayExponent = Settings.Instance.AlphaDecayExponent,
+            _spawnThresholdOverlay = Settings.Instance.SpawnThresholdOverlay,
+            _spawnThresholdNormal = Settings.Instance.SpawnThresholdNormal,
+            _spawnProbability = Settings.Instance.SpawnProbability,
+            _particleSizeOverlay = Settings.Instance.ParticleSizeOverlay,
+            _particleSizeNormal = Settings.Instance.ParticleSizeNormal,
+            _velocityMultiplier = Settings.Instance.VelocityMultiplier,
+            _zRange = Settings.Instance.MaxZDepth - Settings.Instance.MinZDepth;
+
+        private bool _isOverlayActive, _isInitialized, _isDisposed;
         #endregion
 
         #region Constructor and Singleton
-
         private TextParticlesRenderer()
         {
             PrecomputeAlphaCurve();
             InitializeVelocityLookup(Settings.Instance.ParticleVelocityMin);
         }
 
-        private static readonly Lazy<TextParticlesRenderer> _lazyInstance = new(() =>
-        new TextParticlesRenderer(), LazyThreadSafetyMode.ExecutionAndPublication);
+        private static readonly Lazy<TextParticlesRenderer> _lazyInstance =
+            new(() => new TextParticlesRenderer(), LazyThreadSafetyMode.ExecutionAndPublication);
         public static TextParticlesRenderer GetInstance() => _lazyInstance.Value;
-
         #endregion
 
         #region Public Methods
-
         public void Initialize()
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(TextParticlesRenderer));
             if (_isInitialized) return;
-            _particleBuffer = new CircularParticleBuffer((int)Settings.Instance.MaxParticles, _particleLife, _particleLifeDecay, _velocityMultiplier);
+
+            _particleBuffer = new CircularParticleBuffer(
+                (int)Settings.Instance.MaxParticles,
+                _particleLife,
+                _particleLifeDecay,
+                _velocityMultiplier);
             _isInitialized = true;
         }
 
         public void Configure(bool isOverlayActive)
         {
-            if (_isOverlayActive != isOverlayActive)
-            {
-                _isOverlayActive = isOverlayActive;
-                UpdateParticleSizes();
-            }
+            if (_isOverlayActive == isOverlayActive) return;
+            _isOverlayActive = isOverlayActive;
+            UpdateParticleSizes();
         }
 
-        public void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+        public void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth,
+            float barSpacing, int barCount, SKPaint paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
             if (!ValidateRenderParameters(canvas, spectrum, info, paint, drawPerformanceInfo)) return;
-            _renderCache.Width = info.Width; _renderCache.Height = info.Height;
-            UpdateRenderCacheBounds(info.Height);
+
+            _renderCache.Width = info.Width;
+            _renderCache.Height = info.Height;
             _renderCache.StepSize = barCount > 0 ? info.Width / barCount : 0f;
 
+            UpdateRenderCacheBounds(info.Height);
             _particleBuffer?.Update(_renderCache.UpperBound, _renderCache.LowerBound, _alphaDecayExponent);
-            if (_spectrumBuffer == null) _spectrumBuffer = ArrayPool<float>.Shared.Rent(2048);
+            _spectrumBuffer ??= ArrayPool<float>.Shared.Rent(2048);
 
-            SpawnNewParticles(spectrum.AsSpan(0, Math.Min(spectrum.Length, 2048)), _renderCache.LowerBound, _renderCache.Width, barWidth);
+            SpawnNewParticles(
+                spectrum.AsSpan(0, Math.Min(spectrum.Length, 2048)),
+                _renderCache.LowerBound,
+                _renderCache.Width,
+                barWidth);
+
             RenderParticles(canvas, paint, _renderCache.UpperBound, _renderCache.LowerBound);
-
             drawPerformanceInfo(canvas, info);
         }
 
@@ -90,86 +100,95 @@ namespace SpectrumNet
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-
         #endregion
 
         #region Private Methods
 
         private void PrecomputeAlphaCurve()
         {
-            if (_alphaCurve == null) _alphaCurve = ArrayPool<float>.Shared.Rent(101);
+            _alphaCurve ??= ArrayPool<float>.Shared.Rent(101);
             float step = 1f / (_alphaCurve.Length - 1);
-            for (int i = 0; i < _alphaCurve.Length; i++) _alphaCurve[i] = (float)Math.Pow(i * step, _alphaDecayExponent);
+            for (int i = 0; i < _alphaCurve.Length; i++)
+                _alphaCurve[i] = (float)Math.Pow(i * step, _alphaDecayExponent);
         }
 
         private void InitializeVelocityLookup(float minVelocity)
         {
-            if (_velocityLookup == null) _velocityLookup = ArrayPool<float>.Shared.Rent(VelocityLookupSize);
-            for (int i = 0; i < VelocityLookupSize; i++) _velocityLookup[i] = minVelocity + _velocityRange * i / VelocityLookupSize;
+            _velocityLookup ??= ArrayPool<float>.Shared.Rent(VelocityLookupSize);
+            for (int i = 0; i < VelocityLookupSize; i++)
+                _velocityLookup[i] = minVelocity + _velocityRange * i / VelocityLookupSize;
         }
 
         private void UpdateRenderCacheBounds(float height)
         {
             float overlayHeight = height * Settings.Instance.OverlayHeightMultiplier;
-            if (_isOverlayActive)
-            {
-                _renderCache.UpperBound = height - overlayHeight;
-                _renderCache.LowerBound = height;
-                _renderCache.OverlayHeight = overlayHeight;
-            }
-            else
-            {
-                _renderCache.UpperBound = 0f;
-                _renderCache.LowerBound = height;
-                _renderCache.OverlayHeight = 0f;
-            }
+            _renderCache.OverlayHeight = _isOverlayActive ? overlayHeight : 0f;
+            _renderCache.UpperBound = _isOverlayActive ? height - overlayHeight : 0f;
+            _renderCache.LowerBound = height;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         private void SpawnNewParticles(ReadOnlySpan<float> spectrum, float spawnY, float canvasWidth, float barWidth)
         {
             if (_particleBuffer == null) return;
+
+            Span<float> randomValues = stackalloc float[spectrum.Length];
+            for (int i = 0; i < randomValues.Length; i++)
+                randomValues[i] = (float)_random.NextDouble();
+
             float threshold = _isOverlayActive ? _spawnThresholdOverlay : _spawnThresholdNormal;
-            float baseSize = (_isOverlayActive ? _particleSizeOverlay : _particleSizeNormal) * 2; // Increase size
+            float baseSize = (_isOverlayActive ? _particleSizeOverlay : _particleSizeNormal) * 2;
             int targetCount = Math.Min(spectrum.Length / 2, 2048);
+
             ScaleSpectrum(spectrum, SpectrumBuffer.AsSpan(0, targetCount));
             float xStep = _renderCache.StepSize;
 
             for (int i = 0; i < targetCount; i++)
             {
                 float spectrumValue = SpectrumBuffer[i];
-                if (spectrumValue <= threshold) continue;
-                float densityFactor = MathF.Min(spectrumValue / threshold, 3f);
-                if (_random.NextDouble() >= densityFactor * _spawnProbability) continue;
+                if (spectrumValue <= threshold || _random.NextDouble() >= MathF.Min(spectrumValue / threshold, 3f) * _spawnProbability)
+                    continue;
 
-                char character = _characters[_random.Next(_characters.Length)];
                 _particleBuffer.Add(new Particle
                 {
                     X = i * xStep + (float)_random.NextDouble() * barWidth,
                     Y = spawnY,
                     Z = Settings.Instance.MinZDepth + (float)_random.NextDouble() * _zRange,
-                    Velocity = GetRandomVelocity() * densityFactor,
-                    Size = baseSize * densityFactor,
+                    Velocity = GetRandomVelocity() * MathF.Min(spectrumValue / threshold, 3f),
+                    Size = baseSize * MathF.Min(spectrumValue / threshold, 3f),
                     Life = _particleLife,
                     Alpha = 1f,
                     IsActive = true,
-                    Character = character
+                    Character = _characters[_random.Next(_characters.Length)]
                 });
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private float GetRandomVelocity()
-        {
-            if (_velocityLookup == null) throw new InvalidOperationException("Velocity lookup is not initialized.");
-            return _velocityLookup[_random.Next(VelocityLookupSize)] * _velocityMultiplier;
-        }
+        private float GetRandomVelocity() =>
+            _velocityLookup?[_random.Next(VelocityLookupSize)] * _velocityMultiplier
+            ?? throw new InvalidOperationException("Velocity lookup is not initialized.");
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         private static void ScaleSpectrum(ReadOnlySpan<float> source, Span<float> dest)
         {
-            int srcLen = source.Length / 2, destLen = dest.Length;
-            if (srcLen == 0 || destLen == 0) return;
-            float scale = srcLen / (float)destLen;
-            for (int i = 0; i < destLen; i++) dest[i] = source[(int)(i * scale)];
+            if (source.IsEmpty || dest.IsEmpty) return;
+
+            ref var sourceRef = ref MemoryMarshal.GetReference(source);
+            ref var destRef = ref MemoryMarshal.GetReference(dest);
+            float scale = (source.Length - 1) / (float)(dest.Length - 1);
+
+            for (int i = 0; i < dest.Length; i++)
+            {
+                float index = i * scale;
+                int baseIndex = (int)index;
+                float fraction = index - baseIndex;
+
+                Unsafe.Add(ref destRef, i) = baseIndex + 1 < source.Length
+                    ? Unsafe.Add(ref sourceRef, baseIndex) * (1 - fraction) +
+                      Unsafe.Add(ref sourceRef, baseIndex + 1) * fraction
+                    : Unsafe.Add(ref sourceRef, baseIndex);
+            }
         }
 
         private void UpdateParticleSizes()
@@ -177,39 +196,44 @@ namespace SpectrumNet
             if (_particleBuffer == null) return;
             float baseSize = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
             float oldBaseSize = _isOverlayActive ? _particleSizeNormal : _particleSizeOverlay;
+
             foreach (ref var particle in _particleBuffer.GetActiveParticles())
-            {
-                float relativeSizeFactor = particle.Size / oldBaseSize;
-                particle.Size = baseSize * relativeSizeFactor;
-            }
+                particle.Size = baseSize * (particle.Size / oldBaseSize);
         }
 
         private void RenderParticles(SKCanvas canvas, SKPaint paint, float upperBound, float lowerBound)
         {
             if (_particleBuffer == null) return;
             var activeParticles = _particleBuffer.GetActiveParticles();
-            if (activeParticles.Length == 0) return;
+            if (activeParticles.IsEmpty) return;
+
             paint.Style = SKPaintStyle.Fill;
+            const float focalLength = 1000f;
+            float centerX = _renderCache.Width / 2f, centerY = _renderCache.Height / 2f;
 
-            float focalLength = 1000f; // Adjust for projection depth
-            float canvasWidth = _renderCache.Width, canvasHeight = _renderCache.Height, centerX = canvasWidth / 2f, centerY = canvasHeight / 2f;
+            ref var activeRef = ref MemoryMarshal.GetReference(activeParticles);
 
-            foreach (ref readonly var particle in activeParticles)
+            for (int i = 0; i < activeParticles.Length; i++)
             {
-                if (!particle.IsActive || particle.Y < upperBound || particle.Y > lowerBound) continue;
-                float depth = focalLength + particle.Z, scale = focalLength / depth;
-                float screenX = centerX + (particle.X - centerX) * scale, screenY = centerY + (particle.Y - centerY) * scale;
-                float textSize = particle.Size * scale;
-                float alpha = particle.Alpha * (depth / (focalLength + particle.Z));
+                ref readonly var p = ref Unsafe.Add(ref activeRef, i);
+                if (!p.IsActive || p.Y < upperBound || p.Y > lowerBound) continue;
 
-                paint.Color = paint.Color.WithAlpha((byte)(alpha * 255));
-                canvas.DrawText(particle.Character.ToString(), screenX - textSize / 2, screenY + textSize / 2, new SKFont { Size = textSize }, paint);
+                float depth = focalLength + p.Z;
+                float scale = focalLength / depth;
+                float screenX = centerX + (p.X - centerX) * scale;
+                float screenY = centerY + (p.Y - centerY) * scale;
+                float textSize = p.Size * scale;
+
+                paint.Color = paint.Color.WithAlpha((byte)(p.Alpha * (depth / (focalLength + p.Z)) * 255));
+                canvas.DrawText(p.Character.ToString(), screenX - textSize / 2, screenY + textSize / 2,
+                    new SKFont { Size = textSize }, paint);
             }
         }
 
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
-            => !_isDisposed && _isInitialized && canvas != null && spectrum != null && spectrum.Length >= 2
-               && paint != null && drawPerformanceInfo != null && info.Width > 0 && info.Height > 0;
+        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint,
+            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo) =>
+            !_isDisposed && _isInitialized && canvas != null && spectrum?.Length >= 2 &&
+            paint != null && drawPerformanceInfo != null && info.Width > 0 && info.Height > 0;
 
         private void Dispose(bool disposing)
         {
@@ -219,9 +243,7 @@ namespace SpectrumNet
                 if (_spectrumBuffer != null) ArrayPool<float>.Shared.Return(_spectrumBuffer);
                 if (_velocityLookup != null) ArrayPool<float>.Shared.Return(_velocityLookup);
                 if (_alphaCurve != null) ArrayPool<float>.Shared.Return(_alphaCurve);
-                _spectrumBuffer = null;
-                _velocityLookup = null;
-                _alphaCurve = null;
+                _spectrumBuffer = _velocityLookup = _alphaCurve = null;
                 _particleBuffer = null;
                 _renderCache = new RenderCache();
             }
@@ -232,7 +254,6 @@ namespace SpectrumNet
         #endregion
 
         #region Nested Classes
-
         private class CircularParticleBuffer
         {
             private Particle[] _buffer;
@@ -243,48 +264,43 @@ namespace SpectrumNet
             {
                 _capacity = capacity;
                 _buffer = new Particle[capacity];
-                _particleLife = particleLife;
-                _particleLifeDecay = particleLifeDecay;
-                _velocityMultiplier = velocityMultiplier;
+                (_particleLife, _particleLifeDecay, _velocityMultiplier) = (particleLife, particleLifeDecay, velocityMultiplier);
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void Add(Particle particle)
             {
-                if (_count < _capacity)
-                {
-                    _buffer[_tail] = particle;
-                    _tail = (_tail + 1) % _capacity;
-                    _count++;
-                }
+                if (_count >= _capacity) return;
+                _buffer[_tail] = particle;
+                _tail = (_tail + 1) % _capacity;
+                _count++;
             }
 
             public Span<Particle> GetActiveParticles() => _buffer.AsSpan(_head, _count);
 
             public void Update(float upperBound, float lowerBound, float alphaDecayExponent)
             {
-                int writeIndex = 0, readIndex = _head;
-                for (int i = 0; i < _count; i++)
+                int writeIndex = 0;
+                for (int i = 0, readIndex = _head; i < _count; i++, readIndex = (readIndex + 1) % _capacity)
                 {
                     ref var particle = ref _buffer[readIndex];
-                    if (particle.IsActive)
-                    {
-                        particle.Y -= particle.Velocity * _velocityMultiplier;
-                        particle.Life -= _particleLifeDecay;
-                        particle.Alpha = (float)Math.Pow(particle.Life / _particleLife, alphaDecayExponent);
-                        if (particle.Y < upperBound || particle.Y > lowerBound || particle.Alpha < 0.01f)
-                            particle.IsActive = false;
-                        else
-                            _buffer[writeIndex++] = particle;
-                    }
-                    readIndex = (readIndex + 1) % _capacity;
+                    if (!particle.IsActive) continue;
+
+                    particle.Y -= particle.Velocity * _velocityMultiplier;
+                    particle.Life -= _particleLifeDecay;
+                    particle.Alpha = MathF.Pow(particle.Life / _particleLife, alphaDecayExponent);
+
+                    if (particle.Y >= upperBound && particle.Y <= lowerBound && particle.Alpha >= 0.01f)
+                        _buffer[writeIndex++] = particle;
+                    else
+                        particle.IsActive = false;
                 }
+
                 _count = writeIndex;
                 _head = 0;
                 _tail = writeIndex;
             }
         }
-
         #endregion
     }
 }
