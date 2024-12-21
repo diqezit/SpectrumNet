@@ -2,42 +2,72 @@
 
 namespace SpectrumNet
 {
+    #region CommonResources
+    /// <summary>
+    /// Provides common resources and utility methods for the application.
+    /// </summary>
     public partial class CommonResources
     {
-        public static void InitaliseRecources()
+        /// <summary>
+        /// Initializes the application resources by loading and merging resource dictionaries.
+        /// </summary>
+        public static void InitialiseResources()
         {
-            var commonResources = new ResourceDictionary { Source = new Uri("/Themes/CommonResources.xaml", UriKind.Relative) };
-            var lightTheme = new ResourceDictionary { Source = new Uri("/Themes/LightTheme.xaml", UriKind.Relative) };
-            var darkTheme = new ResourceDictionary { Source = new Uri("/Themes/DarkTheme.xaml", UriKind.Relative) };
+            var resources = new[]
+            {
+                "/Themes/CommonResources.xaml",
+                "/Themes/LightTheme.xaml",
+                "/Themes/DarkTheme.xaml"
+            };
 
-            Application.Current.Resources.MergedDictionaries.Add(commonResources);
-            Application.Current.Resources.MergedDictionaries.Add(lightTheme);
-            Application.Current.Resources.MergedDictionaries.Add(darkTheme);
+            foreach (var resource in resources)
+            {
+                Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
+                {
+                    Source = new Uri(resource, UriKind.Relative)
+                });
+            }
         }
 
+        /// <summary>
+        /// Handles mouse wheel scrolling for sliders.
+        /// </summary>
+        /// <param name="sender">The object that raised the event.</param>
+        /// <param name="e">The mouse wheel event arguments.</param>
         public void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e)
         {
             if (sender is Slider slider)
             {
-                double change = slider.SmallChange <= 0 ? 1 : slider.SmallChange;
+                var change = slider.SmallChange > 0 ? slider.SmallChange : 1;
                 slider.Value = Math.Clamp(slider.Value + (e.Delta > 0 ? change : -change), slider.Minimum, slider.Maximum);
                 e.Handled = true;
             }
         }
     }
+    #endregion
 
+    #region ThemeManager
+    /// <summary>
+    /// Manages the application's theme, allowing switching between light and dark themes.
+    /// </summary>
     public class ThemeManager : INotifyPropertyChanged
     {
+        #region Fields
         private static ThemeManager? _instance;
         private bool _isDarkTheme = true;
         private readonly Dictionary<bool, ResourceDictionary> _themeDictionaries;
-        private readonly List<WeakReference<Window>> _registeredWindows;
+        private readonly List<WeakReference<Window>> _registeredWindows = new();
+        #endregion
 
+        #region Properties
+        /// <summary>
+        /// Gets the singleton instance of the ThemeManager.
+        /// </summary>
         public static ThemeManager Instance => _instance ??= new ThemeManager();
 
-        public event PropertyChangedEventHandler? PropertyChanged;
-        public event EventHandler<ThemeChangedEventArgs>? ThemeChanged;
-
+        /// <summary>
+        /// Gets or sets a value indicating whether the dark theme is currently active.
+        /// </summary>
         public bool IsDarkTheme
         {
             get => _isDarkTheme;
@@ -51,22 +81,39 @@ namespace SpectrumNet
                 }
             }
         }
+        #endregion
 
+        #region Events
+        /// <summary>
+        /// Occurs when a property value changes.
+        /// </summary>
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        /// <summary>
+        /// Occurs when the theme changes.
+        /// </summary>
+        public event EventHandler<ThemeChangedEventArgs>? ThemeChanged;
+        #endregion
+
+        #region Constructor
+        /// <summary>
+        /// Initializes a new instance of the ThemeManager class.
+        /// </summary>
         private ThemeManager()
         {
-            _registeredWindows = new List<WeakReference<Window>>();
             _themeDictionaries = new Dictionary<bool, ResourceDictionary>
             {
-                { true, LoadThemeResource("Themes/DarkTheme.xaml") },
-                { false, LoadThemeResource("Themes/LightTheme.xaml") }
+                { true, LoadThemeResource("/Themes/DarkTheme.xaml") },
+                { false, LoadThemeResource("/Themes/LightTheme.xaml") }
             };
         }
+        #endregion
 
-        private ResourceDictionary LoadThemeResource(string path)
-        {
-            return new ResourceDictionary { Source = new Uri(path, UriKind.Relative) };
-        }
-
+        #region Public Methods
+        /// <summary>
+        /// Registers a window with the ThemeManager.
+        /// </summary>
+        /// <param name="window">The window to register.</param>
         public void RegisterWindow(Window window)
         {
             CleanupUnusedReferences();
@@ -79,56 +126,63 @@ namespace SpectrumNet
             }
         }
 
-        private void CleanupUnusedReferences()
-        {
-            _registeredWindows.RemoveAll(wr => !wr.TryGetTarget(out _));
-        }
-
+        /// <summary>
+        /// Unregisters a window from the ThemeManager.
+        /// </summary>
+        /// <param name="window">The window to unregister.</param>
         public void UnregisterWindow(Window window)
         {
             CleanupUnusedReferences();
 
-            if (_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
-            {
-                _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
-                window.Closed -= OnWindowClosed;
-            }
+            _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
+            window.Closed -= OnWindowClosed;
         }
 
-        private void OnWindowClosed(object? sender, EventArgs e)
-        {
-            if (sender is Window window)
-            {
-                window.Loaded -= OnWindowLoaded;
-                window.Unloaded -= OnWindowUnloaded;
-                _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
-                window.Closed -= OnWindowClosed;
-            }
-        }
-
-        private void OnWindowLoaded(object sender, RoutedEventArgs e)
-        {
-            if (sender is Window window)
-            {
-                ApplyThemeToWindow(window);
-            }
-        }
-
-        private void OnWindowUnloaded(object sender, RoutedEventArgs e)
-        {
-            // No action needed
-        }
-
+        /// <summary>
+        /// Toggles between light and dark themes.
+        /// </summary>
         public void ToggleTheme()
         {
             IsDarkTheme = !IsDarkTheme;
             UpdateAllWindows();
         }
+        #endregion
 
+        #region Private Methods
+        /// <summary>
+        /// Loads a theme resource dictionary from the specified path.
+        /// </summary>
+        /// <param name="path">The path to the theme resource.</param>
+        /// <returns>The loaded ResourceDictionary.</returns>
+        private static ResourceDictionary LoadThemeResource(string path) =>
+            new() { Source = new Uri(path, UriKind.Relative) };
+
+        /// <summary>
+        /// Removes references to closed windows from the registered windows list.
+        /// </summary>
+        private void CleanupUnusedReferences() =>
+            _registeredWindows.RemoveAll(wr => !wr.TryGetTarget(out _));
+
+        /// <summary>
+        /// Handles the window closed event.
+        /// </summary>
+        /// <param name="sender">The object that raised the event.</param>
+        /// <param name="e">The event arguments.</param>
+        private void OnWindowClosed(object? sender, EventArgs e)
+        {
+            if (sender is Window window)
+            {
+                _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
+                window.Closed -= OnWindowClosed;
+            }
+        }
+
+        /// <summary>
+        /// Updates the theme for all registered windows.
+        /// </summary>
         private void UpdateAllWindows()
         {
-            var windows = _registeredWindows.ToList();
-            foreach (var windowRef in windows)
+            foreach (var windowRef in _registeredWindows.ToList())
             {
                 if (windowRef.TryGetTarget(out var window))
                 {
@@ -137,65 +191,67 @@ namespace SpectrumNet
             }
         }
 
+        /// <summary>
+        /// Applies the current theme to the specified window.
+        /// </summary>
+        /// <param name="window">The window to apply the theme to.</param>
         public void ApplyThemeToWindow(Window window)
         {
             if (window == null) return;
 
+            var themeDict = _themeDictionaries[IsDarkTheme];
             Application.Current.Dispatcher.Invoke(() =>
             {
-                var themeDict = _themeDictionaries[IsDarkTheme];
-
                 foreach (var key in themeDict.Keys)
                 {
-                    if (window.Resources.Contains(key))
-                    {
-                        window.Resources[key] = themeDict[key];
-                    }
-                    else
-                    {
-                        window.Resources.Add(key, themeDict[key]);
-                    }
+                    window.Resources[key] = themeDict[key];
                 }
 
-                if (window is MainWindow)
+                if (window is MainWindow && Application.Current is { } app)
                 {
-                    var app = Application.Current;
-                    if (app != null)
+                    foreach (var key in themeDict.Keys)
                     {
-                        foreach (var key in themeDict.Keys)
-                        {
-                            if (app.Resources.Contains(key))
-                            {
-                                app.Resources[key] = themeDict[key];
-                            }
-                            else
-                            {
-                                app.Resources.Add(key, themeDict[key]);
-                            }
-                        }
+                        app.Resources[key] = themeDict[key];
                     }
                 }
             });
         }
+        #endregion
 
-        protected virtual void OnPropertyChanged(string propertyName)
-        {
+        #region Event Triggers
+        /// <summary>
+        /// Raises the PropertyChanged event.
+        /// </summary>
+        /// <param name="propertyName">The name of the property that changed.</param>
+        protected virtual void OnPropertyChanged(string propertyName) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        }
 
-        protected virtual void OnThemeChanged(bool isDarkTheme)
-        {
+        /// <summary>
+        /// Raises the ThemeChanged event.
+        /// </summary>
+        /// <param name="isDarkTheme">A value indicating whether the dark theme is active.</param>
+        protected virtual void OnThemeChanged(bool isDarkTheme) =>
             ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(isDarkTheme));
-        }
+        #endregion
     }
+    #endregion
 
+    #region ThemeChangedEventArgs
+    /// <summary>
+    /// Provides data for the ThemeChanged event.
+    /// </summary>
     public class ThemeChangedEventArgs : EventArgs
     {
+        /// <summary>
+        /// Gets a value indicating whether the dark theme is active.
+        /// </summary>
         public bool IsDarkTheme { get; }
 
-        public ThemeChangedEventArgs(bool isDarkTheme)
-        {
-            IsDarkTheme = isDarkTheme;
-        }
+        /// <summary>
+        /// Initializes a new instance of the ThemeChangedEventArgs class.
+        /// </summary>
+        /// <param name="isDarkTheme">A value indicating whether the dark theme is active.</param>
+        public ThemeChangedEventArgs(bool isDarkTheme) => IsDarkTheme = isDarkTheme;
     }
+    #endregion
 }

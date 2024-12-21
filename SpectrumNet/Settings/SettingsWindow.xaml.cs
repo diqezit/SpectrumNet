@@ -3,20 +3,37 @@
 namespace SpectrumNet
 {
     /// <summary>
-    /// Interaction logic for SettingsWindow.xaml
+    /// Represents the settings window for the SpectrumNet application.
+    /// This window allows users to view and modify application settings.
     /// </summary>
+    /// <remarks>
+    /// The SettingsWindow class handles the initialization of resources,
+    /// manages the application's theme, and provides functionality to
+    /// save, apply, reset, and restore settings.
+    /// </remarks>
     public partial class SettingsWindow : Window
     {
+        #region Fields
+        /// <summary>
+        /// The application settings instance.
+        /// </summary>
         private readonly Settings _settings;
-        private Dictionary<string, object>? _originalValues;
 
         /// <summary>
-        /// Initializes a new instance of the SettingsWindow class.
+        /// Dictionary to store original setting values.
+        /// </summary>
+        private Dictionary<string, object?>? _originalValues;
+        #endregion
+
+        #region Constructor
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SettingsWindow"/> class.
         /// </summary>
         public SettingsWindow()
         {
             Log.Debug($"[{nameof(SettingsWindow)}] Инициализация окна ресурсов");
-            InitaliseRecources();
+            InitialiseResources();
+
             Log.Debug($"[{nameof(SettingsWindow)}] Инициализация окна");
             InitializeComponent();
 
@@ -27,25 +44,23 @@ namespace SpectrumNet
             SaveOriginalSettings();
             DataContext = _settings;
         }
-
-        private static void InitaliseRecources()
-        {
-            CommonResources.InitaliseRecources();
-        }
+        #endregion
 
         #region Private Methods
+        /// <summary>
+        /// Initializes the window resources.
+        /// </summary>
+        private static void InitialiseResources() =>
+            CommonResources.InitialiseResources();
 
         /// <summary>
-        /// Saves the original settings values to a dictionary for later restoration.
+        /// Saves the current settings to use as original values.
         /// </summary>
         private void SaveOriginalSettings()
         {
-            var settings = _settings.GetType().GetProperties()
+            _originalValues = _settings.GetType().GetProperties()
                 .Where(p => p.CanRead && p.CanWrite)
                 .ToDictionary(p => p.Name, p => p.GetValue(_settings));
-            _originalValues = settings;
-
-            Log.Debug($"[{nameof(SettingsWindow)}] Оригинальные настройки сохранены");
         }
 
         /// <summary>
@@ -59,20 +74,41 @@ namespace SpectrumNet
                 return;
             }
 
-            foreach (var setting in _originalValues)
-            {
-                var property = _settings.GetType().GetProperty(setting.Key);
-                property?.SetValue(_settings, setting.Value);
-            }
+            foreach (var (key, value) in _originalValues)
+                _settings.GetType().GetProperty(key)?.SetValue(_settings, value);
 
             Log.Debug($"[{nameof(SettingsWindow)}] Настройки восстановлены из оригинала");
         }
 
         /// <summary>
-        /// Handles the window closing event, saving and persisting the settings.
+        /// Saves the current settings.
         /// </summary>
-        /// <param name="sender">The sender of the event.</param>
-        /// <param name="e">The CancelEventArgs containing the event data.</param>
+        private void SaveSettings() =>
+            Log.Information($"[{nameof(SettingsWindow)}] Настройки сохранены успешно");
+
+        /// <summary>
+        /// Persists the current settings to a file.
+        /// </summary>
+        private void PersistSettings()
+        {
+            try
+            {
+                File.WriteAllText("settings.json", JsonConvert.SerializeObject(_settings, Formatting.Indented));
+                Log.Information($"[{nameof(SettingsWindow)}] Настройки успешно сохранены");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при сохранении настроек в файл");
+            }
+        }
+        #endregion
+
+        #region Event Handlers
+        /// <summary>
+        /// Handles the window closing event.
+        /// </summary>
+        /// <param name="sender">The source of the event.</param>
+        /// <param name="e">The event arguments.</param>
         private void Window_Closing(object sender, CancelEventArgs e)
         {
             try
@@ -89,47 +125,10 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Persists the current settings to a JSON file.
+        /// Handles the close button click event.
         /// </summary>
-        private void PersistSettings()
-        {
-            try
-            {
-                var json = JsonConvert.SerializeObject(_settings, Formatting.Indented);
-                File.WriteAllText("settings.json", json);
-                Log.Information($"[{nameof(SettingsWindow)}] Настройки успешно сохранены");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при сохранении настроек в файл");
-            }
-        }
-
-        /// <summary>
-        /// Saves the current settings.
-        /// </summary>
-        private void SaveSettings()
-        {
-            try
-            {
-                Log.Information($"[{nameof(SettingsWindow)}] Настройки сохранены успешно");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при сохранении настроек");
-                throw;
-            }
-        }
-
-        #endregion
-
-        #region Event Handlers
-
-        /// <summary>
-        /// Handles the close button click event, restoring original settings and closing the window.
-        /// </summary>
-        /// <param name="sender">The sender of the event.</param>
-        /// <param name="e">The RoutedEventArgs containing the event data.</param>
+        /// <param name="sender">The source of the event.</param>
+        /// <param name="e">The event arguments.</param>
         private void OnCloseButton_Click(object sender, RoutedEventArgs e)
         {
             Log.Debug($"[{nameof(SettingsWindow)}] Кнопка закрытия нажата");
@@ -139,10 +138,10 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Handles the apply button click event, saving and persisting the settings.
+        /// Handles the apply button click event.
         /// </summary>
-        /// <param name="sender">The sender of the event.</param>
-        /// <param name="e">The RoutedEventArgs containing the event data.</param>
+        /// <param name="sender">The source of the event.</param>
+        /// <param name="e">The event arguments.</param>
         private void OnApplyButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -160,10 +159,10 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Handles the reset button click event, resetting the settings to their default values.
+        /// Handles the reset button click event.
         /// </summary>
-        /// <param name="sender">The sender of the event.</param>
-        /// <param name="e">The RoutedEventArgs containing the event data.</param>
+        /// <param name="sender">The source of the event.</param>
+        /// <param name="e">The event arguments.</param>
         private void OnResetButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -176,7 +175,6 @@ namespace SpectrumNet
                 Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при сбросе настроек");
             }
         }
-
         #endregion
     }
 }
