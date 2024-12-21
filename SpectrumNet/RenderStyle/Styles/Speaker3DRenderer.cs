@@ -495,11 +495,11 @@
         {
             float topY = _center.Y;
             float bottomY = _center.Y + RADIUS_Y * 1.3f;
-            float midY = topY + (bottomY - topY) * 0.4f;
+            float midY = topY + (bottomY - topY) * 0.35f; // Изменено с 0.4f на 0.35f
 
-            float[] xRatios = new float[] { 1.0f, 0.97f, 0.90f, 0.38f };
-            float topCompression = 0.99f;
-            float bottomExpansion = 1.01f;
+            float[] xRatios = new float[] { 1.0f, 0.96f, 0.88f, 0.35f }; // Скорректированы для лучшей перспективы
+            float topCompression = 0.985f;    // Уменьшено сжатие сверху
+            float bottomExpansion = 1.015f;   // Уменьшено расширение снизу
 
             using var path = new SKPath();
 
@@ -525,8 +525,8 @@
                 var current = leftPoints[i];
                 var next = leftPoints[i + 1];
                 var controlPoint1 = new SKPoint(
-                    current.X + (next.X - current.X) * 0.15f,
-                    current.Y + (next.Y - current.Y) * 0.5f
+                    current.X + (next.X - current.X) * 0.2f, // Увеличено с 0.15f для более плавного изгиба
+                    current.Y + (next.Y - current.Y) * 0.45f // Уменьшено с 0.5f для лучшей перспективы
                 );
                 var controlPoint2 = new SKPoint(
                     next.X - (next.X - current.X) * 0.15f,
@@ -542,8 +542,8 @@
                 var current = rightPoints[i + 1];
                 var next = rightPoints[i];
                 var controlPoint1 = new SKPoint(
-                    current.X - (current.X - next.X) * 0.15f,
-                    current.Y - (current.Y - next.Y) * 0.5f
+                    current.X + (next.X - current.X) * 0.2f, // Увеличено с 0.15f для более плавного изгиба
+                    current.Y + (next.Y - current.Y) * 0.45f // Уменьшено с 0.5f для лучшей перспективы
                 );
                 var controlPoint2 = new SKPoint(
                     next.X + (current.X - next.X) * 0.15f,
@@ -746,14 +746,14 @@
 
         private void DrawMagnet(SKCanvas canvas)
         {
-            float magnetHeight = RADIUS_Y * 0.2f;
-            float magnetWidth = RADIUS_X * 0.85f;
-            float magnetBottomOffset = RADIUS_Y * 1.28f;
+            float magnetHeight = RADIUS_Y * 0.18f; // Уменьшено с 0.2f
+            float magnetWidth = RADIUS_X * 0.82f;  // Уменьшено с 0.85f
+            float magnetBottomOffset = RADIUS_Y * 1.25f; // Уменьшено с 1.28f
             float cornerRadius = magnetHeight * 0.15f;
 
             // Корректируем коэффициенты перспективы для соответствия корпусу
-            float topCompression = 0.92f;    // Увеличено сжатие сверху
-            float bottomExpansion = 1.08f;   // Увеличено расширение снизу
+            float topCompression = 0.94f;    // Изменено с 0.92f
+            float bottomExpansion = 1.06f;   // Изменено с 1.08f
 
             using (var clipPath = new SKPath())
             {
@@ -763,8 +763,8 @@
                 // Корректируем точки отсечения для соответствия перспективе корпуса
                 float p1X = _center.X - RADIUS_X * 1.1f;
                 float p2X = _center.X + RADIUS_X * 1.1f;
-                float p3X = _center.X - RADIUS_X * 0.42f;  // Скорректировано
-                float p4X = _center.X + RADIUS_X * 0.42f;  // Скорректировано
+                float p3X = _center.X - RADIUS_X * 0.39f;  // Изменено с 0.42f
+                float p4X = _center.X + RADIUS_X * 0.39f;  // Изменено с 0.42f
 
                 // Создаем трапециевидный путь отсечения с учетом перспективы
                 clipPath.MoveTo(p1X, topY);
@@ -788,7 +788,7 @@
                 canvas.ClipPath(clipPath);
 
                 // Создаем эллипс с учетом перспективы
-                float perspectiveScale = 0.85f; // Коэффициент перспективного сжатия
+                float perspectiveScale = 0.88f; // Увеличено с 0.85f
                 SKRect magnetRect = new SKRect(
                     _center.X - magnetWidth / 2,
                     (_center.Y + magnetBottomOffset - magnetHeight * 0.1f) * topCompression,
@@ -899,15 +899,14 @@
                 // Тени с учетом перспективы
                 using (var shadowPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke })
                 {
-                    // Нижняя тень
-                    shadowPaint.Color = new SKColor(0, 0, 0, 70);
-                    shadowPaint.StrokeWidth = 1.5f * STROKE_SCALE * perspectiveScale;
-                    canvas.DrawArc(magnetRect, -40, 260, false, shadowPaint);
+                    shadowPaint.Color = new SKColor(0, 0, 0, 60); // Уменьшено с 70
+                    shadowPaint.StrokeWidth = 1.3f * STROKE_SCALE * perspectiveScale; // Уменьшено с 1.5f
+                    canvas.DrawArc(magnetRect, -35, 250, false, shadowPaint); // Изменены углы
 
-                    // Дополнительная мягкая тень
-                    shadowPaint.Color = new SKColor(0, 0, 0, 30);
-                    shadowPaint.StrokeWidth = 2.2f * STROKE_SCALE * perspectiveScale;
-                    canvas.DrawArc(magnetRect, -30, 240, false, shadowPaint);
+                    // Корректируем мягкую тень
+                    shadowPaint.Color = new SKColor(0, 0, 0, 25); // Уменьшено с 30
+                    shadowPaint.StrokeWidth = 2.0f * STROKE_SCALE * perspectiveScale; // Уменьшено с 2.2f
+                    canvas.DrawArc(magnetRect, -25, 230, false, shadowPaint); // Изменены углы
                 }
 
                 // Окантовка с учетом перспективы
