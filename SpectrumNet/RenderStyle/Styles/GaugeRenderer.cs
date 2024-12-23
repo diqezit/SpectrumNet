@@ -4,16 +4,12 @@
     {
         public static class Db
         {
-            public const float Max = 5f;
-            public const float Min = -30f;
-            public const float PeakThreshold = 1.5f;
+            public const float Max = 5f, Min = -30f, PeakThreshold = 1.5f;
         }
 
         public static class Angle
         {
-            public const float Start = -150f;
-            public const float End = -30f;
-            public const float TotalRange = End - Start;
+            public const float Start = -150f, End = -30f, TotalRange = End - Start;
         }
 
         public static class Needle
@@ -21,66 +17,47 @@
             public const float DefaultLengthMultiplier = 1.55f; // Длина стрелки
             public const float DefaultCenterYOffsetMultiplier = 0.4f; // Смещение центра по Y
             public const float StrokeWidth = 2.25f; // Толщина стрелки
-            public const float CenterCircleRadiusOverlay = 0.015f; // Радиус центральной точки стрелки в Overlay
-            public const float CenterCircleRadius = 0.02f; // Радиус центральной точки стрелки
+            public const float CenterCircleRadiusOverlay = 0.015f, CenterCircleRadius = 0.02f; // Радиус центральной точки
         }
 
         public static class Background
         {
-            public const float OuterFrameCornerRadius = 8f;
-            public const float InnerFramePadding = 4f;
-            public const float InnerFrameCornerRadius = 6f;
-            public const float BackgroundPadding = 4f;
-            public const float BackgroundCornerRadius = 4f;
-            public const float VuTextSizeFactor = 0.2f; // Размер текста "VU" относительно высоты
-            public const float VuTextBottomOffsetFactor = 0.2f; // Смещение текста "VU" от нижнего края
+            public const float OuterFrameCornerRadius = 8f, InnerFramePadding = 4f, InnerFrameCornerRadius = 6f;
+            public const float BackgroundPadding = 4f, BackgroundCornerRadius = 4f;
+            public const float VuTextSizeFactor = 0.2f, VuTextBottomOffsetFactor = 0.2f; // Параметры текста "VU"
         }
 
         public static class Scale
         {
-            public const float CenterYOffsetFactor = 0.15f; // Смещение центра шкалы по Y
-            public const float RadiusXFactorOverlay = 0.4f;
-            public const float RadiusXFactor = 0.45f;
-            public const float RadiusYFactorOverlay = 0.45f;
-            public const float RadiusYFactor = 0.5f;
-            public const float TextOffsetFactorOverlay = 0.1f;
-            public const float TextOffsetFactor = 0.12f;
-            public const float TextSizeFactorOverlay = 0.08f;
-            public const float TextSizeFactor = 0.1f;
-            public const float TickLengthZeroFactorOverlay = 0.12f;
-            public const float TickLengthZeroFactor = 0.15f;
-            public const float TickLengthFactorOverlay = 0.07f;
-            public const float TickLengthFactor = 0.08f;
-
-            public const float TickLengthMinorFactorOverlay = 0.05f;
-            public const float TickLengthMinorFactor = 0.06f;
+            public const float CenterYOffsetFactor = 0.15f; // Смещение центра шкалы
+            public const float RadiusXFactorOverlay = 0.4f, RadiusXFactor = 0.45f;
+            public const float RadiusYFactorOverlay = 0.45f, RadiusYFactor = 0.5f;
+            public const float TextOffsetFactorOverlay = 0.1f, TextOffsetFactor = 0.12f;
+            public const float TextSizeFactorOverlay = 0.08f, TextSizeFactor = 0.1f;
+            public const float TickLengthZeroFactorOverlay = 0.12f, TickLengthZeroFactor = 0.15f;
+            public const float TickLengthFactorOverlay = 0.07f, TickLengthFactor = 0.08f;
+            public const float TickLengthMinorFactorOverlay = 0.05f, TickLengthMinorFactor = 0.06f; // Параметры мелких делений
         }
 
         public static class PeakLamp
         {
-            public const float RadiusFactorOverlay = 0.04f;
-            public const float RadiusFactor = 0.05f;
-            public const float LampXOffsetFactorOverlay = 0.12f;
-            public const float LampXOffsetFactor = 0.1f;
-            public const float LampYOffsetFactorOverlay = 0.18f;
-            public const float LampYOffsetFactor = 0.2f;
-            public const float TextSizeFactorOverlay = 1.2f;
-            public const float TextSizeFactor = 1.5f;
-            public const float TextYOffsetFactor = 2.5f;
-            public const float RimStrokeWidth = 1f; // Толщина обводки лампы
+            public const float RadiusFactorOverlay = 0.04f, RadiusFactor = 0.05f;
+            public const float LampXOffsetFactorOverlay = 0.12f, LampXOffsetFactor = 0.1f;
+            public const float LampYOffsetFactorOverlay = 0.18f, LampYOffsetFactor = 0.2f;
+            public const float TextSizeFactorOverlay = 1.2f, TextSizeFactor = 1.5f;
+            public const float TextYOffsetFactor = 2.5f, RimStrokeWidth = 1f; // Параметры текста и обводки лампы
         }
 
         public static class Rendering
         {
-            public const float AspectRatio = 2.0f; // Соотношение сторон (ширина к высоте)
-            public const float GaugeRectPadding = 0.8f; // Процент от ширины/высоты для прямоугольника
-            public const float MinDbClamp = 1e-10f; // Минимальное значение для RMS
+            public const float AspectRatio = 2.0f; // Соотношение сторон
+            public const float GaugeRectPadding = 0.8f, MinDbClamp = 1e-10f; // Параметры рендера
             public const float Margin = 0.05f; // 5% зазора для стрелки
         }
 
         public static class MinorMarks
         {
-            public const int Divisor = 3; // Делитель для определения количества мелких делений
+            public const int Divisor = 3; // Делитель для мелких делений
         }
     }
 

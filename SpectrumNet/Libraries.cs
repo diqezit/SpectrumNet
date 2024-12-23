@@ -1,5 +1,4 @@
 ﻿global using Microsoft.Extensions.Logging;
-global using Microsoft.Extensions.ObjectPool;
 global using NAudio.Dsp;
 global using NAudio.Wave;
 global using Newtonsoft.Json;
@@ -25,3 +24,4 @@ global using System.Windows.Interop;
 global using System.Windows.Threading;
 global using System.Numerics;
 global using System.Buffers;
+global using Vector = System.Numerics.Vector;

@@ -1,5 +1,4 @@
 ﻿using Complex = NAudio.Dsp.Complex;
-using Vector = System.Numerics.Vector;
 
 #nullable enable
 
