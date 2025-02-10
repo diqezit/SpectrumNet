@@ -6,9 +6,7 @@
 
     <!-- Объединённые словари для тем -->
     <ResourceDictionary.MergedDictionaries>
-        <!-- Темная тема -->
         <ResourceDictionary Source="/Themes/darktheme.xaml"/>
-        <!-- Светлая тема -->
         <ResourceDictionary Source="/Themes/lighttheme.xaml"/>
     </ResourceDictionary.MergedDictionaries>
 
@@ -45,7 +43,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}" CornerRadius="20">
+                    <!-- Кеширование статичного содержимого для снижения нагрузки -->
+                    <Border Background="{TemplateBinding Background}" CornerRadius="20" CacheMode="BitmapCache">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -80,27 +79,25 @@
         <DoubleAnimation Storyboard.TargetProperty="Opacity"
                          From="1" To="0" Duration="0:0:0.3"/>
     </Storyboard>
-
+    
     <!-- Эффекты тени -->
     <DropShadowEffect x:Key="SurfaceShadowEffect" 
-                      BlurRadius="12" 
-                      ShadowDepth="2" 
+                      BlurRadius="4" 
+                      ShadowDepth="0.5" 
                       Direction="270" 
                       Color="#25000000"
-                      Opacity="0.6"/>
+                      Opacity="0.4"/>
     <DropShadowEffect x:Key="ControlsPanelShadowEffect" 
-                      BlurRadius="8" 
-                      ShadowDepth="2" 
+                      BlurRadius="2" 
+                      ShadowDepth="0.5" 
                       Direction="270" 
                       Color="#20000000"
-                      Opacity="0.5"/>
-
-    <!-- Ресурс для тени окна -->
+                      Opacity="0.3"/>
     <DropShadowEffect x:Key="WindowShadowEffect" 
-                      BlurRadius="20" 
+                      BlurRadius="8" 
                       ShadowDepth="0" 
                       Color="Black"
-                      Opacity="0.5"/>
+                      Opacity="0.4"/>
 
     <!-- Стиль современной кнопки -->
     <Style x:Key="ModernButtonStyle" TargetType="Button">
@@ -119,7 +116,8 @@
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="8"
-                            Effect="{DynamicResource SurfaceShadowEffect}">
+                            Effect="{DynamicResource SurfaceShadowEffect}"
+                            CacheMode="BitmapCache">
                         <ContentPresenter HorizontalAlignment="Center" 
                                           VerticalAlignment="Center"
                                           Margin="2"/>
@@ -130,7 +128,6 @@
                             <Setter Property="Foreground" Value="{DynamicResource ButtonHoverForegroundBrush}"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <!-- Используем ресурс ButtonPressedBrush (определён в файлах тем) -->
                             <Setter Property="Background" Value="{DynamicResource ButtonPressedBrush}"/>
                             <Setter Property="Foreground" Value="{DynamicResource ButtonPressedForegroundBrush}"/>
                         </Trigger>
@@ -139,10 +136,10 @@
                             <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}"/>
                             <Setter Property="Effect">
                                 <Setter.Value>
-                                    <DropShadowEffect BlurRadius="4" 
+                                    <DropShadowEffect BlurRadius="2" 
                                                       Color="#15000000" 
                                                       ShadowDepth="1"
-                                                      Opacity="0.3"/>
+                                                      Opacity="0.2"/>
                                 </Setter.Value>
                             </Setter>
                         </Trigger>
@@ -173,7 +170,8 @@
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="14"
                                 Effect="{DynamicResource ControlsPanelShadowEffect}"
-                                Padding="{TemplateBinding Padding}">
+                                Padding="{TemplateBinding Padding}"
+                                CacheMode="BitmapCache">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <Ellipse x:Name="ToggleIndicator"
@@ -250,31 +248,28 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Slider">
                     <Grid>
-                        <!-- Полоса прогресса -->
                         <Border 
                             Background="{TemplateBinding Background}"
                             Height="4"
                             VerticalAlignment="Center"
-                            CornerRadius="2"/>
-                        <!-- Основной трек и ползунок -->
+                            CornerRadius="2"
+                            CacheMode="BitmapCache"/>
                         <Track Name="PART_Track"
                                Minimum="{TemplateBinding Minimum}"
                                Maximum="{TemplateBinding Maximum}"
                                Value="{TemplateBinding Value}"
                                IsDirectionReversed="False">
-                            <!-- Полоса трека -->
                             <Track.DecreaseRepeatButton>
                                 <RepeatButton Style="{x:Null}" Height="4" VerticalAlignment="Center" Background="{TemplateBinding Foreground}" />
                             </Track.DecreaseRepeatButton>
                             <Track.IncreaseRepeatButton>
                                 <RepeatButton Style="{x:Null}" Height="4" VerticalAlignment="Center" Background="{TemplateBinding Background}" />
                             </Track.IncreaseRepeatButton>
-                            <!-- Ползунок (Thumb) -->
                             <Track.Thumb>
                                 <Thumb Width="12" Height="12" Background="{TemplateBinding Foreground}">
                                     <Thumb.Template>
                                         <ControlTemplate TargetType="Thumb">
-                                            <Ellipse Fill="{TemplateBinding Background}" Width="12" Height="12" />
+                                            <Ellipse Fill="{TemplateBinding Background}" Width="12" Height="12" CacheMode="BitmapCache"/>
                                         </ControlTemplate>
                                     </Thumb.Template>
                                 </Thumb>
@@ -284,7 +279,6 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
-        <!-- Привязка к событию прокрутки мыши -->
         <EventSetter Event="PreviewMouseWheel" Handler="Slider_MouseWheelScroll"/>
     </Style>
 
@@ -320,7 +314,8 @@
                                                 BorderBrush="{TemplateBinding BorderBrush}"
                                                 BorderThickness="{TemplateBinding BorderThickness}"
                                                 CornerRadius="6"
-                                                Effect="{DynamicResource ControlsPanelShadowEffect}"/>
+                                                Effect="{DynamicResource ControlsPanelShadowEffect}"
+                                                CacheMode="BitmapCache"/>
                                         <ContentPresenter HorizontalAlignment="Center" 
                                                           VerticalAlignment="Center"
                                                           Margin="2"/>
@@ -342,10 +337,10 @@
                                             <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
                                             <Setter Property="Effect">
                                                 <Setter.Value>
-                                                    <DropShadowEffect BlurRadius="8" 
+                                                    <DropShadowEffect BlurRadius="4" 
                                                                       Color="#30000000" 
-                                                                      ShadowDepth="2"
-                                                                      Opacity="0.6"/>
+                                                                      ShadowDepth="1"
+                                                                      Opacity="0.5"/>
                                                 </Setter.Value>
                                             </Setter>
                                         </Trigger>
@@ -387,10 +382,10 @@
                                             <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxDisabledBorderBrush}"/>
                                             <Setter Property="Effect">
                                                 <Setter.Value>
-                                                    <DropShadowEffect BlurRadius="4" 
+                                                    <DropShadowEffect BlurRadius="2" 
                                                                       Color="#15000000" 
                                                                       ShadowDepth="1"
-                                                                      Opacity="0.3"/>
+                                                                      Opacity="0.2"/>
                                                 </Setter.Value>
                                             </Setter>
                                         </Trigger>
@@ -430,7 +425,8 @@
                                         BorderBrush="{DynamicResource ComboBoxPopupBorderBrush}"
                                         BorderThickness="1.5"
                                         CornerRadius="6"
-                                        Effect="{DynamicResource SurfaceShadowEffect}"/>
+                                        Effect="{DynamicResource SurfaceShadowEffect}"
+                                        CacheMode="BitmapCache"/>
                                 <ScrollViewer Margin="4,2" SnapsToDevicePixels="True">
                                     <StackPanel IsItemsHost="True" 
                                                 KeyboardNavigation.DirectionalNavigation="Contained"

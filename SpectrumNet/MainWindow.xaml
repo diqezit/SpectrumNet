@@ -16,10 +16,12 @@
         UseLayoutRounding="True"
         SnapsToDevicePixels="True">
 
+    <!-- Глобальное кеширование для уменьшения количества перерисовок -->
     <Border BorderThickness="1"
             BorderBrush="{DynamicResource WindowBorderBrush}"
             CornerRadius="12"
-            Effect="{DynamicResource WindowShadowEffect}">
+            Effect="{DynamicResource WindowShadowEffect}"
+            CacheMode="BitmapCache">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -27,15 +29,16 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Панель заголовка, обёрнутая в Border с применением стиля TitleBarBorderStyle -->
+            <!-- Заголовок окна -->
             <Border Grid.Row="0"
                     Style="{StaticResource TitleBarBorderStyle}"
                     MouseLeftButtonDown="OnWindowDrag"
                     Height="50"
-                    CornerRadius="12,12,0,0">
+                    CornerRadius="12,12,0,0"
+                    CacheMode="BitmapCache">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="Spectrum Analyser"
@@ -43,11 +46,13 @@
                                FontWeight="Bold"
                                Foreground="White"
                                VerticalAlignment="Center"
-                               Margin="24,0,0,0"/>
+                               Margin="24,0,0,0"
+                               CacheMode="BitmapCache"/>
                     <StackPanel Grid.Column="1"
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Right"
-                                Margin="0,0,12,0">
+                                Margin="0,0,12,0"
+                                CacheMode="BitmapCache">
                         <ToggleButton x:Name="ThemeToggleButton"
                                       Checked="OnThemeToggleButtonChanged"
                                       Unchecked="OnThemeToggleButtonChanged"
@@ -56,26 +61,32 @@
                                       Margin="0,0,20,0"/>
                         <Button x:Name="MinimizeButton"
                                 Click="OnButtonClick"
-                                Style="{DynamicResource WindowControlButtonStyle}">
+                                Style="{DynamicResource WindowControlButtonStyle}"
+                                CacheMode="BitmapCache">
                             <Path Data="M0,10 H20"
                                   Stroke="White"
-                                  StrokeThickness="2"/>
+                                  StrokeThickness="2"
+                                  CacheMode="BitmapCache"/>
                         </Button>
                         <Button x:Name="MaximizeButton"
                                 Click="OnButtonClick"
-                                Style="{DynamicResource WindowControlButtonStyle}">
+                                Style="{DynamicResource WindowControlButtonStyle}"
+                                CacheMode="BitmapCache">
                             <Path x:Name="MaximizeIcon"
                                   Data="M2,2 H18 V18 H2 Z"
                                   Stroke="White"
                                   StrokeThickness="2"
-                                  Fill="Transparent"/>
+                                  Fill="Transparent"
+                                  CacheMode="BitmapCache"/>
                         </Button>
                         <Button x:Name="CloseButton"
                                 Click="OnButtonClick"
-                                Style="{DynamicResource WindowCloseButtonStyle}">
+                                Style="{DynamicResource WindowCloseButtonStyle}"
+                                CacheMode="BitmapCache">
                             <Path Data="M4,4 L16,16 M16,4 L4,16"
                                   Stroke="White"
-                                  StrokeThickness="2"/>
+                                  StrokeThickness="2"
+                                  CacheMode="BitmapCache"/>
                         </Button>
                     </StackPanel>
                 </Grid>
@@ -92,7 +103,8 @@
                         CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
                         Effect="{DynamicResource SurfaceShadowEffect}"
-                        Margin="0,0,0,20">
+                        Margin="0,0,0,20"
+                        CacheMode="BitmapCache">
                     <sk:SKElement x:Name="spectrumCanvas"
                                   PaintSurface="OnPaintSurface"
                                   Margin="16"/>
@@ -102,7 +114,8 @@
                         CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
                         Effect="{DynamicResource SurfaceShadowEffect}"
-                        Padding="20">
+                        Padding="20"
+                        CacheMode="BitmapCache">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -115,8 +128,10 @@
                                 CornerRadius="8"
                                 Background="{DynamicResource ControlsPanelBackgroundBrush}"
                                 Effect="{DynamicResource ControlsPanelShadowEffect}"
-                                Padding="16">
+                                Padding="16"
+                                CacheMode="BitmapCache">
                             <StackPanel>
+                                <!-- Кнопка Start с иконкой и текстом -->
                                 <Button x:Name="StartCaptureButton"
                                         Click="OnButtonClick"
                                         IsEnabled="{Binding CanStartCapture}"
@@ -139,6 +154,7 @@
                                                    HorizontalAlignment="Center"/>
                                     </Grid>
                                 </Button>
+                                <!-- Кнопка Stop с иконкой и текстом -->
                                 <Button x:Name="StopCaptureButton"
                                         Click="OnButtonClick"
                                         IsEnabled="{Binding IsRecording}"
@@ -161,6 +177,7 @@
                                                    HorizontalAlignment="Center"/>
                                     </Grid>
                                 </Button>
+                                <!-- Кнопка Overlay с иконкой и текстом -->
                                 <Button x:Name="OverlayButton"
                                         Click="OnButtonClick"
                                         Margin="0,0,0,12"
@@ -176,6 +193,7 @@
                                         <TextBlock Text="Overlay"/>
                                     </StackPanel>
                                 </Button>
+                                <!-- Кнопка Settings с иконкой и текстом -->
                                 <Button x:Name="OpenSettingsButton"
                                         Click="OnButtonClick"
                                         Margin="0,0,0,12"
@@ -191,6 +209,7 @@
                                         <TextBlock Text="Settings"/>
                                     </StackPanel>
                                 </Button>
+                                <!-- Кнопка Gain Control с иконкой и текстом -->
                                 <Button x:Name="OpenPopupButton"
                                         Click="OnButtonClick"
                                         Width="180"
@@ -214,7 +233,8 @@
                                 Background="{DynamicResource ControlsPanelBackgroundBrush}"
                                 Effect="{DynamicResource ControlsPanelShadowEffect}"
                                 Padding="12"
-                                Margin="12,0">
+                                Margin="12,0"
+                                CacheMode="BitmapCache">
                             <StackPanel>
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
@@ -233,7 +253,8 @@
                                                Text="Interval:"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
-                                               Margin="0,0,8,0"/>
+                                               Margin="0,0,8,0"
+                                               CacheMode="BitmapCache"/>
                                     <Slider Grid.Column="1"
                                             x:Name="barSpacingSlider"
                                             Minimum="1" Maximum="15"
@@ -245,7 +266,8 @@
                                                Text="{Binding BarSpacing, StringFormat='{}{0:F0}'}"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
-                                               Margin="0,0,8,0"/>
+                                               Margin="0,0,8,0"
+                                               CacheMode="BitmapCache"/>
                                 </Grid>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -257,7 +279,8 @@
                                                Text="Number of strips:"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
-                                               Margin="0,0,8,0"/>
+                                               Margin="0,0,8,0"
+                                               CacheMode="BitmapCache"/>
                                     <Slider Grid.Column="1"
                                             x:Name="barCountSlider"
                                             Minimum="10" Maximum="500"
@@ -268,7 +291,8 @@
                                                Text="{Binding BarCount, StringFormat='{}{0:F0}'}"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
-                                               Margin="0,0,8,0"/>
+                                               Margin="0,0,8,0"
+                                               CacheMode="BitmapCache"/>
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -278,7 +302,8 @@
                                 CornerRadius="8"
                                 Background="{DynamicResource ControlsPanelBackgroundBrush}"
                                 Effect="{DynamicResource ControlsPanelShadowEffect}"
-                                Padding="12">
+                                Padding="12"
+                                CacheMode="BitmapCache">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -292,7 +317,8 @@
                                 <TextBlock Grid.Row="0"
                                            Text="Renderer:"
                                            Foreground="{DynamicResource TextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                                 <ComboBox Grid.Row="0"
                                           Grid.Column="1"
                                           x:Name="RenderStyleComboBox"
@@ -300,12 +326,12 @@
                                           SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"
                                           Width="200"
                                           Margin="0,0,0,12"
-                                          Style="{DynamicResource ModernComboBoxStyle}"
-                                          SelectionChanged="OnComboBoxSelectionChanged"/>
+                                          Style="{DynamicResource ModernComboBoxStyle}"/>
                                 <TextBlock Grid.Row="1"
                                            Text="Paint:"
                                            Foreground="{DynamicResource TextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                                 <ComboBox Grid.Row="1"
                                           Grid.Column="1"
                                           x:Name="StyleComboBox"
@@ -313,12 +339,12 @@
                                           SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
                                           Width="200"
                                           Style="{DynamicResource ModernComboBoxStyle}"
-                                          SelectionChanged="OnComboBoxSelectionChanged"
                                           Margin="0,12,0,12"/>
                                 <TextBlock Grid.Row="2"
                                            Text="Window FFT:"
                                            Foreground="{DynamicResource TextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                                 <ComboBox Grid.Row="2"
                                           Grid.Column="1"
                                           x:Name="FftWindowTypeComboBox"
@@ -326,7 +352,6 @@
                                           SelectedItem="{Binding SelectedFftWindowType, Mode=TwoWay}"
                                           Width="200"
                                           Style="{DynamicResource ModernComboBoxStyle}"
-                                          SelectionChanged="OnComboBoxSelectionChanged"
                                           Margin="0,12,0,0"/>
                             </Grid>
                         </Border>
@@ -361,13 +386,15 @@
                             Width="400"
                             BorderBrush="{DynamicResource DarkPopupBorderBrush}"
                             BorderThickness="1"
-                            Effect="{DynamicResource PopupShadowEffect}">
+                            Effect="{DynamicResource PopupShadowEffect}"
+                            CacheMode="BitmapCache">
                         <StackPanel>
                             <TextBlock Text="Gain Settings"
                                        FontSize="20"
                                        FontWeight="Bold"
                                        Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                       Margin="0,0,0,20"/>
+                                       Margin="0,0,0,20"
+                                       CacheMode="BitmapCache"/>
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="120"/>
@@ -377,7 +404,8 @@
                                 <TextBlock Grid.Column="0"
                                            Text="Minimum dB level:"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                                 <Slider Grid.Column="1"
                                         x:Name="minDbLevelSlider"
                                         Minimum="-200" Maximum="0"
@@ -387,7 +415,8 @@
                                 <TextBlock Grid.Column="2"
                                            Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                             </Grid>
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
@@ -398,7 +427,8 @@
                                 <TextBlock Grid.Column="0"
                                            Text="Maximum dB level:"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                                 <Slider Grid.Column="1"
                                         x:Name="maxDbLevelSlider"
                                         Minimum="-100" Maximum="0"
@@ -408,7 +438,8 @@
                                 <TextBlock Grid.Column="2"
                                            Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                             </Grid>
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -419,7 +450,8 @@
                                 <TextBlock Grid.Column="0"
                                            Text="Amplification factor:"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                                 <Slider Grid.Column="1"
                                         x:Name="amplificationFactorSlider"
                                         Minimum="0.01" Maximum="1"
@@ -429,7 +461,8 @@
                                 <TextBlock Grid.Column="2"
                                            Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                           Margin="0,0,8,0"/>
+                                           Margin="0,0,8,0"
+                                           CacheMode="BitmapCache"/>
                             </Grid>
                         </StackPanel>
                     </Border>

@@ -95,17 +95,18 @@ namespace SpectrumNet
             _spectrum = spectrum;
             _currentBarCount = barCount;
 
-            // Ручной расчет среднего и максимального значений спектра для повышения производительности
+            // Однопроходный расчёт среднего и максимального значений спектра
             float sum = 0f, maxSpectrum = 0f;
-            for (int i = 0, len = spectrum.Length; i < len; i++)
+            int len = spectrum.Length;
+            for (int i = 0; i < len; i++)
             {
                 float val = spectrum[i];
                 sum += val;
                 if (val > maxSpectrum)
                     maxSpectrum = val;
             }
-            float average = (spectrum.Length > 0) ? sum / spectrum.Length : 0f;
-            _currentRotationIntensity = (spectrum.Length > 0) ? 0.5f + (average * 1.5f) : 1.0f;
+            float average = (len > 0) ? sum / len : 0f;
+            _currentRotationIntensity = (len > 0) ? 0.5f + (average * 1.5f) : 1.0f;
 
             UpdateRotationAngles();
             _rotationMatrix = CreateRotationMatrix();
@@ -131,19 +132,21 @@ namespace SpectrumNet
         {
             float centerX = info.Width * 0.5f;
             float centerY = info.Height * 0.5f;
-            float scale = MathF.Min(centerX, centerY) * DonutScale * (1f + MathF.Log2(_currentBarCount + 1) * 0.1f);
+            // Предварительный расчёт логарифмического множителя для оптимизации
+            float logBarCount = MathF.Log2(_currentBarCount + 1);
+            float scale = MathF.Min(centerX, centerY) * DonutScale * (1f + logBarCount * 0.1f);
 
             ProjectVertices(scale, centerX, centerY);
+            // Сортировка вершин по глубине (от дальнего к ближнему)
             System.Array.Sort(_projectedVertices, 0, _vertices.Length,
                 Comparer<ProjectedVertex>.Create((a, b) => b.Depth.CompareTo(a.Depth)));
 
             float minZ = _projectedVertices[0].Depth;
             float maxZ = _projectedVertices[_projectedVertices.Length - 1].Depth;
             float depthRange = maxZ - minZ + float.Epsilon;
-            float alphaMultiplier = 1f + MathF.Log2(_currentBarCount + 1) * 0.2f;
+            float alphaMultiplier = 1f + logBarCount * 0.2f;
 
             var originalColor = paint.Color;
-
             // Отрисовка вершин с расчетом интенсивности освещения и альфа-канала
             foreach (ref var vertex in _projectedVertices.AsSpan())
             {
@@ -167,13 +170,13 @@ namespace SpectrumNet
 
         private void UpdateRotationAngles()
         {
-            (float sx, float sy, float sz) speeds = (_spectrum.Length > 0)
+            var speeds = (_spectrum.Length > 0)
                 ? GetSpectralRotationSpeeds()
                 : (RotationSpeedX, RotationSpeedY, RotationSpeedZ);
 
-            _rotationAngleX = (_rotationAngleX + speeds.sx * _currentRotationIntensity) % (MathF.PI * 2f);
-            _rotationAngleY = (_rotationAngleY + speeds.sy * _currentRotationIntensity) % (MathF.PI * 2f);
-            _rotationAngleZ = (_rotationAngleZ + speeds.sz * _currentRotationIntensity) % (MathF.PI * 2f);
+            _rotationAngleX = (_rotationAngleX + speeds.Item1 * _currentRotationIntensity) % (MathF.PI * 2f);
+            _rotationAngleY = (_rotationAngleY + speeds.Item2 * _currentRotationIntensity) % (MathF.PI * 2f);
+            _rotationAngleZ = (_rotationAngleZ + speeds.Item3 * _currentRotationIntensity) % (MathF.PI * 2f);
         }
 
         private (float, float, float) GetSpectralRotationSpeeds()
@@ -199,7 +202,7 @@ namespace SpectrumNet
                     sum1 += _spectrum[i];
                     count1++;
                 }
-                else // if (i < 3 * segmentSize)
+                else
                 {
                     sum2 += _spectrum[i];
                     count2++;
@@ -216,19 +219,31 @@ namespace SpectrumNet
 
         private void ProjectVertices(float scale, float centerX, float centerY)
         {
+            // Извлечение элементов матрицы вращения для минимизации накладных расходов
+            float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
+            float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
+            float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
+
             System.Threading.Tasks.Parallel.For(0, _vertices.Length, i =>
             {
                 Vertex vertex = _vertices[i];
-                Vector3 rotated = Vector3.Transform(new Vector3(vertex.X, vertex.Y, vertex.Z), _rotationMatrix);
+                // Ручное умножение вектора на матрицу вращения
+                float rx = vertex.X * m11 + vertex.Y * m21 + vertex.Z * m31;
+                float ry = vertex.X * m12 + vertex.Y * m22 + vertex.Z * m32;
+                float rz = vertex.X * m13 + vertex.Y * m23 + vertex.Z * m33;
 
-                float invDepth = 1f / (rotated.Z + DepthOffset);
-                float lightIntensity = Vector3.Dot(Vector3.Normalize(rotated), LightDirection) * 0.5f + 0.5f;
+                float invDepth = 1f / (rz + DepthOffset);
+                // Вычисление интенсивности освещения без использования Vector3.Normalize
+                float len = MathF.Sqrt(rx * rx + ry * ry + rz * rz);
+                float invLen = (len > 0f) ? 1f / len : 0f;
+                float normRx = rx * invLen, normRy = ry * invLen, normRz = rz * invLen;
+                float lightIntensity = (normRx * LightDirection.X + normRy * LightDirection.Y + normRz * LightDirection.Z) * 0.5f + 0.5f;
 
                 _projectedVertices[i] = new ProjectedVertex
                 {
-                    X = rotated.X * scale * invDepth + centerX,
-                    Y = rotated.Y * scale * invDepth + centerY,
-                    Depth = rotated.Z + DepthOffset,
+                    X = rx * scale * invDepth + centerX,
+                    Y = ry * scale * invDepth + centerY,
+                    Depth = rz + DepthOffset,
                     LightIntensity = lightIntensity
                 };
             });
