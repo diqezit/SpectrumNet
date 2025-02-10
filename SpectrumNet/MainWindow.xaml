@@ -3,127 +3,91 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:local="clr-namespace:SpectrumNet"
-        Title="Spectrum Analyser" 
-        Height="700" 
-        Width="1000" 
+        Title="Spectrum Analyser"
+        Height="700"
+        Width="1000"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
         WindowStyle="None"
         AllowsTransparency="True"
         ResizeMode="CanResize"
         StateChanged="OnStateChanged"
-        MouseDoubleClick="OnWindowMouseDoubleClick">
+        MouseDoubleClick="OnWindowMouseDoubleClick"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
 
-    <Window.Resources>
-        <Style x:Key="WindowControlButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
-            <Setter Property="Width" Value="40"/>
-            <Setter Property="Height" Value="40"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="WindowCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowControlButtonStyle}">
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#FF4136"/>
-                    <Setter Property="Foreground" Value="White"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-    </Window.Resources>
-
-    <Border BorderThickness="1" 
-            BorderBrush="{DynamicResource WindowBorderBrush}" 
-            CornerRadius="12">
+    <Border BorderThickness="1"
+            BorderBrush="{DynamicResource WindowBorderBrush}"
+            CornerRadius="12"
+            Effect="{DynamicResource WindowShadowEffect}">
         <Grid>
-            <!-- Drag Area for Moving Window -->
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Window Header with Custom Controls -->
-            <Grid Grid.Row="0" 
-                  Background="Transparent" 
-                  MouseLeftButtonDown="OnWindowDrag"
-                  Height="50">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+            <!-- Панель заголовка, обёрнутая в Border с применением стиля TitleBarBorderStyle -->
+            <Border Grid.Row="0"
+                    Style="{StaticResource TitleBarBorderStyle}"
+                    MouseLeftButtonDown="OnWindowDrag"
+                    Height="50"
+                    CornerRadius="12,12,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Spectrum Analyser"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               Foreground="White"
+                               VerticalAlignment="Center"
+                               Margin="24,0,0,0"/>
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,12,0">
+                        <ToggleButton x:Name="ThemeToggleButton"
+                                      Checked="OnThemeToggleButtonChanged"
+                                      Unchecked="OnThemeToggleButtonChanged"
+                                      Style="{DynamicResource ToggleSwitchStyle}"
+                                      Width="100"
+                                      Margin="0,0,20,0"/>
+                        <Button x:Name="MinimizeButton"
+                                Click="OnButtonClick"
+                                Style="{DynamicResource WindowControlButtonStyle}">
+                            <Path Data="M0,10 H20"
+                                  Stroke="White"
+                                  StrokeThickness="2"/>
+                        </Button>
+                        <Button x:Name="MaximizeButton"
+                                Click="OnButtonClick"
+                                Style="{DynamicResource WindowControlButtonStyle}">
+                            <Path x:Name="MaximizeIcon"
+                                  Data="M2,2 H18 V18 H2 Z"
+                                  Stroke="White"
+                                  StrokeThickness="2"
+                                  Fill="Transparent"/>
+                        </Button>
+                        <Button x:Name="CloseButton"
+                                Click="OnButtonClick"
+                                Style="{DynamicResource WindowCloseButtonStyle}">
+                            <Path Data="M4,4 L16,16 M16,4 L4,16"
+                                  Stroke="White"
+                                  StrokeThickness="2"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-                <TextBlock Grid.Column="0"
-                           Text="Spectrum Analyser"
-                           FontSize="20"
-                           FontWeight="Bold"
-                           Foreground="{DynamicResource TextPrimaryBrush}"
-                           VerticalAlignment="Center"
-                           Margin="24,0,0,0"/>
-
-                <StackPanel Grid.Column="2" 
-                            Orientation="Horizontal" 
-                            HorizontalAlignment="Right" 
-                            Margin="0,0,12,0">
-                    <ToggleButton x:Name="ThemeToggleButton"
-                                  Checked="OnThemeToggleButtonChanged"
-                                  Unchecked="OnThemeToggleButtonChanged"
-                                  Style="{StaticResource ToggleSwitchStyle}"
-                                  Width="100"
-                                  Margin="0,0,20,0"/>
-
-                    <Button x:Name="MinimizeButton" 
-                            Click="OnButtonClick" 
-                            Style="{StaticResource WindowControlButtonStyle}">
-                        <Path Data="M0,10 H20" 
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" 
-                              StrokeThickness="2"/>
-                    </Button>
-
-                    <Button x:Name="MaximizeButton" 
-                            Click="OnButtonClick" 
-                            Style="{StaticResource WindowControlButtonStyle}">
-                        <Path x:Name="MaximizeIcon" 
-                              Data="M2,2 H18 V18 H2 Z" 
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" 
-                              StrokeThickness="2" 
-                              Fill="Transparent"/>
-                    </Button>
-
-                    <Button x:Name="CloseButton" 
-                            Click="OnButtonClick" 
-                            Style="{StaticResource WindowCloseButtonStyle}">
-                        <Path Data="M4,4 L16,16 M16,4 L4,16" 
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="2"/>
-                    </Button>
-                </StackPanel>
-            </Grid>
-
-            <!-- Main Content Grid -->
+            <!-- Основное содержимое -->
             <Grid Grid.Row="1" Margin="24">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-
-                <!-- Spectrum Visualization Area -->
+                <!-- Область визуализации спектра -->
                 <Border Grid.Row="0"
                         CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
@@ -133,14 +97,12 @@
                                   PaintSurface="OnPaintSurface"
                                   Margin="16"/>
                 </Border>
-
-                <!-- Control Panel -->
+                <!-- Панель управления -->
                 <Border Grid.Row="1"
                         CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
                         Effect="{DynamicResource SurfaceShadowEffect}"
                         Padding="20">
-                    <!-- Existing Control Panel Content -->
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -148,9 +110,9 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Кнопки управления -->
-                        <Border Grid.Column="0" 
-                                CornerRadius="8" 
+                        <!-- Блок кнопок управления -->
+                        <Border Grid.Column="0"
+                                CornerRadius="8"
                                 Background="{DynamicResource ControlsPanelBackgroundBrush}"
                                 Effect="{DynamicResource ControlsPanelShadowEffect}"
                                 Padding="16">
@@ -161,133 +123,149 @@
                                         Margin="0,0,0,12"
                                         Width="180"
                                         Height="40"
-                                        Style="{StaticResource ModernButtonStyle}">
+                                        Style="{DynamicResource ModernButtonStyle}">
                                     <Grid Width="160">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="▶" FontSize="16" Margin="0,0,8,0" Grid.Column="0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Start" VerticalAlignment="Center" Grid.Column="1" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="▶"
+                                                   FontSize="16"
+                                                   Margin="0,0,8,0"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Text="Start"
+                                                   VerticalAlignment="Center"
+                                                   Grid.Column="1"
+                                                   HorizontalAlignment="Center"/>
                                     </Grid>
                                 </Button>
-
                                 <Button x:Name="StopCaptureButton"
                                         Click="OnButtonClick"
                                         IsEnabled="{Binding IsRecording}"
                                         Margin="0,0,0,12"
                                         Width="180"
                                         Height="40"
-                                        Style="{StaticResource ModernButtonStyle}">
+                                        Style="{DynamicResource ModernButtonStyle}">
                                     <Grid Width="160">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="⏹" FontSize="16" Margin="0,0,8,0" Grid.Column="0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Stop" VerticalAlignment="Center" Grid.Column="1" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="⏹"
+                                                   FontSize="16"
+                                                   Margin="0,0,8,0"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Text="Stop"
+                                                   VerticalAlignment="Center"
+                                                   Grid.Column="1"
+                                                   HorizontalAlignment="Center"/>
                                     </Grid>
                                 </Button>
-
                                 <Button x:Name="OverlayButton"
                                         Click="OnButtonClick"
                                         Margin="0,0,0,12"
                                         Width="180"
                                         Height="40"
-                                        Style="{StaticResource ModernButtonStyle}">
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <TextBlock Text="⚡" FontSize="16" Margin="0,0,8,0"/>
+                                        Style="{DynamicResource ModernButtonStyle}">
+                                    <StackPanel Orientation="Horizontal"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="⚡"
+                                                   FontSize="16"
+                                                   Margin="0,0,8,0"/>
                                         <TextBlock Text="Overlay"/>
                                     </StackPanel>
                                 </Button>
-
                                 <Button x:Name="OpenSettingsButton"
                                         Click="OnButtonClick"
                                         Margin="0,0,0,12"
                                         Width="180"
                                         Height="40"
-                                        Style="{StaticResource ModernButtonStyle}">
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <TextBlock Text="⚙" FontSize="16" Margin="0,0,8,0"/>
+                                        Style="{DynamicResource ModernButtonStyle}">
+                                    <StackPanel Orientation="Horizontal"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="⚙"
+                                                   FontSize="16"
+                                                   Margin="0,0,8,0"/>
                                         <TextBlock Text="Settings"/>
                                     </StackPanel>
                                 </Button>
-
                                 <Button x:Name="OpenPopupButton"
                                         Click="OnButtonClick"
                                         Width="180"
                                         Height="40"
-                                        Style="{StaticResource ModernButtonStyle}">
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <TextBlock Text="🔧" FontSize="16" Margin="0,0,8,0"/>
+                                        Style="{DynamicResource ModernButtonStyle}">
+                                    <StackPanel Orientation="Horizontal"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="🔧"
+                                                   FontSize="16"
+                                                   Margin="0,0,8,0"/>
                                         <TextBlock Text="Gain Control"/>
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
                         </Border>
 
-                        <!-- Ползунки настройки -->
-                        <Border Grid.Column="1" 
-                                CornerRadius="8" 
+                        <!-- Блок настроек слайдеров -->
+                        <Border Grid.Column="1"
+                                CornerRadius="8"
                                 Background="{DynamicResource ControlsPanelBackgroundBrush}"
                                 Effect="{DynamicResource ControlsPanelShadowEffect}"
                                 Padding="12"
                                 Margin="12,0">
                             <StackPanel>
-                                <!-- Ширина полос -->
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="120"/>
-                                        <!-- Фиксированная ширина для текста -->
                                         <ColumnDefinition Width="*"/>
-                                        <!-- Остальное пространство для слайдера -->
                                         <ColumnDefinition Width="30"/>
-                                        <!-- Фиксированная ширина для значения -->
                                     </Grid.ColumnDefinitions>
                                 </Grid>
-
-                                <!-- Интервал между полосами -->
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="120"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="30"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Interval:"
+                                    <TextBlock Grid.Column="0"
+                                               Text="Interval:"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,8,0"/>
-                                    <Slider Grid.Column="1" x:Name="barSpacingSlider"
-                                            Minimum="1"
-                                            Maximum="15"
+                                    <Slider Grid.Column="1"
+                                            x:Name="barSpacingSlider"
+                                            Minimum="1" Maximum="15"
                                             Value="{Binding BarSpacing, Mode=TwoWay}"
                                             ValueChanged="OnSliderValueChanged"
-                                            Style="{StaticResource ModernSliderStyle}" Height="20"/>
-                                    <TextBlock Grid.Column="2" Text="{Binding BarSpacing, StringFormat='{}{0:F0}'}"
+                                            Style="{DynamicResource ModernSliderStyle}"
+                                            Height="20"/>
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding BarSpacing, StringFormat='{}{0:F0}'}"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,8,0"/>
                                 </Grid>
-
-                                <!-- Количество полос -->
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="120"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="30"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Number of strips:"
+                                    <TextBlock Grid.Column="0"
+                                               Text="Number of strips:"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,8,0"/>
-                                    <Slider Grid.Column="1" x:Name="barCountSlider"
-                                            Minimum="10"
-                                            Maximum="500"
+                                    <Slider Grid.Column="1"
+                                            x:Name="barCountSlider"
+                                            Minimum="10" Maximum="500"
                                             Value="{Binding BarCount, Mode=TwoWay}"
-                                            Style="{StaticResource ModernSliderStyle}" Height="20"/>
-                                    <TextBlock Grid.Column="2" Text="{Binding BarCount, StringFormat='{}{0:F0}'}"
+                                            Style="{DynamicResource ModernSliderStyle}"
+                                            Height="20"/>
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding BarCount, StringFormat='{}{0:F0}'}"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,8,0"/>
@@ -295,75 +273,65 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Выбор визуализации -->
-                        <Border Grid.Column="2" 
-        CornerRadius="8" 
-        Background="{DynamicResource ControlsPanelBackgroundBrush}"
-        Effect="{DynamicResource ControlsPanelShadowEffect}"
-        Padding="12">
+                        <!-- Блок выбора визуализации -->
+                        <Border Grid.Column="2"
+                                CornerRadius="8"
+                                Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                Effect="{DynamicResource ControlsPanelShadowEffect}"
+                                Padding="12">
                             <Grid>
-                                <!-- Определение строк и столбцов -->
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
-
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-
-                                <!-- Блок выбора типа визуализации -->
-                                <TextBlock Grid.Row="0" 
-                   Text="Renderer:" 
-                   Foreground="{DynamicResource TextPrimaryBrush}" 
-                   Margin="0,0,8,0"/>
-                                <ComboBox Grid.Row="0" 
-                  Grid.Column="1" 
-                  x:Name="RenderStyleComboBox" 
-                  ItemsSource="{Binding AvailableDrawingTypes}" 
-                  SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}" 
-                  Width="200" 
-                  Margin="0,0,0,12" 
-                  Style="{StaticResource ModernComboBoxStyle}" 
-                  SelectionChanged="OnComboBoxSelectionChanged"/>
-
-                                <!-- Блок выбора кисти отрисовки -->
-                                <TextBlock Grid.Row="1" 
-                   Text="Paint:" 
-                   Foreground="{DynamicResource TextPrimaryBrush}" 
-                   Margin="0,0,8,0"/>
-                                <ComboBox Grid.Row="1" 
-                  Grid.Column="1" 
-                  x:Name="StyleComboBox" 
-                  ItemsSource="{Binding AvailableStyles.Keys}" 
-                  SelectedItem="{Binding SelectedStyle, Mode=TwoWay}" 
-                  Width="200" 
-                  Style="{StaticResource ModernComboBoxStyle}" 
-                  SelectionChanged="OnComboBoxSelectionChanged"
-                  Margin="0,12,0,12"/>
-
-                                <!-- Блок выбора типа окна FFT -->
-                                <TextBlock Grid.Row="2" 
-                   Text="Window FFT:" 
-                   Foreground="{DynamicResource TextPrimaryBrush}" 
-                   Margin="0,0,8,0"/>
-                                <ComboBox Grid.Row="2" 
-                  Grid.Column="1" 
-                  x:Name="FftWindowTypeComboBox" 
-                  ItemsSource="{Binding AvailableFftWindowTypes}" 
-                  SelectedItem="{Binding SelectedFftWindowType, Mode=TwoWay}" 
-                  Width="200" 
-                  Style="{StaticResource ModernComboBoxStyle}" 
-                  SelectionChanged="OnComboBoxSelectionChanged"
-                  Margin="0,12,0,0"/>
+                                <TextBlock Grid.Row="0"
+                                           Text="Renderer:"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
+                                <ComboBox Grid.Row="0"
+                                          Grid.Column="1"
+                                          x:Name="RenderStyleComboBox"
+                                          ItemsSource="{Binding AvailableDrawingTypes}"
+                                          SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"
+                                          Width="200"
+                                          Margin="0,0,0,12"
+                                          Style="{DynamicResource ModernComboBoxStyle}"
+                                          SelectionChanged="OnComboBoxSelectionChanged"/>
+                                <TextBlock Grid.Row="1"
+                                           Text="Paint:"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
+                                <ComboBox Grid.Row="1"
+                                          Grid.Column="1"
+                                          x:Name="StyleComboBox"
+                                          ItemsSource="{Binding AvailableStyles.Keys}"
+                                          SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
+                                          Width="200"
+                                          Style="{DynamicResource ModernComboBoxStyle}"
+                                          SelectionChanged="OnComboBoxSelectionChanged"
+                                          Margin="0,12,0,12"/>
+                                <TextBlock Grid.Row="2"
+                                           Text="Window FFT:"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           Margin="0,0,8,0"/>
+                                <ComboBox Grid.Row="2"
+                                          Grid.Column="1"
+                                          x:Name="FftWindowTypeComboBox"
+                                          ItemsSource="{Binding AvailableFftWindowTypes}"
+                                          SelectedItem="{Binding SelectedFftWindowType, Mode=TwoWay}"
+                                          Width="200"
+                                          Style="{DynamicResource ModernComboBoxStyle}"
+                                          SelectionChanged="OnComboBoxSelectionChanged"
+                                          Margin="0,12,0,0"/>
                             </Grid>
                         </Border>
                     </Grid>
                 </Border>
-
                 <!-- Всплывающее окно настроек усиления -->
                 <Popup x:Name="GainControlsPopup"
                        Placement="Center"
@@ -378,24 +346,10 @@
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsPopupOpen}" Value="True">
                                     <DataTrigger.EnterActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetProperty="(Popup.RenderTransform).(TranslateTransform.Y)"
-                                                                 From="20" To="0" Duration="0:0:0.3" />
-                                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                                 From="0" To="1" Duration="0:0:0.3" />
-                                            </Storyboard>
-                                        </BeginStoryboard>
+                                        <BeginStoryboard Storyboard="{DynamicResource PopupAppearStoryboard}"/>
                                     </DataTrigger.EnterActions>
                                     <DataTrigger.ExitActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetProperty="(Popup.RenderTransform).(TranslateTransform.Y)"
-                                                                 From="0" To="20" Duration="0:0:0.3" />
-                                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                                 From="1" To="0" Duration="0:0:0.3" />
-                                            </Storyboard>
-                                        </BeginStoryboard>
+                                        <BeginStoryboard Storyboard="{DynamicResource PopupDisappearStoryboard}"/>
                                     </DataTrigger.ExitActions>
                                 </DataTrigger>
                             </Style.Triggers>
@@ -407,67 +361,73 @@
                             Width="400"
                             BorderBrush="{DynamicResource DarkPopupBorderBrush}"
                             BorderThickness="1"
-                            Effect="{StaticResource PopupShadowEffect}">
+                            Effect="{DynamicResource PopupShadowEffect}">
                         <StackPanel>
-                            <TextBlock Text="Настройки усиления"
+                            <TextBlock Text="Gain Settings"
                                        FontSize="20"
                                        FontWeight="Bold"
                                        Foreground="{DynamicResource LightTextPrimaryBrush}"
                                        Margin="0,0,0,20"/>
-                            <!-- Минимальный уровень дБ -->
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="120"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="30"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Минимальный уровень дБ:"
+                                <TextBlock Grid.Column="0"
+                                           Text="Minimum dB level:"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
                                            Margin="0,0,8,0"/>
-                                <Slider Grid.Column="1" x:Name="minDbLevelSlider"
-                                        Minimum="-200"
-                                        Maximum="0"
+                                <Slider Grid.Column="1"
+                                        x:Name="minDbLevelSlider"
+                                        Minimum="-200" Maximum="0"
                                         Value="{Binding MinDbLevel, Mode=TwoWay}"
-                                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
-                                <TextBlock Grid.Column="2" Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
+                                        Style="{DynamicResource ModernSliderStyle}"
+                                        Height="20"/>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
                                            Margin="0,0,8,0"/>
                             </Grid>
-                            <!-- Максимальный уровень дБ -->
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="120"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="30"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Максимальный уровень дБ:"
+                                <TextBlock Grid.Column="0"
+                                           Text="Maximum dB level:"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
                                            Margin="0,0,8,0"/>
-                                <Slider Grid.Column="1" x:Name="maxDbLevelSlider"
-                                        Minimum="-100"
-                                        Maximum="0"
+                                <Slider Grid.Column="1"
+                                        x:Name="maxDbLevelSlider"
+                                        Minimum="-100" Maximum="0"
                                         Value="{Binding MaxDbLevel, Mode=TwoWay}"
-                                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
-                                <TextBlock Grid.Column="2" Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
+                                        Style="{DynamicResource ModernSliderStyle}"
+                                        Height="20"/>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
                                            Margin="0,0,8,0"/>
                             </Grid>
-                            <!-- Коэффициент усиления -->
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="120"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="30"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Коэффициент усиления:"
+                                <TextBlock Grid.Column="0"
+                                           Text="Amplification factor:"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
                                            Margin="0,0,8,0"/>
-                                <Slider Grid.Column="1" x:Name="amplificationFactorSlider"
-                                        Minimum="0.01"
-                                        Maximum="1"
+                                <Slider Grid.Column="1"
+                                        x:Name="amplificationFactorSlider"
+                                        Minimum="0.01" Maximum="1"
                                         Value="{Binding AmplificationFactor, Mode=TwoWay}"
-                                        Style="{StaticResource ModernSliderStyle}" Height="20"/>
-                                <TextBlock Grid.Column="2" Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
+                                        Style="{DynamicResource ModernSliderStyle}"
+                                        Height="20"/>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
                                            Foreground="{DynamicResource LightTextPrimaryBrush}"
                                            Margin="0,0,8,0"/>
                             </Grid>
