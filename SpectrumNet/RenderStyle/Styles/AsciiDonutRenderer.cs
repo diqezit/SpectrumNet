@@ -3,23 +3,53 @@ namespace SpectrumNet
 {
     public sealed class AsciiDonutRenderer : ISpectrumRenderer, IDisposable
     {
-        #region Constants
+        #region Helper Structures
 
         private readonly record struct Vertex(float X, float Y, float Z);
         private struct ProjectedVertex { public float X, Y, Depth, LightIntensity; }
 
+        #endregion
+
+        #region Constants and Static Fields
+
         private const int Segments = 60;
-        private const float DonutRadius = 1.5f, TubeRadius = 0.6f;
-        private const float RotationSpeedX = 0.01f, RotationSpeedY = 0.02f, RotationSpeedZ = 0.015f;
-        private const float DepthOffset = 6.0f, CharOffsetX = 4f, CharOffsetY = 4f, FontSize = 10f, DonutScale = 1.85f;
+        private const float DonutRadius = 1.5f;
+        private const float TubeRadius = 0.6f;
+        private const float RotationSpeedX = 0.01f;
+        private const float RotationSpeedY = 0.02f;
+        private const float RotationSpeedZ = 0.015f;
+        private const float DepthOffset = 6.0f;
+        private const float CharOffsetX = 4f;
+        private const float CharOffsetY = 4f;
+        private const float FontSize = 10f;
+        private const float DonutScale = 1.85f;
         private static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.5f, 0.5f, -1.0f));
         private static readonly char[] AsciiChars = " .:-=+*#%@".ToCharArray();
-        private static readonly string[] AsciiCharStrings = new string[AsciiChars.Length];
-        private static readonly float[] CosTable = new float[Segments], SinTable = new float[Segments];
+        private static readonly string[] AsciiCharStrings;
+        private static readonly float[] CosTable;
+        private static readonly float[] SinTable;
+
+        // Static constructor for initializing static fields
+        static AsciiDonutRenderer()
+        {
+            CosTable = new float[Segments];
+            SinTable = new float[Segments];
+            for (int i = 0; i < Segments; i++)
+            {
+                float angle = i * MathF.PI * 2f / Segments;
+                CosTable[i] = MathF.Cos(angle);
+                SinTable[i] = MathF.Sin(angle);
+            }
+            AsciiCharStrings = new string[AsciiChars.Length];
+            for (int i = 0; i < AsciiChars.Length; i++)
+            {
+                AsciiCharStrings[i] = AsciiChars[i].ToString();
+            }
+        }
 
         #endregion
 
-        #region Fields
+        #region Instance Fields
 
         private readonly byte[] _alphaCache;
         private readonly Vertex[] _vertices;
@@ -27,7 +57,7 @@ namespace SpectrumNet
         private readonly SKFont _font;
         private float _rotationAngleX, _rotationAngleY, _rotationAngleZ, _currentRotationIntensity = 1.0f;
         private bool _isInitialized, _isDisposed;
-        private float[] _spectrum = System.Array.Empty<float>();
+        private float[] _spectrum = Array.Empty<float>();
         private int _currentBarCount;
         private Matrix4x4 _rotationMatrix;
 
@@ -42,19 +72,7 @@ namespace SpectrumNet
 
         private AsciiDonutRenderer()
         {
-            // Инициализация таблиц синусов и косинусов
-            for (int i = 0; i < Segments; i++)
-            {
-                float angle = i * MathF.PI * 2f / Segments;
-                CosTable[i] = MathF.Cos(angle);
-                SinTable[i] = MathF.Sin(angle);
-            }
-            // Инициализация строкового массива для символов ASCII
-            for (int i = 0; i < AsciiChars.Length; i++)
-            {
-                AsciiCharStrings[i] = AsciiChars[i].ToString();
-            }
-            // Генерация вершин пончика без использования LINQ
+            // Generate donut vertices (without using LINQ)
             _vertices = new Vertex[Segments * Segments];
             int idx = 0;
             for (int i = 0; i < Segments; i++)
@@ -67,7 +85,8 @@ namespace SpectrumNet
             }
             _projectedVertices = new ProjectedVertex[_vertices.Length];
             _font = new SKFont { Size = FontSize };
-            // Инициализация кэша альфа-каналов для символов ASCII
+
+            // Initialize alpha channel cache for ASCII characters
             _alphaCache = new byte[AsciiChars.Length];
             for (int i = 0; i < AsciiChars.Length; i++)
             {
@@ -82,7 +101,6 @@ namespace SpectrumNet
         public void Initialize() => _isInitialized = true;
         public void Configure(bool isOverlayActive) { }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth,
             float barSpacing, int barCount, SKPaint paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
@@ -95,7 +113,7 @@ namespace SpectrumNet
             _spectrum = spectrum;
             _currentBarCount = barCount;
 
-            // Однопроходный расчёт среднего и максимального значений спектра
+            // Single-pass calculation of spectrum sum and maximum value
             float sum = 0f, maxSpectrum = 0f;
             int len = spectrum.Length;
             for (int i = 0; i < len; i++)
@@ -132,13 +150,12 @@ namespace SpectrumNet
         {
             float centerX = info.Width * 0.5f;
             float centerY = info.Height * 0.5f;
-            // Предварительный расчёт логарифмического множителя для оптимизации
             float logBarCount = MathF.Log2(_currentBarCount + 1);
             float scale = MathF.Min(centerX, centerY) * DonutScale * (1f + logBarCount * 0.1f);
 
             ProjectVertices(scale, centerX, centerY);
-            // Сортировка вершин по глубине (от дальнего к ближнему)
-            System.Array.Sort(_projectedVertices, 0, _vertices.Length,
+            // Sort vertices by depth (from far to near)
+            Array.Sort(_projectedVertices, 0, _vertices.Length,
                 Comparer<ProjectedVertex>.Create((a, b) => b.Depth.CompareTo(a.Depth)));
 
             float minZ = _projectedVertices[0].Depth;
@@ -147,7 +164,6 @@ namespace SpectrumNet
             float alphaMultiplier = 1f + logBarCount * 0.2f;
 
             var originalColor = paint.Color;
-            // Отрисовка вершин с расчетом интенсивности освещения и альфа-канала
             foreach (ref var vertex in _projectedVertices.AsSpan())
             {
                 float normalizedDepth = (vertex.Depth - minZ) / depthRange;
@@ -168,6 +184,7 @@ namespace SpectrumNet
             paint.Color = originalColor;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateRotationAngles()
         {
             var speeds = (_spectrum.Length > 0)
@@ -217,26 +234,27 @@ namespace SpectrumNet
                     RotationSpeedZ * (1f + avg2 * 2f * multiplier));
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ProjectVertices(float scale, float centerX, float centerY)
         {
-            // Извлечение элементов матрицы вращения для минимизации накладных расходов
+            // Extract rotation matrix elements to reduce overhead
             float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
             float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
             float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
 
-            System.Threading.Tasks.Parallel.For(0, _vertices.Length, i =>
+            Parallel.For(0, _vertices.Length, i =>
             {
                 Vertex vertex = _vertices[i];
-                // Ручное умножение вектора на матрицу вращения
                 float rx = vertex.X * m11 + vertex.Y * m21 + vertex.Z * m31;
                 float ry = vertex.X * m12 + vertex.Y * m22 + vertex.Z * m32;
                 float rz = vertex.X * m13 + vertex.Y * m23 + vertex.Z * m33;
 
                 float invDepth = 1f / (rz + DepthOffset);
-                // Вычисление интенсивности освещения без использования Vector3.Normalize
-                float len = MathF.Sqrt(rx * rx + ry * ry + rz * rz);
-                float invLen = (len > 0f) ? 1f / len : 0f;
-                float normRx = rx * invLen, normRy = ry * invLen, normRz = rz * invLen;
+                float length = MathF.Sqrt(rx * rx + ry * ry + rz * rz);
+                float invLength = (length > 0f) ? 1f / length : 0f;
+                float normRx = rx * invLength;
+                float normRy = ry * invLength;
+                float normRz = rz * invLength;
                 float lightIntensity = (normRx * LightDirection.X + normRy * LightDirection.Y + normRz * LightDirection.Z) * 0.5f + 0.5f;
 
                 _projectedVertices[i] = new ProjectedVertex
@@ -249,6 +267,7 @@ namespace SpectrumNet
             });
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Matrix4x4 CreateRotationMatrix() =>
             Matrix4x4.CreateRotationX(_rotationAngleX) *
             Matrix4x4.CreateRotationY(_rotationAngleY) *
