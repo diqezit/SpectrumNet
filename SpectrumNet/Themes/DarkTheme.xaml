@@ -2,85 +2,86 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- Основные цвета -->
-    <SolidColorBrush x:Key="BackgroundBrush" Color="#2E2E2E"/>
+    <SolidColorBrush x:Key="BackgroundBrush" Color="#1A1D1E"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B0B0B0"/>
-    <SolidColorBrush x:Key="SurfaceBrush" Color="#424242"/>
-    <SolidColorBrush x:Key="BorderBrush" Color="#616161"/>
-    <SolidColorBrush x:Key="AccentBrush" Color="#1E88E5"/>
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#1565C0"/>
-    <SolidColorBrush x:Key="FocusedBorderBrush" Color="#1E88E5"/>
-    <SolidColorBrush x:Key="ButtonHoverBackgroundBrush" Color="#555555"/>
-    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#333333"/>
-    <SolidColorBrush x:Key="DarkSurfaceBrush" Color="#424242"/>
-    <SolidColorBrush x:Key="DarkPopupBorderBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A0A4A8"/>
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#252A2B"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#4D7DFE"/>
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#2E5BFF"/>
+    <SolidColorBrush x:Key="FocusedBorderBrush" Color="#4D7DFE"/>
+    <SolidColorBrush x:Key="ButtonHoverBackgroundBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#3A4042"/>
+    <SolidColorBrush x:Key="DarkSurfaceBrush" Color="#252A2B"/>
+    <SolidColorBrush x:Key="DarkPopupBorderBrush" Color="#2F3436"/>
     <SolidColorBrush x:Key="LightTextPrimaryBrush" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#383838"/>
+    <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#2F3436"/>
 
     <!-- Цвета для кнопок -->
-    <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#616161"/>
-    <SolidColorBrush x:Key="ButtonPressedBorderBrush" Color="#333333"/>
-    <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#2E2E2E"/>
-    <SolidColorBrush x:Key="ButtonDisabledBorderBrush" Color="#616161"/>
-    <SolidColorBrush x:Key="ButtonDisabledForegroundBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#3A4042"/>
+    <SolidColorBrush x:Key="ButtonPressedBorderBrush" Color="#454A4D"/>
+    <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#1A1D1E"/>
+    <SolidColorBrush x:Key="ButtonDisabledBorderBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="ButtonDisabledForegroundBrush" Color="#666A6D"/>
     <SolidColorBrush x:Key="ButtonHoverForegroundBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="ButtonPressedForegroundBrush" Color="#FFFFFF"/>
 
     <!-- Цвета окна -->
-    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#121212"/>
-    <SolidColorBrush x:Key="WindowForegroundBrush" Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="WindowControlPressedBrush" Color="#333333"/>
-    <SolidColorBrush x:Key="WindowControlHoverBrush" Color="#555555"/>
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#151718"/>
+    <SolidColorBrush x:Key="WindowForegroundBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="WindowControlPressedBrush" Color="#3A4042"/>
+    <SolidColorBrush x:Key="WindowControlHoverBrush" Color="#2F3436"/>
 
     <!-- Цвета для TextBox -->
-    <SolidColorBrush x:Key="TextBoxBackgroundBrush" Color="#2E2E2E"/>
-    <SolidColorBrush x:Key="TextBoxBorderBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="TextBoxBackgroundBrush" Color="#1A1D1E"/>
+    <SolidColorBrush x:Key="TextBoxBorderBrush" Color="#2F3436"/>
     <SolidColorBrush x:Key="TextBoxForegroundBrush" Color="#FFFFFF"/>
 
     <!-- Цвета для ComboBox -->
-    <SolidColorBrush x:Key="ComboBoxBackgroundBrush" Color="#2E2E2E"/>
-    <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="ComboBoxBackgroundBrush" Color="#1A1D1E"/>
+    <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#2F3436"/>
     <SolidColorBrush x:Key="ComboBoxForegroundBrush" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="ComboBoxHoverBackgroundBrush" Color="#555555"/>
-    <SolidColorBrush x:Key="ComboBoxHoverBorderBrush" Color="#616161"/>
-    <SolidColorBrush x:Key="ComboBoxPressedBackgroundBrush" Color="#333333"/>
-    <SolidColorBrush x:Key="ComboBoxPressedBorderBrush" Color="#333333"/>
-    <SolidColorBrush x:Key="ComboBoxDisabledBackgroundBrush" Color="#2E2E2E"/>
-    <SolidColorBrush x:Key="ComboBoxDisabledBorderBrush" Color="#616161"/>
-    <SolidColorBrush x:Key="ComboBoxDisabledForegroundBrush" Color="#616161"/>
-    <SolidColorBrush x:Key="ComboBoxPopupBackgroundBrush" Color="#2E2E2E"/>
-    <SolidColorBrush x:Key="ComboBoxPopupBorderBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="ComboBoxHoverBackgroundBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="ComboBoxHoverBorderBrush" Color="#3A4042"/>
+    <SolidColorBrush x:Key="ComboBoxPressedBackgroundBrush" Color="#3A4042"/>
+    <SolidColorBrush x:Key="ComboBoxPressedBorderBrush" Color="#454A4D"/>
+    <SolidColorBrush x:Key="ComboBoxDisabledBackgroundBrush" Color="#1A1D1E"/>
+    <SolidColorBrush x:Key="ComboBoxDisabledBorderBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="ComboBoxDisabledForegroundBrush" Color="#666A6D"/>
+    <SolidColorBrush x:Key="ComboBoxPopupBackgroundBrush" Color="#1A1D1E"/>
+    <SolidColorBrush x:Key="ComboBoxPopupBorderBrush" Color="#2F3436"/>
 
     <!-- Цвета для ComboBoxItem -->
-    <SolidColorBrush x:Key="ComboBoxItemHoverBackgroundBrush" Color="#555555"/>
-    <SolidColorBrush x:Key="ComboBoxItemSelectedBackgroundBrush" Color="#333333"/>
+    <SolidColorBrush x:Key="ComboBoxItemHoverBackgroundBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="ComboBoxItemSelectedBackgroundBrush" Color="#3A4042"/>
 
     <!-- Цвета для CheckBox -->
     <SolidColorBrush x:Key="CheckBoxForegroundBrush" Color="#FFFFFF"/>
 
     <!-- Цвета для ListBox -->
-    <SolidColorBrush x:Key="ListBoxBackgroundBrush" Color="#2E2E2E"/>
-    <SolidColorBrush x:Key="ListBoxBorderBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="ListBoxBackgroundBrush" Color="#1A1D1E"/>
+    <SolidColorBrush x:Key="ListBoxBorderBrush" Color="#2F3436"/>
     <SolidColorBrush x:Key="ListBoxForegroundBrush" Color="#FFFFFF"/>
 
     <!-- Цвета для ScrollViewer -->
-    <SolidColorBrush x:Key="ScrollViewerBackgroundBrush" Color="#2E2E2E"/>
+    <SolidColorBrush x:Key="ScrollViewerBackgroundBrush" Color="#1A1D1E"/>
 
     <!-- Цвета для ProgressBar -->
-    <SolidColorBrush x:Key="ProgressBarForegroundBrush" Color="#1E88E5"/>
-    <SolidColorBrush x:Key="ProgressBarBackgroundBrush" Color="#424242"/>
-    <SolidColorBrush x:Key="ProgressBarBorderBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="ProgressBarForegroundBrush" Color="#4D7DFE"/>
+    <SolidColorBrush x:Key="ProgressBarBackgroundBrush" Color="#252A2B"/>
+    <SolidColorBrush x:Key="ProgressBarBorderBrush" Color="#2F3436"/>
 
     <!-- Цвета для Slider -->
-    <SolidColorBrush x:Key="SliderForegroundBrush" Color="#1E88E5"/>
-    <SolidColorBrush x:Key="SliderBackgroundBrush" Color="#424242"/>
-    <SolidColorBrush x:Key="SliderBorderBrush" Color="#616161"/>
+    <SolidColorBrush x:Key="SliderForegroundBrush" Color="#4D7DFE"/>
+    <SolidColorBrush x:Key="SliderBackgroundBrush" Color="#252A2B"/>
+    <SolidColorBrush x:Key="SliderBorderBrush" Color="#2F3436"/>
 
     <!-- Кнопка -->
-    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#444444"/>
+    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#252A2B"/>
     <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF"/>
 
     <!-- Добавленные ресурсы -->
-    <SolidColorBrush x:Key="WindowBorderBrush" Color="#616161"/>
-    <SolidColorBrush x:Key="ControlsPanelBackgroundBrush" Color="#424242"/>
+    <SolidColorBrush x:Key="WindowBorderBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="ControlsPanelBackgroundBrush" Color="#252A2B"/>
+    <SolidColorBrush x:Key="TitleBarBackgroundBrush" Color="#4D7DFE"/>
 </ResourceDictionary>

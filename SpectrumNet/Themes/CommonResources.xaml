@@ -4,12 +4,6 @@
     xmlns:local="clr-namespace:SpectrumNet"
     x:Class="SpectrumNet.CommonResources">
 
-    <!-- Объединённые словари для тем -->
-    <ResourceDictionary.MergedDictionaries>
-        <ResourceDictionary Source="/Themes/darktheme.xaml"/>
-        <ResourceDictionary Source="/Themes/lighttheme.xaml"/>
-    </ResourceDictionary.MergedDictionaries>
-
     <!-- Ресурс преобразователя -->
     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
 

@@ -7,10 +7,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>WinExe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <StartupObject>SpectrumNet.App</StartupObject>
+    <ApplicationIcon>spectrum.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove="SpectrumAnalyzer - Копировать.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="spectrum.ico" />
   </ItemGroup>
 
   <ItemGroup>

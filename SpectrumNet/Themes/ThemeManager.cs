@@ -204,15 +204,7 @@ namespace SpectrumNet
             {
                 foreach (var key in themeDict.Keys)
                 {
-                    window.Resources[key] = themeDict[key];
-                }
-
-                if (window is MainWindow && Application.Current is { } app)
-                {
-                    foreach (var key in themeDict.Keys)
-                    {
-                        app.Resources[key] = themeDict[key];
-                    }
+                    Application.Current.Resources[key] = themeDict[key]; 
                 }
             });
         }
