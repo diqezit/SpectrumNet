@@ -1,12 +1,11 @@
 
 
+![image](https://github.com/user-attachments/assets/6fab0773-1d49-4fe1-8a59-9ed63360501d)
+![image](https://github.com/user-attachments/assets/d4054872-9823-4bd7-9e41-a2df972aa269)
+![image](https://github.com/user-attachments/assets/9860216e-208a-4c8a-923e-2ed0b8d7523d)
+![image](https://github.com/user-attachments/assets/1b6da52f-2f51-4d1e-a239-9d183a7145f6)
+![image](https://github.com/user-attachments/assets/414a992b-d063-4b4f-b6b0-a90c05d7527f)
 
-![image](https://github.com/user-attachments/assets/d23cdbaa-3b79-43d5-8645-b73ee70a35db)
-![image](https://github.com/user-attachments/assets/b01af1e7-1665-441f-9be8-7199ae76f59e)
-![image](https://github.com/user-attachments/assets/d9728eae-9c78-4c7f-aaf5-89b2d124e259)
-![image](https://github.com/user-attachments/assets/01769dd2-a089-4cba-8ceb-abd5683ead45)
-![image](https://github.com/user-attachments/assets/ea4090fd-f939-491e-97e8-bb5b17d5a1e0)
-![image](https://github.com/user-attachments/assets/94bef9dc-d9fd-4526-8248-e11a1c373c5a)
 
 
 # SpectrumNet
