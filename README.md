@@ -47,8 +47,6 @@ To run SpectrumNet, you need to have the following prerequisites installed:
 
 ## Usage
 
-### Main Window
-
 - **Start/Stop Capture**: Use the buttons to start and stop audio capture.
 - **Visualization Settings**: Adjust the bar width, spacing, and count using the sliders.
 - **Style Selection**: Choose from different visualization styles.
