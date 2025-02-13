@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:local="clr-namespace:SpectrumNet"
-        Title="Настройки" 
-        Height="800" 
-        Width="700" 
+        Title="Settings"
+        Height="800"
+        Width="700"
         WindowStartupLocation="CenterScreen"
         Closing="Window_Closing"
         Background="{DynamicResource WindowBackgroundBrush}">
@@ -20,8 +20,8 @@
             <Setter Property="HeaderTemplate">
                 <Setter.Value>
                     <DataTemplate>
-                        <TextBlock Text="{Binding}" 
-                                   Foreground="{DynamicResource TextPrimaryBrush}" 
+                        <TextBlock Text="{Binding}"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
                                    FontWeight="Bold"/>
                     </DataTemplate>
                 </Setter.Value>
@@ -47,11 +47,10 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <ScrollViewer Grid.Row="0" 
+            <ScrollViewer Grid.Row="0"
                           VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <!-- Основные настройки частиц -->
-                    <GroupBox Header="Основные параметры частиц" 
+                    <GroupBox Header="Basic particle settings"
                               Style="{DynamicResource SettingsGroupBoxStyle}">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -60,14 +59,11 @@
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="255"/>
-                                <!-- Фиксированная ширина для текста -->
                                 <ColumnDefinition Width="*"/>
-                                <!-- Остальное пространство для слайдера -->
                                 <ColumnDefinition Width="Auto"/>
-                                <!-- Автоматическая ширина для значения -->
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Затухание частиц:" 
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Particle decay:"
                                        Style="{StaticResource SettingsTextBlockStyle}"/>
                             <Slider Grid.Row="0" Grid.Column="1" Minimum="0.001"
                                     Maximum="0.1"
@@ -76,7 +72,7 @@
                             <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleLifeDecay, StringFormat='{}{0:F3}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Время жизни частиц:" 
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Particle life time:"
                                        Style="{StaticResource SettingsTextBlockStyle}"/>
                             <Slider Grid.Row="1" Grid.Column="1" Minimum="0.01"
                                     Maximum="5"
@@ -87,8 +83,7 @@
                         </Grid>
                     </GroupBox>
 
-                    <!-- Настройки появления частиц -->
-                    <GroupBox Header="Параметры появления" 
+                    <GroupBox Header="Spawn parameters"
                               Style="{DynamicResource SettingsGroupBoxStyle}">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -101,7 +96,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Порог появления (наложение):" 
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Spawn threshold (overlay):"
                                        Style="{StaticResource SettingsTextBlockStyle}"/>
                             <Slider Grid.Row="0" Grid.Column="1" Minimum="0.1"
                                     Maximum="1.0"
@@ -110,7 +105,7 @@
                             <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SpawnThresholdOverlay, StringFormat='{}{0:F2}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Порог появления (обычный):" 
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Spawn threshold (normal):"
                                        Style="{StaticResource SettingsTextBlockStyle}"/>
                             <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1"
                                     Maximum="1.0"
@@ -121,8 +116,7 @@
                         </Grid>
                     </GroupBox>
 
-                    <!-- Настройки скорости -->
-                    <GroupBox Header="Параметры скорости" 
+                    <GroupBox Header="Speed parameters"
                               Style="{DynamicResource SettingsGroupBoxStyle}">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -136,7 +130,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Минимальная скорость:" 
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Minimum speed:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Column="1" Minimum="0.1"
                                     Maximum="10.0"
@@ -145,7 +139,7 @@
                             <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleVelocityMin, StringFormat='{}{0:F2}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Максимальная скорость:" 
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Maximum speed:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1"
                                     Maximum="10.0"
@@ -154,7 +148,7 @@
                             <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ParticleVelocityMax, StringFormat='{}{0:F2}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Множитель скорости:" 
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Speed multiplier:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Row="2" Grid.Column="1" Minimum="0.5"
                                     Maximum="5.0"
@@ -165,8 +159,7 @@
                         </Grid>
                     </GroupBox>
 
-                    <!-- Настройки размера -->
-                    <GroupBox Header="Параметры размера" 
+                    <GroupBox Header="Size parameters"
                               Style="{DynamicResource SettingsGroupBoxStyle}">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -179,7 +172,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Размер частиц (наложение):" 
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Particle size (overlay):"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Column="1" Minimum="1.0"
                                     Maximum="5.0"
@@ -188,7 +181,7 @@
                             <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleSizeOverlay, StringFormat='{}{0:F2}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Размер частиц (обычный):" 
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Particle size (normal):"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Row="1" Grid.Column="1" Minimum="1.0"
                                     Maximum="5.0"
@@ -199,8 +192,7 @@
                         </Grid>
                     </GroupBox>
 
-                    <!-- Глубина залегания -->
-                    <GroupBox Header="Глубина залегания" Style="{StaticResource SettingsGroupBoxStyle}">
+                    <GroupBox Header="Depth of field" Style="{DynamicResource SettingsGroupBoxStyle}">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -212,20 +204,19 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Максимальная глубина Z:" Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Z Depth:" Style="{StaticResource SettingsTextBlockStyle}"/>
                             <Slider Grid.Row="0" Grid.Column="1" Minimum="100" Maximum="1000"
                                     Value="{Binding MaxZDepth, Mode=TwoWay}" Style="{StaticResource AlignedSliderStyle}"/>
                             <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxZDepth, StringFormat='{}{0:F2}'}" Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Минимальная глубина Z:" Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Minimum Z Depth:" Style="{StaticResource SettingsTextBlockStyle}"/>
                             <Slider Grid.Row="1" Grid.Column="1" Minimum="100" Maximum="1000"
                                     Value="{Binding MinZDepth, Mode=TwoWay}" Style="{StaticResource AlignedSliderStyle}"/>
                             <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MinZDepth, StringFormat='{}{0:F2}'}" Style="{StaticResource SettingsTextBlockStyle}"/>
                         </Grid>
                     </GroupBox>
 
-                    <!-- Дополнительные настройки -->
-                    <GroupBox Header="Дополнительные параметры" 
+                    <GroupBox Header="Additional settings"
                               Style="{DynamicResource SettingsGroupBoxStyle}">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -241,7 +232,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Максимум частиц:" 
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum particles:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Column="1" Minimum="100"
                                     Maximum="5000"
@@ -250,7 +241,7 @@
                             <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxParticles, StringFormat='{}{0:F0}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Экспонента затухания прозрачности:" 
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Transparency decay exponent:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1"
                                     Maximum="3.0"
@@ -259,7 +250,7 @@
                             <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding AlphaDecayExponent, StringFormat='{}{0:F2}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Вероятность появления:" 
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Spawn probability:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Row="2" Grid.Column="1" Minimum="0.01"
                                     Maximum="1.0"
@@ -268,7 +259,7 @@
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding SpawnProbability, StringFormat='{}{0:F2}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
 
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Множитель смещения наложения:" 
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Overlay offset multiplier:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Row="3" Grid.Column="1" Minimum="0.1"
                                     Maximum="5.0"
@@ -277,7 +268,7 @@
                             <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding OverlayOffsetMultiplier, StringFormat='{}{0:F2}'}"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
 
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Множитель высоты наложения:" 
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Overlay height multiplier:"
                                        Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
                             <Slider Grid.Row="4" Grid.Column="1" Minimum="0.1"
                                     Maximum="5.0"
@@ -288,58 +279,55 @@
                         </Grid>
                     </GroupBox>
 
-                    <!-- Информационный блок -->
-                    <GroupBox Header="Информация" 
-                              Style="{StaticResource SettingsGroupBoxStyle}">
+                    <GroupBox Header="Information"
+                              Style="{DynamicResource SettingsGroupBoxStyle}">
                         <StackPanel Margin="8,4">
-                            <TextBlock Text="Подсказки:" 
+                            <TextBlock Text="Hints:"
                                        FontWeight="Bold"
                                        Margin="0,0,0,4"
                                        Foreground="{DynamicResource TextPrimaryBrush}"/>
-                            <TextBlock Text="• Для оптимальной работы рекомендуется начать с настройки основных параметров"
+                            <TextBlock Text="• For optimal performance, it is recommended to start by adjusting the basic settings"
                                        TextWrapping="Wrap"
                                        Margin="8,2"
                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
-                            <TextBlock Text="• Изменение максимального количества частиц может сильно повлиять на производительность"
+                            <TextBlock Text="• Changing the maximum number of particles can greatly affect performance"
                                        TextWrapping="Wrap"
                                        Margin="8,2"
                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
-                            <TextBlock Text="• Используем 'Сброс' для возврата к исходным настройкам"
+                            <TextBlock Text="• Use 'Reset' to return to the default settings"
                                        TextWrapping="Wrap"
                                        Margin="8,2"
                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
                         </StackPanel>
                     </GroupBox>
 
-                    <!-- Нижний отступ -->
                     <Rectangle Height="16"/>
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- Панель управляющих кнопок -->
-            <StackPanel Grid.Row="1" 
-                        Orientation="Horizontal" 
-                        HorizontalAlignment="Right" 
+            <StackPanel Grid.Row="1"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
                         Margin="0,16,0,0">
-                <Button Content="Сброс"
+                <Button Content="Reset"
                         Click="OnResetButton_Click"
                         Margin="8,0"
                         Style="{StaticResource ModernButtonStyle}"
-                        Height="40" 
+                        Height="40"
                         Width="120" />
 
-                <Button Content="Применить"
+                <Button Content="Apply"
                         Click="OnApplyButton_Click"
                         Margin="8,0"
                         Style="{StaticResource ModernButtonStyle}"
-                        Height="40" 
+                        Height="40"
                         Width="120" />
 
-                <Button Content="Закрыть"
+                <Button Content="Close"
                         Click="OnCloseButton_Click"
                         Margin="8,0"
                         Style="{StaticResource ModernButtonStyle}"
-                        Height="40" 
+                        Height="40"
                         Width="120" />
             </StackPanel>
         </Grid>
