@@ -32,11 +32,6 @@
     <SolidColorBrush x:Key="WindowControlPressedBrush" Color="#333333"/>
     <SolidColorBrush x:Key="WindowControlHoverBrush" Color="#555555"/>
 
-    <!-- Тени и анимации -->
-    <DropShadowEffect x:Key="ButtonShadowEffect" BlurRadius="8" Color="#80000000" Direction="315" ShadowDepth="2"/>
-    <DoubleAnimation x:Key="ButtonHoverAnimation" To="1.05" Duration="0:0:0.2" AutoReverse="True"/>
-    <DropShadowEffect x:Key="PopupShadowEffect" BlurRadius="12" Color="#80000000" Direction="270" ShadowDepth="2"/>
-
     <!-- Цвета для TextBox -->
     <SolidColorBrush x:Key="TextBoxBackgroundBrush" Color="#2E2E2E"/>
     <SolidColorBrush x:Key="TextBoxBorderBrush" Color="#616161"/>
@@ -88,5 +83,4 @@
     <!-- Добавленные ресурсы -->
     <SolidColorBrush x:Key="WindowBorderBrush" Color="#616161"/>
     <SolidColorBrush x:Key="ControlsPanelBackgroundBrush" Color="#424242"/>
-
 </ResourceDictionary>

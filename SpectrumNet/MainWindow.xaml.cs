@@ -124,11 +124,7 @@ namespace SpectrumNet
         {
             try
             {
-                while (!token.IsCancellationRequested)
-                {
-                    await Task.Delay(MwConstants.MonitorDelay, token);
-                    _mainWindow.Dispatcher.Invoke(() => _mainWindow.RenderElement?.InvalidateVisual());
-                }
+                await Task.Delay(Timeout.Infinite, token);
             }
             catch (TaskCanceledException)
             {
@@ -203,6 +199,12 @@ namespace SpectrumNet
             SetupEventHandlers();
             ConfigureTheme();
             UpdateProperties();
+            CompositionTarget.Rendering += OnRendering!;
+        }
+
+        private void OnRendering(object sender, EventArgs e)
+        {
+            RenderElement?.InvalidateVisual();
         }
 
         private void InitializeComponents()
@@ -211,21 +213,14 @@ namespace SpectrumNet
             _spectrumStyles = new SpectrumBrushes();
             _disposables = new CompositeDisposable();
 
-            var renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(MwConstants.RenderIntervalMs) };
-            renderTimer.Tick += (_, _) => RenderElement?.InvalidateVisual();
-            renderTimer.Start();
-
             _analyzer = new SpectrumAnalyzer(new FftProcessor(),
                                              new SpectrumConverter(_gainParameters),
                                              SynchronizationContext.Current ?? throw new InvalidOperationException("SynchronizationContext.Current is null"));
-
             _captureManager = new AudioCaptureManager(this);
-
             _renderer = new Renderer(_spectrumStyles ?? throw new InvalidOperationException("_spectrumStyles is null"),
                                      this,
                                      _analyzer,
                                      RenderElement);
-
             SelectedStyle = MwConstants.DefaultStyle;
         }
 
@@ -233,7 +228,6 @@ namespace SpectrumNet
         {
             if (RenderElement is null)
                 throw new InvalidOperationException("RenderElement is null");
-
             RenderElement.PaintSurface += OnPaintSurface;
             SizeChanged += OnWindowSizeChanged;
             StateChanged += OnStateChanged;
