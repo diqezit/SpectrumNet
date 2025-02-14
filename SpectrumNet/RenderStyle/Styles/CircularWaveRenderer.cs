@@ -2,10 +2,8 @@
 
 namespace SpectrumNet
 {
-    public class CircularWaveRenderer : ISpectrumRenderer, IDisposable
+    public sealed class CircularWaveRenderer : ISpectrumRenderer, IDisposable
     {
-        #region Fields
-
         private static CircularWaveRenderer? _instance;
         private bool _isInitialized;
         private bool _isOverlayActive;
@@ -17,13 +15,10 @@ namespace SpectrumNet
 
         private float[]? _previousSpectrum, _precomputedCosValues, _precomputedSinValues;
         private int _previousPointCount, _maxPointCount = DefaultMaxPointCount;
-
+        private SKFont? _cachedFont;
         private readonly SKPath _path = new();
 
-        #endregion
-
         #region Constants
-
         private const float DefaultRotationSpeed = 0.5f;
         private const float DefaultRadiusProportion = 0.4f;
         private const float DefaultAmplitudeScale = 0.5f;
@@ -31,21 +26,17 @@ namespace SpectrumNet
         private const float DefaultSmoothingFactor = 0.3f;
         private const float OverlaySmoothingFactor = 0.5f;
         private const int DefaultMaxPointCount = 180;
-
         #endregion
-
-        #region Constructor
 
         private CircularWaveRenderer() { }
         public static CircularWaveRenderer GetInstance() => _instance ??= new CircularWaveRenderer();
 
-        #endregion
-
-        #region Public Methods
-
         public void Initialize()
         {
-            if (!_isInitialized) _isInitialized = true;
+            if (!_isInitialized)
+            {
+                _isInitialized = true;
+            }
         }
 
         public void Configure(bool isOverlayActive) =>
@@ -75,9 +66,12 @@ namespace SpectrumNet
             float barSpacing,
             int barCount,
             SKPaint paint,
-            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            if (!_isInitialized || !AreRenderParamsValid(canvas, spectrum, info, paint)) return;
+            if (!_isInitialized || !AreRenderParamsValid(canvas, spectrum, info, paint))
+            {
+                return;
+            }
 
             int halfSpectrumLength = spectrum!.Length / 2;
             int pointCount = Math.Min(halfSpectrumLength, _maxPointCount);
@@ -88,28 +82,50 @@ namespace SpectrumNet
                 _previousPointCount = pointCount;
             }
 
-            var smoothedSpectrum = SmoothSpectrum(ScaleSpectrum(spectrum, pointCount, halfSpectrumLength).AsSpan(), pointCount);
-            float radius = Math.Min(info.Width, info.Height) * _radiusProportion;
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, halfSpectrumLength);
+            float[] smoothedSpectrum = SmoothSpectrum(scaledSpectrum.AsSpan(), pointCount);
+            float radius = MathF.Min(info.Width, info.Height) * _radiusProportion;
             RenderCircularWave(canvas, smoothedSpectrum, pointCount, radius, info.Width / 2f, info.Height / 2f, paint);
 
             _rotation = (_rotation + _rotationSpeed) % 360f;
-            drawPerformanceInfo(canvas, info);
+            if (drawPerformanceInfo != null)
+            {
+                drawPerformanceInfo(canvas, info);
+            }
+            else
+            {
+                DefaultDrawPerformanceInfo(canvas, info, paint);
+            }
         }
 
         public void Dispose()
         {
-            _precomputedCosValues = _precomputedSinValues = _previousSpectrum = null;
-            _isInitialized = false;
-            _path.Dispose();
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
-        #endregion
-
-        #region Private Methods
+        private void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    _precomputedCosValues = _precomputedSinValues = _previousSpectrum = null;
+                    _cachedFont?.Dispose();
+                    _path.Dispose();
+                }
+                _disposed = true;
+                _isInitialized = false;
+            }
+        }
+        private bool _disposed;
 
         private void PrecomputeTrigonometryValues(int pointCount)
         {
-            if (_precomputedCosValues?.Length == pointCount) return;
+            if (_precomputedCosValues?.Length == pointCount)
+            {
+                return;
+            }
 
             _precomputedCosValues = new float[pointCount];
             _precomputedSinValues = new float[pointCount];
@@ -127,10 +143,10 @@ namespace SpectrumNet
         {
             var scaledSpectrum = new float[targetCount];
             float step = (float)halfSpectrumLength / targetCount;
-
             for (int i = 0; i < targetCount; i++)
+            {
                 scaledSpectrum[i] = spectrum[(int)(i * step)];
-
+            }
             return scaledSpectrum;
         }
 
@@ -138,13 +154,11 @@ namespace SpectrumNet
         {
             _previousSpectrum ??= new float[pointCount];
             var smoothedSpectrum = new float[pointCount];
-
             for (int i = 0; i < pointCount; i++)
             {
                 smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) + scaledSpectrum[i] * _smoothingFactor;
                 _previousSpectrum[i] = smoothedSpectrum[i];
             }
-
             return smoothedSpectrum;
         }
 
@@ -158,17 +172,22 @@ namespace SpectrumNet
             SKPaint paint)
         {
             _path.Reset();
-
+            float rad = _rotation * MathF.PI / 180f;
+            float cosDelta = MathF.Cos(rad);
+            float sinDelta = MathF.Sin(rad);
             bool firstPoint = true;
             for (int i = 0; i < pointCount; i++)
             {
                 float amplitude = spectrum[i];
-                if (amplitude < _minMagnitudeThreshold) continue;
-
+                if (amplitude < _minMagnitudeThreshold)
+                    continue;
                 float r = radius * (1f + amplitude * _amplitudeScale);
-                float x = centerX + r * _precomputedCosValues![i];
-                float y = centerY + r * _precomputedSinValues![i];
-
+                float baseCos = _precomputedCosValues![i];
+                float baseSin = _precomputedSinValues![i];
+                float rotatedCos = baseCos * cosDelta - baseSin * sinDelta;
+                float rotatedSin = baseSin * cosDelta + baseCos * sinDelta;
+                float x = centerX + r * rotatedCos;
+                float y = centerY + r * rotatedSin;
                 if (firstPoint)
                 {
                     _path.MoveTo(x, y);
@@ -179,10 +198,16 @@ namespace SpectrumNet
                     _path.LineTo(x, y);
                 }
             }
-
             if (!firstPoint)
             {
                 _path.Close();
+                using (var glowPaint = paint.Clone())
+                {
+                    glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 8);
+                    SKColor baseColor = paint.Color;
+                    glowPaint.Color = new SKColor(baseColor.Red, baseColor.Green, baseColor.Blue, (byte)(baseColor.Alpha / 2));
+                    canvas.DrawPath(_path, glowPaint);
+                }
                 canvas.DrawPath(_path, paint);
             }
         }
@@ -190,6 +215,24 @@ namespace SpectrumNet
         private static bool AreRenderParamsValid(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint) =>
             canvas != null && spectrum != null && spectrum.Length > 0 && paint != null && info.Width > 0 && info.Height > 0;
 
-        #endregion
+        private void DefaultDrawPerformanceInfo(SKCanvas canvas, SKImageInfo info, SKPaint baseTextPaint)
+        {
+            string performanceText = "Performance Info";
+            using SKPaint textPaint = new SKPaint
+            {
+                Color = SKColors.White,
+                IsAntialias = true,
+                TextSize = 24
+            };
+            // Use SKFont.Size property instead of TextSize.
+            if (_cachedFont == null || _cachedFont.Size != textPaint.TextSize || _cachedFont.Typeface != textPaint.Typeface)
+            {
+                _cachedFont?.Dispose();
+                _cachedFont = new SKFont(textPaint.Typeface, textPaint.TextSize);
+            }
+            float x = 10;
+            float y = info.Height - 10;
+            canvas.DrawText(performanceText, x, y, _cachedFont, textPaint);
+        }
     }
 }
