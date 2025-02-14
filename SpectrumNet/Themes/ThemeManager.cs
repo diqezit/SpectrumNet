@@ -13,20 +13,13 @@ namespace SpectrumNet
         /// </summary>
         public static void InitialiseResources()
         {
-            var resources = new[]
+            Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
             {
-                "/Themes/CommonResources.xaml",
-                "/Themes/LightTheme.xaml",
-                "/Themes/DarkTheme.xaml"
-            };
+                Source = new Uri("pack://application:,,,/SpectrumNet;component/Themes/CommonResources.xaml",
+                                UriKind.Absolute)
+            });
 
-            foreach (var resource in resources)
-            {
-                Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
-                {
-                    Source = new Uri(resource, UriKind.Relative)
-                });
-            }
+            ThemeManager.Instance.ApplyThemeToWindow(Application.Current.MainWindow);
         }
 
         /// <summary>
@@ -154,8 +147,10 @@ namespace SpectrumNet
         /// </summary>
         /// <param name="path">The path to the theme resource.</param>
         /// <returns>The loaded ResourceDictionary.</returns>
-        private static ResourceDictionary LoadThemeResource(string path) =>
-            new() { Source = new Uri(path, UriKind.Relative) };
+        private static ResourceDictionary LoadThemeResource(string path) => new()
+        {
+            Source = new Uri($"pack://application:,,,/SpectrumNet;component/{path}", UriKind.Absolute)
+        };
 
         /// <summary>
         /// Removes references to closed windows from the registered windows list.

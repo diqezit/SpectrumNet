@@ -33,6 +33,7 @@ namespace SpectrumNet
                 };
 
                 base.OnStartup(e);
+                SpectrumNet.CommonResources.InitialiseResources();
             }
             catch (Exception ex)
             {

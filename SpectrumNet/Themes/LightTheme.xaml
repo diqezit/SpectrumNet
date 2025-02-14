@@ -25,6 +25,7 @@
     <SolidColorBrush x:Key="ButtonDisabledForegroundBrush" Color="#A6B1C4"/>
     <SolidColorBrush x:Key="ButtonHoverForegroundBrush" Color="#1A1F36"/>
     <SolidColorBrush x:Key="ButtonPressedForegroundBrush" Color="#1A1F36"/>
+    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#E6E8F0"/>
 
     <!-- Цвета окна -->
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F5F7FA"/>
