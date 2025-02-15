@@ -299,18 +299,12 @@ namespace SpectrumNet
                 var hidePanelSB = (Storyboard)FindResource("HidePanelAnimation");
                 hidePanelSB.Completed += (s, ev) => ControlPanel.Visibility = Visibility.Collapsed;
                 hidePanelSB.Begin();
-
-                var hideCPStoryboard = (Storyboard)FindResource("HideControlPanelStoryboard");
-                hideCPStoryboard.Begin();
             }
             else
             {
                 ControlPanel.Visibility = Visibility.Visible;
                 var showPanelSB = (Storyboard)FindResource("ShowPanelAnimation");
                 showPanelSB.Begin();
-
-                var showCPStoryboard = (Storyboard)FindResource("ShowControlPanelStoryboard");
-                showCPStoryboard.Begin();
             }
         }
 

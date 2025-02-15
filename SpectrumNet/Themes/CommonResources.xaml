@@ -17,6 +17,15 @@
         <GradientStop Color="#FF1A1A1A" Offset="1"/>
     </LinearGradientBrush>
 
+    <!-- Базовый стиль для кнопок -->
+    <Style x:Key="BaseButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FontFamily" Value="Segoe UI"/>
+    </Style>
+
     <!-- Стиль панели заголовка -->
     <Style x:Key="TitleBarBorderStyle" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource LightTitleBarGradientBrush}"/>
@@ -28,10 +37,7 @@
     </Style>
 
     <!-- Стиль кнопок управления окном -->
-    <Style x:Key="WindowControlButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Style x:Key="WindowControlButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
         <Setter Property="Width" Value="40"/>
         <Setter Property="Height" Value="40"/>
         <Setter Property="Template">
@@ -50,6 +56,7 @@
         </Setter>
     </Style>
 
+    <!-- Стиль кнопки закрытия окна -->
     <Style x:Key="WindowCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowControlButtonStyle}">
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
@@ -60,27 +67,25 @@
     </Style>
 
     <!-- Стиль современной кнопки -->
-    <Style x:Key="ModernButtonStyle" TargetType="Button">
+    <Style x:Key="ModernButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="12,6"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="ButtonBorder"
-                        Background="{TemplateBinding Background}"
-                        BorderBrush="{TemplateBinding BorderBrush}"
-                        BorderThickness="{TemplateBinding BorderThickness}"
-                        CornerRadius="6">
-                        <ContentPresenter x:Name="ContentPresenter" 
-                                    HorizontalAlignment="Center" 
-                                    VerticalAlignment="Center"
-                                    Margin="{TemplateBinding Padding}"
-                                    RecognizesAccessKey="True"/>
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="Center" 
+                                          VerticalAlignment="Center"
+                                          Margin="{TemplateBinding Padding}"
+                                          RecognizesAccessKey="True"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -117,13 +122,13 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="ToggleBorder"
-                Background="{TemplateBinding Background}"
-                BorderBrush="{TemplateBinding BorderBrush}"
-                BorderThickness="{TemplateBinding BorderThickness}"
-                CornerRadius="8">
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8">
                         <ContentPresenter HorizontalAlignment="Center" 
-                            VerticalAlignment="Center" 
-                            Margin="{TemplateBinding Padding}"/>
+                                          VerticalAlignment="Center" 
+                                          Margin="{TemplateBinding Padding}"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -159,7 +164,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Grid>
-                        <Border x:Name="Border"
+                        <Border x:Name="SwitchBorder"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
@@ -191,7 +196,7 @@
                                                 <QuadraticEase EasingMode="EaseInOut"/>
                                             </DoubleAnimation.EasingFunction>
                                         </DoubleAnimation>
-                                        <ColorAnimation Storyboard.TargetName="Border"
+                                        <ColorAnimation Storyboard.TargetName="SwitchBorder"
                                                         Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
                                                         To="#FF2196F3"
                                                         Duration="0:0:0.5"/>
@@ -209,7 +214,7 @@
                                                 <QuadraticEase EasingMode="EaseInOut"/>
                                             </DoubleAnimation.EasingFunction>
                                         </DoubleAnimation>
-                                        <ColorAnimation Storyboard.TargetName="Border"
+                                        <ColorAnimation Storyboard.TargetName="SwitchBorder"
                                                         Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
                                                         To="#FFE0E0E0"
                                                         Duration="0:0:0.5"/>
@@ -303,7 +308,7 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="20"/>
                                         </Grid.ColumnDefinitions>
-                                        <Border x:Name="Border"
+                                        <Border x:Name="ToggleBorder"
                                                 Background="{TemplateBinding Background}"
                                                 BorderBrush="{TemplateBinding BorderBrush}"
                                                 BorderThickness="{TemplateBinding BorderThickness}"
@@ -410,7 +415,7 @@
                                                 <Setter Property="Template">
                                                     <Setter.Value>
                                                         <ControlTemplate TargetType="ComboBoxItem">
-                                                            <Border x:Name="Border"
+                                                            <Border x:Name="ItemBorder"
                                                                     Background="Transparent"
                                                                     BorderThickness="0"
                                                                     CornerRadius="4"
@@ -419,11 +424,11 @@
                                                             </Border>
                                                             <ControlTemplate.Triggers>
                                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                                    <Setter TargetName="Border" Property="Background" 
+                                                                    <Setter TargetName="ItemBorder" Property="Background" 
                                                                             Value="{DynamicResource ComboBoxItemHoverBackgroundBrush}"/>
                                                                 </Trigger>
                                                                 <Trigger Property="IsSelected" Value="True">
-                                                                    <Setter TargetName="Border" Property="Background" 
+                                                                    <Setter TargetName="ItemBorder" Property="Background" 
                                                                             Value="{DynamicResource ComboBoxItemSelectedBackgroundBrush}"/>
                                                                 </Trigger>
                                                             </ControlTemplate.Triggers>
