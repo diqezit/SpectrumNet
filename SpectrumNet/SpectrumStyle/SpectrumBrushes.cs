@@ -34,15 +34,15 @@ namespace SpectrumNet
             if (string.IsNullOrWhiteSpace(styleName))
                 throw new ArgumentException("Style name cannot be empty.", nameof(styleName));
 
-            if (overwriteIfExists)
+            // Если стиль можно перезаписать или он не существует, обновляем его
+            if (overwriteIfExists || !_styles.ContainsKey(styleName))
             {
-                _styles[styleName] = definition; // Перезаписываем без лишних проверок
-                _paintCache.TryRemove(styleName, out _); // Удаляем старый кэш
-            }
-            else
-            {
-                if (_styles.TryAdd(styleName, definition))
-                    _paintCache.TryRemove(styleName, out _);
+                // Удаляем и освобождаем старый объект SKPaint, если он существует
+                if (_paintCache.TryRemove(styleName, out var oldPaint))
+                {
+                    oldPaint?.Dispose();
+                }
+                _styles[styleName] = definition;
             }
         }
 
@@ -102,7 +102,6 @@ namespace SpectrumNet
 
             _styles.Clear();
             _paintCache.Clear();
-            GC.SuppressFinalize(this);
         }
     }
 
@@ -138,8 +137,8 @@ namespace SpectrumNet
 
         static StyleFactory()
         {
-            // Тут буду использовать LINQ для загрузки всех команд
-            foreach (var command in Assembly.GetCallingAssembly().GetTypes()
+            // Загружаем типы из сборки, где определен StyleFactory, для надежности
+            foreach (var command in typeof(StyleFactory).Assembly.GetTypes()
                          .Where(type => typeof(IStyleCommand).IsAssignableFrom(type) && !type.IsAbstract)
                          .Select(type => Activator.CreateInstance(type) as IStyleCommand)
                          .Where(command => command?.Name is not null))
