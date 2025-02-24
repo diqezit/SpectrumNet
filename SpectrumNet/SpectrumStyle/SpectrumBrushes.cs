@@ -6,7 +6,7 @@ namespace SpectrumNet
     {
         private readonly ConcurrentDictionary<string, StyleDefinition> _styles = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, SKPaint> _paintCache = new(StringComparer.OrdinalIgnoreCase);
-        private volatile bool _disposed;
+        private bool _disposed;
 
         public IReadOnlyDictionary<string, StyleDefinition> Styles => _styles;
 
@@ -19,7 +19,6 @@ namespace SpectrumNet
         {
             var styleNames = StyleFactory.GetAllStyleNames();
 
-            // Используем Parallel.ForEach для параллельной загрузки стилей
             Parallel.ForEach(styleNames, styleName =>
             {
                 var command = StyleFactory.CreateStyleCommand(styleName);
@@ -29,63 +28,67 @@ namespace SpectrumNet
 
         public void RegisterStyle(string styleName, StyleDefinition definition, bool overwriteIfExists = false)
         {
-            ValidateDisposed();
+            EnsureNotDisposed();
 
             if (string.IsNullOrWhiteSpace(styleName))
-                throw new ArgumentException("Style name cannot be empty.", nameof(styleName));
+                throw new ArgumentException("Название стиля не может быть пустым.", nameof(styleName));
 
-            // Если стиль можно перезаписать или он не существует, обновляем его
-            if (overwriteIfExists || !_styles.ContainsKey(styleName))
-            {
-                // Удаляем и освобождаем старый объект SKPaint, если он существует
-                if (_paintCache.TryRemove(styleName, out var oldPaint))
+            _styles.AddOrUpdate(
+                styleName,
+                _ => definition,
+                (_, existing) =>
                 {
-                    oldPaint?.Dispose();
-                }
-                _styles[styleName] = definition;
-            }
+                    if (!overwriteIfExists)
+                        return existing;
+                    RemovePaint(styleName);
+                    return definition;
+                });
         }
 
         public (SKColor startColor, SKColor endColor, SKPaint paint) GetColorsAndBrush(string styleName)
         {
-            ValidateDisposed();
+            EnsureNotDisposed();
 
             if (!_styles.TryGetValue(styleName, out var styleDefinition))
-                throw new InvalidOperationException($"Style '{styleName}' not found.");
+                throw new InvalidOperationException($"Стиль '{styleName}' не найден.");
 
             var (startColor, endColor) = styleDefinition.GetColors();
-
-            // Потокобезопасное получение или создание кисти
             var paint = _paintCache.GetOrAdd(styleName, _ => styleDefinition.CreatePaint());
             return (startColor, endColor, paint);
         }
 
         public bool RemoveStyle(string styleName)
         {
-            ValidateDisposed();
+            EnsureNotDisposed();
 
-            // Удаляем стиль и кисть, если они существуют
-            if (_styles.TryRemove(styleName, out _) && _paintCache.TryRemove(styleName, out var paint))
-            {
-                paint?.Dispose();
-                return true;
-            }
-
-            return false;
+            var styleRemoved = _styles.TryRemove(styleName, out _);
+            var paintRemoved = RemovePaint(styleName);
+            return styleRemoved || paintRemoved;
         }
 
         public void ClearStyles()
         {
-            ValidateDisposed();
+            EnsureNotDisposed();
 
-            // Освобождаем ресурсы кистей
-            Parallel.ForEach(_paintCache.Values, paint => paint?.Dispose());
-
+            foreach (var paint in _paintCache.Values)
+            {
+                paint?.Dispose();
+            }
             _styles.Clear();
             _paintCache.Clear();
         }
 
-        private void ValidateDisposed()
+        private bool RemovePaint(string styleName)
+        {
+            if (_paintCache.TryRemove(styleName, out var paint))
+            {
+                paint?.Dispose();
+                return true;
+            }
+            return false;
+        }
+
+        private void EnsureNotDisposed()
         {
             if (_disposed)
                 throw new ObjectDisposedException(nameof(SpectrumBrushes));
@@ -93,15 +96,25 @@ namespace SpectrumNet
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+                return;
 
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (var paint in _paintCache.Values)
+                {
+                    paint?.Dispose();
+                }
+                _styles.Clear();
+                _paintCache.Clear();
+            }
             _disposed = true;
-
-            // Освобождаем ресурсы кистей перед выходом
-            Parallel.ForEach(_paintCache.Values, paint => paint?.Dispose());
-
-            _styles.Clear();
-            _paintCache.Clear();
         }
     }
 
@@ -127,7 +140,7 @@ namespace SpectrumNet
         public SKPaint CreatePaint()
         {
             return _cachedPaint ??= _factory(_startColor, _endColor)
-                ?? throw new InvalidOperationException("Factory failed to create paint.");
+                ?? throw new InvalidOperationException("Фабрика не смогла создать кисть.");
         }
     }
 
@@ -137,11 +150,12 @@ namespace SpectrumNet
 
         static StyleFactory()
         {
-            // Загружаем типы из сборки, где определен StyleFactory, для надежности
-            foreach (var command in typeof(StyleFactory).Assembly.GetTypes()
-                         .Where(type => typeof(IStyleCommand).IsAssignableFrom(type) && !type.IsAbstract)
-                         .Select(type => Activator.CreateInstance(type) as IStyleCommand)
-                         .Where(command => command?.Name is not null))
+            var commands = typeof(StyleFactory).Assembly.GetTypes()
+                .Where(type => typeof(IStyleCommand).IsAssignableFrom(type) && !type.IsAbstract)
+                .Select(type => Activator.CreateInstance(type) as IStyleCommand)
+                .Where(command => command?.Name is not null);
+
+            foreach (var command in commands)
             {
                 StyleCommands[command!.Name] = command;
             }
@@ -150,7 +164,7 @@ namespace SpectrumNet
         public static IStyleCommand CreateStyleCommand(string styleName) =>
             StyleCommands.TryGetValue(styleName, out var command)
                 ? command
-                : throw new ArgumentException($"Unknown style name: {styleName}", nameof(styleName));
+                : throw new ArgumentException($"Неизвестное имя стиля: {styleName}", nameof(styleName));
 
         public static IEnumerable<string> GetAllStyleNames() => StyleCommands.Keys;
     }

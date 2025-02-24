@@ -325,7 +325,7 @@ namespace SpectrumNet
         private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (sender is not Slider slider) return;
-            var actions = new Dictionary<string, Action<double>>
+            var sliderActions = new Dictionary<string, Action<double>>
             {
                 ["barSpacingSlider"] = value => BarSpacing = value,
                 ["barCountSlider"] = value => BarCount = (int)value,
@@ -333,7 +333,7 @@ namespace SpectrumNet
                 ["maxDbLevelSlider"] = value => MaxDbLevel = (float)value,
                 ["amplificationFactorSlider"] = value => AmplificationFactor = (float)value
             };
-            if (actions.TryGetValue(slider.Name, out var act))
+            if (sliderActions.TryGetValue(slider.Name, out var act))
             {
                 act(slider.Value);
                 InvalidateVisuals();
@@ -354,7 +354,8 @@ namespace SpectrumNet
                 ["MaximizeButton"] = () => Dispatcher.Invoke(MaximizeWindow),
                 ["CloseButton"] = () => Dispatcher.Invoke(CloseWindow)
             };
-            if (actions.TryGetValue(btn.Name, out var act)) act();
+            if (actions.TryGetValue(btn.Name, out var act))
+                act();
         }
 
         private void OnOverlayButtonClick(object sender, RoutedEventArgs e)
