@@ -287,6 +287,7 @@ namespace SpectrumNet
                 {
                     _windowType = value;
                     _window = GenerateWindow(_fftSize, value);
+                    _sampleCount = 0; // Сбрасываем буфер, чтобы начать с нового окна
                 }
             }
         }
@@ -368,20 +369,20 @@ namespace SpectrumNet
                 _ => throw new NotSupportedException($"Window type {type} is not supported.")
             };
 
-            int vecSize = Vector<float>.Count;
-            int vecCount = size / vecSize;
-            Parallel.For(0, vecCount, i =>
+            // Порог для переключения на обычный цикл
+
+            if (size < 4096) 
             {
-                int offset = i * vecSize;
-                for (int j = 0; j < vecSize; j++)
+                for (int i = 0; i < size; i++)
                 {
-                    window[offset + j] = windowFunc(offset + j);
+                    window[i] = windowFunc(i);
                 }
-            });
-            for (int i = vecCount * vecSize; i < size; i++)
-            {
-                window[i] = windowFunc(i);
             }
+            else
+            {
+                Parallel.For(0, size, i => window[i] = windowFunc(i));
+            }
+
             _windowCache[(size, type)] = window;
             return window;
         }
