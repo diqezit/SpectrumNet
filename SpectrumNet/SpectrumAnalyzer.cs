@@ -257,7 +257,7 @@ namespace SpectrumNet
             _parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
 
             (_cosCache, _sinCache) = PrecomputeTrigonometricValues(fftSize);
-            _window = GenerateWindow(fftSize, WindowType);
+            _window = GenerateWindow(fftSize, _windowType);
 
             _channel = Channel.CreateUnbounded<(float[] Samples, int SampleRate)>(new UnboundedChannelOptions
             {
@@ -277,7 +277,19 @@ namespace SpectrumNet
 
         #region Events and Properties
         public event EventHandler<FftEventArgs>? FftCalculated;
-        public FftWindowType WindowType { get; set; } = FftWindowType.Hann;
+        private FftWindowType _windowType = FftWindowType.Hann;
+        public FftWindowType WindowType
+        {
+            get => _windowType;
+            set
+            {
+                if (_windowType != value)
+                {
+                    _windowType = value;
+                    _window = GenerateWindow(_fftSize, value);
+                }
+            }
+        }
         #endregion
 
         #region Public Methods
