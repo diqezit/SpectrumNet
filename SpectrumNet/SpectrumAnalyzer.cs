@@ -371,7 +371,7 @@ namespace SpectrumNet
 
             // Порог для переключения на обычный цикл
 
-            if (size < 4096) 
+            if (size < 4096)
             {
                 for (int i = 0; i < size; i++)
                 {
@@ -443,11 +443,6 @@ namespace SpectrumNet
                 pos += count;
                 _sampleCount += count;
 
-                if (_sampleCount > _fftSize)
-                {
-                    Log.Warning("Sample count exceeded FFT size. Resetting.");
-                    _sampleCount = 0;
-                }
                 if (_sampleCount >= _fftSize)
                 {
                     PerformFftCalculation(rate);
