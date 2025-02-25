@@ -79,20 +79,43 @@ public sealed class Renderer : IDisposable
             RequestRender();
             Log.Debug("[Renderer] Состояние плейсхолдера обновлено: {ShouldShow}", _shouldShowPlaceholder);
         }
+        else if (e.PropertyName == nameof(MainWindow.IsOverlayActive))
+        {
+            // Update all renderers when overlay state changes
+            SpectrumRendererFactory.ConfigureAllRenderers(_mainWindow.IsOverlayActive);
+            RequestRender();
+            Log.Debug("[Renderer] Состояние оверлея обновлено: {IsActive}", _mainWindow.IsOverlayActive);
+        }
     }
 
     private void SubscribeToEvents()
     {
         if (_skElement == null) return;
         _skElement.PaintSurface += RenderFrame;
-        _skElement.Loaded += (s, e) => UpdateRenderDimensions((int)_skElement.ActualWidth, (int)_skElement.ActualHeight);
-        _skElement.Unloaded += (s, e) => { _renderTimer?.Stop(); _performanceMonitor.Stop(); };
+        _skElement.Loaded += OnElementLoaded;
+        _skElement.Unloaded += OnElementUnloaded;
+    }
+
+    private void OnElementLoaded(object sender, RoutedEventArgs e) =>
+        UpdateRenderDimensions((int)_skElement!.ActualWidth, (int)_skElement.ActualHeight);
+
+    private void OnElementUnloaded(object sender, RoutedEventArgs e)
+    {
+        _renderTimer?.Stop();
+        _performanceMonitor.Stop();
     }
     #endregion
 
     #region Render Methods
     public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
     {
+        // Skip rendering on the main canvas when overlay is active
+        if (_mainWindow.IsOverlayActive && sender == _mainWindow.spectrumCanvas)
+        {
+            e.Surface.Canvas.Clear(SKColors.Transparent);
+            return;
+        }
+
         if (_isDisposed || !_renderLock.Wait(RENDER_TIMEOUT_MS)) return;
         try
         {
@@ -180,7 +203,14 @@ public sealed class Renderer : IDisposable
         Log.Debug("[Renderer] Обновлен стиль спектра: {StyleName}", styleName);
     }
 
-    public void RequestRender() => _skElement?.InvalidateVisual();
+    public void RequestRender()
+    {
+        // Only invalidate the main canvas if overlay is not active
+        if (!_mainWindow.IsOverlayActive || _skElement != _mainWindow.spectrumCanvas)
+        {
+            _skElement?.InvalidateVisual();
+        }
+    }
 
     public void UpdateRenderDimensions(int width, int height)
     {
@@ -228,8 +258,8 @@ public sealed class Renderer : IDisposable
         if (_skElement != null)
         {
             _skElement.PaintSurface -= RenderFrame;
-            _skElement.Loaded -= (s, e) => UpdateRenderDimensions((int)_skElement.ActualWidth, (int)_skElement.ActualHeight);
-            _skElement.Unloaded -= (s, e) => { _renderTimer?.Stop(); _performanceMonitor.Stop(); };
+            _skElement.Loaded -= OnElementLoaded;
+            _skElement.Unloaded -= OnElementUnloaded;
             _skElement = null;
         }
         Log.Information("[Renderer] Рендерер успешно утилизирован");

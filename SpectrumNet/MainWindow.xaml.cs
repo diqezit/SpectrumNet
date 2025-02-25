@@ -65,7 +65,16 @@ namespace SpectrumNet
         public bool IsOverlayActive
         {
             get => _isOverlayActive;
-            set => SetField(ref _isOverlayActive, value);
+            set
+            {
+                if (_isOverlayActive != value)
+                {
+                    _isOverlayActive = value;
+                    OnPropertyChanged(nameof(IsOverlayActive));
+                    SpectrumRendererFactory.ConfigureAllRenderers(value);
+                    spectrumCanvas?.InvalidateVisual();
+                }
+            }
         }
 
         public bool IsRecording
@@ -243,8 +252,17 @@ namespace SpectrumNet
         private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) =>
             _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e) =>
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
+        {
+            // If this is the main canvas and overlay is active, don't render
+            if (IsOverlayActive && sender == spectrumCanvas)
+            {
+                e.Surface.Canvas.Clear(SKColors.Transparent);
+                return;
+            }
+
             _renderer?.RenderFrame(sender, e);
+        }
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -366,9 +384,20 @@ namespace SpectrumNet
                 CloseOverlay();
             else
                 Dispatcher.Invoke(OpenOverlay);
+
+            // Update all renderers with the new overlay state
+            SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
+
+            // Force a refresh of the main canvas
+            spectrumCanvas?.InvalidateVisual();
         }
 
-        private void OnOverlayClosed() => IsOverlayActive = false;
+        private void OnOverlayClosed()
+        {
+            IsOverlayActive = false;
+            SpectrumRendererFactory.ConfigureAllRenderers(false);
+            spectrumCanvas?.InvalidateVisual();
+        }
 
         private void OpenOverlay()
         {
@@ -385,6 +414,12 @@ namespace SpectrumNet
             _overlayWindow.Show();
             IsOverlayActive = true;
 
+            // Configure all renderers for overlay mode
+            SpectrumRendererFactory.ConfigureAllRenderers(true);
+
+            // Force a refresh of the main canvas to clear it
+            spectrumCanvas?.InvalidateVisual();
+
             UpdateRendererDimensions(
                 (int)SystemParameters.PrimaryScreenWidth,
                 (int)SystemParameters.PrimaryScreenHeight);
@@ -398,6 +433,12 @@ namespace SpectrumNet
             _overlayWindow.Dispose();
             _overlayWindow = null;
             IsOverlayActive = false;
+
+            // Configure all renderers for normal mode
+            SpectrumRendererFactory.ConfigureAllRenderers(false);
+
+            // Force a refresh of the main canvas
+            spectrumCanvas?.InvalidateVisual();
         }
 
         private void UpdateRendererDimensions(int width, int height) =>
