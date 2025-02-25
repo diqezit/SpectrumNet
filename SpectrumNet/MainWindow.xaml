@@ -532,7 +532,7 @@
                                      VerticalAlignment="Center"/>
                             <Slider Grid.Column="1"
                                     x:Name="amplificationFactorSlider"
-                                    Minimum="0.01" Maximum="1"
+                                    Minimum="0.01" Maximum="5"
                                     Value="{Binding AmplificationFactor, Mode=TwoWay}"
                                     Style="{DynamicResource ModernSliderStyle}"
                                     Height="20"/>

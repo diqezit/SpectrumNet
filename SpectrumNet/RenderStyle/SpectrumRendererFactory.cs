@@ -1,14 +1,46 @@
 ﻿namespace SpectrumNet
 {
-    #region RenderCache Struct
+    #region Structs
+
+    /// <summary>
+    /// Структура для хранения кэшированных значений, используемых при рендеринге спектра.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct RenderCache
     {
-        public float Width, Height, LowerBound, UpperBound, StepSize, OverlayHeight;
+        /// <summary>
+        /// Ширина области рендеринга.
+        /// </summary>
+        public float Width;
+        /// <summary>
+        /// Высота области рендеринга.
+        /// </summary>
+        public float Height;
+        /// <summary>
+        /// Нижняя граница отображения на екране (для динамических частиц , корректируеться при оверлее).
+        /// </summary>
+        public float LowerBound;
+        /// <summary>
+        /// Верхняя граница спектрального диапазона (аналогично).
+        /// </summary>
+        public float UpperBound;
+        /// <summary>
+        /// Размер шага для дискретизации спектра.
+        /// </summary>
+        public float StepSize;
+        /// <summary>
+        /// Высота наложения для оврелея.
+        /// </summary>
+        public float OverlayHeight;
     }
+
     #endregion
 
-    #region RenderStyle Enum
+    #region Enums
+
+    /// <summary>
+    /// Перечисление, определяющее различные стили рендеринга спектра.
+    /// </summary>
     public enum RenderStyle
     {
         AsciiDonut,
@@ -28,25 +60,61 @@
         TextParticles,
         Waveform,
     }
+
     #endregion
 
-    #region ISpectrumRenderer Interface
+    #region Interfaces
+
+    /// <summary>
+    /// Интерфейс, определяющий контракт для классов, выполняющих рендеринг спектра.
+    /// </summary>
     public interface ISpectrumRenderer : IDisposable
     {
+        /// <summary>
+        /// Инициализирует рендерер.
+        /// </summary>
         void Initialize();
+        /// <summary>
+        /// Выполняет рендеринг спектра на заданном канвасе.
+        /// </summary>
+        /// <param name="canvas">Канвас SkiaSharp для рисования.</param>
+        /// <param name="spectrum">Массив float значений спектра.</param>
+        /// <param name="info">Информация о изображении SkiaSharp.</param>
+        /// <param name="barWidth">Ширина столбцов спектра.</param>
+        /// <param name="barSpacing">Расстояние между столбцами спектра.</param>
+        /// <param name="barCount">Количество столбцов спектра.</param>
+        /// <param name="paint">Объект SKPaint для стилизации рендеринга через public sealed class SpectrumBrushes.</param>
+        /// <param name="drawPerformanceInfo">Рисования информации о производительности на канве.</param>
         void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth,
                     float barSpacing, int barCount, SKPaint paint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
+        /// <summary>
+        /// Конфигурирует рендерер, например, для активации или деактивации режима наложения при включенном оверлее на весь екран.
+        /// </summary>
+        /// <param name="isOverlayActive">Указывает, активен ли режим наложения.</param>
         void Configure(bool isOverlayActive);
     }
+
     #endregion
 
-    #region SpectrumRendererFactory Class
+    #region Factory Classes
+
+    /// <summary>
+    /// Фабрика для создания экземпляров рендереров спектра в зависимости от выбранного стиля выбраного из главного окна.
+    /// Обеспечивает кэширование и переиспользование экземпляров рендереров.
+    /// </summary>
     public static class SpectrumRendererFactory
     {
         private static readonly object _lock = new();
         private static readonly Dictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
         private static readonly HashSet<RenderStyle> _initializedRenderers = new();
 
+        /// <summary>
+        /// Создает или получает экземпляр рендерера спектра заданного стиля.
+        /// Использует кэширование для переиспользования существующих экземпляров.
+        /// </summary>
+        /// <param name="style">Стиль рендеринга спектра.</param>
+        /// <param name="isOverlayActive">Указывает, активен ли режим наложения для рендерера.</param>
+        /// <returns>Экземпляр ISpectrumRenderer для заданного стиля.</returns>
         public static ISpectrumRenderer CreateRenderer(RenderStyle style, bool isOverlayActive)
         {
             if (_rendererCache.TryGetValue(style, out var cachedRenderer))
