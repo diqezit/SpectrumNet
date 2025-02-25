@@ -31,13 +31,13 @@ namespace SpectrumNet
         /// </summary>
         public SettingsWindow()
         {
-            Log.Debug($"[{nameof(SettingsWindow)}] Инициализация окна ресурсов");
+            Log.Debug($"[{nameof(SettingsWindow)}] Initializing resources window");
             InitialiseResources();
 
-            Log.Debug($"[{nameof(SettingsWindow)}] Инициализация окна");
+            Log.Debug($"[{nameof(SettingsWindow)}] Initializing window");
             InitializeComponent();
 
-            Log.Debug($"[{nameof(SettingsWindow)}] Инициализация темы");
+            Log.Debug($"[{nameof(SettingsWindow)}] Initializing theme");
             ThemeManager.Instance.RegisterWindow(this);
 
             _settings = Settings.Instance;
@@ -70,21 +70,50 @@ namespace SpectrumNet
         {
             if (_originalValues == null)
             {
-                Log.Warning($"[{nameof(SettingsWindow)}] Оригинальные настройки не найдены");
+                Log.Warning($"[{nameof(SettingsWindow)}] Original settings not found");
                 return;
             }
 
             foreach (var (key, value) in _originalValues)
                 _settings.GetType().GetProperty(key)?.SetValue(_settings, value);
 
-            Log.Debug($"[{nameof(SettingsWindow)}] Настройки восстановлены из оригинала");
+            Log.Debug($"[{nameof(SettingsWindow)}] Settings restored from original");
         }
 
         /// <summary>
         /// Saves the current settings.
         /// </summary>
-        private void SaveSettings() =>
-            Log.Information($"[{nameof(SettingsWindow)}] Настройки сохранены успешно");
+        private void SaveSettings()
+        {
+            Log.Information($"[{nameof(SettingsWindow)}] Settings saved successfully");
+
+            try
+            {
+                var renderer = RaindropsRenderer.GetInstance();
+                if (renderer != null)
+                {
+                    var field = renderer.GetType().GetField("_isOverlayActive",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+                    bool isOverlayActive = false;
+                    if (field != null)
+                    {
+                        object? value = field.GetValue(renderer);
+                        if (value is bool boolValue)
+                        {
+                            isOverlayActive = boolValue;
+                        }
+                    }
+
+                    renderer.Configure(isOverlayActive);
+                    Log.Debug($"[{nameof(SettingsWindow)}] Renderer updated successfully");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error updating renderer");
+            }
+        }
 
         /// <summary>
         /// Persists the current settings to a file.
@@ -94,11 +123,11 @@ namespace SpectrumNet
             try
             {
                 File.WriteAllText("settings.json", JsonConvert.SerializeObject(_settings, Formatting.Indented));
-                Log.Information($"[{nameof(SettingsWindow)}] Настройки успешно сохранены");
+                Log.Information($"[{nameof(SettingsWindow)}] Settings saved successfully");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при сохранении настроек в файл");
+                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error saving settings to file");
             }
         }
         #endregion
@@ -113,14 +142,14 @@ namespace SpectrumNet
         {
             try
             {
-                Log.Information($"[{nameof(SettingsWindow)}] Закрытие окна настроек");
+                Log.Information($"[{nameof(SettingsWindow)}] Closing settings window");
                 SaveSettings();
                 PersistSettings();
                 ThemeManager.Instance.UnregisterWindow(this);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при закрытии окна");
+                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error closing window");
             }
         }
 
@@ -131,7 +160,7 @@ namespace SpectrumNet
         /// <param name="e">The event arguments.</param>
         private void OnCloseButton_Click(object sender, RoutedEventArgs e)
         {
-            Log.Debug($"[{nameof(SettingsWindow)}] Кнопка закрытия нажата");
+            Log.Debug($"[{nameof(SettingsWindow)}] Close button clicked");
             RestoreOriginalSettings();
             ThemeManager.Instance.UnregisterWindow(this);
             Close();
@@ -146,15 +175,21 @@ namespace SpectrumNet
         {
             try
             {
-                Log.Debug($"[{nameof(SettingsWindow)}] Применение настроек");
+                Log.Debug($"[{nameof(SettingsWindow)}] Applying settings");
                 SaveSettings();
                 PersistSettings();
                 SaveOriginalSettings();
-                Log.Information($"[{nameof(SettingsWindow)}] Настройки успешно применены");
+
+                MessageBox.Show("Settings applied successfully!", "Settings",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+
+                Log.Information($"[{nameof(SettingsWindow)}] Settings applied successfully");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при применении настроек");
+                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error applying settings");
+                MessageBox.Show($"Error applying settings: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -168,11 +203,18 @@ namespace SpectrumNet
             try
             {
                 _settings.ResetToDefaults();
-                Log.Debug($"[{nameof(SettingsWindow)}] Настройки сброшены на значения по умолчанию");
+                SaveSettings();
+
+                MessageBox.Show("Settings have been reset to defaults.", "Settings Reset",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+
+                Log.Debug($"[{nameof(SettingsWindow)}] Settings reset to defaults");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Ошибка при сбросе настроек");
+                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error resetting settings");
+                MessageBox.Show($"Error resetting settings: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         #endregion

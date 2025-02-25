@@ -3,7 +3,7 @@
     public interface ISettings
     {
         // Существующие настройки
-        public int MaxParticles { get; set; } // Изменено с float на int
+        public int MaxParticles { get; set; }
         float SpawnThresholdOverlay { get; set; }
         float SpawnThresholdNormal { get; set; }
         float ParticleVelocityMin { get; set; }
@@ -17,11 +17,20 @@
         float SpawnProbability { get; set; }
         float OverlayOffsetMultiplier { get; set; }
         float OverlayHeightMultiplier { get; set; }
-
-
-        // Новые свойства
         float MaxZDepth { get; set; }
         float MinZDepth { get; set; }
+
+        // Новые настройки для RaindropsRenderer
+        int MaxRaindrops { get; set; }
+        float BaseFallSpeed { get; set; }
+        float RaindropSize { get; set; }
+        float SplashParticleSize { get; set; }
+        float SplashUpwardForce { get; set; }
+        float SpeedVariation { get; set; }
+        float IntensitySpeedMultiplier { get; set; }
+        float TimeScaleFactor { get; set; }
+        float MaxTimeStep { get; set; }
+        float MinTimeStep { get; set; }
 
         void ResetToDefaults();
         event PropertyChangedEventHandler? PropertyChanged;
@@ -44,15 +53,24 @@
         public const float SpawnProbability = 0.08f;
         public const float OverlayOffsetMultiplier = 1.0f;
         public const float OverlayHeightMultiplier = 0.7f;
-
-        // Новые настройки
         public const float MaxZDepth = 1000f;
         public const float MinZDepth = 100f;
+
+        // Настройки для RaindropsRenderer
+        public const int MaxRaindrops = 1000;
+        public const float BaseFallSpeed = 12f;
+        public const float RaindropSize = 3f;
+        public const float SplashParticleSize = 2f;
+        public const float SplashUpwardForce = 8f;
+        public const float SpeedVariation = 3f;
+        public const float IntensitySpeedMultiplier = 4f;
+        public const float TimeScaleFactor = 60.0f;
+        public const float MaxTimeStep = 0.1f;
+        public const float MinTimeStep = 0.001f;
     }
 
     public class Settings : ISettings, INotifyPropertyChanged
     {
-
         // Существующие поля
         private int _maxParticles;
         private float _spawnThresholdOverlay;
@@ -68,11 +86,20 @@
         private float _spawnProbability;
         private float _overlayOffsetMultiplier;
         private float _overlayHeightMultiplier;
-
-        // Новые поля
         private float _maxZDepth;
         private float _minZDepth;
 
+        // Поля для RaindropsRenderer
+        private int _maxRaindrops;
+        private float _baseFallSpeed;
+        private float _raindropSize;
+        private float _splashParticleSize;
+        private float _splashUpwardForce;
+        private float _speedVariation;
+        private float _intensitySpeedMultiplier;
+        private float _timeScaleFactor;
+        private float _maxTimeStep;
+        private float _minTimeStep;
 
         private static readonly Lazy<Settings> _instance = new(() => new Settings());
         public static Settings Instance => _instance.Value;
@@ -99,6 +126,7 @@
 
         public void ResetToDefaults()
         {
+            // Существующие настройки
             MaxParticles = DefaultSettings.MaxParticles;
             SpawnThresholdOverlay = DefaultSettings.SpawnThresholdOverlay;
             SpawnThresholdNormal = DefaultSettings.SpawnThresholdNormal;
@@ -113,9 +141,20 @@
             SpawnProbability = DefaultSettings.SpawnProbability;
             OverlayOffsetMultiplier = DefaultSettings.OverlayOffsetMultiplier;
             OverlayHeightMultiplier = DefaultSettings.OverlayHeightMultiplier;
-
             MaxZDepth = DefaultSettings.MaxZDepth;
             MinZDepth = DefaultSettings.MinZDepth;
+
+            // Настройки для RaindropsRenderer
+            MaxRaindrops = DefaultSettings.MaxRaindrops;
+            BaseFallSpeed = DefaultSettings.BaseFallSpeed;
+            RaindropSize = DefaultSettings.RaindropSize;
+            SplashParticleSize = DefaultSettings.SplashParticleSize;
+            SplashUpwardForce = DefaultSettings.SplashUpwardForce;
+            SpeedVariation = DefaultSettings.SpeedVariation;
+            IntensitySpeedMultiplier = DefaultSettings.IntensitySpeedMultiplier;
+            TimeScaleFactor = DefaultSettings.TimeScaleFactor;
+            MaxTimeStep = DefaultSettings.MaxTimeStep;
+            MinTimeStep = DefaultSettings.MinTimeStep;
 
             Log.Information("Settings have been reset to defaults");
         }
@@ -204,7 +243,6 @@
             set => SetProperty(ref _particleLifeDecay, value);
         }
 
-        // Реализация новых свойств
         public float MaxZDepth
         {
             get => _maxZDepth;
@@ -215,6 +253,67 @@
         {
             get => _minZDepth;
             set => SetProperty(ref _minZDepth, value);
+        }
+
+        // Свойства для RaindropsRenderer
+        public int MaxRaindrops
+        {
+            get => _maxRaindrops;
+            set => SetProperty(ref _maxRaindrops, value);
+        }
+
+        public float BaseFallSpeed
+        {
+            get => _baseFallSpeed;
+            set => SetProperty(ref _baseFallSpeed, value);
+        }
+
+        public float RaindropSize
+        {
+            get => _raindropSize;
+            set => SetProperty(ref _raindropSize, value);
+        }
+
+        public float SplashParticleSize
+        {
+            get => _splashParticleSize;
+            set => SetProperty(ref _splashParticleSize, value);
+        }
+
+        public float SplashUpwardForce
+        {
+            get => _splashUpwardForce;
+            set => SetProperty(ref _splashUpwardForce, value);
+        }
+
+        public float SpeedVariation
+        {
+            get => _speedVariation;
+            set => SetProperty(ref _speedVariation, value);
+        }
+
+        public float IntensitySpeedMultiplier
+        {
+            get => _intensitySpeedMultiplier;
+            set => SetProperty(ref _intensitySpeedMultiplier, value);
+        }
+
+        public float TimeScaleFactor
+        {
+            get => _timeScaleFactor;
+            set => SetProperty(ref _timeScaleFactor, value);
+        }
+
+        public float MaxTimeStep
+        {
+            get => _maxTimeStep;
+            set => SetProperty(ref _maxTimeStep, value);
+        }
+
+        public float MinTimeStep
+        {
+            get => _minTimeStep;
+            set => SetProperty(ref _minTimeStep, value);
         }
     }
 }

@@ -2,18 +2,6 @@
 
 namespace SpectrumNet
 {
-    #region Renderers Implementations
-
-    public static class RaindropsSettings
-    {
-        public const int MaxRaindrops = 1000, MaxParticles = 5000, MaxSplashParticles = 15, BatchSize = 64;
-        public const float BaseFallSpeed = 12f, SpectrumThreshold = 0.1f, OverlayBottomMultiplier = 0.75f;
-        public const float DeltaTime = 0.016f, ParticleSize = 2f, RaindropSize = 3f;
-        public const float ParticleVelocityMultiplier = 5f, SpeedVariation = 3f, IntensitySpeedMultiplier = 4f;
-        public const float InitialDropsCount = 50, SplashUpwardForce = 8f;
-        public const double SpawnProbability = 0.15;
-    }
-
     public sealed class RaindropsRenderer : ISpectrumRenderer, IDisposable
     {
         #region Nested Types
@@ -24,9 +12,9 @@ namespace SpectrumNet
             public RenderCache(float width, float height, bool isOverlay)
             {
                 Width = width; Height = height;
-                LowerBound = isOverlay ? height * RaindropsSettings.OverlayBottomMultiplier : height;
+                LowerBound = isOverlay ? height * Settings.Instance.OverlayHeightMultiplier : height;
                 UpperBound = 0f;
-                StepSize = width / RaindropsSettings.MaxRaindrops;
+                StepSize = width / Settings.Instance.MaxRaindrops;
             }
         }
 
@@ -71,7 +59,7 @@ namespace SpectrumNet
 
         private sealed class ParticleBuffer
         {
-            private readonly Particle[] _particles;
+            private Particle[] _particles;
             private int _count;
             private float _lowerBound;
 
@@ -79,6 +67,20 @@ namespace SpectrumNet
                 (_particles, _count, _lowerBound) = (new Particle[capacity], 0, lowerBound);
 
             public void UpdateLowerBound(float lowerBound) => _lowerBound = lowerBound;
+
+            public void ResizeBuffer(int newCapacity)
+            {
+                if (newCapacity <= 0) return;
+
+                var newParticles = new Particle[newCapacity];
+                int copyCount = Math.Min(_count, newCapacity);
+
+                if (copyCount > 0)
+                    Array.Copy(_particles, newParticles, copyCount);
+
+                _particles = newParticles;
+                _count = copyCount;
+            }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void AddParticle(in Particle particle)
@@ -122,8 +124,8 @@ namespace SpectrumNet
                     canvas.DrawCircle(
                         p.X,
                         p.Y,
-                        p.IsSplash ? RaindropsSettings.ParticleSize * 1.5f
-                                   : RaindropsSettings.ParticleSize,
+                        p.IsSplash ? Settings.Instance.SplashParticleSize * 1.5f
+                                   : Settings.Instance.SplashParticleSize,
                         paint);
                 }
             }
@@ -131,13 +133,13 @@ namespace SpectrumNet
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void CreateSplashParticles(float x, float y, Random random)
             {
-                int count = random.Next(5, RaindropsSettings.MaxSplashParticles);
+                int count = random.Next(5, 15);
                 for (int i = 0; i < count; i++)
                 {
                     float angle = (float)(random.NextDouble() * Math.PI * 2);
-                    float speed = (float)(random.NextDouble() * RaindropsSettings.ParticleVelocityMultiplier);
+                    float speed = (float)(random.NextDouble() * Settings.Instance.ParticleVelocityMax);
                     AddParticle(new Particle(x, y, MathF.Cos(angle) * speed,
-                                MathF.Sin(angle) * speed - RaindropsSettings.SplashUpwardForce, true));
+                                MathF.Sin(angle) * speed - Settings.Instance.SplashUpwardForce, true));
                 }
             }
         }
@@ -146,16 +148,17 @@ namespace SpectrumNet
         #region Fields
         private static readonly Lazy<RaindropsRenderer> _instance = new(() => new RaindropsRenderer());
         private RenderCache _renderCache;
-        private readonly Raindrop[] _raindrops = new Raindrop[RaindropsSettings.MaxRaindrops];
+        private Raindrop[] _raindrops;
         private int _raindropCount;
         private readonly Random _random = new();
-        private readonly float[] _scaledSpectrumCache = new float[RaindropsSettings.MaxRaindrops];
+        private float[] _scaledSpectrumCache;
         private bool _isInitialized, _isOverlayActive, _cacheNeedsUpdate, _isDisposed;
         private readonly ParticleBuffer _particleBuffer;
         private float _timeSinceLastSpawn;
         private bool _firstRender = true;
+        private readonly Stopwatch _frameTimer = new Stopwatch();
+        private float _actualDeltaTime = 0.016f;
 
-        // Многопоточная обработка
         private readonly Thread _processingThread;
         private readonly CancellationTokenSource _cts = new();
         private readonly AutoResetEvent _spectrumDataAvailable = new(false);
@@ -169,8 +172,15 @@ namespace SpectrumNet
         #region Constructor and Instance Management
         private RaindropsRenderer()
         {
-            _particleBuffer = new ParticleBuffer(RaindropsSettings.MaxParticles, 1);
+            _raindrops = new Raindrop[Settings.Instance.MaxRaindrops];
+            _scaledSpectrumCache = new float[Settings.Instance.MaxRaindrops];
+
+            _particleBuffer = new ParticleBuffer(Settings.Instance.MaxParticles, 1);
             _renderCache = new RenderCache(1, 1, false);
+            _frameTimer.Start();
+
+            // Подписываемся на изменения настроек
+            Settings.Instance.PropertyChanged += OnSettingsChanged;
 
             _processingThread = new Thread(ProcessSpectrumThreadFunc)
             {
@@ -179,6 +189,33 @@ namespace SpectrumNet
             };
             _processingRunning = true;
             _processingThread.Start();
+        }
+
+        private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(Settings.MaxRaindrops))
+            {
+                var newRaindrops = new Raindrop[Settings.Instance.MaxRaindrops];
+                var newSpectrumCache = new float[Settings.Instance.MaxRaindrops];
+
+                int copyCount = Math.Min(_raindropCount, Settings.Instance.MaxRaindrops);
+                if (copyCount > 0)
+                    Array.Copy(_raindrops, newRaindrops, copyCount);
+
+                _raindrops = newRaindrops;
+                _scaledSpectrumCache = newSpectrumCache;
+                _raindropCount = copyCount;
+
+                _cacheNeedsUpdate = true;
+            }
+            else if (e.PropertyName == nameof(Settings.MaxParticles))
+            {
+                _particleBuffer.ResizeBuffer(Settings.Instance.MaxParticles);
+            }
+            else if (e.PropertyName == nameof(Settings.OverlayHeightMultiplier))
+            {
+                _cacheNeedsUpdate = true;
+            }
         }
 
         public static RaindropsRenderer GetInstance() => _instance.Value;
@@ -216,6 +253,18 @@ namespace SpectrumNet
 
             try
             {
+                float targetDeltaTime = 0.016f; 
+                float elapsed = (float)_frameTimer.Elapsed.TotalSeconds;
+                _frameTimer.Restart();
+
+                float speedMultiplier = elapsed / targetDeltaTime;
+                _actualDeltaTime = targetDeltaTime * speedMultiplier;
+
+                if (_actualDeltaTime > Settings.Instance.MaxTimeStep)
+                    _actualDeltaTime = Settings.Instance.MaxTimeStep;
+                if (_actualDeltaTime < Settings.Instance.MinTimeStep)
+                    _actualDeltaTime = Settings.Instance.MinTimeStep;
+
                 using var localPaint = paint!.Clone();
                 localPaint.BlendMode = SKBlendMode.SrcOver;
                 localPaint.ColorFilter = null;
@@ -237,7 +286,7 @@ namespace SpectrumNet
                     _firstRender = false;
                 }
 
-                _timeSinceLastSpawn += RaindropsSettings.DeltaTime;
+                _timeSinceLastSpawn += _actualDeltaTime;
                 UpdateSimulation(actualBarCount);
 
                 RenderScene(canvas!, localPaint);
@@ -285,7 +334,7 @@ namespace SpectrumNet
                     _processingComplete.Set();
                 }
             }
-            catch (OperationCanceledException) { /* Нормальное завершение */ }
+            catch (OperationCanceledException) { }
             catch (Exception ex) { Log.Error($"RaindropsRenderer: {ex.Message}"); }
         }
         #endregion
@@ -301,13 +350,13 @@ namespace SpectrumNet
             float width = _renderCache.Width;
             float height = _renderCache.Height;
 
-            for (int i = 0; i < RaindropsSettings.InitialDropsCount; i++)
+            for (int i = 0; i < 50; i++)
             {
                 int spectrumIndex = _random.Next(barCount);
                 float x = width * (float)_random.NextDouble();
                 float y = height * (float)_random.NextDouble() * 0.5f;
-                float speedVariation = (float)(_random.NextDouble() * RaindropsSettings.SpeedVariation);
-                float fallSpeed = RaindropsSettings.BaseFallSpeed + speedVariation;
+                float speedVariation = (float)(_random.NextDouble() * Settings.Instance.SpeedVariation);
+                float fallSpeed = Settings.Instance.BaseFallSpeed + speedVariation;
 
                 _raindrops[_raindropCount++] = new Raindrop(x, y, fallSpeed, spectrumIndex);
             }
@@ -327,7 +376,6 @@ namespace SpectrumNet
 
             float blockSize = src.Length / (2f * count);
             int halfLen = src.Length / 2;
-
             for (int i = 0; i < count; i++)
             {
                 int start = (int)(i * blockSize);
@@ -342,7 +390,7 @@ namespace SpectrumNet
         private void UpdateSimulation(int barCount)
         {
             UpdateRaindrops();
-            _particleBuffer.UpdateParticles(RaindropsSettings.DeltaTime);
+            _particleBuffer.UpdateParticles(_actualDeltaTime);
 
             if (_timeSinceLastSpawn >= 0.05f)
             {
@@ -358,7 +406,7 @@ namespace SpectrumNet
             for (int i = 0; i < _raindropCount; i++)
             {
                 Raindrop drop = _raindrops[i];
-                float newY = drop.Y + drop.FallSpeed * RaindropsSettings.DeltaTime;
+                float newY = drop.Y + drop.FallSpeed * _actualDeltaTime;
 
                 if (newY < _renderCache.LowerBound)
                 {
@@ -378,23 +426,26 @@ namespace SpectrumNet
             if (barCount <= 0) return;
 
             float stepWidth = _renderCache.Width / barCount;
+            float threshold = _isOverlayActive ?
+                Settings.Instance.SpawnThresholdOverlay :
+                Settings.Instance.SpawnThresholdNormal;
 
             for (int i = 0; i < barCount && i < _scaledSpectrumCache.Length; i++)
             {
                 float intensity = _scaledSpectrumCache[i];
 
-                if (intensity > RaindropsSettings.SpectrumThreshold &&
-                                    _random.NextDouble() < RaindropsSettings.SpawnProbability * intensity)
+                if (intensity > threshold &&
+                    _random.NextDouble() < Settings.Instance.SpawnProbability * intensity)
                 {
                     float x = i * stepWidth + stepWidth * 0.5f +
                               (float)(_random.NextDouble() * stepWidth * 0.5f - stepWidth * 0.25f);
 
-                    float speedVariation = (float)(_random.NextDouble() * RaindropsSettings.SpeedVariation);
-                    float fallSpeed = RaindropsSettings.BaseFallSpeed *
-                                     (1f + intensity * RaindropsSettings.IntensitySpeedMultiplier) +
+                    float speedVariation = (float)(_random.NextDouble() * Settings.Instance.SpeedVariation);
+                    float fallSpeed = Settings.Instance.BaseFallSpeed *
+                                     (1f + intensity * Settings.Instance.IntensitySpeedMultiplier) +
                                      speedVariation;
 
-                    if (_raindropCount < RaindropsSettings.MaxRaindrops)
+                    if (_raindropCount < Settings.Instance.MaxRaindrops)
                         _raindrops[_raindropCount++] = new Raindrop(x, _renderCache.UpperBound, fallSpeed, i);
                 }
             }
@@ -405,14 +456,18 @@ namespace SpectrumNet
         private void RenderScene(SKCanvas canvas, SKPaint paint)
         {
             paint.Style = SKPaintStyle.Fill;
+
+            // Рисуем капли
             for (int i = 0; i < _raindropCount; i++)
             {
                 canvas.DrawCircle(
                     _raindrops[i].X,
                     _raindrops[i].Y,
-                    RaindropsSettings.RaindropSize,
+                    Settings.Instance.RaindropSize,
                     paint);
             }
+
+            // Рисуем частицы
             _particleBuffer.RenderParticles(canvas, paint);
         }
         #endregion
@@ -431,6 +486,8 @@ namespace SpectrumNet
             _spectrumDataAvailable.Dispose();
             _processingComplete.Dispose();
 
+            Settings.Instance.PropertyChanged -= OnSettingsChanged;
+
             _isInitialized = false;
             _isDisposed = true;
 
@@ -438,6 +495,4 @@ namespace SpectrumNet
         }
         #endregion
     }
-
-    #endregion
 }

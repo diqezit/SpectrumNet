@@ -216,6 +216,129 @@
                         </Grid>
                     </GroupBox>
 
+                    <GroupBox Header="Raindrops Settings" Style="{DynamicResource SettingsGroupBoxStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="255"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Raindrops:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="0" Grid.Column="1" Minimum="100"
+                                    Maximum="2000"
+                                    Value="{Binding MaxRaindrops, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxRaindrops, StringFormat='{}{0:F0}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Base Fall Speed:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="1" Grid.Column="1" Minimum="1"
+                                    Maximum="30"
+                                    Value="{Binding BaseFallSpeed, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding BaseFallSpeed, StringFormat='{}{0:F1}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Raindrop Size:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="2" Grid.Column="1" Minimum="1"
+                                    Maximum="10"
+                                    Value="{Binding RaindropSize, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding RaindropSize, StringFormat='{}{0:F1}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Splash Particle Size:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="3" Grid.Column="1" Minimum="1"
+                                    Maximum="5"
+                                    Value="{Binding SplashParticleSize, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding SplashParticleSize, StringFormat='{}{0:F1}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Splash Upward Force:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="4" Grid.Column="1" Minimum="1"
+                                    Maximum="20"
+                                    Value="{Binding SplashUpwardForce, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding SplashUpwardForce, StringFormat='{}{0:F1}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Speed Variation:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="5" Grid.Column="1" Minimum="0"
+                                    Maximum="10"
+                                    Value="{Binding SpeedVariation, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding SpeedVariation, StringFormat='{}{0:F1}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Intensity Speed Multiplier:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="6" Grid.Column="1" Minimum="1"
+                                    Maximum="10"
+                                    Value="{Binding IntensitySpeedMultiplier, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding IntensitySpeedMultiplier, StringFormat='{}{0:F1}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Header="Time Settings" Style="{DynamicResource SettingsGroupBoxStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="255"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Time Scale Factor:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="0" Grid.Column="1" Minimum="10"
+                                    Maximum="120"
+                                    Value="{Binding TimeScaleFactor, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding TimeScaleFactor, StringFormat='{}{0:F1}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Maximum Time Step:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0.01"
+                                    Maximum="0.5"
+                                    Value="{Binding MaxTimeStep, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MaxTimeStep, StringFormat='{}{0:F3}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimum Time Step:"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.0001"
+                                    Maximum="0.01"
+                                    Value="{Binding MinTimeStep, Mode=TwoWay}"
+                                    Style="{StaticResource AlignedSliderStyle}"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding MinTimeStep, StringFormat='{}{0:F4}'}"
+                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                        </Grid>
+                    </GroupBox>
+
                     <GroupBox Header="Additional settings"
                               Style="{DynamicResource SettingsGroupBoxStyle}">
                         <Grid>
@@ -295,6 +418,14 @@
                                        Margin="8,2"
                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
                             <TextBlock Text="• Use 'Reset' to return to the default settings"
+                                       TextWrapping="Wrap"
+                                       Margin="8,2"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBlock Text="• Time Scale Factor affects how fast raindrops fall - higher values make them fall faster"
+                                       TextWrapping="Wrap"
+                                       Margin="8,2"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBlock Text="• Base Fall Speed controls the default speed of raindrops"
                                        TextWrapping="Wrap"
                                        Margin="8,2"
                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
