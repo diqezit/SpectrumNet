@@ -108,11 +108,23 @@ namespace SpectrumNet
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void RenderParticles(SKCanvas canvas, SKPaint paint)
             {
+                SKColor baseColor = paint.Color.WithAlpha(255);
+
                 for (int i = 0; i < _count; i++)
                 {
                     ref Particle p = ref _particles[i];
-                    paint.Color = paint.Color.WithAlpha((byte)(p.Lifetime * 255));
-                    canvas.DrawCircle(p.X, p.Y, p.IsSplash ? RaindropsSettings.ParticleSize * 1.5f : RaindropsSettings.ParticleSize, paint);
+
+                    float clampedLifetime = Math.Clamp(p.Lifetime, 0f, 1f);
+                    byte alpha = (byte)(clampedLifetime * 255);
+
+                    paint.Color = baseColor.WithAlpha(alpha);
+
+                    canvas.DrawCircle(
+                        p.X,
+                        p.Y,
+                        p.IsSplash ? RaindropsSettings.ParticleSize * 1.5f
+                                   : RaindropsSettings.ParticleSize,
+                        paint);
                 }
             }
 
@@ -197,13 +209,18 @@ namespace SpectrumNet
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                          float barWidth, float barSpacing, int barCount,
-                          SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+                           float barWidth, float barSpacing, int barCount,
+                           SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
             if (!ValidateRenderParameters(canvas, spectrum, paint)) return;
 
             try
             {
+                using var localPaint = paint!.Clone();
+                localPaint.BlendMode = SKBlendMode.SrcOver;
+                localPaint.ColorFilter = null;
+                localPaint.Color = localPaint.Color.WithAlpha(255);
+
                 if (_cacheNeedsUpdate || _renderCache.Width != info.Width || _renderCache.Height != info.Height)
                 {
                     _renderCache = new RenderCache(info.Width, info.Height, _isOverlayActive);
@@ -223,7 +240,6 @@ namespace SpectrumNet
                 _timeSinceLastSpawn += RaindropsSettings.DeltaTime;
                 UpdateSimulation(actualBarCount);
 
-                using var localPaint = paint!.Clone();
                 RenderScene(canvas!, localPaint);
                 drawPerformanceInfo?.Invoke(canvas!, info);
             }
@@ -388,13 +404,15 @@ namespace SpectrumNet
         #region Rendering Methods
         private void RenderScene(SKCanvas canvas, SKPaint paint)
         {
-            // Рендерим капли
             paint.Style = SKPaintStyle.Fill;
-
             for (int i = 0; i < _raindropCount; i++)
-                canvas.DrawCircle(_raindrops[i].X, _raindrops[i].Y, RaindropsSettings.RaindropSize, paint);
-
-            // Рендерим частицы
+            {
+                canvas.DrawCircle(
+                    _raindrops[i].X,
+                    _raindrops[i].Y,
+                    RaindropsSettings.RaindropSize,
+                    paint);
+            }
             _particleBuffer.RenderParticles(canvas, paint);
         }
         #endregion
