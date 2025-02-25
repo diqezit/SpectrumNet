@@ -7,13 +7,9 @@ namespace SpectrumNet
 {
     public static class MwConstants
     {
-        public const int RenderIntervalMs = 16;
-        public const int MonitorDelay = 16;
-        public const int BarCount = 60;
+        public const int RenderIntervalMs = 16, MonitorDelay = 16, BarCount = 60;
         public const double BarSpacing = 4;
-        public const string DefaultStyle = "Gradient";
-        public const string ReadyStatus = "Ready";
-        public const string RecordingStatus = "Recording...";
+        public const string DefaultStyle = "Gradient", ReadyStatus = "Ready", RecordingStatus = "Recording...";
     }
 
     public partial class MainWindow : Window, INotifyPropertyChanged
@@ -41,19 +37,12 @@ namespace SpectrumNet
 
         #region Properties
         public static bool IsDarkTheme => ThemeManager.Instance.IsDarkTheme;
-
-        public static IEnumerable<RenderStyle> AvailableDrawingTypes =>
-            Enum.GetValues<RenderStyle>().OrderBy(s => s.ToString());
-
+        public static IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>().OrderBy(s => s.ToString());
         public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
-            _spectrumStyles!.Styles.OrderBy(kvp => kvp.Key)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-
+            _spectrumStyles!.Styles.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
         public static IEnumerable<FftWindowType> AvailableFftWindowTypes =>
             Enum.GetValues<FftWindowType>().OrderBy(wt => wt.ToString());
-
         public SKElement? RenderElement { get; private set; }
-
         public bool CanStartCapture => _captureManager is not null && !IsRecording;
 
         public bool IsPopupOpen
@@ -165,7 +154,6 @@ namespace SpectrumNet
         public MainWindow()
         {
             InitializeComponent();
-
             _gainParameters = new GainParameters(
                 SynchronizationContext.Current,
                 SharedConstants.DefaultMinDb,
@@ -173,12 +161,10 @@ namespace SpectrumNet
                 SharedConstants.DefaultAmplificationFactor);
 
             DataContext = this;
-
             InitComponents();
             InitEventHandlers();
             ConfigureTheme();
             UpdateProps();
-
             CompositionTarget.Rendering += OnRendering;
         }
 
@@ -214,12 +200,9 @@ namespace SpectrumNet
             MouseDoubleClick += OnWindowMouseDoubleClick;
             Closed += OnWindowClosed;
 
-            PropertyChanged += (_, args) =>
-            {
+            PropertyChanged += (_, args) => {
                 if (args.PropertyName == nameof(IsRecording))
-                {
                     StatusText = IsRecording ? MwConstants.RecordingStatus : MwConstants.ReadyStatus;
-                }
             };
         }
 
@@ -227,8 +210,7 @@ namespace SpectrumNet
         {
             var tm = ThemeManager.Instance;
             tm.RegisterWindow(this);
-            tm.PropertyChanged += (_, e) =>
-            {
+            tm.PropertyChanged += (_, e) => {
                 if (e.PropertyName == nameof(ThemeManager.IsDarkTheme))
                     OnPropertyChanged(nameof(IsDarkTheme));
             };
@@ -236,7 +218,7 @@ namespace SpectrumNet
         #endregion
 
         #region Event Handlers
-        private void OnRendering(object sender, EventArgs e) => RenderElement?.InvalidateVisual();
+        private void OnRendering(object? sender, EventArgs e) => RenderElement?.InvalidateVisual();
 
         private void OnStateChanged(object? sender, EventArgs e)
         {
@@ -260,32 +242,27 @@ namespace SpectrumNet
                 e.Surface.Canvas.Clear(SKColors.Transparent);
                 return;
             }
-
             _renderer?.RenderFrame(sender, e);
         }
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (sender is not ComboBox cb) return;
+
             switch (cb.Name)
             {
-                case nameof(StyleComboBox):
-                    if (SelectedStyle != null && _spectrumStyles != null)
-                    {
-                        var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
-                        _renderer?.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
-                    }
+                case nameof(StyleComboBox) when SelectedStyle != null && _spectrumStyles != null:
+                    var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
+                    _renderer?.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
                     break;
-                case nameof(RenderStyleComboBox):
-                    if (RenderStyleComboBox?.SelectedValue is RenderStyle rs)
-                    {
-                        _selectedDrawingType = rs;
-                        _renderer?.UpdateRenderStyle(rs);
-                    }
+
+                case nameof(RenderStyleComboBox) when RenderStyleComboBox?.SelectedValue is RenderStyle rs:
+                    _selectedDrawingType = rs;
+                    _renderer?.UpdateRenderStyle(rs);
                     break;
-                case nameof(FftWindowTypeComboBox):
-                    if (FftWindowTypeComboBox?.SelectedValue is FftWindowType wt)
-                        SelectedFftWindowType = wt;
+
+                case nameof(FftWindowTypeComboBox) when FftWindowTypeComboBox?.SelectedValue is FftWindowType wt:
+                    SelectedFftWindowType = wt;
                     break;
             }
             InvalidateVisuals();
@@ -324,6 +301,7 @@ namespace SpectrumNet
         private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (sender is not Slider slider) return;
+
             var sliderActions = new Dictionary<string, Action<double>>
             {
                 ["barSpacingSlider"] = value => BarSpacing = value,
@@ -332,6 +310,7 @@ namespace SpectrumNet
                 ["maxDbLevelSlider"] = value => MaxDbLevel = (float)value,
                 ["amplificationFactorSlider"] = value => AmplificationFactor = (float)value
             };
+
             if (sliderActions.TryGetValue(slider.Name, out var act))
             {
                 act(slider.Value);
@@ -342,6 +321,7 @@ namespace SpectrumNet
         private void OnButtonClick(object sender, RoutedEventArgs e)
         {
             if (sender is not Button btn) return;
+
             var actions = new Dictionary<string, Action>
             {
                 ["StartCaptureButton"] = async () => await StartCaptureAsync(),
@@ -353,6 +333,7 @@ namespace SpectrumNet
                 ["MaximizeButton"] = () => Dispatcher.Invoke(MaximizeWindow),
                 ["CloseButton"] = () => Dispatcher.Invoke(CloseWindow)
             };
+
             if (actions.TryGetValue(btn.Name, out var act))
                 act();
         }
@@ -368,8 +349,7 @@ namespace SpectrumNet
             else
             {
                 ControlPanel.Visibility = Visibility.Visible;
-                var showPanelSB = (Storyboard)FindResource("ShowPanelAnimation");
-                showPanelSB.Begin();
+                ((Storyboard)FindResource("ShowPanelAnimation")).Begin();
             }
         }
 
@@ -385,10 +365,7 @@ namespace SpectrumNet
             else
                 Dispatcher.Invoke(OpenOverlay);
 
-            // Update all renderers with the new overlay state
             SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
-
-            // Force a refresh of the main canvas
             spectrumCanvas?.InvalidateVisual();
         }
 
@@ -396,7 +373,6 @@ namespace SpectrumNet
         {
             _overlayWindow?.Dispose();
             _overlayWindow = null;
-
             IsOverlayActive = false;
             SpectrumRendererFactory.ConfigureAllRenderers(false);
             spectrumCanvas?.InvalidateVisual();
@@ -425,16 +401,13 @@ namespace SpectrumNet
             IsOverlayActive = true;
             SpectrumRendererFactory.ConfigureAllRenderers(true);
             spectrumCanvas?.InvalidateVisual();
-
             UpdateRendererDimensions(
                 (int)SystemParameters.PrimaryScreenWidth,
                 (int)SystemParameters.PrimaryScreenHeight);
         }
-
         private void CloseOverlay()
         {
             if (_overlayWindow == null) return;
-
             _overlayWindow.Close();
         }
 
@@ -482,9 +455,7 @@ namespace SpectrumNet
 
         protected bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
         {
-            if (EqualityComparer<T>.Default.Equals(field, value))
-                return false;
-
+            if (EqualityComparer<T>.Default.Equals(field, value)) return false;
             field = value;
             OnPropertyChanged(propertyName ?? string.Empty);
             callback?.Invoke();
