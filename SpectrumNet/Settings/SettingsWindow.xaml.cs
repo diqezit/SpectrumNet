@@ -134,6 +134,17 @@ namespace SpectrumNet
 
         #region Event Handlers
         /// <summary>
+        /// Handles the window drag event.
+        /// </summary>
+        /// <param name="sender">The source of the event.</param>
+        /// <param name="e">The event arguments.</param>
+        private void OnWindowDrag(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+                DragMove();
+        }
+
+        /// <summary>
         /// Handles the window closing event.
         /// </summary>
         /// <param name="sender">The source of the event.</param>
