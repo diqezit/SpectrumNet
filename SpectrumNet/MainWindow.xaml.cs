@@ -394,30 +394,36 @@ namespace SpectrumNet
 
         private void OnOverlayClosed()
         {
+            _overlayWindow?.Dispose();
+            _overlayWindow = null;
+
             IsOverlayActive = false;
             SpectrumRendererFactory.ConfigureAllRenderers(false);
             spectrumCanvas?.InvalidateVisual();
+            Activate();
         }
 
         private void OpenOverlay()
         {
-            if (_overlayWindow != null) return;
-
-            _overlayWindow = new OverlayWindow(this, new OverlayConfiguration
+            if (_overlayWindow != null && _overlayWindow.IsInitialized)
             {
-                RenderInterval = MwConstants.RenderIntervalMs,
-                IsTopmost = true,
-                ShowInTaskbar = false
-            });
+                _overlayWindow.Show();
+            }
+            else
+            {
+                _overlayWindow = new OverlayWindow(this, new OverlayConfiguration(
+                    RenderInterval: MwConstants.RenderIntervalMs,
+                    IsTopmost: true,
+                    ShowInTaskbar: false,
+                    EnableHardwareAcceleration: true
+                ));
 
-            _overlayWindow.Closed += (_, _) => OnOverlayClosed();
-            _overlayWindow.Show();
+                _overlayWindow.Closed += (_, _) => OnOverlayClosed();
+                _overlayWindow.Show();
+            }
+
             IsOverlayActive = true;
-
-            // Configure all renderers for overlay mode
             SpectrumRendererFactory.ConfigureAllRenderers(true);
-
-            // Force a refresh of the main canvas to clear it
             spectrumCanvas?.InvalidateVisual();
 
             UpdateRendererDimensions(
@@ -430,15 +436,6 @@ namespace SpectrumNet
             if (_overlayWindow == null) return;
 
             _overlayWindow.Close();
-            _overlayWindow.Dispose();
-            _overlayWindow = null;
-            IsOverlayActive = false;
-
-            // Configure all renderers for normal mode
-            SpectrumRendererFactory.ConfigureAllRenderers(false);
-
-            // Force a refresh of the main canvas
-            spectrumCanvas?.InvalidateVisual();
         }
 
         private void UpdateRendererDimensions(int width, int height) =>

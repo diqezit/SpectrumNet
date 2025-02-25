@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using System.Windows.Media;
+
 namespace SpectrumNet
 {
     public sealed record OverlayConfiguration(
@@ -7,119 +9,192 @@ namespace SpectrumNet
         bool IsTopmost = true,
         bool ShowInTaskbar = false,
         WindowStyle Style = WindowStyle.None,
-        WindowState State = WindowState.Maximized
+        WindowState State = WindowState.Maximized,
+        bool EnableEscapeToClose = true,
+        bool EnableHardwareAcceleration = true
     );
 
     public sealed class OverlayWindow : Window, IDisposable
     {
-        private record struct RenderContext(MainWindow MainWindow, SKElement SkElement, DispatcherTimer RenderTimer);
+        private readonly record struct RenderContext(MainWindow MainWindow, SKElement SkElement, DispatcherTimer RenderTimer);
 
         private readonly OverlayConfiguration _configuration;
         private readonly CancellationTokenSource _disposalTokenSource = new();
         private RenderContext? _renderContext;
         private bool _isDisposed;
+        private SKBitmap? _cacheBitmap;
+        private readonly SemaphoreSlim _renderLock = new(1, 1);
+        private readonly Stopwatch _frameTimeWatch = new();
 
-        public bool IsInitialized => _renderContext != null;
+        public new bool IsInitialized => _renderContext != null && !_isDisposed;
 
         public OverlayWindow(MainWindow mainWindow, OverlayConfiguration? configuration = null)
         {
             if (mainWindow == null) throw new ArgumentNullException(nameof(mainWindow));
             _configuration = configuration ?? new();
-            InitializeOverlay(mainWindow);
+
+            try
+            {
+                if (_configuration.EnableHardwareAcceleration)
+                {
+                    RenderOptions.ProcessRenderMode = RenderMode.Default;
+                    SetValue(RenderOptions.BitmapScalingModeProperty, BitmapScalingMode.NearestNeighbor);
+                }
+
+                InitializeOverlay(mainWindow);
+                _frameTimeWatch.Start();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Failed to initialize overlay window");
+                throw;
+            }
+        }
+
+        public void ForceRedraw()
+        {
+            if (!_isDisposed && _renderContext != null && _renderLock.Wait(0))
+            {
+                try { _renderContext.Value.SkElement.InvalidateVisual(); }
+                finally { _renderLock.Release(); }
+            }
         }
 
         private void InitializeOverlay(MainWindow mainWindow)
         {
             ConfigureWindowProperties();
-            var skElement = new SKElement { VerticalAlignment = VerticalAlignment.Stretch, HorizontalAlignment = HorizontalAlignment.Stretch };
-            var renderTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(_configuration.RenderInterval) };
+
+            var skElement = new SKElement
+            {
+                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                SnapsToDevicePixels = true,
+                UseLayoutRounding = true
+            };
+
+            var renderTimer = new DispatcherTimer(DispatcherPriority.Render)
+            {
+                Interval = TimeSpan.FromMilliseconds(_configuration.RenderInterval)
+            };
+
             _renderContext = new(mainWindow, skElement, renderTimer);
             Content = skElement;
+
             SubscribeToEvents();
-            Log.Information("[OverlayWindow] Overlay window initialized");
         }
 
         private void ConfigureWindowProperties()
         {
-            (WindowStyle, AllowsTransparency, Background, Topmost, WindowState, ShowInTaskbar, ResizeMode) =
-                (_configuration.Style, true, null, _configuration.IsTopmost, _configuration.State, _configuration.ShowInTaskbar, ResizeMode.NoResize);
+            WindowStyle = _configuration.Style;
+            AllowsTransparency = true;
+            Background = null;
+            Topmost = _configuration.IsTopmost;
+            WindowState = _configuration.State;
+            ShowInTaskbar = _configuration.ShowInTaskbar;
+            ResizeMode = ResizeMode.NoResize;
+
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
                 new SystemBackdrop().SetTransparentBackground(this);
-                Log.Debug("[OverlayWindow] Transparent background set for Windows");
-            }
         }
 
         private void SubscribeToEvents()
         {
-            if (_renderContext is null)
-            {
-                Log.Error("[OverlayWindow] Failed to subscribe to events: RenderContext is null");
-                return;
-            }
+            if (_renderContext is null) return;
+
             _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
-            _renderContext.Value.RenderTimer.Tick += (_, _) => _renderContext?.SkElement.InvalidateVisual();
-            Closing += (_, _) =>
+            _renderContext.Value.RenderTimer.Tick += (_, _) => ForceRedraw();
+
+            Closing += (_, _) => { _renderContext?.RenderTimer.Stop(); Dispose(); };
+            SourceInitialized += (_, _) => { ConfigureWindowStyleEx(); _renderContext?.RenderTimer.Start(); };
+
+            if (_configuration.EnableEscapeToClose)
             {
-                _renderContext?.RenderTimer.Stop();
-                Dispose();
-                Log.Information("[OverlayWindow] Overlay window closing");
-            };
-            SourceInitialized += (_, _) =>
-            {
-                ConfigureWindowStyleEx();
-                _renderContext?.RenderTimer.Start();
-                Log.Information("[OverlayWindow] Overlay window source initialized");
-            };
-            KeyDown += (_, e) =>
-            {
-                if (e.Key == System.Windows.Input.Key.Escape)
+                KeyDown += (_, e) =>
                 {
-                    Close();
-                    e.Handled = true;
-                    Log.Information("[OverlayWindow] Overlay window closed by Escape key");
-                }
+                    if (e.Key == Key.Escape)
+                    {
+                        e.Handled = true;
+                        Close();
+                    }
+                };
+            }
+
+            DpiChanged += (_, _) => { _cacheBitmap?.Dispose(); _cacheBitmap = null; ForceRedraw(); };
+
+            IsVisibleChanged += (_, _) =>
+            {
+                if (IsVisible) _renderContext?.RenderTimer.Start();
+                else _renderContext?.RenderTimer.Stop();
             };
-            DpiChanged += (_, _) => _renderContext?.SkElement.InvalidateVisual();
+
+            SizeChanged += (_, _) => { _cacheBitmap?.Dispose(); _cacheBitmap = null; };
         }
 
         private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args)
         {
-            if (_isDisposed)
+            if (_isDisposed || _renderContext is null || !_renderLock.Wait(0)) return;
+
+            try
             {
-                Log.Warning("[OverlayWindow] Attempted to paint surface after disposal");
-                return;
+                _frameTimeWatch.Restart();
+
+                var info = args.Info;
+                var canvas = args.Surface.Canvas;
+                canvas.Clear(SKColors.Transparent);
+
+                if (_frameTimeWatch.ElapsedMilliseconds > _configuration.RenderInterval * 2)
+                {
+                    // Skip complex rendering if we're falling behind
+                    _renderContext.Value.MainWindow.OnPaintSurface(sender, args);
+                    return;
+                }
+
+                if (_cacheBitmap == null || _cacheBitmap.Width != info.Width || _cacheBitmap.Height != info.Height)
+                {
+                    _cacheBitmap?.Dispose();
+                    _cacheBitmap = new SKBitmap(info.Width, info.Height, info.ColorType, info.AlphaType);
+                }
+
+                using (var tempSurface = SKSurface.Create(info, _cacheBitmap.GetPixels(), _cacheBitmap.RowBytes))
+                {
+                    tempSurface.Canvas.Clear(SKColors.Transparent);
+                    var tempArgs = new SKPaintSurfaceEventArgs(tempSurface, info);
+                    _renderContext.Value.MainWindow.OnPaintSurface(sender, tempArgs);
+                }
+
+                canvas.DrawBitmap(_cacheBitmap, 0, 0);
             }
-            if (_renderContext is null)
-            {
-                Log.Error("[OverlayWindow] Failed to handle paint surface: RenderContext is null");
-                return;
-            }
-            _renderContext.Value.MainWindow.OnPaintSurface(sender, args);
+            catch (Exception ex) { Log.Error(ex, "Error during paint surface handling"); }
+            finally { _renderLock.Release(); }
         }
 
         private void ConfigureWindowStyleEx()
         {
             var hwnd = new WindowInteropHelper(this).Handle;
-            if (hwnd == IntPtr.Zero)
-            {
-                Log.Error("[OverlayWindow] Failed to configure window style: Invalid window handle");
-                return;
-            }
+            if (hwnd == IntPtr.Zero) return;
+
             var extendedStyle = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
-            _ = NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE, extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED);
-            Log.Debug("[OverlayWindow] Window style configured");
+            _ = NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE,
+                extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED);
         }
 
         public void Dispose()
         {
             if (_isDisposed) return;
+
             _isDisposed = true;
+
+            if (_renderContext != null)
+            {
+                _renderContext.Value.SkElement.PaintSurface -= HandlePaintSurface;
+                _renderContext.Value.RenderTimer.Stop();
+            }
+
             _disposalTokenSource.Cancel();
-            _renderContext?.RenderTimer.Stop();
-            _renderContext = null;
             _disposalTokenSource.Dispose();
-            Log.Information("[OverlayWindow] Overlay window disposed");
+            _cacheBitmap?.Dispose();
+            _renderLock.Dispose();
+            _renderContext = null;
         }
     }
 
@@ -128,6 +203,7 @@ namespace SpectrumNet
         public void SetTransparentBackground(Window window)
         {
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
+
             var hwnd = new WindowInteropHelper(window).Handle;
             if (hwnd == IntPtr.Zero) return;
 
@@ -156,13 +232,13 @@ namespace SpectrumNet
         public const int WS_EX_TRANSPARENT = 0x00000020;
         public const int WS_EX_LAYERED = 0x00080000;
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         public static extern int GetWindowLong(IntPtr hwnd, int index);
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         public static extern int SetWindowLong(IntPtr hwnd, int index, int newStyle);
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         public static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WINDOWCOMPOSITIONATTRIBDATA data);
 
         public enum WINDOWCOMPOSITIONATTRIB { WCA_ACCENT_POLICY = 19 }
