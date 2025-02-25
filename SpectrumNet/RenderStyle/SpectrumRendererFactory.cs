@@ -1,4 +1,5 @@
-﻿namespace SpectrumNet
+﻿#nullable enable
+namespace SpectrumNet
 {
     #region Structs
     /// <summary>
@@ -28,7 +29,7 @@
     /// </summary>
     public enum RenderStyle
     {
-        AsciiDonut, Bars, CircularBars, CircularWave, Cubes, Fire, Gauge, GradientWave,
+        AsciiDonut, Bars, CircularBars, CircularWave, Cube, Cubes, Fire, Gauge, GradientWave,
         Heartbeat, Loudness, Particles, Raindrops, Rainbow, SphereRenderer, TextParticles, Waveform
     }
     #endregion
@@ -153,6 +154,7 @@
             RenderStyle.Bars => BarsRenderer.GetInstance(),
             RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
             RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
+            RenderStyle.Cube => CubeRenderer.GetInstance(),
             RenderStyle.Cubes => CubesRenderer.GetInstance(),
             RenderStyle.Fire => FireRenderer.GetInstance(),
             RenderStyle.Gauge => GaugeRenderer.GetInstance(),
