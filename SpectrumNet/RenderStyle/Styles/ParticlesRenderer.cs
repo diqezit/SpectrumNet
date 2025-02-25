@@ -2,47 +2,39 @@
 
 namespace SpectrumNet
 {
-    /// <summary>
-    /// Реализует рендерер спектра, который визуализирует аудиоданные в виде частиц.
-    /// Рендерер использует кольцевой буфер для управления частицами и оптимизирован для производительности.
-    /// </summary>
     public sealed class ParticlesRenderer : ISpectrumRenderer, IDisposable
     {
         #region Instance
-        /// <summary>
-        /// Возвращает синглтон экземпляр класса ParticlesRenderer.
-        /// Реализована ленивый способ инициализации для потокобезопасного создания экземпляра.
-        /// </summary>
-        private static readonly Lazy<ParticlesRenderer> _lazyInstance = new(() =>
-            new ParticlesRenderer(), System.Threading.LazyThreadSafetyMode.ExecutionAndPublication);
-
-        /// <summary>
-        /// Получает синглтон экземпляр ParticlesRenderer.
-        /// </summary>
+        private static readonly Lazy<ParticlesRenderer> _lazyInstance = new(() => new ParticlesRenderer(), LazyThreadSafetyMode.ExecutionAndPublication);
         public static ParticlesRenderer GetInstance() => _lazyInstance.Value;
         #endregion
 
         #region Fields
-        // Теперь вместо поля _random будем использовать thread-local генератор, что повышает производительность.
-        [System.ThreadStatic]
-        private static System.Random? _threadLocalRandom;
+        [ThreadStatic] private static Random? _threadLocalRandom;
         private const int VelocityLookupSize = 1024;
         private CircularParticleBuffer? _particleBuffer;
         private bool _isOverlayActive, _isInitialized, _isDisposed;
         private RenderCache _renderCache = new();
-        private readonly float _velocityRange, _particleLife, _particleLifeDecay,
-            _alphaDecayExponent, _spawnThresholdOverlay, _spawnThresholdNormal,
-            _spawnProbability, _particleSizeOverlay, _particleSizeNormal,
-            _velocityMultiplier;
+        private readonly float _velocityRange, _particleLife, _particleLifeDecay, _alphaDecayExponent,
+            _spawnThresholdOverlay, _spawnThresholdNormal, _spawnProbability,
+            _particleSizeOverlay, _particleSizeNormal, _velocityMultiplier;
         private float[]? _spectrumBuffer, _velocityLookup, _alphaCurve;
+
+        // Многопоточная обработка
+        private readonly Thread _processingThread;
+        private readonly CancellationTokenSource _cts = new();
+        private readonly AutoResetEvent _spectrumDataAvailable = new(false);
+        private readonly AutoResetEvent _processingComplete = new(false);
+        private readonly object _spectrumLock = new();
+        private float[]? _spectrumToProcess;
+        private int _spectrumLength;
+        private bool _processingRunning;
+        private float _spawnY;
+        private int _canvasWidth;
+        private float _barWidth;
         #endregion
 
         #region Constructor
-        /// <summary>
-        /// Инициализирует новый экземпляр ParticlesRenderer.
-        /// Закрытый конструктор для реализации паттерна синглтон.
-        /// Инициализирует свойства частиц из глобальных настроек.
-        /// </summary>
         private ParticlesRenderer()
         {
             var s = Settings.Instance;
@@ -56,30 +48,25 @@ namespace SpectrumNet
             _particleSizeOverlay = s.ParticleSizeOverlay;
             _particleSizeNormal = s.ParticleSizeNormal;
             _velocityMultiplier = s.VelocityMultiplier;
+
             PrecomputeAlphaCurve();
             InitializeVelocityLookup(s.ParticleVelocityMin);
+
+            _processingThread = new Thread(ProcessSpectrumThreadFunc) { IsBackground = true, Name = "ParticlesProcessor" };
+            _processingRunning = true;
+            _processingThread.Start();
         }
         #endregion
 
-        #region Public Methods
-        /// <summary>
-        /// Инициализирует рендерер частиц. Метод должен быть вызван перед началом рендеринга.
-        /// Выделяет и настраивает кольцевой буфер частиц.
-        /// </summary>
-        /// <exception cref="System.ObjectDisposedException">Выбрасывается, если рендерер уже освобождён.</exception>
+        #region ISpectrumRenderer Implementation
         public void Initialize()
         {
-            if (_isDisposed) throw new System.ObjectDisposedException(nameof(ParticlesRenderer));
+            if (_isDisposed) throw new ObjectDisposedException(nameof(ParticlesRenderer));
             if (_isInitialized) return;
             _particleBuffer = new CircularParticleBuffer((int)Settings.Instance.MaxParticles, _particleLife, _particleLifeDecay, _velocityMultiplier);
             _isInitialized = true;
         }
 
-        /// <summary>
-        /// Конфигурирует рендерер для режима overlay или обычного режима.
-        /// Обновляет размер частиц в зависимости от режима.
-        /// </summary>
-        /// <param name="isOverlayActive">True для активного overlay режима, false для обычного режима.</param>
         public void Configure(bool isOverlayActive)
         {
             if (_isOverlayActive != isOverlayActive)
@@ -89,33 +76,12 @@ namespace SpectrumNet
             }
         }
 
-        /// <summary>
-        /// Рендерит частицы на основе переданных спектральных данных.
-        /// Обновляет позиции частиц, порождает новые и отрисовывает их на канве.
-        /// </summary>
-        /// <param name="canvas">Канва SkiaSharp для отрисовки.</param>
-        /// <param name="spectrum">Аудиоспектр в виде массива float.</param>
-        /// <param name="info">Информация об изображении SkiaSharp.</param>
-        /// <param name="barWidth">Ширина каждого столбца спектра (не используется напрямую в данном рендерере).</param>
-        /// <param name="barSpacing">Интервал между столбцами спектра (не используется напрямую в данном рендерере).</param>
-        /// <param name="barCount">Количество столбцов спектра (используется для расчёта шага).</param>
-        /// <param name="paint">Объект SKPaint для стилизации частиц.</param>
-        /// <param name="drawPerformanceInfo">Делегат для отрисовки информации о производительности (опционально).</param>
-        public void Render(
-            SKCanvas? canvas,
-            float[]? spectrum,
-            SKImageInfo info,
-            float barWidth,
-            float barSpacing,
-            int barCount,
-            SKPaint? paint,
-            System.Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing,
+                          int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            if (!ValidateRenderParameters(canvas, spectrum, info, paint, drawPerformanceInfo))
-                return;
+            if (!ValidateRenderParameters(canvas, spectrum, info, paint, drawPerformanceInfo)) return;
 
-            int width = info.Width;
-            int height = info.Height;
+            int width = info.Width, height = info.Height;
             _renderCache.Width = width;
             _renderCache.Height = height;
             UpdateRenderCacheBounds(height);
@@ -124,95 +90,112 @@ namespace SpectrumNet
             float upperBound = _renderCache.UpperBound;
             float lowerBound = _renderCache.LowerBound;
 
-            UpdateParticles(upperBound);
-            SpawnNewParticles(spectrum.AsSpan(0, System.Math.Min(spectrum!.Length, 2048)), lowerBound, width, barWidth);
-            RenderParticles(canvas!, paint!, upperBound, lowerBound);
+            // Отправляем спектр на обработку в фоновый поток
+            SubmitSpectrumForProcessing(spectrum!, lowerBound, width, barWidth);
 
+            // Обновляем и рендерим частицы в основном потоке
+            UpdateParticles(upperBound);
+            RenderParticles(canvas!, paint!, upperBound, lowerBound);
             drawPerformanceInfo!(canvas!, info);
         }
 
-        /// <summary>
-        /// Освобождает ресурсы, используемые ParticlesRenderer.
-        /// Освобождает арендованные массивы и сбрасывает поля.
-        /// </summary>
         public void Dispose()
         {
-            Dispose(true);
-            System.GC.SuppressFinalize(this);
+            if (_isDisposed) return;
+
+            _processingRunning = false;
+            _cts.Cancel();
+            _spectrumDataAvailable.Set();
+            _processingThread.Join(100);
+
+            _cts.Dispose();
+            _spectrumDataAvailable.Dispose();
+            _processingComplete.Dispose();
+
+            if (_spectrumBuffer != null) { ArrayPool<float>.Shared.Return(_spectrumBuffer); _spectrumBuffer = null; }
+            if (_velocityLookup != null) { ArrayPool<float>.Shared.Return(_velocityLookup); _velocityLookup = null; }
+            if (_alphaCurve != null) { ArrayPool<float>.Shared.Return(_alphaCurve); _alphaCurve = null; }
+
+            _particleBuffer = null;
+            _renderCache = new RenderCache();
+            _isInitialized = false;
+            _isDisposed = true;
+
+            GC.SuppressFinalize(this);
         }
         #endregion
 
-        #region Private Methods
-        /// <summary>
-        /// Предварительно вычисляет кривую прозрачности для эффекта затухания частиц.
-        /// Сохраняет значения альфа-канала в массиве _alphaCurve на основе заданного экспоненциального закона.
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        private void PrecomputeAlphaCurve()
+        #region Background Processing
+        private void SubmitSpectrumForProcessing(float[] spectrum, float spawnY, int canvasWidth, float barWidth)
         {
-            if (_alphaCurve == null)
-                _alphaCurve = System.Buffers.ArrayPool<float>.Shared.Rent(101);
-
-            float step = 1f / (_alphaCurve.Length - 1);
-            for (int i = 0; i < _alphaCurve.Length; i++)
-                _alphaCurve[i] = (float)System.Math.Pow(i * step, _alphaDecayExponent);
-        }
-
-        /// <summary>
-        /// Инициализирует таблицу поиска для скоростей частиц.
-        /// Заполняет массив _velocityLookup значениями скоростей в заданном диапазоне.
-        /// </summary>
-        /// <param name="minVelocity">Минимальная скорость частиц.</param>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        private void InitializeVelocityLookup(float minVelocity)
-        {
-            if (_velocityLookup == null)
-                _velocityLookup = System.Buffers.ArrayPool<float>.Shared.Rent(VelocityLookupSize);
-
-            for (int i = 0; i < VelocityLookupSize; i++)
+            lock (_spectrumLock)
             {
-                _velocityLookup[i] = minVelocity + _velocityRange * i / VelocityLookupSize;
+                _spectrumToProcess = spectrum;
+                _spectrumLength = spectrum.Length;
+                _spawnY = spawnY;
+                _canvasWidth = canvasWidth;
+                _barWidth = barWidth;
             }
+
+            _spectrumDataAvailable.Set();
+            _processingComplete.WaitOne(5);
         }
 
-        /// <summary>
-        /// Обновляет позиции и значения альфа у частиц в буфере.
-        /// Удаляет частицы, достигшие верхней границы или полностью затухшие.
-        /// </summary>
-        /// <param name="upperBound">Верхняя вертикальная граница движения частиц.</param>
-        private void UpdateParticles(float upperBound)
+        private void ProcessSpectrumThreadFunc()
         {
-            if (_particleBuffer == null) return;
-            _particleBuffer.Update(upperBound, AlphaCurve);
+            try
+            {
+                while (_processingRunning && !_cts.Token.IsCancellationRequested)
+                {
+                    _spectrumDataAvailable.WaitOne();
+
+                    float[]? spectrumCopy;
+                    int spectrumLength;
+                    float spawnY;
+                    int canvasWidth;
+                    float barWidth;
+
+                    lock (_spectrumLock)
+                    {
+                        if (_spectrumToProcess == null) { _processingComplete.Set(); continue; }
+
+                        spectrumCopy = _spectrumToProcess;
+                        spectrumLength = _spectrumLength;
+                        spawnY = _spawnY;
+                        canvasWidth = _canvasWidth;
+                        barWidth = _barWidth;
+                    }
+
+                    ProcessSpectrumAndSpawnParticles(spectrumCopy.AsSpan(0, Math.Min(spectrumLength, 2048)), spawnY, canvasWidth, barWidth);
+                    _processingComplete.Set();
+                }
+            }
+            catch (OperationCanceledException) { /* Нормальное завершение */ }
+            catch (Exception ex) { Log.Error($"ParticlesRenderer: {ex.Message}"); }
         }
 
-        /// <summary>
-        /// Порождает новые частицы на основе спектральных данных.
-        /// Частицы порождаются, если значение спектра превышает порог и с определённой вероятностью.
-        /// </summary>
-        /// <param name="spectrum">Спектральные данные.</param>
-        /// <param name="spawnY">Вертикальная позиция для порождения частиц.</param>
-        /// <param name="canvasWidth">Ширина канвы.</param>
-        /// <param name="barWidth">Ширина каждого столбца спектра.</param>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        private void SpawnNewParticles(System.ReadOnlySpan<float> spectrum, float spawnY, int canvasWidth, float barWidth)
+        private void ProcessSpectrumAndSpawnParticles(ReadOnlySpan<float> spectrum, float spawnY, int canvasWidth, float barWidth)
         {
             if (_particleBuffer == null) return;
+
             float threshold = _isOverlayActive ? _spawnThresholdOverlay : _spawnThresholdNormal;
             float baseSize = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
-            int targetCount = System.Math.Min(spectrum.Length / 2, 2048);
-            var spectrumBufferSpan = SpectrumBuffer.AsSpan(0, targetCount);
+            int targetCount = Math.Min(spectrum.Length / 2, 2048);
+
+            if (_spectrumBuffer == null)
+                _spectrumBuffer = ArrayPool<float>.Shared.Rent(targetCount);
+
+            var spectrumBufferSpan = new Span<float>(_spectrumBuffer, 0, targetCount);
             ScaleSpectrum(spectrum, spectrumBufferSpan);
             float xStep = _renderCache.StepSize;
 
-            // Используем thread-local генератор случайных чисел вместо общего поля _random.
-            var rnd = _threadLocalRandom ??= new System.Random();
+            var rnd = _threadLocalRandom ??= new Random();
             for (int i = 0; i < targetCount; i++)
             {
                 float spectrumValue = spectrumBufferSpan[i];
                 if (spectrumValue <= threshold) continue;
 
-                float densityFactor = System.MathF.Min(spectrumValue / threshold, 3f);
+                float densityFactor = MathF.Min(spectrumValue / threshold, 3f);
                 if (rnd.NextDouble() >= densityFactor * _spawnProbability) continue;
 
                 _particleBuffer.Add(new Particle
@@ -227,12 +210,32 @@ namespace SpectrumNet
                 });
             }
         }
+        #endregion
 
-        /// <summary>
-        /// Обновляет верхнюю и нижнюю границы кеша отрисовки на основе активности overlay и настроек.
-        /// Эти границы определяют видимую область для частиц.
-        /// </summary>
-        /// <param name="height">Высота области отрисовки.</param>
+        #region Helper Methods
+        private void PrecomputeAlphaCurve()
+        {
+            if (_alphaCurve == null) _alphaCurve = ArrayPool<float>.Shared.Rent(101);
+
+            float step = 1f / (_alphaCurve.Length - 1);
+            for (int i = 0; i < _alphaCurve.Length; i++)
+                _alphaCurve[i] = (float)Math.Pow(i * step, _alphaDecayExponent);
+        }
+
+        private void InitializeVelocityLookup(float minVelocity)
+        {
+            if (_velocityLookup == null) _velocityLookup = ArrayPool<float>.Shared.Rent(VelocityLookupSize);
+
+            for (int i = 0; i < VelocityLookupSize; i++)
+                _velocityLookup[i] = minVelocity + _velocityRange * i / VelocityLookupSize;
+        }
+
+        private void UpdateParticles(float upperBound)
+        {
+            if (_particleBuffer == null || _alphaCurve == null) return;
+            _particleBuffer.Update(upperBound, _alphaCurve);
+        }
+
         private void UpdateRenderCacheBounds(float height)
         {
             var settings = Settings.Instance;
@@ -252,37 +255,22 @@ namespace SpectrumNet
             }
         }
 
-        /// <summary>
-        /// Валидирует параметры, передаваемые в метод Render.
-        /// Проверяет, что рендерер инициализирован, не освобождён и что обязательные параметры заданы корректно.
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        private bool ValidateRenderParameters(
-            SKCanvas? canvas,
-            float[]? spectrum,
-            SKImageInfo info,
-            SKPaint? paint,
-            System.Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
-            => !_isDisposed && _isInitialized && canvas != null && spectrum != null && spectrum.Length >= 2
-                && paint != null && drawPerformanceInfo != null && info.Width > 0 && info.Height > 0;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint,
+                                             Action<SKCanvas, SKImageInfo>? drawPerformanceInfo) =>
+            !_isDisposed && _isInitialized && canvas != null && spectrum != null && spectrum.Length >= 2 &&
+            paint != null && drawPerformanceInfo != null && info.Width > 0 && info.Height > 0;
 
-        /// <summary>
-        /// Возвращает случайную скорость для движения частиц из таблицы поиска.
-        /// Использует thread-local генератор случайных чисел для повышения производительности.
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private float GetRandomVelocity()
         {
-            var rnd = _threadLocalRandom ??= new System.Random();
-            return VelocityLookup[rnd.Next(VelocityLookupSize)] * _velocityMultiplier;
+            if (_velocityLookup == null) throw new InvalidOperationException("Velocity lookup not initialized");
+            var rnd = _threadLocalRandom ??= new Random();
+            return _velocityLookup[rnd.Next(VelocityLookupSize)] * _velocityMultiplier;
         }
 
-        /// <summary>
-        /// Масштабирует исходные спектральные данные для подгона под размер целевого span.
-        /// Используется для уменьшения объёма данных спектра при порождении частиц.
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        private static void ScaleSpectrum(System.ReadOnlySpan<float> source, System.Span<float> dest)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void ScaleSpectrum(ReadOnlySpan<float> source, Span<float> dest)
         {
             int srcLen = source.Length / 2, destLen = dest.Length;
             if (srcLen == 0 || destLen == 0) return;
@@ -292,11 +280,6 @@ namespace SpectrumNet
                 dest[i] = source[(int)(i * scale)];
         }
 
-        /// <summary>
-        /// Обновляет размер всех активных частиц в буфере в зависимости от текущего режима overlay.
-        /// Сохраняет относительный коэффициент изменения размера при переключении режимов.
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private void UpdateParticleSizes()
         {
             if (_particleBuffer == null) return;
@@ -309,20 +292,16 @@ namespace SpectrumNet
             }
         }
 
-        /// <summary>
-        /// Рендерит активные частицы из буфера на канву.
-        /// Отрисовываются только частицы, находящиеся в пределах заданных верхней и нижней границ.
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void RenderParticles(SKCanvas canvas, SKPaint paint, float upperBound, float lowerBound)
         {
             if (_particleBuffer == null) return;
             var activeParticles = _particleBuffer.GetActiveParticles();
             int count = activeParticles.Length;
             if (count == 0) return;
+
             paint.Style = SKPaintStyle.Fill;
             paint.StrokeCap = SKStrokeCap.Round;
-            paint.StrokeWidth = 0;
 
             for (int i = 0; i < count; i++)
             {
@@ -335,66 +314,16 @@ namespace SpectrumNet
         }
         #endregion
 
-        #region Dispose Helpers
-        /// <summary>
-        /// Освобождает управляемые ресурсы, используемые ParticlesRenderer.
-        /// Возвращает арендованные массивы и сбрасывает состояние.
-        /// </summary>
-        /// <param name="disposing">True, если вызван из метода Dispose(), false – из финализатора.</param>
-        private void Dispose(bool disposing)
-        {
-            if (_isDisposed)
-                return;
-
-            if (disposing)
-            {
-                if (_spectrumBuffer != null)
-                {
-                    System.Buffers.ArrayPool<float>.Shared.Return(_spectrumBuffer);
-                    _spectrumBuffer = null;
-                }
-                if (_velocityLookup != null)
-                {
-                    System.Buffers.ArrayPool<float>.Shared.Return(_velocityLookup);
-                    _velocityLookup = null;
-                }
-                if (_alphaCurve != null)
-                {
-                    System.Buffers.ArrayPool<float>.Shared.Return(_alphaCurve);
-                    _alphaCurve = null;
-                }
-                _particleBuffer = null;
-                _renderCache = new RenderCache();
-            }
-
-            _isInitialized = false;
-            _isDisposed = true;
-        }
-        #endregion
-
         #region Nested Classes
-        /// <summary>
-        /// Реализует кольцевой буфер для эффективного управления и обновления частиц.
-        /// Переиспользует ячейки для минимизации сборки мусора и повышения производительности.
-        /// </summary>
         private class CircularParticleBuffer
         {
-            private Particle[] _buffer;
-            private int _head;
-            private int _tail;
-            private int _count;
+            private readonly Particle[] _buffer;
+            private int _head, _tail, _count;
             private readonly int _capacity;
-            private readonly float _particleLife;
-            private readonly float _particleLifeDecay;
-            private readonly float _velocityMultiplier;
+            private readonly float _particleLife, _particleLifeDecay, _velocityMultiplier;
+            private readonly object _bufferLock = new();
+            private readonly float _sizeDecayFactor = 0.95f; // Фактор уменьшения размера со временем
 
-            /// <summary>
-            /// Инициализирует новый экземпляр класса CircularParticleBuffer.
-            /// </summary>
-            /// <param name="capacity">Максимальное число частиц, которое может содержать буфер.</param>
-            /// <param name="particleLife">Начальная продолжительность жизни частицы.</param>
-            /// <param name="particleLifeDecay">Скорость уменьшения жизни частицы за кадр.</param>
-            /// <param name="velocityMultiplier">Множитель скорости частицы.</param>
             public CircularParticleBuffer(int capacity, float particleLife, float particleLifeDecay, float velocityMultiplier)
             {
                 _capacity = capacity;
@@ -404,208 +333,127 @@ namespace SpectrumNet
                 _velocityMultiplier = velocityMultiplier;
             }
 
-            /// <summary>
-            /// Добавляет новую частицу в буфер. Если буфер заполнен, новая частица не добавляется.
-            /// </summary>
-            /// <param name="particle">Добавляемая частица.</param>
-            [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void Add(Particle particle)
             {
-                if (_count < _capacity)
+                lock (_bufferLock)
                 {
-                    _buffer[_tail] = particle;
-                    _tail = (_tail + 1) % _capacity;
-                    _count++;
+                    if (_count >= _capacity)
+                    {
+                        _buffer[_tail] = particle;
+                        _tail = (_tail + 1) % _capacity;
+                        _head = (_head + 1) % _capacity;
+                    }
+                    else
+                    {
+                        _buffer[_head] = particle;
+                        _head = (_head + 1) % _capacity;
+                        _count++;
+                    }
                 }
             }
 
-            /// <summary>
-            /// Возвращает span активных частиц в буфере.
-            /// Активными считаются частицы, которые должны отрисовываться.
-            /// </summary>
-            public System.Span<Particle> GetActiveParticles() => _buffer.AsSpan(_head, _count);
-
-            /// <summary>
-            /// Обновляет состояние частиц в буфере.
-            /// Перемещает частицы, обновляет их жизнь и альфа-канал, а также управляет индексами буфера.
-            /// Оптимизация: цикл разделён на непрерывные и разрывные блоки, чтобы избежать лишних операций взятия по модулю.
-            /// </summary>
-            /// <param name="upperBound">Верхняя граница для движения частиц.</param>
-            /// <param name="alphaCurve">Предвычисленная кривая альфа для затухания частиц.</param>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void Update(float upperBound, float[] alphaCurve)
             {
-                int writeIndex = 0;
-                int curveLength = alphaCurve.Length;
-                int maxCurveIndex = curveLength - 1;
-                float invParticleLife = 1f / _particleLife;
-                float velocityMultiplier = _velocityMultiplier;
-                float particleLifeDecay = _particleLifeDecay;
-                float sizeMultiplier = 0.99f;
-
-                if (_count == 0) return;
-
-                int endIndex = (_head + _count) % _capacity;
-
-                if (_head < endIndex)
+                lock (_bufferLock)
                 {
-                    // Непрерывный блок
-                    for (int i = _head; i < endIndex; i++)
+                    int currentTail = _tail;
+                    for (int i = 0; i < _count; i++)
                     {
-                        ref var particle = ref _buffer[i];
-                        if (particle.IsActive && particle.Y >= upperBound)
+                        int index = (currentTail + i) % _capacity;
+                        ref Particle particle = ref _buffer[index];
+
+                        if (!particle.IsActive) continue;
+
+                        // Обновляем позицию
+                        particle.Y -= particle.Velocity * _velocityMultiplier;
+
+                        // Проверяем, не вышла ли частица за верхнюю границу
+                        if (particle.Y <= upperBound)
                         {
-                            particle.Y -= particle.Velocity * velocityMultiplier;
-                            particle.Life -= particleLifeDecay;
-
-                            float lifeRatio = particle.Life * invParticleLife;
-                            int index = (int)(lifeRatio * maxCurveIndex);
-                            index = index < 0 ? 0 : index >= curveLength ? maxCurveIndex : index;
-                            particle.Alpha = alphaCurve[index];
-
-                            particle.Size *= sizeMultiplier;
-                            _buffer[writeIndex++] = particle;
+                            particle.IsActive = false;
+                            continue;
                         }
+
+                        // Обновляем время жизни и прозрачность
+                        particle.Life -= _particleLifeDecay;
+                        if (particle.Life <= 0)
+                        {
+                            particle.IsActive = false;
+                            continue;
+                        }
+
+                        // Уменьшаем размер частицы со временем
+                        particle.Size *= _sizeDecayFactor;
+
+                        // Если частица стала слишком маленькой, деактивируем её
+                        if (particle.Size < 0.5f)
+                        {
+                            particle.IsActive = false;
+                            continue;
+                        }
+
+                        // Вычисляем альфа на основе оставшегося времени жизни
+                        float lifeRatio = particle.Life / _particleLife;
+                        int alphaIndex = (int)(lifeRatio * (alphaCurve.Length - 1));
+                        alphaIndex = Math.Clamp(alphaIndex, 0, alphaCurve.Length - 1);
+                        particle.Alpha = alphaCurve[alphaIndex];
+                    }
+
+                    // Удаляем неактивные частицы из начала буфера
+                    while (_count > 0 && !_buffer[_tail].IsActive)
+                    {
+                        _tail = (_tail + 1) % _capacity;
+                        _count--;
                     }
                 }
-                else
-                {
-                    // Разрывный блок: от _head до конца массива...
-                    for (int i = _head; i < _capacity; i++)
-                    {
-                        ref var particle = ref _buffer[i];
-                        if (particle.IsActive && particle.Y >= upperBound)
-                        {
-                            particle.Y -= particle.Velocity * velocityMultiplier;
-                            particle.Life -= particleLifeDecay;
-
-                            float lifeRatio = particle.Life * invParticleLife;
-                            int index = (int)(lifeRatio * maxCurveIndex);
-                            index = index < 0 ? 0 : index >= curveLength ? maxCurveIndex : index;
-                            particle.Alpha = alphaCurve[index];
-
-                            particle.Size *= sizeMultiplier;
-                            _buffer[writeIndex++] = particle;
-                        }
-                    }
-                    // ...и затем от начала массива до endIndex
-                    for (int i = 0; i < endIndex; i++)
-                    {
-                        ref var particle = ref _buffer[i];
-                        if (particle.IsActive && particle.Y >= upperBound)
-                        {
-                            particle.Y -= particle.Velocity * velocityMultiplier;
-                            particle.Life -= particleLifeDecay;
-
-                            float lifeRatio = particle.Life * invParticleLife;
-                            int index = (int)(lifeRatio * maxCurveIndex);
-                            index = index < 0 ? 0 : index >= curveLength ? maxCurveIndex : index;
-                            particle.Alpha = alphaCurve[index];
-
-                            particle.Size *= sizeMultiplier;
-                            _buffer[writeIndex++] = particle;
-                        }
-                    }
-                }
-
-                _count = writeIndex;
-                _head = 0;
-                _tail = writeIndex;
             }
 
-            /// <summary>
-            /// Возвращает вместимость буфера частиц.
-            /// </summary>
-            public int Capacity => _capacity;
-        }
-        #endregion
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public Span<Particle> GetActiveParticles()
+            {
+                lock (_bufferLock)
+                {
+                    if (_count == 0) return Span<Particle>.Empty;
 
-        #region Particle Struct
-        /// <summary>
-        /// Представляет одну частицу с её свойствами.
-        /// Структура используется для повышения производительности за счёт отсутствия размещения в куче для каждой частицы.
-        /// </summary>
+                    // Создаем временный массив для активных частиц
+                    Particle[] activeParticles = new Particle[_count];
+                    int currentTail = _tail;
+                    int activeCount = 0;
+
+                    for (int i = 0; i < _count; i++)
+                    {
+                        int index = (currentTail + i) % _capacity;
+                        if (_buffer[index].IsActive)
+                        {
+                            activeParticles[activeCount++] = _buffer[index];
+                        }
+                    }
+
+                    return new Span<Particle>(activeParticles, 0, activeCount);
+                }
+            }
+        }
+
         private struct Particle
         {
-            /// <summary>
-            /// Горизонтальная позиция частицы.
-            /// </summary>
-            public float X { get; set; }
-            /// <summary>
-            /// Вертикальная позиция частицы.
-            /// </summary>
-            public float Y { get; set; }
-            /// <summary>
-            /// Скорость частицы.
-            /// </summary>
-            public float Velocity { get; set; }
-            /// <summary>
-            /// Размер частицы.
-            /// </summary>
-            public float Size { get; set; }
-            /// <summary>
-            /// Оставшаяся жизнь частицы.
-            /// </summary>
-            public float Life { get; set; }
-            /// <summary>
-            /// Значение альфа (непрозрачность) частицы.
-            /// </summary>
-            public float Alpha { get; set; }
-            /// <summary>
-            /// Флаг активности частицы (если true – частица отрисовывается).
-            /// </summary>
-            public bool IsActive { get; set; }
+            public float X;
+            public float Y;
+            public float Velocity;
+            public float Size;
+            public float Life;
+            public float Alpha;
+            public bool IsActive;
         }
-        #endregion
 
-        #region Properties for Lazy Initialization
-        /// <summary>
-        /// Свойство для получения буфера спектра с ленивой инициализацией.
-        /// Использует ArrayPool для эффективного управления памятью.
-        /// </summary>
-        private float[] SpectrumBuffer => _spectrumBuffer ??= System.Buffers.ArrayPool<float>.Shared.Rent(2048);
-
-        /// <summary>
-        /// Свойство для получения таблицы скоростей с ленивой инициализацией.
-        /// Использует ArrayPool для эффективного управления памятью.
-        /// </summary>
-        private float[] VelocityLookup => _velocityLookup ??= System.Buffers.ArrayPool<float>.Shared.Rent(VelocityLookupSize);
-
-        /// <summary>
-        /// Свойство для получения массива кривой альфа с ленивой инициализацией.
-        /// Использует ArrayPool для эффективного управления памятью.
-        /// </summary>
-        private float[] AlphaCurve => _alphaCurve ??= System.Buffers.ArrayPool<float>.Shared.Rent(101);
-        #endregion
-
-        #region RenderCache Struct
-        /// <summary>
-        /// Структура для хранения данных кеша отрисовки.
-        /// </summary>
-        private struct RenderCache
+        private class RenderCache
         {
-            /// <summary>
-            /// Ширина области отрисовки.
-            /// </summary>
-            public int Width { get; set; }
-            /// <summary>
-            /// Высота области отрисовки.
-            /// </summary>
-            public int Height { get; set; }
-            /// <summary>
-            /// Верхняя граница отрисовки частиц.
-            /// </summary>
+            public float Width { get; set; }
+            public float Height { get; set; }
             public float UpperBound { get; set; }
-            /// <summary>
-            /// Нижняя граница отрисовки частиц.
-            /// </summary>
             public float LowerBound { get; set; }
-            /// <summary>
-            /// Высота области overlay.
-            /// </summary>
             public float OverlayHeight { get; set; }
-            /// <summary>
-            /// Шаг для порождения частиц.
-            /// </summary>
             public float StepSize { get; set; }
         }
         #endregion
