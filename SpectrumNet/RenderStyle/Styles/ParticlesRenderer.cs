@@ -15,9 +15,10 @@ namespace SpectrumNet
         private CircularParticleBuffer? _particleBuffer;
         private bool _isOverlayActive, _isInitialized, _isDisposed;
         private RenderCache _renderCache = new();
-        private readonly float _velocityRange, _particleLife, _particleLifeDecay, _alphaDecayExponent,
-            _spawnThresholdOverlay, _spawnThresholdNormal, _spawnProbability,
-            _particleSizeOverlay, _particleSizeNormal, _velocityMultiplier;
+
+        // Доступ к настройкам через синглтон
+        private Settings Settings => Settings.Instance;
+
         private float[]? _spectrumBuffer, _velocityLookup, _alphaCurve;
 
         // Многопоточная обработка
@@ -37,20 +38,8 @@ namespace SpectrumNet
         #region Constructor
         private ParticlesRenderer()
         {
-            var s = Settings.Instance;
-            _velocityRange = s.ParticleVelocityMax - s.ParticleVelocityMin;
-            _particleLife = s.ParticleLife;
-            _particleLifeDecay = s.ParticleLifeDecay;
-            _alphaDecayExponent = s.AlphaDecayExponent;
-            _spawnThresholdOverlay = s.SpawnThresholdOverlay;
-            _spawnThresholdNormal = s.SpawnThresholdNormal;
-            _spawnProbability = s.SpawnProbability;
-            _particleSizeOverlay = s.ParticleSizeOverlay;
-            _particleSizeNormal = s.ParticleSizeNormal;
-            _velocityMultiplier = s.VelocityMultiplier;
-
             PrecomputeAlphaCurve();
-            InitializeVelocityLookup(s.ParticleVelocityMin);
+            InitializeVelocityLookup(Settings.ParticleVelocityMin);
 
             _processingThread = new Thread(ProcessSpectrumThreadFunc) { IsBackground = true, Name = "ParticlesProcessor" };
             _processingRunning = true;
@@ -63,7 +52,11 @@ namespace SpectrumNet
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(ParticlesRenderer));
             if (_isInitialized) return;
-            _particleBuffer = new CircularParticleBuffer((int)Settings.Instance.MaxParticles, _particleLife, _particleLifeDecay, _velocityMultiplier);
+            _particleBuffer = new CircularParticleBuffer(
+                (int)Settings.MaxParticles,
+                Settings.ParticleLife,
+                Settings.ParticleLifeDecay,
+                Settings.VelocityMultiplier);
             _isInitialized = true;
         }
 
@@ -178,8 +171,8 @@ namespace SpectrumNet
         {
             if (_particleBuffer == null) return;
 
-            float threshold = _isOverlayActive ? _spawnThresholdOverlay : _spawnThresholdNormal;
-            float baseSize = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
+            float threshold = _isOverlayActive ? Settings.SpawnThresholdOverlay : Settings.SpawnThresholdNormal;
+            float baseSize = _isOverlayActive ? Settings.ParticleSizeOverlay : Settings.ParticleSizeNormal;
             int targetCount = Math.Min(spectrum.Length / 2, 2048);
 
             if (_spectrumBuffer == null)
@@ -196,7 +189,7 @@ namespace SpectrumNet
                 if (spectrumValue <= threshold) continue;
 
                 float densityFactor = MathF.Min(spectrumValue / threshold, 3f);
-                if (rnd.NextDouble() >= densityFactor * _spawnProbability) continue;
+                if (rnd.NextDouble() >= densityFactor * Settings.SpawnProbability) continue;
 
                 _particleBuffer.Add(new Particle
                 {
@@ -204,7 +197,7 @@ namespace SpectrumNet
                     Y = spawnY,
                     Velocity = GetRandomVelocity() * densityFactor,
                     Size = baseSize * densityFactor,
-                    Life = _particleLife,
+                    Life = Settings.ParticleLife,
                     Alpha = 1f,
                     IsActive = true
                 });
@@ -219,15 +212,16 @@ namespace SpectrumNet
 
             float step = 1f / (_alphaCurve.Length - 1);
             for (int i = 0; i < _alphaCurve.Length; i++)
-                _alphaCurve[i] = (float)Math.Pow(i * step, _alphaDecayExponent);
+                _alphaCurve[i] = (float)Math.Pow(i * step, Settings.AlphaDecayExponent);
         }
 
         private void InitializeVelocityLookup(float minVelocity)
         {
             if (_velocityLookup == null) _velocityLookup = ArrayPool<float>.Shared.Rent(VelocityLookupSize);
 
+            float velocityRange = Settings.ParticleVelocityMax - Settings.ParticleVelocityMin;
             for (int i = 0; i < VelocityLookupSize; i++)
-                _velocityLookup[i] = minVelocity + _velocityRange * i / VelocityLookupSize;
+                _velocityLookup[i] = minVelocity + velocityRange * i / VelocityLookupSize;
         }
 
         private void UpdateParticles(float upperBound)
@@ -238,8 +232,7 @@ namespace SpectrumNet
 
         private void UpdateRenderCacheBounds(float height)
         {
-            var settings = Settings.Instance;
-            float overlayHeight = height * settings.OverlayHeightMultiplier;
+            float overlayHeight = height * Settings.OverlayHeightMultiplier;
 
             if (_isOverlayActive)
             {
@@ -266,7 +259,7 @@ namespace SpectrumNet
         {
             if (_velocityLookup == null) throw new InvalidOperationException("Velocity lookup not initialized");
             var rnd = _threadLocalRandom ??= new Random();
-            return _velocityLookup[rnd.Next(VelocityLookupSize)] * _velocityMultiplier;
+            return _velocityLookup[rnd.Next(VelocityLookupSize)] * Settings.VelocityMultiplier;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -283,8 +276,8 @@ namespace SpectrumNet
         private void UpdateParticleSizes()
         {
             if (_particleBuffer == null) return;
-            float baseSize = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
-            float oldBaseSize = _isOverlayActive ? _particleSizeNormal : _particleSizeOverlay;
+            float baseSize = _isOverlayActive ? Settings.ParticleSizeOverlay : Settings.ParticleSizeNormal;
+            float oldBaseSize = _isOverlayActive ? Settings.ParticleSizeNormal : Settings.ParticleSizeOverlay;
             foreach (ref var particle in _particleBuffer.GetActiveParticles())
             {
                 float relativeSizeFactor = particle.Size / oldBaseSize;
