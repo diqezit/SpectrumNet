@@ -14,7 +14,9 @@ namespace SpectrumNet
 
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        #region Private Fields and Records
+        #region Fields and Constants
+        private const string LogPrefix = "[MainWindow] ";
+
         private record MainWindowSettings(
             string Style = MwConstants.DefaultStyle,
             double BarSpacing = MwConstants.BarSpacing,
@@ -22,7 +24,7 @@ namespace SpectrumNet
             string StatusText = MwConstants.ReadyStatus);
 
         private MainWindowSettings _state = new();
-        private bool _isOverlayActive, _isPopupOpen;
+        private bool _isOverlayActive, _isPopupOpen, _isOverlayTopmost = true, _isControlPanelVisible = true;
         private RenderStyle _selectedDrawingType = RenderStyle.Bars;
         private FftWindowType _selectedFftWindowType = FftWindowType.Hann;
         private OverlayWindow? _overlayWindow;
@@ -37,12 +39,18 @@ namespace SpectrumNet
 
         #region Properties
         public static bool IsDarkTheme => ThemeManager.Instance.IsDarkTheme;
-        public static IEnumerable<RenderStyle> AvailableDrawingTypes => Enum.GetValues<RenderStyle>().OrderBy(s => s.ToString());
+
+        public static IEnumerable<RenderStyle> AvailableDrawingTypes =>
+            Enum.GetValues<RenderStyle>().OrderBy(s => s.ToString());
+
         public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
             _spectrumStyles!.Styles.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
         public static IEnumerable<FftWindowType> AvailableFftWindowTypes =>
             Enum.GetValues<FftWindowType>().OrderBy(wt => wt.ToString());
+
         public SKElement? RenderElement { get; private set; }
+
         public bool CanStartCapture => _captureManager is not null && !IsRecording;
 
         public bool IsPopupOpen
@@ -51,7 +59,6 @@ namespace SpectrumNet
             set => SetField(ref _isPopupOpen, value);
         }
 
-        private bool _isOverlayTopmost = true;
         public bool IsOverlayTopmost
         {
             get => _isOverlayTopmost;
@@ -63,17 +70,13 @@ namespace SpectrumNet
             get => _isOverlayActive;
             set
             {
-                if (_isOverlayActive != value)
-                {
-                    _isOverlayActive = value;
-                    OnPropertyChanged(nameof(IsOverlayActive));
-                    SpectrumRendererFactory.ConfigureAllRenderers(value);
-                    spectrumCanvas?.InvalidateVisual();
-                }
+                if (_isOverlayActive == value) return;
+                _isOverlayActive = value;
+                OnPropertyChanged(nameof(IsOverlayActive));
+                SpectrumRendererFactory.ConfigureAllRenderers(value);
+                spectrumCanvas?.InvalidateVisual();
             }
         }
-
-        private bool _isControlPanelVisible = true;
 
         public bool IsControlPanelVisible
         {
@@ -91,11 +94,9 @@ namespace SpectrumNet
             get => _captureManager?.IsRecording ?? false;
             set
             {
-                if (_captureManager?.IsRecording != value)
-                {
-                    _ = value ? StartCaptureAsync() : StopCaptureAsync();
-                    OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
-                }
+                if (_captureManager?.IsRecording == value) return;
+                _ = value ? StartCaptureAsync() : StopCaptureAsync();
+                OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
             }
         }
 
@@ -160,54 +161,70 @@ namespace SpectrumNet
             get => _selectedFftWindowType;
             set
             {
-                if (_selectedFftWindowType != value)
-                {
-                    _selectedFftWindowType = value;
-                    OnPropertyChanged(nameof(SelectedFftWindowType));
-                    UpdateFftWindowType(value);
-                }
+                if (_selectedFftWindowType == value) return;
+                _selectedFftWindowType = value;
+                OnPropertyChanged(nameof(SelectedFftWindowType));
+                UpdateFftWindowType(value);
             }
         }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
         #endregion
 
         #region Constructor and Initialization
         public MainWindow()
         {
-            InitializeComponent();
-            _gainParameters = new GainParameters(
-                SynchronizationContext.Current,
-                SharedConstants.DefaultMinDb,
-                SharedConstants.DefaultMaxDb,
-                SharedConstants.DefaultAmplificationFactor);
+            try
+            {
+                InitializeComponent();
+                _gainParameters = new GainParameters(
+                    SynchronizationContext.Current,
+                    SharedConstants.DefaultMinDb,
+                    SharedConstants.DefaultMaxDb,
+                    SharedConstants.DefaultAmplificationFactor);
 
-            DataContext = this;
-            InitComponents();
-            InitEventHandlers();
-            ConfigureTheme();
-            UpdateProps();
-            CompositionTarget.Rendering += OnRendering;
-            UpdateToggleButtonContent();
+                DataContext = this;
+                InitComponents();
+                InitEventHandlers();
+                ConfigureTheme();
+                UpdateProps();
+                CompositionTarget.Rendering += OnRendering;
+                UpdateToggleButtonContent();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Failed to initialize main window");
+                throw;
+            }
         }
 
         private void InitComponents()
         {
-            RenderElement = spectrumCanvas ?? throw new InvalidOperationException("spectrumCanvas is null");
-            _spectrumStyles = new SpectrumBrushes();
-            _disposables = new CompositeDisposable();
+            try
+            {
+                RenderElement = spectrumCanvas ?? throw new InvalidOperationException("spectrumCanvas is null");
+                _spectrumStyles = new SpectrumBrushes();
+                _disposables = new CompositeDisposable();
 
-            var syncContext = SynchronizationContext.Current ??
-                              throw new InvalidOperationException("SynchronizationContext.Current is null");
+                var syncContext = SynchronizationContext.Current ??
+                                throw new InvalidOperationException("SynchronizationContext.Current is null");
 
-            _analyzer = new SpectrumAnalyzer(
-                new FftProcessor { WindowType = SelectedFftWindowType },
-                new SpectrumConverter(_gainParameters),
-                syncContext);
+                _analyzer = new SpectrumAnalyzer(
+                    new FftProcessor { WindowType = SelectedFftWindowType },
+                    new SpectrumConverter(_gainParameters),
+                    syncContext);
 
-            _captureManager = new AudioCaptureManager(this);
-            _renderer = new Renderer(_spectrumStyles, this, _analyzer, RenderElement);
+                _captureManager = new AudioCaptureManager(this);
+                _renderer = new Renderer(_spectrumStyles, this, _analyzer, RenderElement);
 
-            SelectedStyle = MwConstants.DefaultStyle;
-            SelectedDrawingType = RenderStyle.Bars;
+                SelectedStyle = MwConstants.DefaultStyle;
+                SelectedDrawingType = RenderStyle.Bars;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Failed to initialize components");
+                throw;
+            }
         }
 
         private void InitEventHandlers()
@@ -238,6 +255,106 @@ namespace SpectrumNet
         }
         #endregion
 
+        #region Core Methods
+        public Task StartCaptureAsync()
+        {
+            try
+            {
+                var task = _captureManager?.StartCaptureAsync() ?? Task.CompletedTask;
+                UpdateProps();
+                return task;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Failed to start audio capture");
+                return Task.CompletedTask;
+            }
+        }
+
+        public Task StopCaptureAsync()
+        {
+            try
+            {
+                var task = _captureManager?.StopCaptureAsync() ?? Task.CompletedTask;
+                UpdateProps();
+                return task;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Failed to stop audio capture");
+                return Task.CompletedTask;
+            }
+        }
+
+        private void OpenOverlay()
+        {
+            try
+            {
+                if (_overlayWindow?.IsInitialized == true)
+                {
+                    _overlayWindow.Show();
+                    _overlayWindow.Topmost = IsOverlayTopmost;
+                }
+                else
+                {
+                    _overlayWindow = new OverlayWindow(this, new OverlayConfiguration(
+                        RenderInterval: MwConstants.RenderIntervalMs,
+                        IsTopmost: IsOverlayTopmost,
+                        ShowInTaskbar: false,
+                        EnableHardwareAcceleration: true
+                    ));
+
+                    _overlayWindow.Closed += (_, _) => OnOverlayClosed();
+                    _overlayWindow.Show();
+                }
+
+                IsOverlayActive = true;
+                SpectrumRendererFactory.ConfigureAllRenderers(true);
+                spectrumCanvas?.InvalidateVisual();
+                UpdateRendererDimensions(
+                    (int)SystemParameters.PrimaryScreenWidth,
+                    (int)SystemParameters.PrimaryScreenHeight);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Failed to open overlay window");
+            }
+        }
+
+        private void CloseOverlay()
+        {
+            if (_overlayWindow == null) return;
+            _overlayWindow.Close();
+        }
+
+        private void OnOverlayClosed()
+        {
+            try
+            {
+                _overlayWindow?.Dispose();
+                _overlayWindow = null;
+                IsOverlayActive = false;
+                SpectrumRendererFactory.ConfigureAllRenderers(false);
+                spectrumCanvas?.InvalidateVisual();
+                Activate();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Error closing overlay");
+            }
+        }
+
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
+        {
+            if (IsOverlayActive && sender == spectrumCanvas)
+            {
+                e.Surface.Canvas.Clear(SKColors.Transparent);
+                return;
+            }
+            _renderer?.RenderFrame(sender, e);
+        }
+        #endregion
+
         #region Event Handlers
         private void OnRendering(object? sender, EventArgs e) => RenderElement?.InvalidateVisual();
 
@@ -255,71 +372,57 @@ namespace SpectrumNet
         private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) =>
             _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
-        {
-            // If this is the main canvas and overlay is active, don't render
-            if (IsOverlayActive && sender == spectrumCanvas)
-            {
-                e.Surface.Canvas.Clear(SKColors.Transparent);
-                return;
-            }
-            _renderer?.RenderFrame(sender, e);
-        }
-
-        private void UpdateToggleButtonContent()
-        {
-            if (ToggleButtonIcon != null && ToggleButtonIcon.RenderTransform is RotateTransform rotateTransform)
-            {
-                // Изменяем только поворот индикатора
-                var angle = IsControlPanelVisible ? 0 : 180;
-                var animation = new DoubleAnimation
-                {
-                    To = angle,
-                    Duration = TimeSpan.FromSeconds(0.3),
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                };
-
-                rotateTransform.BeginAnimation(RotateTransform.AngleProperty, animation);
-            }
-        }
-
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (sender is not ComboBox cb) return;
 
-            switch (cb.Name)
+            try
             {
-                case nameof(StyleComboBox) when SelectedStyle != null && _spectrumStyles != null:
-                    var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
-                    _renderer?.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
-                    break;
+                switch (cb.Name)
+                {
+                    case nameof(StyleComboBox) when SelectedStyle != null && _spectrumStyles != null:
+                        var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
+                        _renderer?.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
+                        break;
 
-                case nameof(RenderStyleComboBox) when RenderStyleComboBox?.SelectedValue is RenderStyle rs:
-                    _selectedDrawingType = rs;
-                    _renderer?.UpdateRenderStyle(rs);
-                    break;
+                    case nameof(RenderStyleComboBox) when RenderStyleComboBox?.SelectedValue is RenderStyle rs:
+                        _selectedDrawingType = rs;
+                        _renderer?.UpdateRenderStyle(rs);
+                        break;
 
-                case nameof(FftWindowTypeComboBox) when FftWindowTypeComboBox?.SelectedValue is FftWindowType wt:
-                    SelectedFftWindowType = wt;
-                    break;
+                    case nameof(FftWindowTypeComboBox) when FftWindowTypeComboBox?.SelectedValue is FftWindowType wt:
+                        SelectedFftWindowType = wt;
+                        break;
+                }
+                InvalidateVisuals();
             }
-            InvalidateVisuals();
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Error in combo box selection change");
+            }
         }
 
         private void OnWindowClosed(object? sender, EventArgs e)
         {
-            if (IsOverlayActive) CloseOverlay();
+            try
+            {
+                if (IsOverlayActive) CloseOverlay();
 
-            CompositionTarget.Rendering -= OnRendering;
-            RenderElement!.PaintSurface -= OnPaintSurface;
-            SizeChanged -= OnWindowSizeChanged;
-            StateChanged -= OnStateChanged;
-            MouseDoubleClick -= OnWindowMouseDoubleClick;
+                CompositionTarget.Rendering -= OnRendering;
+                RenderElement!.PaintSurface -= OnPaintSurface;
+                SizeChanged -= OnWindowSizeChanged;
+                StateChanged -= OnStateChanged;
+                MouseDoubleClick -= OnWindowMouseDoubleClick;
 
-            _renderer?.Dispose();
-            _analyzer?.Dispose();
-            _captureManager?.Dispose();
-            _disposables?.Dispose();
+                _renderer?.Dispose();
+                _analyzer?.Dispose();
+                _captureManager?.Dispose();
+                _disposables?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Error during window cleanup");
+            }
         }
 
         private void OnWindowDrag(object sender, MouseButtonEventArgs e)
@@ -340,14 +443,8 @@ namespace SpectrumNet
                         return;
                     }
 
-                    try
-                    {
-                        element = VisualTreeHelper.GetParent(element);
-                    }
-                    catch
-                    {
-                        break;
-                    }
+                    element = VisualTreeHelper.GetParent(element);
+                    if (element == null) break;
                 }
             }
 
@@ -382,156 +479,124 @@ namespace SpectrumNet
         {
             if (sender is not Button btn) return;
 
-            var actions = new Dictionary<string, Action>
+            try
             {
-                ["StartCaptureButton"] = async () => await StartCaptureAsync(),
-                ["StopCaptureButton"] = async () => await StopCaptureAsync(),
-                ["OverlayButton"] = () => OnOverlayButtonClick(sender, e),
-                ["OpenSettingsButton"] = () => Dispatcher.Invoke(() => new SettingsWindow().ShowDialog()),
-                ["OpenPopupButton"] = () => IsPopupOpen = !IsPopupOpen,
-                ["MinimizeButton"] = () => Dispatcher.Invoke(MinimizeWindow),
-                ["MaximizeButton"] = () => Dispatcher.Invoke(MaximizeWindow),
-                ["CloseButton"] = () => Dispatcher.Invoke(CloseWindow)
-            };
+                var actions = new Dictionary<string, Action>
+                {
+                    ["StartCaptureButton"] = async () => await StartCaptureAsync(),
+                    ["StopCaptureButton"] = async () => await StopCaptureAsync(),
+                    ["OverlayButton"] = () => OnOverlayButtonClick(sender, e),
+                    ["OpenSettingsButton"] = () => Dispatcher.Invoke(() => new SettingsWindow().ShowDialog()),
+                    ["OpenPopupButton"] = () => IsPopupOpen = !IsPopupOpen,
+                    ["MinimizeButton"] = () => Dispatcher.Invoke(MinimizeWindow),
+                    ["MaximizeButton"] = () => Dispatcher.Invoke(MaximizeWindow),
+                    ["CloseButton"] = () => Dispatcher.Invoke(CloseWindow)
+                };
 
-            if (actions.TryGetValue(btn.Name, out var act))
-                act();
+                if (actions.TryGetValue(btn.Name, out var act))
+                    act();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Error handling button click: {btn.Name}");
+            }
         }
 
         private void ToggleButtonContainer_MouseDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton == MouseButton.Left)
-            {
                 ToggleControlPanelButton_Click(ToggleControlPanelButton, new RoutedEventArgs());
-            }
         }
 
         private void ToggleControlPanelButton_Click(object sender, RoutedEventArgs e)
         {
-            if (IsControlPanelVisible)
+            try
             {
-                // Скрываем панель
-                var hidePanelSB = (Storyboard)FindResource("HidePanelAnimation");
-                hidePanelSB.Completed += (s, ev) =>
+                if (IsControlPanelVisible)
                 {
-                    ControlPanel.Visibility = Visibility.Collapsed;
-                    IsControlPanelVisible = false;
+                    var hidePanelSB = (Storyboard)FindResource("HidePanelAnimation");
+                    hidePanelSB.Completed += (s, ev) =>
+                    {
+                        ControlPanel.Visibility = Visibility.Collapsed;
+                        IsControlPanelVisible = false;
+                        ((Storyboard)FindResource("HidePanelAndButtonAnimation")).Begin(this);
+                    };
+                    hidePanelSB.Begin(ControlPanel);
+                }
+                else
+                {
+                    ControlPanel.Visibility = Visibility.Visible;
+                    ((Storyboard)FindResource("ShowPanelAndButtonAnimation")).Begin(this);
+                    ((Storyboard)FindResource("ShowPanelAnimation")).Begin(ControlPanel);
+                    IsControlPanelVisible = true;
+                }
 
-                    // Используем стандартную анимацию для поворота иконки
-                    var hideButtonSB = (Storyboard)FindResource("HidePanelAndButtonAnimation");
-                    hideButtonSB.Begin(this);
+                var pulseTransform = new ScaleTransform(1.0, 1.0);
+                var originalTransform = ToggleControlPanelButton.RenderTransform;
+                ToggleControlPanelButton.RenderTransform = pulseTransform;
+
+                var pulseAnimation = new DoubleAnimation
+                {
+                    From = 1.0,
+                    To = 1.1,
+                    Duration = TimeSpan.FromSeconds(0.15),
+                    AutoReverse = true,
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                 };
-                hidePanelSB.Begin(ControlPanel);
+
+                pulseTransform.BeginAnimation(ScaleTransform.ScaleXProperty, pulseAnimation);
+                pulseTransform.BeginAnimation(ScaleTransform.ScaleYProperty, pulseAnimation);
+                pulseAnimation.Completed += (s, args) => ToggleControlPanelButton.RenderTransform = originalTransform;
             }
-            else
+            catch (Exception ex)
             {
-                // Показываем панель
-                ControlPanel.Visibility = Visibility.Visible;
-
-                // Используем стандартную анимацию для поворота иконки
-                var showButtonSB = (Storyboard)FindResource("ShowPanelAndButtonAnimation");
-                showButtonSB.Begin(this);
-
-                var showPanelSB = (Storyboard)FindResource("ShowPanelAnimation");
-                showPanelSB.Begin(ControlPanel);
-                IsControlPanelVisible = true;
-            }
-
-            // Эффект пульсации при нажатии
-            ScaleTransform pulseTransform = new ScaleTransform(1.0, 1.0);
-
-            // Сохраняем оригинальную трансформацию кнопки
-            var originalTransform = ToggleControlPanelButton.RenderTransform;
-
-            // Временно заменяем трансформацию для анимации
-            ToggleControlPanelButton.RenderTransform = pulseTransform;
-
-            // Создаем и настраиваем анимацию
-            var pulseAnimation = new DoubleAnimation
-            {
-                From = 1.0,
-                To = 1.1,
-                Duration = TimeSpan.FromSeconds(0.15),
-                AutoReverse = true,
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-
-            // Запускаем анимацию
-            pulseTransform.BeginAnimation(ScaleTransform.ScaleXProperty, pulseAnimation);
-            pulseTransform.BeginAnimation(ScaleTransform.ScaleYProperty, pulseAnimation);
-
-            // Восстанавливаем оригинальную трансформацию после завершения анимации
-            pulseAnimation.Completed += (s, args) =>
-            {
-                ToggleControlPanelButton.RenderTransform = originalTransform;
-            };
-        }
-
-        private void CloseWindow() => Close();
-        private void MinimizeWindow() => WindowState = WindowState.Minimized;
-        private void MaximizeWindow() =>
-            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-
-        private void UpdateOverlayTopmostState()
-        {
-            if (_overlayWindow != null && _overlayWindow.IsInitialized)
-            {
-                _overlayWindow.Topmost = IsOverlayTopmost;
+                Log.Error(ex, $"{LogPrefix}Error toggling control panel");
             }
         }
 
         private void OnOverlayButtonClick(object sender, RoutedEventArgs e)
         {
-            if (IsOverlayActive)
-                CloseOverlay();
-            else
-                Dispatcher.Invoke(OpenOverlay);
-
-            SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
-            spectrumCanvas?.InvalidateVisual();
-        }
-
-        private void OnOverlayClosed()
-        {
-            _overlayWindow?.Dispose();
-            _overlayWindow = null;
-            IsOverlayActive = false;
-            SpectrumRendererFactory.ConfigureAllRenderers(false);
-            spectrumCanvas?.InvalidateVisual();
-            Activate();
-        }
-
-        private void OpenOverlay()
-        {
-            if (_overlayWindow != null && _overlayWindow.IsInitialized)
+            try
             {
-                _overlayWindow.Show();
-                _overlayWindow.Topmost = IsOverlayTopmost; 
+                if (IsOverlayActive)
+                    CloseOverlay();
+                else
+                    Dispatcher.Invoke(OpenOverlay);
+
+                SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
+                spectrumCanvas?.InvalidateVisual();
             }
-            else
+            catch (Exception ex)
             {
-                _overlayWindow = new OverlayWindow(this, new OverlayConfiguration(
-                    RenderInterval: MwConstants.RenderIntervalMs,
-                    IsTopmost: IsOverlayTopmost, 
-                    ShowInTaskbar: false,
-                    EnableHardwareAcceleration: true
-                ));
-
-                _overlayWindow.Closed += (_, _) => OnOverlayClosed();
-                _overlayWindow.Show();
+                Log.Error(ex, $"{LogPrefix}Error toggling overlay");
             }
-
-            IsOverlayActive = true;
-            SpectrumRendererFactory.ConfigureAllRenderers(true);
-            spectrumCanvas?.InvalidateVisual();
-            UpdateRendererDimensions(
-                (int)SystemParameters.PrimaryScreenWidth,
-                (int)SystemParameters.PrimaryScreenHeight);
         }
-        private void CloseOverlay()
+        #endregion
+
+        #region Helper Methods
+        private void UpdateToggleButtonContent()
         {
-            if (_overlayWindow == null) return;
-            _overlayWindow.Close();
+            if (ToggleButtonIcon?.RenderTransform is RotateTransform rotateTransform)
+            {
+                rotateTransform.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation
+                {
+                    To = IsControlPanelVisible ? 0 : 180,
+                    Duration = TimeSpan.FromSeconds(0.3),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                });
+            }
+        }
+
+        private void CloseWindow() => Close();
+        private void MinimizeWindow() => WindowState = WindowState.Minimized;
+
+        private void MaximizeWindow() =>
+            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+        private void UpdateOverlayTopmostState()
+        {
+            if (_overlayWindow?.IsInitialized == true)
+                _overlayWindow.Topmost = IsOverlayTopmost;
         }
 
         private void UpdateRendererDimensions(int width, int height) =>
@@ -555,20 +620,6 @@ namespace SpectrumNet
 
         private void InvalidateVisuals() => RenderElement?.InvalidateVisual();
 
-        public Task StartCaptureAsync()
-        {
-            var task = _captureManager?.StartCaptureAsync() ?? Task.CompletedTask;
-            UpdateProps();
-            return task;
-        }
-
-        public Task StopCaptureAsync()
-        {
-            var task = _captureManager?.StopCaptureAsync() ?? Task.CompletedTask;
-            UpdateProps();
-            return task;
-        }
-
         private void UpdateState(Func<MainWindowSettings, MainWindowSettings> updater, string propertyName, Action? callback = null)
         {
             _state = updater(_state);
@@ -585,12 +636,11 @@ namespace SpectrumNet
             return true;
         }
 
-        public event PropertyChangedEventHandler? PropertyChanged;
         public virtual void OnPropertyChanged(params string[] propertyNames)
         {
             foreach (var name in propertyNames)
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
+        #endregion
     }
-    #endregion
 }
