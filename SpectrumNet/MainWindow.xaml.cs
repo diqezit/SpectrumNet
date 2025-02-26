@@ -51,6 +51,13 @@ namespace SpectrumNet
             set => SetField(ref _isPopupOpen, value);
         }
 
+        private bool _isOverlayTopmost = true;
+        public bool IsOverlayTopmost
+        {
+            get => _isOverlayTopmost;
+            set => SetField(ref _isOverlayTopmost, value, UpdateOverlayTopmostState);
+        }
+
         public bool IsOverlayActive
         {
             get => _isOverlayActive;
@@ -322,6 +329,28 @@ namespace SpectrumNet
 
         private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
         {
+            if (e.OriginalSource is DependencyObject originalElement)
+            {
+                DependencyObject element = originalElement;
+                while (element != null)
+                {
+                    if (element is CheckBox)
+                    {
+                        e.Handled = true;
+                        return;
+                    }
+
+                    try
+                    {
+                        element = VisualTreeHelper.GetParent(element);
+                    }
+                    catch
+                    {
+                        break;
+                    }
+                }
+            }
+
             if (e.ChangedButton == MouseButton.Left)
             {
                 e.Handled = true;
@@ -443,6 +472,14 @@ namespace SpectrumNet
         private void MaximizeWindow() =>
             WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
+        private void UpdateOverlayTopmostState()
+        {
+            if (_overlayWindow != null && _overlayWindow.IsInitialized)
+            {
+                _overlayWindow.Topmost = IsOverlayTopmost;
+            }
+        }
+
         private void OnOverlayButtonClick(object sender, RoutedEventArgs e)
         {
             if (IsOverlayActive)
@@ -469,12 +506,13 @@ namespace SpectrumNet
             if (_overlayWindow != null && _overlayWindow.IsInitialized)
             {
                 _overlayWindow.Show();
+                _overlayWindow.Topmost = IsOverlayTopmost; 
             }
             else
             {
                 _overlayWindow = new OverlayWindow(this, new OverlayConfiguration(
                     RenderInterval: MwConstants.RenderIntervalMs,
-                    IsTopmost: true,
+                    IsTopmost: IsOverlayTopmost, 
                     ShowInTaskbar: false,
                     EnableHardwareAcceleration: true
                 ));

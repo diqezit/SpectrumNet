@@ -386,7 +386,7 @@
                                                    HorizontalAlignment="Center"
                                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     </Grid>
-                                    <Grid>
+                                    <Grid Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="120"/>
                                             <ColumnDefinition Width="*"/>
@@ -410,6 +410,24 @@
                                                    VerticalAlignment="Center"
                                                    HorizontalAlignment="Center"
                                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    </Grid>
+                                    <!-- Чекбокс для Always on top -->
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                            Text="Overlay mode:"
+               VerticalAlignment="Center"
+               HorizontalAlignment="Right"
+               Foreground="{DynamicResource TextPrimaryBrush}"
+               Margin="0,0,10,0"/>
+                                        <CheckBox Grid.Column="1"
+              Content="Always on top" 
+              IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
+              Style="{StaticResource ModernCheckBoxStyle}"
+              VerticalAlignment="Center"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>
