@@ -66,6 +66,19 @@ namespace SpectrumNet
             }
         }
 
+        private bool _isControlPanelVisible = true;
+
+        public bool IsControlPanelVisible
+        {
+            get => _isControlPanelVisible;
+            set
+            {
+                _isControlPanelVisible = value;
+                OnPropertyChanged(nameof(IsControlPanelVisible));
+                UpdateToggleButtonContent();
+            }
+        }
+
         public bool IsRecording
         {
             get => _captureManager?.IsRecording ?? false;
@@ -166,6 +179,7 @@ namespace SpectrumNet
             ConfigureTheme();
             UpdateProps();
             CompositionTarget.Rendering += OnRendering;
+            UpdateToggleButtonContent();
         }
 
         private void InitComponents()
@@ -243,6 +257,14 @@ namespace SpectrumNet
                 return;
             }
             _renderer?.RenderFrame(sender, e);
+        }
+
+        private void UpdateToggleButtonContent()
+        {
+            if (ToggleControlPanelButton != null)
+            {
+                ToggleControlPanelButton.Content = IsControlPanelVisible ? "Hide Panels" : "↑";
+            }
         }
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -340,16 +362,32 @@ namespace SpectrumNet
 
         private void ToggleControlPanelButton_Click(object sender, RoutedEventArgs e)
         {
-            if (ControlPanel.Visibility == Visibility.Visible)
+            // Принудительно обновляем ActualWidth перед анимацией
+            ToggleControlPanelButton.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            ToggleControlPanelButton.Arrange(new Rect(ToggleControlPanelButton.DesiredSize));
+
+            if (IsControlPanelVisible)
             {
+                // Скрываем панель
                 var hidePanelSB = (Storyboard)FindResource("HidePanelAnimation");
-                hidePanelSB.Completed += (s, ev) => ControlPanel.Visibility = Visibility.Collapsed;
-                hidePanelSB.Begin();
+                hidePanelSB.Completed += (s, ev) =>
+                {
+                    ControlPanel.Visibility = Visibility.Collapsed;
+                    IsControlPanelVisible = false;
+                    var hideButtonSB = (Storyboard)FindResource("HidePanelAndButtonAnimation");
+                    hideButtonSB.Begin(ToggleControlPanelButton);
+                };
+                hidePanelSB.Begin(ControlPanel);
             }
             else
             {
+                // Показываем панель
                 ControlPanel.Visibility = Visibility.Visible;
-                ((Storyboard)FindResource("ShowPanelAnimation")).Begin();
+                var showPanelSB = (Storyboard)FindResource("ShowPanelAnimation");
+                showPanelSB.Begin(ControlPanel);
+                var showButtonSB = (Storyboard)FindResource("ShowPanelAndButtonAnimation");
+                showButtonSB.Begin(ToggleControlPanelButton);
+                IsControlPanelVisible = true;
             }
         }
 

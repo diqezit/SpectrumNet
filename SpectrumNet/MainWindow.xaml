@@ -1,21 +1,21 @@
 ﻿<Window x:Class="SpectrumNet.MainWindow"
-         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-         xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
-         xmlns:local="clr-namespace:SpectrumNet"
-         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-         Title="Spectrum Analyser"
-         Height="600"
-         Width="800"
-         MinHeight="600"
-         MinWidth="800"
-         WindowStartupLocation="CenterScreen"
-         Background="Transparent" 
-         AllowsTransparency="True" 
-         WindowStyle="None"
-         ResizeMode="CanResize"
-         StateChanged="OnStateChanged"
-         MouseDoubleClick="OnWindowMouseDoubleClick">
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
+        xmlns:local="clr-namespace:SpectrumNet"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Spectrum Analyser"
+        Height="600"
+        Width="800"
+        MinHeight="600"
+        MinWidth="800"
+        WindowStartupLocation="CenterScreen"
+        Background="Transparent" 
+        AllowsTransparency="True" 
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        StateChanged="OnStateChanged"
+        MouseDoubleClick="OnWindowMouseDoubleClick">
 
     <Window.Resources>
         <Duration x:Key="StandardAnimationDuration">0:0:0.3</Duration>
@@ -23,51 +23,53 @@
         <CubicEase x:Key="StandardEaseIn" EasingMode="EaseIn"/>
 
         <Storyboard x:Key="ShowPanelAnimation">
-            <DoubleAnimation         
-            Storyboard.TargetName="ControlPanel"
-            Storyboard.TargetProperty="Opacity"
-            From="0" To="1"
-            Duration="{StaticResource StandardAnimationDuration}"
-            FillBehavior="HoldEnd">
+            <DoubleAnimation Storyboard.TargetName="ControlPanel"
+                         Storyboard.TargetProperty="Opacity"
+                         From="0"
+                         To="1"
+                         Duration="0:0:0.3"/>
+        </Storyboard>
+
+        <!-- Анимация для скрытия панели и уменьшения кнопки -->
+        <Storyboard x:Key="HidePanelAndButtonAnimation">
+            <DoubleAnimation Storyboard.TargetName="ToggleControlPanelButton"
+                     Storyboard.TargetProperty="Width"
+                     From="{Binding ActualWidth, ElementName=ToggleControlPanelButton}"
+                     To="50"
+                     Duration="0:0:0.3">
                 <DoubleAnimation.EasingFunction>
                     <CubicEase EasingMode="EaseOut"/>
                 </DoubleAnimation.EasingFunction>
             </DoubleAnimation>
-            <DoubleAnimation         
-            Storyboard.TargetName="ControlPanelTransform"
-            Storyboard.TargetProperty="Y"
-            From="20" To="0"
-            Duration="{StaticResource StandardAnimationDuration}"
-            FillBehavior="HoldEnd">
+            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ToggleControlPanelButton"
+                                       Storyboard.TargetProperty="Content">
+                <DiscreteObjectKeyFrame KeyTime="0:0:0.3" Value="↑"/>
+            </ObjectAnimationUsingKeyFrames>
+        </Storyboard>
+
+        <!-- Анимация для показа панели и восстановления кнопки -->
+        <Storyboard x:Key="ShowPanelAndButtonAnimation">
+            <DoubleAnimation Storyboard.TargetName="ToggleControlPanelButton"
+                     Storyboard.TargetProperty="Width"
+                     From="{Binding ActualWidth, ElementName=ToggleControlPanelButton}"
+                     To="200"
+                     Duration="0:0:0.3">
                 <DoubleAnimation.EasingFunction>
                     <CubicEase EasingMode="EaseOut"/>
                 </DoubleAnimation.EasingFunction>
             </DoubleAnimation>
+            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ToggleControlPanelButton"
+                                       Storyboard.TargetProperty="Content">
+                <DiscreteObjectKeyFrame KeyTime="0:0:0.3" Value="Hide Panels"/>
+            </ObjectAnimationUsingKeyFrames>
         </Storyboard>
 
         <Storyboard x:Key="HidePanelAnimation">
-            <DoubleAnimation         
-            Storyboard.TargetName="ControlPanel"
-            Storyboard.TargetProperty="Opacity"
-            From="1" To="0"
-            Duration="{StaticResource StandardAnimationDuration}"
-            FillBehavior="HoldEnd">
-                <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseIn"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
-            <DoubleAnimation         
-            Storyboard.TargetName="ControlPanelTransform"
-            Storyboard.TargetProperty="Y"
-            From="0" To="20"
-            Duration="{StaticResource StandardAnimationDuration}"
-            FillBehavior="HoldEnd">
-                <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseIn"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="ControlPanel"
+                         Storyboard.TargetProperty="Opacity"
+                         To="0"
+                         Duration="0:0:0.3"/>
         </Storyboard>
-
     </Window.Resources>
 
     <shell:WindowChrome.WindowChrome>
@@ -173,14 +175,14 @@
                     </Grid.RowDefinitions>
 
                     <ToggleButton x:Name="ToggleControlPanelButton"
-              Grid.Row="0"
-              Click="ToggleControlPanelButton_Click"
-              Content="Control Panel"
-              HorizontalAlignment="Stretch"
-              Height="30"
-              Style="{DynamicResource ControlPanelToggleButtonStyle}"
-              BorderThickness="0"
-              Margin="0,0,0,10">
+                                  Grid.Row="0"
+                                  Click="ToggleControlPanelButton_Click"
+                                  HorizontalAlignment="Stretch"
+                                  Width="100"
+                                  Height="30"
+                                  Style="{DynamicResource ControlPanelToggleButtonStyle}"
+                                  BorderThickness="0"
+                                  Margin="0,0,0,10">
                         <ToggleButton.RenderTransform>
                             <TransformGroup>
                                 <ScaleTransform x:Name="ToggleButtonScale" ScaleX="1" ScaleY="1"/>
@@ -192,25 +194,25 @@
                                 <BeginStoryboard>
                                     <Storyboard>
                                         <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[0].ScaleX"
-                                   To="1.02"
-                                   Duration="0:0:0.08"
-                                   AutoReverse="True">
+                                                         To="1.02"
+                                                         Duration="0:0:0.08"
+                                                         AutoReverse="True">
                                             <DoubleAnimation.EasingFunction>
                                                 <CubicEase EasingMode="EaseOut"/>
                                             </DoubleAnimation.EasingFunction>
                                         </DoubleAnimation>
                                         <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[0].ScaleY"
-                                   To="1.02"
-                                   Duration="0:0:0.08"
-                                   AutoReverse="True">
+                                                         To="1.02"
+                                                         Duration="0:0:0.08"
+                                                         AutoReverse="True">
                                             <DoubleAnimation.EasingFunction>
                                                 <CubicEase EasingMode="EaseOut"/>
                                             </DoubleAnimation.EasingFunction>
                                         </DoubleAnimation>
                                         <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[1].X"
-                                   To="-2"
-                                   Duration="0:0:0.08"
-                                   AutoReverse="True">
+                                                         To="-2"
+                                                         Duration="0:0:0.08"
+                                                         AutoReverse="True">
                                             <DoubleAnimation.EasingFunction>
                                                 <CubicEase EasingMode="EaseOut"/>
                                             </DoubleAnimation.EasingFunction>
@@ -480,10 +482,10 @@
                                 <ColumnDefinition Width="30"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0"
-                                     Text="Minimum dB level:"
-                                     Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                     Margin="0,0,8,0"
-                                     VerticalAlignment="Center"/>
+                                       Text="Minimum dB level:"
+                                       Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                       Margin="0,0,8,0"
+                                       VerticalAlignment="Center"/>
                             <Slider Grid.Column="1"
                                     x:Name="minDbLevelSlider"
                                     Minimum="-200" Maximum="0"
@@ -491,10 +493,10 @@
                                     Style="{DynamicResource ModernSliderStyle}"
                                     Height="20"/>
                             <TextBlock Grid.Column="2"
-                                     Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
-                                     Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                     Margin="0,0,8,0"
-                                     VerticalAlignment="Center"/>
+                                       Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
+                                       Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                       Margin="0,0,8,0"
+                                       VerticalAlignment="Center"/>
                         </Grid>
                         <Grid Margin="0,0,0,16">
                             <Grid.ColumnDefinitions>
@@ -503,10 +505,10 @@
                                 <ColumnDefinition Width="30"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0"
-                                     Text="Maximum dB level:"
-                                     Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                     Margin="0,0,8,0"
-                                     VerticalAlignment="Center"/>
+                                       Text="Maximum dB level:"
+                                       Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                       Margin="0,0,8,0"
+                                       VerticalAlignment="Center"/>
                             <Slider Grid.Column="1"
                                     x:Name="maxDbLevelSlider"
                                     Minimum="-100" Maximum="0"
@@ -514,10 +516,10 @@
                                     Style="{DynamicResource ModernSliderStyle}"
                                     Height="20"/>
                             <TextBlock Grid.Column="2"
-                                     Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
-                                     Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                     Margin="0,0,8,0"
-                                     VerticalAlignment="Center"/>
+                                       Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
+                                       Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                       Margin="0,0,8,0"
+                                       VerticalAlignment="Center"/>
                         </Grid>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -526,10 +528,10 @@
                                 <ColumnDefinition Width="30"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0"
-                                     Text="Amplification factor:"
-                                     Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                     Margin="0,0,8,0"
-                                     VerticalAlignment="Center"/>
+                                       Text="Amplification factor:"
+                                       Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                       Margin="0,0,8,0"
+                                       VerticalAlignment="Center"/>
                             <Slider Grid.Column="1"
                                     x:Name="amplificationFactorSlider"
                                     Minimum="0.01" Maximum="5"
@@ -537,10 +539,10 @@
                                     Style="{DynamicResource ModernSliderStyle}"
                                     Height="20"/>
                             <TextBlock Grid.Column="2"
-                                     Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
-                                     Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                     Margin="0,0,8,0"
-                                     VerticalAlignment="Center"/>
+                                       Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
+                                       Foreground="{DynamicResource LightTextPrimaryBrush}"
+                                       Margin="0,0,8,0"
+                                       VerticalAlignment="Center"/>
                         </Grid>
                     </StackPanel>
                 </Border>
