@@ -7,7 +7,7 @@
     {
         // Здесь задаются значения по умолчанию для уровня децибелов и коэффициента усиления.
         public const float DefaultMinDb = -130f;    // Минимальный уровень. (-80)
-        public const float DefaultMaxDb = -35f;       // Максимальный уровень (0 дБ).
-        public const float DefaultAmplificationFactor = 1.20f;  // 1f
+        public const float DefaultMaxDb = -20f;       // Максимальный уровень (0 дБ).
+        public const float DefaultAmplificationFactor = 2.0f;  // 1f
     }
 }
