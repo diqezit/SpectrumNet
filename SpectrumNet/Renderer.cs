@@ -5,7 +5,9 @@ public sealed class Renderer : IDisposable
 {
     #region Constants
     private const int RENDER_TIMEOUT_MS = 16;
-    private const string DEFAULT_STYLE = "Gradient", MESSAGE = "Push start to begin record...";
+    private const string DEFAULT_STYLE = "Gradient";
+    private const string MESSAGE = "Push start to begin record...";
+    private const string LogPrefix = "[Renderer] ";
     #endregion
 
     #region Private Fields
@@ -39,9 +41,12 @@ public sealed class Renderer : IDisposable
         _performanceMonitor = new Stopwatch();
         _shouldShowPlaceholder = true;
 
-        if (_analyzer is IComponent c) c.Disposed += (s, e) => _isAnalyzerDisposed = true;
+        if (_analyzer is IComponent c)
+            c.Disposed += (s, e) => _isAnalyzerDisposed = true;
+
         InitializeRenderer();
-        Log.Information("[Renderer] успешно инициализирован.");
+
+        Log.Information($"{LogPrefix}successfully initialized.");
     }
     #endregion
 
@@ -51,21 +56,27 @@ public sealed class Renderer : IDisposable
         try
         {
             var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(DEFAULT_STYLE);
-            if (paint == null) throw new InvalidOperationException($"[Renderer] Failed to initialize {DEFAULT_STYLE} style");
+            if (paint == null)
+                throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style");
 
             _currentState = new RenderState(paint.Clone(), RenderStyle.Bars, DEFAULT_STYLE);
-            _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS) };
+
+            _renderTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS)
+            };
             _renderTimer.Tick += (_, _) => RequestRender();
             _renderTimer.Start();
 
             SubscribeToEvents();
+
             _performanceMonitor.Start();
             _mainWindow.PropertyChanged += OnMainWindowPropertyChanged;
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "[Renderer] Не удалось инициализировать рендерер");
-            throw new InvalidOperationException("[Renderer] Не удалось инициализировать рендерер", ex);
+            Log.Error(ex, $"{LogPrefix}Failed to initialize renderer");
+            throw new InvalidOperationException($"{LogPrefix}Failed to initialize renderer", ex);
         }
     }
     #endregion
@@ -77,20 +88,22 @@ public sealed class Renderer : IDisposable
         {
             _shouldShowPlaceholder = !_mainWindow.IsRecording;
             RequestRender();
-            Log.Debug("[Renderer] Состояние плейсхолдера обновлено: {ShouldShow}", _shouldShowPlaceholder);
+            Log.Debug($"{LogPrefix}Placeholder state updated: {_shouldShowPlaceholder}");
         }
         else if (e.PropertyName == nameof(MainWindow.IsOverlayActive))
         {
             // Update all renderers when overlay state changes
             SpectrumRendererFactory.ConfigureAllRenderers(_mainWindow.IsOverlayActive);
             RequestRender();
-            Log.Debug("[Renderer] Состояние оверлея обновлено: {IsActive}", _mainWindow.IsOverlayActive);
+            Log.Debug($"{LogPrefix}Overlay state updated: {_mainWindow.IsOverlayActive}");
         }
     }
 
     private void SubscribeToEvents()
     {
-        if (_skElement == null) return;
+        if (_skElement == null)
+            return;
+
         _skElement.PaintSurface += RenderFrame;
         _skElement.Loaded += OnElementLoaded;
         _skElement.Unloaded += OnElementUnloaded;
@@ -116,7 +129,9 @@ public sealed class Renderer : IDisposable
             return;
         }
 
-        if (_isDisposed || !_renderLock.Wait(RENDER_TIMEOUT_MS)) return;
+        if (_isDisposed || !_renderLock.Wait(RENDER_TIMEOUT_MS))
+            return;
+
         try
         {
             RenderFrameInternal(e.Surface.Canvas, e.Info);
@@ -125,16 +140,23 @@ public sealed class Renderer : IDisposable
         catch (ObjectDisposedException)
         {
             _isAnalyzerDisposed = true;
-            Log.Warning("[Renderer] SpectrumAnalyzer was disposed, stopping render loop");
+            Log.Warning($"{LogPrefix}SpectrumAnalyzer was disposed, stopping render loop");
             _renderTimer?.Stop();
         }
-        catch (Exception ex) { Log.Error(ex, "[Renderer] Ошибка при рендеринге кадра"); }
-        finally { _renderLock.Release(); }
+        catch (Exception ex)
+        {
+            Log.Error(ex, $"{LogPrefix}Error rendering frame");
+        }
+        finally
+        {
+            _renderLock.Release();
+        }
     }
 
     private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
     {
         canvas.Clear(SKColors.Transparent);
+
         if (_shouldShowPlaceholder || _isAnalyzerDisposed)
         {
             RenderPlaceholder(canvas);
@@ -142,11 +164,15 @@ public sealed class Renderer : IDisposable
         }
 
         SpectralData? spectrum = null;
-        try { spectrum = _analyzer.GetCurrentSpectrum(); }
+
+        try
+        {
+            spectrum = _analyzer.GetCurrentSpectrum();
+        }
         catch (ObjectDisposedException)
         {
             _isAnalyzerDisposed = _shouldShowPlaceholder = true;
-            Log.Warning("[Renderer] SpectrumAnalyzer was disposed during spectrum acquisition");
+            Log.Warning($"{LogPrefix}SpectrumAnalyzer was disposed during spectrum acquisition");
             RenderPlaceholder(canvas);
             return;
         }
@@ -169,7 +195,14 @@ public sealed class Renderer : IDisposable
 
     private static void RenderPlaceholder(SKCanvas canvas)
     {
-        using var paint = new SKPaint { Color = SKColors.OrangeRed, TextAlign = SKTextAlign.Left, TextSize = 50, IsAntialias = true };
+        using var paint = new SKPaint
+        {
+            Color = SKColors.OrangeRed,
+            TextAlign = SKTextAlign.Left,
+            TextSize = 50,
+            IsAntialias = true
+        };
+
         canvas.Clear(SKColors.Transparent);
         canvas.DrawText(MESSAGE, 50, 100, paint);
     }
@@ -179,28 +212,33 @@ public sealed class Renderer : IDisposable
     public void UpdateRenderStyle(RenderStyle style)
     {
         EnsureNotDisposed();
+
         _currentState = _currentState with { Style = style };
         RequestRender();
-        Log.Debug("[Renderer] Обновлен стиль рендеринга: {Style}", style);
+        Log.Debug($"{LogPrefix}Render style updated: {style}");
     }
 
     public void UpdateSpectrumStyle(string styleName, SKColor startColor, SKColor endColor)
     {
         EnsureNotDisposed();
-        if (string.IsNullOrEmpty(styleName) || styleName == _currentState.StyleName) return;
+
+        if (string.IsNullOrEmpty(styleName) || styleName == _currentState.StyleName)
+            return;
 
         var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(styleName);
+
         if (paint == null)
         {
-            Log.Error("[Renderer] Кисть для стиля {StyleName} не настроена", styleName);
+            Log.Error($"{LogPrefix}Brush for style {styleName} is not configured");
             return;
         }
 
         var oldPaint = _currentState.Paint;
         _currentState = new RenderState(paint.Clone(), _currentState.Style, styleName);
         oldPaint.Dispose();
+
         RequestRender();
-        Log.Debug("[Renderer] Обновлен стиль спектра: {StyleName}", styleName);
+        Log.Debug($"{LogPrefix}Spectrum style updated: {styleName}");
     }
 
     public void RequestRender()
@@ -216,11 +254,12 @@ public sealed class Renderer : IDisposable
     {
         if (width <= 0 || height <= 0)
         {
-            Log.Warning("[Renderer] Invalid render dimensions: {Width}x{Height}", width, height);
+            Log.Warning($"{LogPrefix}Invalid render dimensions: {width}x{height}");
             return;
         }
+
         RequestRender();
-        Log.Debug("[Renderer] Render dimensions updated: {Width}x{Height}", width, height);
+        Log.Debug($"{LogPrefix}Render dimensions updated: {width}x{height}");
     }
     #endregion
 
@@ -229,19 +268,22 @@ public sealed class Renderer : IDisposable
     {
         var elapsed = _performanceMonitor.Elapsed;
         _performanceMonitor.Restart();
-        PerformanceUpdate?.Invoke(this, new(elapsed.TotalMilliseconds, 1000.0 / elapsed.TotalMilliseconds));
+        PerformanceUpdate?.Invoke(this, new PerformanceMetrics(elapsed.TotalMilliseconds, 1000.0 / elapsed.TotalMilliseconds));
     }
 
     private void EnsureNotDisposed()
     {
-        if (_isDisposed) throw new ObjectDisposedException(nameof(Renderer));
+        if (_isDisposed)
+            throw new ObjectDisposedException(nameof(Renderer));
     }
     #endregion
 
     #region IDisposable Implementation
     public void Dispose()
     {
-        if (_isDisposed) return;
+        if (_isDisposed)
+            return;
+
         _isDisposed = _isAnalyzerDisposed = true;
 
         _disposalTokenSource.Cancel();
@@ -262,7 +304,8 @@ public sealed class Renderer : IDisposable
             _skElement.Unloaded -= OnElementUnloaded;
             _skElement = null;
         }
-        Log.Information("[Renderer] Рендерер успешно утилизирован");
+
+        Log.Information($"{LogPrefix}Renderer successfully disposed");
     }
     #endregion
 }
