@@ -1,6 +1,8 @@
 ﻿global using Microsoft.Extensions.Logging;
 global using NAudio.Dsp;
 global using NAudio.Wave;
+global using NAudio.CoreAudioApi;
+global using NAudio.CoreAudioApi.Interfaces;
 global using Newtonsoft.Json;
 global using Serilog;
 global using Serilog.Events;
