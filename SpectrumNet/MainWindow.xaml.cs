@@ -261,9 +261,18 @@ namespace SpectrumNet
 
         private void UpdateToggleButtonContent()
         {
-            if (ToggleControlPanelButton != null)
+            if (ToggleButtonIcon != null && ToggleButtonIcon.RenderTransform is RotateTransform rotateTransform)
             {
-                ToggleControlPanelButton.Content = IsControlPanelVisible ? "Hide Panels" : "↑";
+                // Изменяем только поворот индикатора
+                var angle = IsControlPanelVisible ? 0 : 180;
+                var animation = new DoubleAnimation
+                {
+                    To = angle,
+                    Duration = TimeSpan.FromSeconds(0.3),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                };
+
+                rotateTransform.BeginAnimation(RotateTransform.AngleProperty, animation);
             }
         }
 
@@ -360,12 +369,16 @@ namespace SpectrumNet
                 act();
         }
 
+        private void ToggleButtonContainer_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                ToggleControlPanelButton_Click(ToggleControlPanelButton, new RoutedEventArgs());
+            }
+        }
+
         private void ToggleControlPanelButton_Click(object sender, RoutedEventArgs e)
         {
-            // Принудительно обновляем ActualWidth перед анимацией
-            ToggleControlPanelButton.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            ToggleControlPanelButton.Arrange(new Rect(ToggleControlPanelButton.DesiredSize));
-
             if (IsControlPanelVisible)
             {
                 // Скрываем панель
@@ -374,8 +387,10 @@ namespace SpectrumNet
                 {
                     ControlPanel.Visibility = Visibility.Collapsed;
                     IsControlPanelVisible = false;
+
+                    // Используем стандартную анимацию для поворота иконки
                     var hideButtonSB = (Storyboard)FindResource("HidePanelAndButtonAnimation");
-                    hideButtonSB.Begin(ToggleControlPanelButton);
+                    hideButtonSB.Begin(this);
                 };
                 hidePanelSB.Begin(ControlPanel);
             }
@@ -383,12 +398,44 @@ namespace SpectrumNet
             {
                 // Показываем панель
                 ControlPanel.Visibility = Visibility.Visible;
+
+                // Используем стандартную анимацию для поворота иконки
+                var showButtonSB = (Storyboard)FindResource("ShowPanelAndButtonAnimation");
+                showButtonSB.Begin(this);
+
                 var showPanelSB = (Storyboard)FindResource("ShowPanelAnimation");
                 showPanelSB.Begin(ControlPanel);
-                var showButtonSB = (Storyboard)FindResource("ShowPanelAndButtonAnimation");
-                showButtonSB.Begin(ToggleControlPanelButton);
                 IsControlPanelVisible = true;
             }
+
+            // Эффект пульсации при нажатии
+            ScaleTransform pulseTransform = new ScaleTransform(1.0, 1.0);
+
+            // Сохраняем оригинальную трансформацию кнопки
+            var originalTransform = ToggleControlPanelButton.RenderTransform;
+
+            // Временно заменяем трансформацию для анимации
+            ToggleControlPanelButton.RenderTransform = pulseTransform;
+
+            // Создаем и настраиваем анимацию
+            var pulseAnimation = new DoubleAnimation
+            {
+                From = 1.0,
+                To = 1.1,
+                Duration = TimeSpan.FromSeconds(0.15),
+                AutoReverse = true,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            // Запускаем анимацию
+            pulseTransform.BeginAnimation(ScaleTransform.ScaleXProperty, pulseAnimation);
+            pulseTransform.BeginAnimation(ScaleTransform.ScaleYProperty, pulseAnimation);
+
+            // Восстанавливаем оригинальную трансформацию после завершения анимации
+            pulseAnimation.Completed += (s, args) =>
+            {
+                ToggleControlPanelButton.RenderTransform = originalTransform;
+            };
         }
 
         private void CloseWindow() => Close();
