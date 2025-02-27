@@ -8,10 +8,13 @@ namespace SpectrumNet
         private static readonly Lazy<FireRenderer> _instance = new(() => new FireRenderer());
         private bool _isInitialized;
         private float[] _previousSpectrum = Array.Empty<float>();
+        private float[]? _processedSpectrum;
         private readonly Random _random = new();
         private float _time;
         private readonly SKPath _path = new();
-        private readonly object _lock = new();
+        private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
+        private readonly object _spectrumLock = new();
+        private bool _disposed;
         #endregion
 
         #region Configuration
@@ -36,14 +39,13 @@ namespace SpectrumNet
             public const float OpacityBase = 0.9f;
             public const float PositionPhaseShift = 0.5f;
             public const int MinBarCount = 10;
+            public const float GlowIntensity = 0.3f;
+            public const float HighIntensityThreshold = 0.7f;
         }
         #endregion
 
         #region Constructors and Instance Management
-        private FireRenderer()
-        {
-            // Private constructor for singleton pattern
-        }
+        private FireRenderer() { /*Private constructor for singleton pattern*/ }
 
         public static FireRenderer GetInstance() => _instance.Value;
         #endregion
@@ -51,20 +53,29 @@ namespace SpectrumNet
         #region Public Methods
         public void Initialize()
         {
-            lock (_lock)
+            try
             {
+                _renderSemaphore.Wait();
+
                 if (_isInitialized)
                     return;
 
                 _isInitialized = true;
                 _time = 0f;
+
+                Log.Debug("FireRenderer initialized");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error initializing FireRenderer: {ex.Message}");
+            }
+            finally
+            {
+                _renderSemaphore.Release();
             }
         }
 
-        public void Configure(bool isOverlayActive)
-        {
-            // Configuration method kept for interface compatibility
-        }
+        public void Configure(bool isOverlayActive) { /* Configuration method kept for interface compatibility*/ }
 
         public void Render(
             SKCanvas? canvas,
@@ -76,11 +87,113 @@ namespace SpectrumNet
             SKPaint? basePaint,
             Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            if (!ValidateRenderParameters(canvas, spectrum, basePaint))
+            if (!ValidateRenderParameters(canvas, spectrum, info, basePaint))
                 return;
 
-            using var renderScope = new RenderScope(this, canvas!, spectrum!, info, barWidth, barSpacing, barCount, basePaint!);
-            renderScope.Execute(drawPerformanceInfo);
+            bool semaphoreAcquired = false;
+            try
+            {
+                semaphoreAcquired = _renderSemaphore.Wait(0);
+
+                if (semaphoreAcquired)
+                {
+                    _time += Config.TimeStep;
+                    ProcessSpectrumData(spectrum!, barCount);
+                }
+
+                float[] renderSpectrum;
+                lock (_spectrumLock)
+                {
+                    renderSpectrum = _processedSpectrum ??
+                                     ProcessSpectrumSynchronously(spectrum!, barCount);
+                }
+
+                using var renderScope = new RenderScope(
+                    this, canvas!, renderSpectrum, info, barWidth, barSpacing, barCount, basePaint!);
+                renderScope.Execute(drawPerformanceInfo);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error rendering flames: {ex.Message}");
+            }
+            finally
+            {
+                if (semaphoreAcquired)
+                {
+                    _renderSemaphore.Release();
+                }
+            }
+        }
+
+        private void ProcessSpectrumData(float[] spectrum, int barCount)
+        {
+            try
+            {
+                EnsureSpectrumBuffer(spectrum.Length);
+
+                int halfSpectrumLength = spectrum.Length / 2;
+                int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+                float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+
+                UpdatePreviousSpectrum(spectrum);
+
+                lock (_spectrumLock)
+                {
+                    _processedSpectrum = scaledSpectrum;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error processing spectrum data: {ex.Message}");
+            }
+        }
+
+        private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
+        {
+            int halfSpectrumLength = spectrum.Length / 2;
+            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            return ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+        }
+
+        private void EnsureSpectrumBuffer(int length)
+        {
+            if (_previousSpectrum.Length != length)
+            {
+                _previousSpectrum = new float[length];
+                Array.Copy(_previousSpectrum, _previousSpectrum, length);
+            }
+        }
+
+        private float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        {
+            float[] scaledSpectrum = new float[targetCount];
+            float blockSize = (float)halfSpectrumLength / targetCount;
+            float[] localSpectrum = spectrum;
+
+            Parallel.For(0, targetCount, i =>
+            {
+                float sum = 0;
+                int start = (int)(i * blockSize);
+                int end = (int)((i + 1) * blockSize);
+
+                for (int j = start; j < end && j < halfSpectrumLength; j++)
+                    sum += localSpectrum[j];
+
+                scaledSpectrum[i] = sum / (end - start);
+            });
+
+            return scaledSpectrum;
+        }
+
+        private void UpdatePreviousSpectrum(float[] spectrum)
+        {
+            for (int i = 0; i < spectrum.Length; i++)
+            {
+                _previousSpectrum[i] = Math.Max(
+                    spectrum[i],
+                    _previousSpectrum[i] - Config.DecayRate
+                );
+            }
         }
         #endregion
 
@@ -96,6 +209,7 @@ namespace SpectrumNet
             private readonly int _barCount;
             private readonly SKPaint _basePaint;
             private readonly SKPaint _workingPaint;
+            private readonly SKPaint _glowPaint;
 
             public RenderScope(
                 FireRenderer renderer,
@@ -116,54 +230,19 @@ namespace SpectrumNet
                 _barCount = barCount;
                 _basePaint = basePaint;
                 _workingPaint = basePaint.Clone();
+
+                _glowPaint = basePaint.Clone();
+                _glowPaint.ImageFilter = SKImageFilter.CreateBlur(3f, 3f);
             }
 
             public void Execute(Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
             {
-                _renderer._time += Config.TimeStep;
-
-                EnsureSpectrumBuffer();
-
-                var actualBarCount = Math.Min(_spectrum.Length / 2, _barCount);
-                var scaledSpectrum = ScaleSpectrum();
+                var actualBarCount = _spectrum.Length;
                 var totalBarWidth = CalculateTotalBarWidth(actualBarCount);
 
-                RenderFlames(scaledSpectrum, actualBarCount, totalBarWidth);
-                UpdatePreviousSpectrum();
+                RenderFlames(actualBarCount, totalBarWidth);
 
                 drawPerformanceInfo(_canvas, _info);
-            }
-
-            private void EnsureSpectrumBuffer()
-            {
-                if (_renderer._previousSpectrum.Length != _spectrum.Length)
-                {
-                    _renderer._previousSpectrum = new float[_spectrum.Length];
-                    Array.Copy(_spectrum, _renderer._previousSpectrum, _spectrum.Length);
-                }
-            }
-
-            private float[] ScaleSpectrum()
-            {
-                int spectrumLength = _spectrum.Length / 2;
-                int targetCount = Math.Min(spectrumLength, _barCount);
-                float[] scaledSpectrum = new float[targetCount];
-                float blockSize = (float)spectrumLength / targetCount;
-                float[] localSpectrum = _spectrum;
-
-                Parallel.For(0, targetCount, i =>
-                {
-                    float sum = 0;
-                    int start = (int)(i * blockSize);
-                    int end = (int)((i + 1) * blockSize);
-
-                    for (int j = start; j < end && j < spectrumLength; j++)
-                        sum += localSpectrum[j];
-
-                    scaledSpectrum[i] = sum / (end - start);
-                });
-
-                return scaledSpectrum;
             }
 
             private float CalculateTotalBarWidth(int actualBarCount)
@@ -174,11 +253,11 @@ namespace SpectrumNet
                 return totalBarWidth;
             }
 
-            private void RenderFlames(float[] scaledSpectrum, int actualBarCount, float totalBarWidth)
+            private void RenderFlames(int actualBarCount, float totalBarWidth)
             {
                 for (int i = 0; i < actualBarCount; i++)
                 {
-                    var flameParams = CalculateFlameParameters(i, totalBarWidth, scaledSpectrum[i]);
+                    var flameParams = CalculateFlameParameters(i, totalBarWidth, _spectrum[i]);
                     RenderSingleFlame(flameParams);
                 }
             }
@@ -189,7 +268,8 @@ namespace SpectrumNet
                 float waveOffset = (float)Math.Sin(_renderer._time * Config.WaveSpeed + index * Config.PositionPhaseShift)
                     * Config.WaveAmplitude;
                 float currentHeight = spectrumValue * _info.Height * (1 + waveOffset);
-                float previousHeight = _renderer._previousSpectrum[index] * _info.Height;
+                float previousHeight = _renderer._previousSpectrum.Length > index ?
+                                      _renderer._previousSpectrum[index] * _info.Height : 0;
 
                 return new FlameParameters(
                     x, currentHeight, previousHeight,
@@ -203,6 +283,11 @@ namespace SpectrumNet
 
                 var (flameTop, flameBottom) = CalculateFlameVerticalPositions(parameters);
                 var x = CalculateHorizontalPosition(parameters);
+
+                if (parameters.CurrentHeight / parameters.CanvasHeight > Config.HighIntensityThreshold)
+                {
+                    RenderFlameGlow(x, flameTop, flameBottom, parameters);
+                }
 
                 RenderFlameBase(x, flameBottom);
                 RenderFlameBody(x, flameTop, flameBottom, parameters);
@@ -226,6 +311,7 @@ namespace SpectrumNet
 
             private void RenderFlameBase(float x, float flameBottom)
             {
+                _renderer._path.Reset();
                 _renderer._path.MoveTo(x, flameBottom);
                 _renderer._path.LineTo(x + _barWidth, flameBottom);
 
@@ -233,6 +319,27 @@ namespace SpectrumNet
                 byte bottomAlpha = (byte)(255 * Config.MinBottomAlpha);
                 bottomPaint.Color = bottomPaint.Color.WithAlpha(bottomAlpha);
                 _canvas.DrawPath(_renderer._path, bottomPaint);
+            }
+
+            private void RenderFlameGlow(float x, float flameTop, float flameBottom, FlameParameters parameters)
+            {
+                _renderer._path.Reset();
+                _renderer._path.MoveTo(x, flameBottom);
+
+                float height = flameBottom - flameTop;
+                var controlPoints = CalculateControlPoints(x, flameBottom, height, parameters.BarWidth);
+
+                _renderer._path.CubicTo(
+                    controlPoints.cp1X, controlPoints.cp1Y,
+                    controlPoints.cp2X, controlPoints.cp2Y,
+                    x + parameters.BarWidth, flameBottom
+                );
+
+                float intensity = parameters.CurrentHeight / parameters.CanvasHeight;
+                byte glowAlpha = (byte)(255 * intensity * Config.GlowIntensity);
+                _glowPaint.Color = _glowPaint.Color.WithAlpha(glowAlpha);
+
+                _canvas.DrawPath(_renderer._path, _glowPaint);
             }
 
             private void RenderFlameBody(float x, float flameTop, float flameBottom, FlameParameters parameters)
@@ -285,20 +392,10 @@ namespace SpectrumNet
                 _workingPaint.Color = _workingPaint.Color.WithAlpha(alpha);
             }
 
-            private void UpdatePreviousSpectrum()
-            {
-                for (int i = 0; i < _spectrum.Length; i++)
-                {
-                    _renderer._previousSpectrum[i] = Math.Max(
-                        _spectrum[i],
-                        _renderer._previousSpectrum[i] - Config.DecayRate
-                    );
-                }
-            }
-
             public void Dispose()
             {
                 _workingPaint.Dispose();
+                _glowPaint.Dispose();
             }
         }
 
@@ -313,30 +410,77 @@ namespace SpectrumNet
         #endregion
 
         #region Validation Methods
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? basePaint)
+        private bool ValidateRenderParameters(
+            SKCanvas? canvas,
+            float[]? spectrum,
+            SKImageInfo info,
+            SKPaint? basePaint)
         {
-            return _isInitialized &&
-                   canvas != null &&
-                   spectrum != null &&
-                   spectrum.Length > 0 &&
-                   basePaint != null;
+            if (!_isInitialized)
+            {
+                Log.Error("FireRenderer not initialized before rendering");
+                return false;
+            }
+
+            if (canvas == null)
+            {
+                Log.Error("Cannot render flames with null canvas");
+                return false;
+            }
+
+            if (spectrum == null || spectrum.Length == 0)
+            {
+                Log.Error("Cannot render flames with null or empty spectrum");
+                return false;
+            }
+
+            if (basePaint == null)
+            {
+                Log.Error("Cannot render flames with null paint");
+                return false;
+            }
+
+            if (info.Width <= 0 || info.Height <= 0)
+            {
+                Log.Error("Cannot render flames with invalid canvas dimensions");
+                return false;
+            }
+
+            return true;
         }
         #endregion
 
         #region IDisposable Implementation
         public void Dispose()
         {
-            lock (_lock)
+            if (_disposed)
+                return;
+
+            try
             {
+                _renderSemaphore.Wait();
+
                 if (!_isInitialized)
                     return;
 
                 _path.Dispose();
+                _renderSemaphore.Dispose();
                 _previousSpectrum = Array.Empty<float>();
+                _processedSpectrum = null;
                 _isInitialized = false;
-            }
+                _disposed = true;
 
-            GC.SuppressFinalize(this);
+                Log.Debug("FireRenderer disposed");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error disposing FireRenderer: {ex.Message}");
+            }
+            finally
+            {
+                _renderSemaphore.Release();
+                GC.SuppressFinalize(this);
+            }
         }
         #endregion
     }
