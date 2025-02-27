@@ -29,8 +29,24 @@ namespace SpectrumNet
     /// </summary>
     public enum RenderStyle
     {
-        AsciiDonut, Bars, CircularBars, CircularWave, Cube, Cubes, Fire, Gauge, GradientWave,
-        Heartbeat, Loudness, Particles, Raindrops, Rainbow, SphereRenderer, TextParticles, Waveform
+        AsciiDonut,
+        Bars,
+        CircularBars,
+        CircularWave,
+        Cube,
+        Cubes,
+        Fire,
+        Gauge,
+        GradientWave,
+        Heartbeat,
+        Loudness,
+        Particles,
+        Raindrops,
+        Rainbow,
+        SphereRenderer,
+        TextParticles,
+        Waveform,
+        Kenwood
     }
     #endregion
 
@@ -167,6 +183,7 @@ namespace SpectrumNet
             RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
             RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
             RenderStyle.Waveform => WaveformRenderer.GetInstance(),
+            RenderStyle.Kenwood => KenwoodRenderer.GetInstance(),
             _ => throw new ArgumentException($"Unknown render style: {style}")
         };
         #endregion
