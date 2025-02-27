@@ -46,7 +46,8 @@ namespace SpectrumNet
         SphereRenderer,
         TextParticles,
         Waveform,
-        Kenwood
+        Kenwood,
+        LedMeter
     }
     #endregion
 
@@ -68,8 +69,8 @@ namespace SpectrumNet
         /// <param name="barCount">Number of bars.</param>
         /// <param name="paint">Object for styling the rendering.</param>
         /// <param name="drawPerformanceInfo">Method for drawing performance information.</param>
-        void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info, float barWidth,
-                    float barSpacing, int barCount, SKPaint paint,
+        void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
+                    float barSpacing, int barCount, SKPaint? paint,
                     Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
 
         /// <summary>Configures the renderer for overlay mode.</summary>
@@ -184,6 +185,7 @@ namespace SpectrumNet
             RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
             RenderStyle.Waveform => WaveformRenderer.GetInstance(),
             RenderStyle.Kenwood => KenwoodRenderer.GetInstance(),
+            RenderStyle.LedMeter => LedMeterRenderer.GetInstance(),
             _ => throw new ArgumentException($"Unknown render style: {style}")
         };
         #endregion
