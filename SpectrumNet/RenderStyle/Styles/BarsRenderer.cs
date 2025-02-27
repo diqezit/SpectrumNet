@@ -135,22 +135,30 @@
     /// </summary>
     public class BarsRenderer : ISpectrumRenderer, IDisposable
     {
+        #region Fields
         private static BarsRenderer? _instance;
         private bool _isInitialized;
         private readonly SKPath _path = new();
         private volatile bool _disposed;
+        private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
 
-        private const float MaxCornerRadius = 10f,
-                            HighlightWidthProportion = 0.6f,
-                            HighlightHeightProportion = 0.1f,
-                            MaxHighlightHeight = 5f,
-                            AlphaMultiplier = 1.5f,
-                            HighlightAlphaDivisor = 3f,
-                            DefaultCornerRadiusFactor = 5.0f;
+        private const float MaxCornerRadius = 10f;
+        private const float HighlightWidthProportion = 0.6f;
+        private const float HighlightHeightProportion = 0.1f;
+        private const float MaxHighlightHeight = 5f;
+        private const float AlphaMultiplier = 1.5f;
+        private const float HighlightAlphaDivisor = 3f;
+        private const float DefaultCornerRadiusFactor = 5.0f;
+        private const float GlowEffectAlpha = 0.25f;
+        private const float MinBarHeight = 1f;
 
         private float[]? _previousSpectrum;
+        private float[]? _processedSpectrum;
         private float _smoothingFactor = 0.3f;
+        private SKPaint? _glowPaint;
+        #endregion
 
+        #region Constructor and Initialization
         private BarsRenderer() { }
 
         /// <summary>
@@ -167,35 +175,126 @@
             if (!_isInitialized)
             {
                 _isInitialized = true;
+                _glowPaint = new SKPaint
+                {
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Fill,
+                    ImageFilter = SKImageFilter.CreateBlur(5f, 5f)
+                };
                 Log.Debug("BarsRenderer initialized");
             }
         }
+        #endregion
 
+        #region Configuration
         /// <inheritdoc />
         public void Configure(bool isOverlayActive)
         {
             _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
         }
+        #endregion
 
+        #region Rendering
         /// <inheritdoc />
-        public void Render(SKCanvas canvas, float[] spectrum, SKImageInfo info,
-                            float barWidth, float barSpacing, int barCount, SKPaint paint,
-                            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+        public void Render(
+            SKCanvas? canvas,
+            float[]? spectrum,
+            SKImageInfo info,
+            float barWidth,
+            float barSpacing,
+            int barCount,
+            SKPaint? paint,
+            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 ||
-                paint == null || info.Width <= 0 || info.Height <= 0)
+            if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             {
-                Log.Warning("Invalid render parameters or renderer not initialized.");
                 return;
             }
 
+            float[] renderSpectrum;
+            bool semaphoreAcquired = false;
+            int halfSpectrumLength = spectrum!.Length / 2;
+            int renderedBarCount;
+
+            try
+            {
+                semaphoreAcquired = _spectrumSemaphore.Wait(0);
+
+                if (semaphoreAcquired)
+                {
+                    int targetBarCount = Math.Min(halfSpectrumLength, barCount);
+
+                    float[] scaledSpectrum = ScaleSpectrum(spectrum, targetBarCount, halfSpectrumLength);
+                    _processedSpectrum = SmoothSpectrum(scaledSpectrum, targetBarCount);
+                }
+
+                renderSpectrum = _processedSpectrum ??
+                                 ProcessSynchronously(spectrum!, Math.Min(halfSpectrumLength, barCount));
+
+                renderedBarCount = renderSpectrum.Length;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error processing spectrum: {ex.Message}");
+                return;
+            }
+            finally
+            {
+                if (semaphoreAcquired)
+                {
+                    _spectrumSemaphore.Release();
+                }
+            }
+
+            RenderBars(canvas!, renderSpectrum, info, barWidth, barSpacing, paint!);
+            drawPerformanceInfo?.Invoke(canvas!, info);
+        }
+
+        private bool ValidateRenderParameters(
+            SKCanvas? canvas,
+            float[]? spectrum,
+            SKImageInfo info,
+            SKPaint? paint)
+        {
+            if (!_isInitialized)
+            {
+                Log.Error("BarsRenderer not initialized before rendering");
+                return false;
+            }
+
+            if (canvas == null ||
+                spectrum == null || spectrum.Length < 2 ||
+                paint == null ||
+                info.Width <= 0 || info.Height <= 0)
+            {
+                Log.Error("Invalid render parameters for BarsRenderer");
+                return false;
+            }
+
+            return true;
+        }
+
+        private float[] ProcessSynchronously(float[] spectrum, int targetCount)
+        {
             int halfSpectrumLength = spectrum.Length / 2;
-            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            var scaledSpectrum = ScaleSpectrum(spectrum, targetCount, halfSpectrumLength);
+            return SmoothSpectrum(scaledSpectrum, targetCount);
+        }
+
+        private void RenderBars(
+            SKCanvas canvas,
+            float[] spectrum,
+            SKImageInfo info,
+            float barWidth,
+            float barSpacing,
+            SKPaint basePaint)
+        {
             float totalBarWidth = barWidth + barSpacing;
             float canvasHeight = info.Height;
 
-            using var barPaint = paint.Clone();
+            using var barPaint = basePaint.Clone();
             barPaint.IsAntialias = true;
+            barPaint.FilterQuality = SKFilterQuality.High;
 
             using var highlightPaint = new SKPaint
             {
@@ -204,17 +303,27 @@
                 Color = SKColors.White
             };
 
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
-            float[] smoothedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
+            float cornerRadius = MathF.Min(barWidth * DefaultCornerRadiusFactor, MaxCornerRadius);
 
-            for (int i = 0; i < actualBarCount; i++)
+            for (int i = 0; i < spectrum.Length; i++)
             {
-                float barHeight = MathF.Max(smoothedSpectrum[i] * canvasHeight, 1f);
-                byte alpha = (byte)MathF.Min(smoothedSpectrum[i] * AlphaMultiplier * 255f, 255f);
-                barPaint.Color = barPaint.Color.WithAlpha(alpha);
+                float magnitude = spectrum[i];
+                float barHeight = MathF.Max(magnitude * canvasHeight, MinBarHeight);
+                byte alpha = (byte)MathF.Min(magnitude * AlphaMultiplier * 255f, 255f);
+                barPaint.Color = basePaint.Color.WithAlpha(alpha);
 
                 float x = i * totalBarWidth;
-                float cornerRadius = MathF.Min(barWidth * DefaultCornerRadiusFactor, MaxCornerRadius);
+
+                if (_glowPaint != null && magnitude > 0.6f)
+                {
+                    _glowPaint.Color = barPaint.Color.WithAlpha((byte)(magnitude * 255f * GlowEffectAlpha));
+                    _path.Reset();
+                    _path.AddRoundRect(new SKRoundRect(
+                        new SKRect(x, canvasHeight - barHeight, x + barWidth, canvasHeight),
+                        cornerRadius, cornerRadius));
+                    canvas.DrawPath(_path, _glowPaint);
+                }
+
                 RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
 
                 if (barHeight > cornerRadius * 2)
@@ -224,13 +333,49 @@
                     byte highlightAlpha = (byte)(alpha / HighlightAlphaDivisor);
                     highlightPaint.Color = highlightPaint.Color.WithAlpha(highlightAlpha);
 
-                    RenderHighlight(canvas, x, barWidth, barHeight, canvasHeight, highlightWidth, highlightHeight, highlightPaint);
+                    RenderHighlight(canvas, x, barWidth, barHeight, canvasHeight,
+                                    highlightWidth, highlightHeight, highlightPaint);
                 }
             }
-
-            drawPerformanceInfo?.Invoke(canvas, info);
         }
 
+        private void RenderBar(
+            SKCanvas canvas,
+            float x,
+            float barWidth,
+            float barHeight,
+            float canvasHeight,
+            float cornerRadius,
+            SKPaint barPaint)
+        {
+            _path.Reset();
+            _path.AddRoundRect(new SKRoundRect(
+                new SKRect(x, canvasHeight - barHeight, x + barWidth, canvasHeight),
+                cornerRadius, cornerRadius));
+            canvas.DrawPath(_path, barPaint);
+        }
+
+        private static void RenderHighlight(
+            SKCanvas canvas,
+            float x,
+            float barWidth,
+            float barHeight,
+            float canvasHeight,
+            float highlightWidth,
+            float highlightHeight,
+            SKPaint highlightPaint)
+        {
+            float highlightX = x + (barWidth - highlightWidth) / 2;
+            canvas.DrawRect(
+                highlightX,
+                canvasHeight - barHeight,
+                highlightWidth,
+                highlightHeight,
+                highlightPaint);
+        }
+        #endregion
+
+        #region Spectrum Processing
         private static float[] ScaleSpectrum(float[] spectrum, int barCount, int halfSpectrumLength)
         {
             float[] scaledSpectrum = new float[barCount];
@@ -242,10 +387,12 @@
                 int start = (int)(i * blockSize);
                 int end = (int)((i + 1) * blockSize);
                 end = Math.Min(end, halfSpectrumLength);
+
                 for (int j = start; j < end; j++)
                 {
                     sum += spectrum[j];
                 }
+
                 scaledSpectrum[i] = sum / (end - start);
             }
 
@@ -263,39 +410,33 @@
 
             for (int i = 0; i < actualBarCount; i++)
             {
-                smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) + scaledSpectrum[i] * _smoothingFactor;
+                smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) +
+                                      scaledSpectrum[i] * _smoothingFactor;
                 _previousSpectrum[i] = smoothedSpectrum[i];
             }
 
             return smoothedSpectrum;
         }
+        #endregion
 
-        private void RenderBar(SKCanvas canvas, float x, float barWidth, float barHeight,
-                                        float canvasHeight, float cornerRadius, SKPaint barPaint)
-        {
-            _path.Reset();
-            _path.AddRoundRect(new SKRoundRect(new SKRect(x, canvasHeight - barHeight, x + barWidth, canvasHeight), cornerRadius, cornerRadius));
-            canvas.DrawPath(_path, barPaint);
-        }
-
-        private static void RenderHighlight(SKCanvas canvas, float x, float barWidth, float barHeight,
-                                                float canvasHeight, float highlightWidth, float highlightHeight, SKPaint highlightPaint)
-        {
-            float highlightX = x + (barWidth - highlightWidth) / 2;
-            canvas.DrawRect(highlightX, canvasHeight - barHeight, highlightWidth, highlightHeight, highlightPaint);
-        }
-
+        #region Disposal
         /// <inheritdoc />
         protected virtual void Dispose(bool disposing)
         {
-            if (_disposed) return;
-            if (disposing)
+            if (!_disposed)
             {
-                _path.Dispose();
-                _previousSpectrum = null;
+                if (disposing)
+                {
+                    _spectrumSemaphore?.Dispose();
+                    _path?.Dispose();
+                    _glowPaint?.Dispose();
+                    _previousSpectrum = null;
+                    _processedSpectrum = null;
+                }
+
+                _disposed = true;
+                Log.Debug("BarsRenderer disposed");
             }
-            _disposed = true;
-            Log.Debug("BarsRenderer disposed");
         }
 
         /// <inheritdoc />
@@ -304,8 +445,8 @@
             Dispose(true);
             GC.SuppressFinalize(this);
         }
+        #endregion
     }
 
     #endregion
-
 }
