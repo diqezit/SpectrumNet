@@ -1,4 +1,5 @@
 ﻿#nullable enable
+
 namespace SpectrumNet
 {
     #region Structs
@@ -33,21 +34,26 @@ namespace SpectrumNet
         Bars,
         CircularBars,
         CircularWave,
+        Constellation, 
         Cube,
         Cubes,
-        Fire,
+        Fire,       
         Gauge,
+        Glitch,         
         GradientWave,
         Heartbeat,
+        Kenwood,
+        LedMeter,
         Loudness,
         Particles,
+        Polar,        
         Raindrops,
         Rainbow,
         SphereRenderer,
         TextParticles,
-        Waveform,
-        Kenwood,
-        LedMeter
+        Voronoi,
+        Waterfall,   
+        Waveform
     }
     #endregion
 
@@ -118,8 +124,16 @@ namespace SpectrumNet
 
                 if (!_initializedRenderers.Contains(style))
                 {
-                    renderer.Initialize();
-                    _initializedRenderers.Add(style);
+                    try
+                    {
+                        renderer.Initialize();
+                        _initializedRenderers.Add(style);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"Failed to initialize renderer {style}: {ex.Message}");
+                        throw;
+                    }
                 }
 
                 renderer.Configure(isOverlayActive);
@@ -171,21 +185,26 @@ namespace SpectrumNet
             RenderStyle.Bars => BarsRenderer.GetInstance(),
             RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
             RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
+            RenderStyle.Constellation => ConstellationRenderer.GetInstance(),
             RenderStyle.Cube => CubeRenderer.GetInstance(),
             RenderStyle.Cubes => CubesRenderer.GetInstance(),
             RenderStyle.Fire => FireRenderer.GetInstance(),
             RenderStyle.Gauge => GaugeRenderer.GetInstance(),
+            RenderStyle.Glitch => GlitchRenderer.GetInstance(),
             RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
             RenderStyle.Heartbeat => HeartbeatRenderer.GetInstance(),
+            RenderStyle.Kenwood => KenwoodRenderer.GetInstance(),
+            RenderStyle.LedMeter => LedMeterRenderer.GetInstance(),
             RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
             RenderStyle.Particles => ParticlesRenderer.GetInstance(),
+            RenderStyle.Polar => PolarRenderer.GetInstance(),
             RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
             RenderStyle.Rainbow => RainbowRenderer.GetInstance(),
             RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
             RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
+            RenderStyle.Voronoi => VoronoiRenderer.GetInstance(),
+            RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
             RenderStyle.Waveform => WaveformRenderer.GetInstance(),
-            RenderStyle.Kenwood => KenwoodRenderer.GetInstance(),
-            RenderStyle.LedMeter => LedMeterRenderer.GetInstance(),
             _ => throw new ArgumentException($"Unknown render style: {style}")
         };
         #endregion
