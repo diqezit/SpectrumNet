@@ -638,30 +638,21 @@ namespace SpectrumNet
             {
                 Log.Debug($"{LogPrefix}Changing spectrum scale from {_analyzer.ScaleType} to {scale}");
 
-                // Временно приостанавливаем обработку
                 bool wasRecording = _captureManager?.IsRecording ?? false;
 
                 if (wasRecording)
                 {
                     Log.Debug($"{LogPrefix}Pausing capture for scale change");
-                    // Используем await вместо GetAwaiter().GetResult()
                     await Task.Run(() => _captureManager?.StopCaptureAsync(false));
                 }
 
-                // Небольшая задержка для стабилизации состояния
                 await Task.Delay(50);
-
-                // Устанавливаем новую шкалу (внутри будет вызван ResetSpectrum)
                 _analyzer.ScaleType = scale;
-
-                // Небольшая задержка для стабилизации состояния
                 await Task.Delay(50);
 
-                // Возобновляем обработку
                 if (wasRecording)
                 {
                     Log.Debug($"{LogPrefix}Resuming capture after scale change");
-                    // Используем await вместо GetAwaiter().GetResult()
                     await Task.Run(() => _captureManager?.StartCaptureAsync());
                 }
 

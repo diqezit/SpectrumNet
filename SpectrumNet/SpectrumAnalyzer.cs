@@ -748,8 +748,6 @@ namespace SpectrumNet
                     spectrum[i] = 0;
                 }
             });
-
-            Log.Debug($"{LogPrefix}Logarithmic spectrum processing completed");
         }
 
         private static void ProcessSpectrumVector(Complex[] fft, float[] spectrum, int index, int minIdx, SpectrumParameters sp)

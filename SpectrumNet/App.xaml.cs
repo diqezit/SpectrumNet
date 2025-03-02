@@ -1,4 +1,5 @@
 ﻿#nullable enable
+using Serilog.Core;
 
 namespace SpectrumNet
 {
@@ -12,9 +13,11 @@ namespace SpectrumNet
 
         private static readonly string ApplicationVersion =
             Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "Unknown";
-
         private static ILoggerFactory _loggerFactory = null!;
+
         public static ILoggerFactory LoggerFactory => _loggerFactory;
+
+        public static int MaxMessagesPerSecond { get; set; } = 5;
 
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -22,7 +25,7 @@ namespace SpectrumNet
             {
                 InitializeLogging();
                 _loggerFactory = new LoggerFactory();
-                _loggerFactory.AddSerilog(); // Add Serilog as logging provider
+                _loggerFactory.AddSerilog();
 
                 var logger = _loggerFactory.CreateLogger<App>();
                 logger.LogInformation("Application '{Application}' version '{Version}' started", "SpectrumNet", ApplicationVersion);
@@ -42,6 +45,19 @@ namespace SpectrumNet
             }
         }
 
+        protected override void OnExit(ExitEventArgs e)
+        {
+            try
+            {
+                Log.Information("Application '{Application}' version '{Version}' closed", "SpectrumNet", ApplicationVersion);
+            }
+            finally
+            {
+                Log.CloseAndFlush();
+                base.OnExit(e);
+            }
+        }
+
         private void InitializeLogging()
         {
             EnsureLogDirectoryExists();
@@ -51,6 +67,7 @@ namespace SpectrumNet
                 .MinimumLevel.Debug()
                 .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
                 .MinimumLevel.Override("System", LogEventLevel.Warning)
+                .Filter.With(new RateBasedFilter(App.MaxMessagesPerSecond))
                 .Enrich.WithProperty("Application", "SpectrumNet")
                 .Enrich.WithProperty("Version", ApplicationVersion)
                 .Enrich.WithMachineName()
@@ -64,7 +81,6 @@ namespace SpectrumNet
         private void ConfigureLogOutputs(LoggerConfiguration loggerConfig)
         {
             loggerConfig.WriteTo.Console(outputTemplate: OutputTemplate);
-
             loggerConfig.WriteTo.File(
                 Path.Combine(LogDirectoryPath, LatestLogFileName),
                 outputTemplate: OutputTemplate,
@@ -72,6 +88,38 @@ namespace SpectrumNet
                 retainedFileCountLimit: RetainedFileCount,
                 buffered: false,
                 flushToDiskInterval: TimeSpan.FromSeconds(1));
+        }
+
+        public static void ReconfigureLogging()
+        {
+            Log.Information("Reconfiguring logging settings");
+
+            Log.CloseAndFlush();
+
+            var loggerConfig = new LoggerConfiguration()
+                .MinimumLevel.Debug()
+                .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+                .MinimumLevel.Override("System", LogEventLevel.Warning)
+                .Filter.With(new RateBasedFilter(App.MaxMessagesPerSecond))
+                .Enrich.WithProperty("Application", "SpectrumNet")
+                .Enrich.WithProperty("Version", ApplicationVersion)
+                .Enrich.WithMachineName()
+                .Enrich.WithEnvironmentUserName()
+                .Enrich.WithThreadId();
+
+            loggerConfig.WriteTo.Console(outputTemplate: OutputTemplate);
+            loggerConfig.WriteTo.File(
+                Path.Combine(LogDirectoryPath, LatestLogFileName),
+                outputTemplate: OutputTemplate,
+                fileSizeLimitBytes: MaxFileSizeMB * 1024 * 1024,
+                retainedFileCountLimit: RetainedFileCount,
+                buffered: false,
+                flushToDiskInterval: TimeSpan.FromSeconds(1));
+
+            Log.Logger = loggerConfig.CreateLogger();
+
+            _loggerFactory = new LoggerFactory();
+            _loggerFactory.AddSerilog();
         }
 
         private void EnsureLogDirectoryExists()
@@ -99,17 +147,123 @@ namespace SpectrumNet
                 File.Move(latestLogPath, backupPath);
             }
         }
+    }
 
-        protected override void OnExit(ExitEventArgs e)
+    public class RateBasedFilter : ILogEventFilter
+    {
+        private readonly ConcurrentDictionary<string, Queue<DateTime>> _messageTimestamps = new();
+        private readonly int _maxMessagesPerSecond;
+        private DateTime _lastCleanupTime = DateTime.UtcNow;
+
+        private static readonly HashSet<string> ImportantKeywords = new(StringComparer.OrdinalIgnoreCase)
         {
-            try
+            "initialized", "started", "changed", "changing", "completed",
+            "reset", "disposed", "closed", "registered", "pausing", "resuming"
+        };
+
+        public RateBasedFilter(int maxMessagesPerSecond)
+        {
+            _maxMessagesPerSecond = maxMessagesPerSecond;
+        }
+
+        public bool IsEnabled(LogEvent logEvent)
+        {
+            if (logEvent.Level == LogEventLevel.Error || logEvent.Level == LogEventLevel.Fatal)
+                return true;
+
+            if (logEvent.Level != LogEventLevel.Debug)
+                return true;
+
+            string message = logEvent.MessageTemplate.Text;
+            if (ContainsImportantKeyword(message))
+                return true;
+
+            PeriodicCleanup();
+
+            string source = GetSourceKey(logEvent);
+            var now = DateTime.UtcNow;
+
+            if (!_messageTimestamps.TryGetValue(source, out var timestamps))
             {
-                Log.Information("Application '{Application}' version '{Version}' closed", "SpectrumNet", ApplicationVersion);
+                timestamps = new Queue<DateTime>();
+                _messageTimestamps[source] = timestamps;
             }
-            finally
+
+            while (timestamps.Count > 0 && (now - timestamps.Peek()).TotalSeconds > 1)
             {
-                Log.CloseAndFlush();
-                base.OnExit(e);
+                timestamps.Dequeue();
+            }
+
+            if (timestamps.Count >= _maxMessagesPerSecond)
+            {
+                return false;
+            }
+
+            timestamps.Enqueue(now);
+            return true;
+        }
+
+        private bool ContainsImportantKeyword(string message)
+        {
+            foreach (var keyword in ImportantKeywords)
+            {
+                if (message.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        private string GetSourceKey(LogEvent logEvent)
+        {
+            string threadId = GetThreadId(logEvent);
+            string component = GetComponent(logEvent.MessageTemplate.Text);
+            return $"{component}:{threadId}";
+        }
+
+        private string GetThreadId(LogEvent logEvent)
+        {
+            if (logEvent.Properties.TryGetValue("ThreadId", out var threadIdProp) &&
+                threadIdProp is ScalarValue threadIdValue)
+            {
+                return threadIdValue.Value?.ToString() ?? "0";
+            }
+            return "0";
+        }
+
+        private string GetComponent(string message)
+        {
+            int start = message.IndexOf('[');
+            if (start >= 0)
+            {
+                int end = message.IndexOf(']', start);
+                if (end > start)
+                {
+                    return message.Substring(start + 1, end - start - 1);
+                }
+            }
+            return "Unknown";
+        }
+
+        private void PeriodicCleanup()
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastCleanupTime).TotalMinutes < 5)
+                return;
+
+            _lastCleanupTime = now;
+
+            var keysToRemove = new List<string>();
+            foreach (var entry in _messageTimestamps)
+            {
+                if (entry.Value.Count == 0 || (now - entry.Value.Peek()).TotalSeconds > 10)
+                {
+                    keysToRemove.Add(entry.Key);
+                }
+            }
+
+            foreach (var key in keysToRemove)
+            {
+                _messageTimestamps.TryRemove(key, out _);
             }
         }
     }
