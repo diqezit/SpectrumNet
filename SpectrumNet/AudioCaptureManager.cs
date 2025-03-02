@@ -128,6 +128,9 @@ namespace SpectrumNet
                                     new FftProcessor { WindowType = _mainWindow.SelectedFftWindowType },
                                     new SpectrumConverter(_mainWindow._gainParameters),
                                     SynchronizationContext.Current);
+
+                                _mainWindow._analyzer.ScaleType = _mainWindow.SelectedScaleType;
+
                                 if (_mainWindow.RenderElement is { ActualWidth: > 0, ActualHeight: > 0 })
                                 {
                                     _mainWindow._renderer = new Renderer(
@@ -257,14 +260,21 @@ namespace SpectrumNet
         {
             return _mainWindow.Dispatcher.Invoke(() =>
             {
-                var analyzer = new SpectrumAnalyzer(new FftProcessor(),
-                                                     new SpectrumConverter(_mainWindow._gainParameters),
-                                                     SynchronizationContext.Current);
+                var analyzer = new SpectrumAnalyzer(
+                    new FftProcessor(),
+                    new SpectrumConverter(_mainWindow._gainParameters),
+                    SynchronizationContext.Current);
+
+                analyzer.ScaleType = _mainWindow.SelectedScaleType;
+
                 if (_mainWindow.RenderElement is { ActualWidth: > 0, ActualHeight: > 0 })
                 {
                     _mainWindow._renderer?.Dispose();
-                    _mainWindow._renderer = new Renderer(_mainWindow._spectrumStyles ?? new SpectrumBrushes(),
-                                                         _mainWindow, analyzer, _mainWindow.RenderElement);
+                    _mainWindow._renderer = new Renderer(
+                        _mainWindow._spectrumStyles ?? new SpectrumBrushes(),
+                        _mainWindow,
+                        analyzer,
+                        _mainWindow.RenderElement);
                 }
                 return analyzer;
             });

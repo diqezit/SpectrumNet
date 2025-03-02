@@ -43,9 +43,11 @@ namespace SpectrumNet
         Task AddSamplesAsync(float[] samples, int sampleRate, CancellationToken cancellationToken = default);
     }
 
+    public enum SpectrumScale { Linear, Logarithmic }
+
     public interface ISpectrumConverter
     {
-        float[] ConvertToSpectrum(Complex[] fftResult, int sampleRate);
+        float[] ConvertToSpectrum(Complex[] fftResult, int sampleRate, SpectrumScale scale);
     }
 
     public readonly struct FftEventArgs
@@ -161,6 +163,8 @@ namespace SpectrumNet
 
         private SpectralData? _lastData;
         private bool _disposed;
+        private readonly object _scaleLock = new object();
+        private SpectrumScale _scaleType = SpectrumScale.Linear;
 
         public SpectrumAnalyzer(IFftProcessor fftProcessor, ISpectrumConverter converter, SynchronizationContext? context = null)
         {
@@ -173,6 +177,24 @@ namespace SpectrumNet
 
         public IFftProcessor FftProcessor => _fftProcessor;
 
+        public SpectrumScale ScaleType
+        {
+            get
+            {
+                lock (_scaleLock) { return _scaleType; }
+            }
+            set
+            {
+                lock (_scaleLock)
+                {
+                    if (_scaleType == value) return;
+                    Log.Debug($"{LogPrefix}Setting scale type: {value}");
+                    _scaleType = value;
+                }
+                ResetSpectrum();
+            }
+        }
+
         public SpectralData? GetCurrentSpectrum()
         {
             if (_disposed)
@@ -181,6 +203,23 @@ namespace SpectrumNet
             }
 
             return _lastData;
+        }
+
+        public void ResetSpectrum()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SpectrumAnalyzer));
+            }
+
+            _lastData = null;
+            if (_context != null)
+            {
+                var emptyData = new SpectralData(Array.Empty<float>(), DateTime.UtcNow);
+                _context.Post(_ => SpectralDataReady?.Invoke(this, new SpectralDataEventArgs(emptyData)), null);
+            }
+
+            Log.Debug($"{LogPrefix}Spectrum data reset due to scale change to {ScaleType}");
         }
 
         public async Task AddSamplesAsync(float[] samples, int sampleRate, CancellationToken cancellationToken = default)
@@ -212,10 +251,17 @@ namespace SpectrumNet
             {
                 if (e.Result?.Length > 0)
                 {
-                    var spectrum = _converter.ConvertToSpectrum(e.Result, e.SampleRate);
+                    SpectrumScale currentScale;
+                    lock (_scaleLock) { currentScale = _scaleType; }
+
+                    Log.Debug($"{LogPrefix}Processing FFT data with scale type: {currentScale}");
+
+                    var spectrum = _converter.ConvertToSpectrum(e.Result, e.SampleRate, currentScale);
                     var data = new SpectralData(spectrum, DateTime.UtcNow);
 
                     _lastData = data;
+
+                    Log.Debug($"{LogPrefix}Spectrum calculated: {spectrum.Length} points, scale: {currentScale}");
 
                     if (_context != null)
                     {
@@ -299,6 +345,8 @@ namespace SpectrumNet
                 new UnboundedChannelOptions { SingleReader = true, AllowSynchronousContinuations = true });
             _cts = new CancellationTokenSource();
             _processTask = Task.Run(ProcessAsync);
+
+            Log.Debug($"{LogPrefix}Initialized with FFT size: {fftSize}, window: {_windowType}");
         }
 
         public FftWindowType WindowType
@@ -308,6 +356,7 @@ namespace SpectrumNet
             {
                 if (_windowType != value)
                 {
+                    Log.Debug($"{LogPrefix}Changing window type from {_windowType} to {value}");
                     _windowType = value;
                     _window = GenerateWindow(_fftSize, value);
                     _sampleCount = 0;
@@ -561,6 +610,7 @@ namespace SpectrumNet
 
             try
             {
+                Log.Debug($"{LogPrefix}Performing FFT calculation for sampling rate: {rate}");
                 FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
 
                 FftCalculated?.Invoke(this, new FftEventArgs(_buffer, rate));
@@ -574,6 +624,7 @@ namespace SpectrumNet
 
     public sealed class SpectrumConverter : ISpectrumConverter
     {
+        private const string LogPrefix = "[SpectrumConverter] ";
         private readonly IGainParametersProvider _params;
         private readonly ArrayPool<float> _pool;
         private readonly int _vectorSize;
@@ -598,7 +649,7 @@ namespace SpectrumNet
             _parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
         }
 
-        public float[] ConvertToSpectrum(Complex[] fft, int sampleRate)
+        public float[] ConvertToSpectrum(Complex[] fft, int sampleRate, SpectrumScale scale)
         {
             if (fft == null)
             {
@@ -610,13 +661,23 @@ namespace SpectrumNet
                 throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
             }
 
-            var range = CalculateSpectrumRange(fft.Length, sampleRate);
+            Log.Debug($"{LogPrefix}ConvertToSpectrum called with scale: {scale}");
 
+            var range = CalculateSpectrumRange(fft.Length, sampleRate);
             float[] spectrum = _pool.Rent(range.Length);
 
             try
             {
-                ProcessSpectrum(fft, spectrum, range);
+                if (scale == SpectrumScale.Linear)
+                {
+                    Log.Debug($"{LogPrefix}Using LINEAR processing, range: {range.MinIndex}-{range.MaxIndex}");
+                    ProcessSpectrumLinear(fft, spectrum, range);
+                }
+                else
+                {
+                    Log.Debug($"{LogPrefix}Using LOGARITHMIC processing, range: {range.MinIndex}-{range.MaxIndex}");
+                    ProcessSpectrumLogarithmic(fft, spectrum, range, sampleRate);
+                }
 
                 return spectrum.AsSpan(0, range.Length).ToArray();
             }
@@ -640,10 +701,9 @@ namespace SpectrumNet
             return new SpectrumRange(minIdx, maxIdx);
         }
 
-        private void ProcessSpectrum(Complex[] fft, float[] spectrum, SpectrumRange range)
+        private void ProcessSpectrumLinear(Complex[] fft, float[] spectrum, SpectrumRange range)
         {
             SpectrumParameters spParams = SpectrumParameters.FromProvider(_params);
-
             int vectorEnd = range.MinIndex + ((range.MaxIndex - range.MinIndex) / _vectorSize) * _vectorSize;
 
             Parallel.ForEach(
@@ -662,6 +722,34 @@ namespace SpectrumNet
                 float mag = fft[i].X * fft[i].X + fft[i].Y * fft[i].Y;
                 spectrum[i - range.MinIndex] = CalculateSpectrumValue(mag, spParams);
             });
+        }
+
+        private void ProcessSpectrumLogarithmic(Complex[] fft, float[] spectrum, SpectrumRange range, int sampleRate)
+        {
+            SpectrumParameters spParams = SpectrumParameters.FromProvider(_params);
+            int len = range.Length;
+            float logMin = MathF.Log10(Constants.MinFreq);
+            float logMax = MathF.Log10(Constants.MaxFreq);
+            float logStep = (logMax - logMin) / (len - 1);
+
+            Log.Debug($"{LogPrefix}Logarithmic parameters: logMin={logMin}, logMax={logMax}, len={len}");
+
+            Parallel.For(0, len, i =>
+            {
+                float freq = MathF.Pow(10, logMin + i * logStep);
+                int binIndex = (int)(freq * fft.Length / sampleRate);
+                if (binIndex >= 0 && binIndex < fft.Length)
+                {
+                    float mag = fft[binIndex].X * fft[binIndex].X + fft[binIndex].Y * fft[binIndex].Y;
+                    spectrum[i] = CalculateSpectrumValue(mag, spParams);
+                }
+                else
+                {
+                    spectrum[i] = 0;
+                }
+            });
+
+            Log.Debug($"{LogPrefix}Logarithmic spectrum processing completed");
         }
 
         private static void ProcessSpectrumVector(Complex[] fft, float[] spectrum, int index, int minIdx, SpectrumParameters sp)

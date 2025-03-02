@@ -157,7 +157,8 @@ public sealed class Renderer : IDisposable
     {
         canvas.Clear(SKColors.Transparent);
 
-        if (_shouldShowPlaceholder || _isAnalyzerDisposed)
+        // Быстрая проверка необходимости отображения плейсхолдера
+        if (_shouldShowPlaceholder || _isAnalyzerDisposed || _analyzer == null)
         {
             RenderPlaceholder(canvas);
             return;
@@ -167,30 +168,94 @@ public sealed class Renderer : IDisposable
 
         try
         {
-            spectrum = _analyzer.GetCurrentSpectrum();
+            // Защитный блок для получения спектра - делаем короткую операцию 
+            // и завершаемся при любых проблемах
+            try
+            {
+                spectrum = _analyzer.GetCurrentSpectrum();
+            }
+            catch (ObjectDisposedException)
+            {
+                _isAnalyzerDisposed = true;
+                _shouldShowPlaceholder = true;
+                Log.Warning($"{LogPrefix}SpectrumAnalyzer was disposed during spectrum acquisition");
+                RenderPlaceholder(canvas);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Error obtaining spectrum data");
+                RenderPlaceholder(canvas);
+                return;
+            }
+
+            // Проверка наличия данных для рендеринга
+            if (spectrum?.Spectrum is not { Length: > 0 })
+            {
+                RenderPlaceholder(canvas);
+                return;
+            }
+
+            // Вынесем расчеты параметров в отдельный блок try-catch
+            // для изоляции возможных ошибок
+            RenderStyle style;
+            float barWidth, barSpacing;
+            int barCount;
+
+            try
+            {
+                style = _currentState.Style;
+                barCount = _mainWindow.BarCount;
+                var totalWidth = info.Width;
+
+                // Защита от деления на ноль и некорректных значений
+                if (totalWidth <= 0 || barCount <= 0)
+                {
+                    RenderPlaceholder(canvas);
+                    return;
+                }
+
+                barSpacing = Math.Min((float)_mainWindow.BarSpacing, totalWidth / (barCount + 1));
+                barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
+
+                // Корректировка расстояния между полосами
+                if (barCount > 1)
+                    barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
+                else
+                    barSpacing = 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Error calculating render parameters");
+                RenderPlaceholder(canvas);
+                return;
+            }
+
+            // Рендерим спектр с защитой от исключений
+            try
+            {
+                var renderer = SpectrumRendererFactory.CreateRenderer(style, _mainWindow.IsOverlayActive);
+                renderer.Render(
+                    canvas,
+                    spectrum.Spectrum,
+                    info,
+                    barWidth,
+                    barSpacing,
+                    barCount,
+                    _currentState.Paint,
+                    PerfomanceMetrics.DrawPerformanceInfo);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"{LogPrefix}Error during spectrum rendering");
+                RenderPlaceholder(canvas);
+            }
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex)
         {
-            _isAnalyzerDisposed = _shouldShowPlaceholder = true;
-            Log.Warning($"{LogPrefix}SpectrumAnalyzer was disposed during spectrum acquisition");
+            Log.Error(ex, $"{LogPrefix}Unhandled exception in render loop");
             RenderPlaceholder(canvas);
-            return;
         }
-
-        if (spectrum?.Spectrum is not { Length: > 0 })
-        {
-            RenderPlaceholder(canvas);
-            return;
-        }
-
-        var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _mainWindow.IsOverlayActive);
-        var totalWidth = info.Width;
-        var barCount = _mainWindow.BarCount;
-        var barSpacing = Math.Min((float)_mainWindow.BarSpacing, totalWidth / (barCount + 1));
-        var barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
-        barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
-
-        renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint, PerfomanceMetrics.DrawPerformanceInfo);
     }
 
     private static void RenderPlaceholder(SKCanvas canvas)

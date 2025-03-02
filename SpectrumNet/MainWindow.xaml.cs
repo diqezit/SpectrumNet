@@ -27,6 +27,7 @@ namespace SpectrumNet
         private bool _isOverlayActive, _isPopupOpen, _isOverlayTopmost = true, _isControlPanelVisible = true;
         private RenderStyle _selectedDrawingType = RenderStyle.Bars;
         private FftWindowType _selectedFftWindowType = FftWindowType.Hann;
+        private SpectrumScale _selectedScaleType = SpectrumScale.Linear;
         private OverlayWindow? _overlayWindow;
 
         internal SpectrumBrushes? _spectrumStyles;
@@ -43,11 +44,14 @@ namespace SpectrumNet
         public static IEnumerable<RenderStyle> AvailableDrawingTypes =>
             Enum.GetValues<RenderStyle>().OrderBy(s => s.ToString());
 
-        public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
-            _spectrumStyles!.Styles.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-
         public static IEnumerable<FftWindowType> AvailableFftWindowTypes =>
             Enum.GetValues<FftWindowType>().OrderBy(wt => wt.ToString());
+
+        public static IEnumerable<SpectrumScale> AvailableScaleTypes =>
+            Enum.GetValues<SpectrumScale>().OrderBy(s => s.ToString());
+
+        public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
+            _spectrumStyles!.Styles.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
         public SKElement? RenderElement { get; private set; }
 
@@ -116,6 +120,18 @@ namespace SpectrumNet
         {
             get => _selectedDrawingType;
             set => SetField(ref _selectedDrawingType, value, () => _renderer?.UpdateRenderStyle(value));
+        }
+
+        public SpectrumScale SelectedScaleType
+        {
+            get => _selectedScaleType;
+            set
+            {
+                if (_selectedScaleType == value) return;
+                _selectedScaleType = value;
+                OnPropertyChanged(nameof(SelectedScaleType));
+                UpdateSpectrumScale(value);
+            }
         }
 
         public string SelectedStyle
@@ -214,6 +230,7 @@ namespace SpectrumNet
                     new SpectrumConverter(_gainParameters),
                     syncContext);
 
+                _analyzer.ScaleType = SelectedScaleType;
                 _captureManager = new AudioCaptureManager(this);
                 _renderer = new Renderer(_spectrumStyles, this, _analyzer, RenderElement);
 
@@ -392,6 +409,10 @@ namespace SpectrumNet
 
                     case nameof(FftWindowTypeComboBox) when FftWindowTypeComboBox?.SelectedValue is FftWindowType wt:
                         SelectedFftWindowType = wt;
+                        break;
+
+                    case nameof(ScaleTypeComboBox) when ScaleTypeComboBox?.SelectedValue is SpectrumScale scale:
+                        SelectedScaleType = scale;
                         break;
                 }
                 InvalidateVisuals();
@@ -606,6 +627,53 @@ namespace SpectrumNet
         {
             if (_analyzer?.FftProcessor != null)
                 _analyzer.FftProcessor.WindowType = windowType;
+        }
+
+        private async void UpdateSpectrumScale(SpectrumScale scale)
+        {
+            if (_analyzer == null)
+                return;
+
+            try
+            {
+                Log.Debug($"{LogPrefix}Changing spectrum scale from {_analyzer.ScaleType} to {scale}");
+
+                // Временно приостанавливаем обработку
+                bool wasRecording = _captureManager?.IsRecording ?? false;
+
+                if (wasRecording)
+                {
+                    Log.Debug($"{LogPrefix}Pausing capture for scale change");
+                    // Используем await вместо GetAwaiter().GetResult()
+                    await Task.Run(() => _captureManager?.StopCaptureAsync(false));
+                }
+
+                // Небольшая задержка для стабилизации состояния
+                await Task.Delay(50);
+
+                // Устанавливаем новую шкалу (внутри будет вызван ResetSpectrum)
+                _analyzer.ScaleType = scale;
+
+                // Небольшая задержка для стабилизации состояния
+                await Task.Delay(50);
+
+                // Возобновляем обработку
+                if (wasRecording)
+                {
+                    Log.Debug($"{LogPrefix}Resuming capture after scale change");
+                    // Используем await вместо GetAwaiter().GetResult()
+                    await Task.Run(() => _captureManager?.StartCaptureAsync());
+                }
+
+                _renderer?.RequestRender();
+                InvalidateVisuals();
+
+                Log.Debug($"{LogPrefix}Scale change completed to {scale}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{LogPrefix}Error changing spectrum scale: {ex}");
+            }
         }
 
         private void UpdateProps() =>
