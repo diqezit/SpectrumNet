@@ -26,6 +26,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         string StatusText = MwConstants.ReadyStatus
     );
 
+    private readonly SemaphoreSlim _transitionSemaphore = new SemaphoreSlim(1, 1);
+
     MainWindowSettings _state = new();
     bool _isOverlayActive, _isPopupOpen,
          _isOverlayTopmost = true,
@@ -700,153 +702,63 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     async void UpdateFftWindowType(FftWindowType windowType)
     {
-        if (_analyzer?.FftProcessor == null || _captureManager == null)
+        if (_analyzer?.FftProcessor == null || _captureManager == null || _renderer == null)
             return;
 
         try
         {
-            var currentType = _analyzer.FftProcessor.WindowType;
-            SmartLogger.Log(
-                LogLevel.Debug,
-                LogPrefix,
-                $"Changing FFT window type from {currentType} to {windowType}",
-                forceLog: true
-            );
-
             IsTransitioning = true;
-            InvalidateVisuals();
+            _renderer.ShouldShowPlaceholder = false;
 
             bool wasRecording = _captureManager.IsRecording;
             if (wasRecording)
-            {
-                SmartLogger.Log(
-                    LogLevel.Debug,
-                    LogPrefix,
-                    "Pausing capture for window type change",
-                    forceLog: true
-                );
-                await _captureManager.StopCaptureAsync(false);
-            }
+                await _captureManager.StopCaptureAsync(updateUI: false);
 
             _analyzer.FftProcessor.WindowType = windowType;
 
             if (wasRecording)
-            {
-                SmartLogger.Log(
-                    LogLevel.Debug,
-                    LogPrefix,
-                    "Resuming capture after window type change",
-                    forceLog: true
-                );
                 await _captureManager.StartCaptureAsync();
-            }
-
-            _renderer?.RequestRender();
-            InvalidateVisuals();
-            SynchronizeRendererWithSettings();
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(
-                LogLevel.Error,
-                LogPrefix,
-                $"Error changing FFT window type: {ex}"
-            );
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"FFT Window change error: {ex}");
         }
         finally
         {
             IsTransitioning = false;
+            _renderer.ShouldShowPlaceholder = !(_captureManager?.IsRecording ?? false);
             InvalidateVisuals();
         }
     }
 
     async void UpdateSpectrumScale(SpectrumScale scale)
     {
-        if (_analyzer == null || _captureManager == null)
+        if (_analyzer == null || _captureManager == null || _renderer == null)
             return;
 
         try
         {
-            SmartLogger.Log(
-                LogLevel.Debug,
-                LogPrefix,
-                $"Changing spectrum scale from {_analyzer.ScaleType} to {scale}",
-                forceLog: true
-            );
-
             IsTransitioning = true;
-            InvalidateVisuals();
+            _renderer.ShouldShowPlaceholder = false;
 
             bool wasRecording = _captureManager.IsRecording;
             if (wasRecording)
-            {
-                SmartLogger.Log(
-                    LogLevel.Debug,
-                    LogPrefix,
-                    "Pausing capture for scale change",
-                    forceLog: true
-                );
-                await _captureManager.StopCaptureAsync(false);
-            }
+                await _captureManager.StopCaptureAsync(updateUI: false);
 
             _analyzer.ScaleType = scale;
 
             if (wasRecording)
-            {
-                SmartLogger.Log(
-                    LogLevel.Debug,
-                    LogPrefix,
-                    "Resuming capture after scale change",
-                    forceLog: true
-                );
                 await _captureManager.StartCaptureAsync();
-            }
-
-            _renderer?.RequestRender();
-            InvalidateVisuals();
-            SynchronizeRendererWithSettings();
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(
-                LogLevel.Error,
-                LogPrefix,
-                $"Error changing spectrum scale: {ex}"
-            );
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Scale change error: {ex}");
         }
         finally
         {
             IsTransitioning = false;
+            _renderer.ShouldShowPlaceholder = !(_captureManager?.IsRecording ?? false);
             InvalidateVisuals();
-        }
-    }
-
-    void SynchronizeRendererWithSettings()
-    {
-        if (_renderer == null)
-            return;
-        try
-        {
-            _renderer.UpdateRenderStyle(SelectedDrawingType);
-            if (_spectrumStyles != null)
-            {
-                var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(SelectedStyle);
-                _renderer.UpdateSpectrumStyle(SelectedStyle, startColor, endColor);
-            }
-            SmartLogger.Log(
-                LogLevel.Debug,
-                LogPrefix,
-                "Renderer synchronized with current settings",
-                forceLog: true
-            );
-        }
-        catch (Exception ex)
-        {
-            SmartLogger.Log(
-                LogLevel.Error,
-                LogPrefix,
-                $"Failed to synchronize renderer: {ex}"
-            );
         }
     }
 

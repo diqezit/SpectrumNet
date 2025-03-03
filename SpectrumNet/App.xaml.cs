@@ -109,7 +109,7 @@ public static class SmartLogger
             _messageCounters.TryRemove(key, out _);
         }
 #if DEBUG
-        Log.Debug($"{LogPrefix}Cache cleanup: removed {keysToRemove.Count} entries, current size: {_lastLoggedTimes.Count}");
+        Serilog.Log.Debug($"{LogPrefix}Cache cleanup: removed {keysToRemove.Count} entries, current size: {_lastLoggedTimes.Count}");
 #endif
     }
 

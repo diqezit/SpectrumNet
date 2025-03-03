@@ -25,6 +25,12 @@ sealed class Renderer : IDisposable
     public string CurrentStyleName => _currentState.StyleName;
     public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
 
+    public bool ShouldShowPlaceholder
+    {
+        get => _shouldShowPlaceholder;
+        set => _shouldShowPlaceholder = value;
+    }
+
     public Renderer(SpectrumBrushes styles, MainWindow window, SpectrumAnalyzer analyzer, SKElement element)
     {
         _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
@@ -34,6 +40,8 @@ sealed class Renderer : IDisposable
 
         if (_analyzer is IComponent comp)
             comp.Disposed += (_, _) => _isAnalyzerDisposed = true;
+
+        _shouldShowPlaceholder = !_mainWindow.IsRecording;
 
         InitializeRenderer();
         SmartLogger.Log(LogLevel.Information, LogPrefix, "successfully initialized.", forceLog: true);
@@ -131,11 +139,24 @@ sealed class Renderer : IDisposable
         canvas.Clear(SKColors.Transparent);
 
         if (_mainWindow.IsTransitioning)
+            return;
+
+        bool shouldRenderPlaceholder = ShouldShowPlaceholder ||
+                                      _isAnalyzerDisposed ||
+                                      _analyzer == null ||
+                                      !(_mainWindow._captureManager?.IsRecording ?? false);
+
+        if (shouldRenderPlaceholder && _mainWindow._captureManager?.IsRecording == true && _analyzer != null)
         {
-            return; 
+            var currentSpectrum = _analyzer.GetCurrentSpectrum();
+            if (currentSpectrum == null || currentSpectrum.Spectrum.Length == 0)
+            {
+                canvas.Clear(SKColors.Transparent);
+                return;
+            }
         }
 
-        if (_shouldShowPlaceholder || _isAnalyzerDisposed || _analyzer is null)
+        if (shouldRenderPlaceholder)
         {
             RenderPlaceholder(canvas);
             return;
@@ -144,19 +165,21 @@ sealed class Renderer : IDisposable
         SpectralData? spectrum = null;
         try
         {
+            // Проверка на null анализатора
+            if (_analyzer == null)
+            {
+                RenderPlaceholder(canvas);
+                return;
+            }
+
             spectrum = _analyzer.GetCurrentSpectrum();
         }
         catch (ObjectDisposedException)
         {
             _isAnalyzerDisposed = true;
-            _shouldShowPlaceholder = true;
-            SmartLogger.Log(LogLevel.Warning, LogPrefix, "SpectrumAnalyzer was disposed during spectrum acquisition");
+            ShouldShowPlaceholder = true;
             RenderPlaceholder(canvas);
             return;
-        }
-        catch (Exception ex)
-        {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error obtaining spectrum data: {ex}");
         }
 
         if (spectrum?.Spectrum is not { Length: > 0 })
@@ -173,13 +196,25 @@ sealed class Renderer : IDisposable
 
         try
         {
-            var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _mainWindow.IsOverlayActive);
-            renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount,
-                _currentState.Paint, PerfomanceMetrics.DrawPerformanceInfo);
+            var renderer = SpectrumRendererFactory.CreateRenderer(
+                _currentState.Style,
+                _mainWindow.IsOverlayActive
+            );
+
+            renderer.Render(
+                canvas,
+                spectrum.Spectrum,
+                info,
+                barWidth,
+                barSpacing,
+                barCount,
+                _currentState.Paint,
+                PerfomanceMetrics.DrawPerformanceInfo
+            );
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error during spectrum rendering: {ex}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Rendering error: {ex}");
             RenderPlaceholder(canvas);
         }
     }

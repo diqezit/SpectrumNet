@@ -47,7 +47,18 @@ namespace SpectrumNet
                 lock (_lock)
                 {
                     if (_isDisposed || _isReinitializing || _mainWindow.IsTransitioning)
+                    {
+                        if (_mainWindow.IsTransitioning)
+                        {
+                            Task.Run(async () =>
+                            {
+                                while (_mainWindow.IsTransitioning)
+                                    await Task.Delay(100);
+                                OnDeviceChanged();
+                            });
+                        }
                         return;
+                    }
 
                     var device = GetDefaultAudioDevice();
                     if (device == null)
@@ -178,7 +189,7 @@ namespace SpectrumNet
             await MonitorCaptureAsync(token);
         }
 
-        public Task StopCaptureAsync(bool updateUI = true)
+        public async Task StopCaptureAsync(bool updateUI = true)
         {
             CaptureState? stateToDispose = null;
 
@@ -196,32 +207,33 @@ namespace SpectrumNet
             {
                 try
                 {
-                    stateToDispose.Capture.StopRecording();
-
-                    if (!_mainWindow.IsTransitioning)
+                    await Task.Run(() =>
                     {
-                        try
-                        {
-                            stateToDispose.Analyzer.ResetSpectrum();
-                        }
-                        catch (Exception ex)
-                        {
-                            SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Error resetting spectrum: {ex.Message}");
-                        }
-                    }
+                        stateToDispose.Capture.StopRecording();
 
-                    DisposeCaptureState(stateToDispose);
+                        if (!_mainWindow.IsTransitioning)
+                        {
+                            try
+                            {
+                                stateToDispose.Analyzer.ResetSpectrum();
+                            }
+                            catch (Exception ex)
+                            {
+                                SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Spectrum reset error: {ex}");
+                            }
+                        }
+
+                        DisposeCaptureState(stateToDispose);
+                    });
                 }
                 catch (Exception ex)
                 {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error disposing capture state: {ex}");
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Stop capture error: {ex}");
                 }
             }
 
-            if (updateUI && !_mainWindow.IsTransitioning)
+            if (updateUI)
                 UpdateStatus(false);
-
-            return Task.CompletedTask;
         }
 
         MMDevice? GetDefaultAudioDevice()
@@ -299,6 +311,9 @@ namespace SpectrumNet
                         analyzer,
                         _mainWindow.RenderElement);
                     _mainWindow._renderer.SynchronizeWithMainWindow();
+                    // Принудительно синхронизируем состояние
+                    _mainWindow._renderer.ShouldShowPlaceholder = !_mainWindow.IsRecording;
+                    _mainWindow._renderer.RequestRender();
                 }
                 return analyzer;
             });
