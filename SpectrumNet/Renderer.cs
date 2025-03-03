@@ -1,128 +1,100 @@
 ﻿#nullable enable
 namespace SpectrumNet;
 
-public sealed class Renderer : IDisposable
+sealed class Renderer : IDisposable
 {
-    #region Constants
-    private const int RENDER_TIMEOUT_MS = 16;
-    private const string DEFAULT_STYLE = "Gradient";
-    private const string MESSAGE = "Push start to begin record...";
-    private const string LogPrefix = "[Renderer] ";
-    #endregion
+    const int RENDER_TIMEOUT_MS = 16;
+    const string DEFAULT_STYLE = "Gradient";
+    const string MESSAGE = "Push start to begin record...";
+    const string LogPrefix = "[Renderer] ";
 
-    #region Private Fields
-    private readonly record struct RenderState(SKPaint Paint, RenderStyle Style, string StyleName);
+    record struct RenderState(SKPaint Paint, RenderStyle Style, string StyleName);
 
-    private readonly SemaphoreSlim _renderLock = new(1, 1);
-    private readonly SpectrumBrushes _spectrumStyles;
-    private readonly MainWindow _mainWindow;
-    private readonly SpectrumAnalyzer _analyzer;
-    private readonly CancellationTokenSource _disposalTokenSource = new();
-    private readonly Stopwatch _performanceMonitor;
+    readonly SemaphoreSlim _renderLock = new(1, 1);
+    readonly SpectrumBrushes _spectrumStyles;
+    readonly MainWindow _mainWindow;
+    readonly SpectrumAnalyzer _analyzer;
+    readonly CancellationTokenSource _disposalTokenSource = new();
+    readonly Stopwatch _performanceMonitor = new();
 
-    private SKElement? _skElement;
-    private DispatcherTimer? _renderTimer;
-    private RenderState _currentState;
-    private volatile bool _isDisposed, _isAnalyzerDisposed, _shouldShowPlaceholder;
-    #endregion
-
-    #region Public Properties
+    SKElement? _skElement;
+    DispatcherTimer? _renderTimer;
+    RenderState _currentState;
+    volatile bool _isDisposed, _isAnalyzerDisposed, _shouldShowPlaceholder = true;
+    SpectralData? _cachedSpectrum;
     public string CurrentStyleName => _currentState.StyleName;
     public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
-    #endregion
 
-    #region Constructor
     public Renderer(SpectrumBrushes styles, MainWindow window, SpectrumAnalyzer analyzer, SKElement element)
     {
         _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
         _mainWindow = window ?? throw new ArgumentNullException(nameof(window));
         _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
         _skElement = element ?? throw new ArgumentNullException(nameof(element));
-        _performanceMonitor = new Stopwatch();
-        _shouldShowPlaceholder = true;
 
-        if (_analyzer is IComponent c)
-            c.Disposed += (s, e) => _isAnalyzerDisposed = true;
+        if (_analyzer is IComponent comp)
+            comp.Disposed += (_, _) => _isAnalyzerDisposed = true;
 
         InitializeRenderer();
-
-        Log.Information($"{LogPrefix}successfully initialized.");
+        SmartLogger.Log(LogLevel.Information, LogPrefix, "successfully initialized.", forceLog: true);
     }
-    #endregion
 
-    #region Initialization
-    private void InitializeRenderer()
+    void InitializeRenderer()
     {
         try
         {
             var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(DEFAULT_STYLE);
-            if (paint == null)
+            if (paint is null)
                 throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style");
 
             _currentState = new RenderState(paint.Clone(), RenderStyle.Bars, DEFAULT_STYLE);
 
-            _renderTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS)
-            };
+            _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS) };
             _renderTimer.Tick += (_, _) => RequestRender();
             _renderTimer.Start();
 
-            SubscribeToEvents();
+            _skElement!.PaintSurface += RenderFrame;
+            _skElement.Loaded += OnElementLoaded;
+            _skElement.Unloaded += OnElementUnloaded;
 
             _performanceMonitor.Start();
             _mainWindow.PropertyChanged += OnMainWindowPropertyChanged;
+            SynchronizeWithMainWindow();
         }
         catch (Exception ex)
         {
-            Log.Error(ex, $"{LogPrefix}Failed to initialize renderer");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to initialize renderer: {ex}");
             throw new InvalidOperationException($"{LogPrefix}Failed to initialize renderer", ex);
         }
     }
-    #endregion
 
-    #region Event Handlers
-    private void OnMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    void OnMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainWindow.IsRecording))
         {
             _shouldShowPlaceholder = !_mainWindow.IsRecording;
             RequestRender();
-            Log.Debug($"{LogPrefix}Placeholder state updated: {_shouldShowPlaceholder}");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Placeholder state updated: {_shouldShowPlaceholder}", forceLog: true);
         }
         else if (e.PropertyName == nameof(MainWindow.IsOverlayActive))
         {
-            // Update all renderers when overlay state changes
             SpectrumRendererFactory.ConfigureAllRenderers(_mainWindow.IsOverlayActive);
             RequestRender();
-            Log.Debug($"{LogPrefix}Overlay state updated: {_mainWindow.IsOverlayActive}");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Overlay state updated: {_mainWindow.IsOverlayActive}", forceLog: true);
         }
     }
 
-    private void SubscribeToEvents()
-    {
-        if (_skElement == null)
-            return;
-
-        _skElement.PaintSurface += RenderFrame;
-        _skElement.Loaded += OnElementLoaded;
-        _skElement.Unloaded += OnElementUnloaded;
-    }
-
-    private void OnElementLoaded(object sender, RoutedEventArgs e) =>
+    void OnElementLoaded(object sender, RoutedEventArgs e) =>
         UpdateRenderDimensions((int)_skElement!.ActualWidth, (int)_skElement.ActualHeight);
 
-    private void OnElementUnloaded(object sender, RoutedEventArgs e)
+    void OnElementUnloaded(object sender, RoutedEventArgs e)
     {
         _renderTimer?.Stop();
         _performanceMonitor.Stop();
     }
-    #endregion
 
-    #region Render Methods
     public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
     {
-        // Skip rendering on the main canvas when overlay is active
         if (_mainWindow.IsOverlayActive && sender == _mainWindow.spectrumCanvas)
         {
             e.Surface.Canvas.Clear(SKColors.Transparent);
@@ -140,12 +112,13 @@ public sealed class Renderer : IDisposable
         catch (ObjectDisposedException)
         {
             _isAnalyzerDisposed = true;
-            Log.Warning($"{LogPrefix}SpectrumAnalyzer was disposed, stopping render loop");
+            SmartLogger.Log(_mainWindow.IsTransitioning ? LogLevel.Debug : LogLevel.Warning, LogPrefix,
+                "SpectrumAnalyzer was disposed, stopping render loop");
             _renderTimer?.Stop();
         }
         catch (Exception ex)
         {
-            Log.Error(ex, $"{LogPrefix}Error rendering frame");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering frame: {ex}");
         }
         finally
         {
@@ -153,112 +126,78 @@ public sealed class Renderer : IDisposable
         }
     }
 
-    private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
+    void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
     {
         canvas.Clear(SKColors.Transparent);
 
-        // Быстрая проверка необходимости отображения плейсхолдера
-        if (_shouldShowPlaceholder || _isAnalyzerDisposed || _analyzer == null)
+        if (_mainWindow.IsTransitioning)
+        {
+            return; 
+        }
+
+        if (_shouldShowPlaceholder || _isAnalyzerDisposed || _analyzer is null)
         {
             RenderPlaceholder(canvas);
             return;
         }
 
         SpectralData? spectrum = null;
-
         try
         {
-            // Защитный блок для получения спектра - делаем короткую операцию 
-            // и завершаемся при любых проблемах
-            try
-            {
-                spectrum = _analyzer.GetCurrentSpectrum();
-            }
-            catch (ObjectDisposedException)
-            {
-                _isAnalyzerDisposed = true;
-                _shouldShowPlaceholder = true;
-                Log.Warning($"{LogPrefix}SpectrumAnalyzer was disposed during spectrum acquisition");
-                RenderPlaceholder(canvas);
-                return;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"{LogPrefix}Error obtaining spectrum data");
-                RenderPlaceholder(canvas);
-                return;
-            }
-
-            // Проверка наличия данных для рендеринга
-            if (spectrum?.Spectrum is not { Length: > 0 })
-            {
-                RenderPlaceholder(canvas);
-                return;
-            }
-
-            // Вынесем расчеты параметров в отдельный блок try-catch
-            // для изоляции возможных ошибок
-            RenderStyle style;
-            float barWidth, barSpacing;
-            int barCount;
-
-            try
-            {
-                style = _currentState.Style;
-                barCount = _mainWindow.BarCount;
-                var totalWidth = info.Width;
-
-                // Защита от деления на ноль и некорректных значений
-                if (totalWidth <= 0 || barCount <= 0)
-                {
-                    RenderPlaceholder(canvas);
-                    return;
-                }
-
-                barSpacing = Math.Min((float)_mainWindow.BarSpacing, totalWidth / (barCount + 1));
-                barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
-
-                // Корректировка расстояния между полосами
-                if (barCount > 1)
-                    barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
-                else
-                    barSpacing = 0;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"{LogPrefix}Error calculating render parameters");
-                RenderPlaceholder(canvas);
-                return;
-            }
-
-            // Рендерим спектр с защитой от исключений
-            try
-            {
-                var renderer = SpectrumRendererFactory.CreateRenderer(style, _mainWindow.IsOverlayActive);
-                renderer.Render(
-                    canvas,
-                    spectrum.Spectrum,
-                    info,
-                    barWidth,
-                    barSpacing,
-                    barCount,
-                    _currentState.Paint,
-                    PerfomanceMetrics.DrawPerformanceInfo);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"{LogPrefix}Error during spectrum rendering");
-                RenderPlaceholder(canvas);
-            }
+            spectrum = _analyzer.GetCurrentSpectrum();
+        }
+        catch (ObjectDisposedException)
+        {
+            _isAnalyzerDisposed = true;
+            _shouldShowPlaceholder = true;
+            SmartLogger.Log(LogLevel.Warning, LogPrefix, "SpectrumAnalyzer was disposed during spectrum acquisition");
+            RenderPlaceholder(canvas);
+            return;
         }
         catch (Exception ex)
         {
-            Log.Error(ex, $"{LogPrefix}Unhandled exception in render loop");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error obtaining spectrum data: {ex}");
+        }
+
+        if (spectrum?.Spectrum is not { Length: > 0 })
+        {
+            RenderPlaceholder(canvas);
+            return;
+        }
+
+        if (!TryCalcRenderParams(info, out float barWidth, out float barSpacing, out int barCount))
+        {
+            RenderPlaceholder(canvas);
+            return;
+        }
+
+        try
+        {
+            var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _mainWindow.IsOverlayActive);
+            renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount,
+                _currentState.Paint, PerfomanceMetrics.DrawPerformanceInfo);
+        }
+        catch (Exception ex)
+        {
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error during spectrum rendering: {ex}");
             RenderPlaceholder(canvas);
         }
     }
 
-    private static void RenderPlaceholder(SKCanvas canvas)
+    bool TryCalcRenderParams(SKImageInfo info, out float barWidth, out float barSpacing, out int barCount)
+    {
+        barWidth = barSpacing = 0;
+        barCount = _mainWindow.BarCount;
+        int totalWidth = info.Width;
+        if (totalWidth <= 0 || barCount <= 0)
+            return false;
+        barSpacing = Math.Min((float)_mainWindow.BarSpacing, totalWidth / (barCount + 1));
+        barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
+        barSpacing = barCount > 1 ? (totalWidth - barCount * barWidth) / (barCount - 1) : 0;
+        return true;
+    }
+
+    static void RenderPlaceholder(SKCanvas canvas)
     {
         using var paint = new SKPaint
         {
@@ -267,90 +206,103 @@ public sealed class Renderer : IDisposable
             TextSize = 50,
             IsAntialias = true
         };
-
         canvas.Clear(SKColors.Transparent);
         canvas.DrawText(MESSAGE, 50, 100, paint);
     }
-    #endregion
 
-    #region Public Methods
+    public void SynchronizeWithMainWindow()
+    {
+        try
+        {
+            EnsureNotDisposed();
+            bool needsUpdate = false;
+            if (_currentState.Style != _mainWindow.SelectedDrawingType)
+            {
+                UpdateRenderStyle(_mainWindow.SelectedDrawingType);
+                needsUpdate = true;
+            }
+            var styleName = _mainWindow.SelectedStyle;
+            if (!string.IsNullOrEmpty(styleName) && styleName != _currentState.StyleName)
+            {
+                var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(styleName);
+                UpdateSpectrumStyle(styleName, startColor, endColor);
+                needsUpdate = true;
+            }
+            if (needsUpdate)
+            {
+                RequestRender();
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Renderer synchronized with MainWindow settings", forceLog: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to synchronize renderer with MainWindow: {ex.Message}");
+        }
+    }
+
     public void UpdateRenderStyle(RenderStyle style)
     {
         EnsureNotDisposed();
-
+        if (_currentState.Style == style)
+            return;
         _currentState = _currentState with { Style = style };
         RequestRender();
-        Log.Debug($"{LogPrefix}Render style updated: {style}");
+        SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Render style updated: {style}", forceLog: true);
     }
 
     public void UpdateSpectrumStyle(string styleName, SKColor startColor, SKColor endColor)
     {
         EnsureNotDisposed();
-
         if (string.IsNullOrEmpty(styleName) || styleName == _currentState.StyleName)
             return;
-
         var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(styleName);
-
-        if (paint == null)
+        if (paint is null)
         {
-            Log.Error($"{LogPrefix}Brush for style {styleName} is not configured");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Brush for style {styleName} is not configured");
             return;
         }
-
         var oldPaint = _currentState.Paint;
         _currentState = new RenderState(paint.Clone(), _currentState.Style, styleName);
         oldPaint.Dispose();
-
         RequestRender();
-        Log.Debug($"{LogPrefix}Spectrum style updated: {styleName}");
+        SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Spectrum style updated: {styleName}", forceLog: true);
     }
 
     public void RequestRender()
     {
-        // Only invalidate the main canvas if overlay is not active
         if (!_mainWindow.IsOverlayActive || _skElement != _mainWindow.spectrumCanvas)
-        {
             _skElement?.InvalidateVisual();
-        }
     }
 
     public void UpdateRenderDimensions(int width, int height)
     {
         if (width <= 0 || height <= 0)
         {
-            Log.Warning($"{LogPrefix}Invalid render dimensions: {width}x{height}");
+            SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Invalid render dimensions: {width}x{height}");
             return;
         }
-
         RequestRender();
-        Log.Debug($"{LogPrefix}Render dimensions updated: {width}x{height}");
+        SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Render dimensions updated: {width}x{height}", forceLog: true);
     }
-    #endregion
 
-    #region Private Methods
-    private void EmitPerformanceMetrics()
+    void EmitPerformanceMetrics()
     {
         var elapsed = _performanceMonitor.Elapsed;
         _performanceMonitor.Restart();
         PerformanceUpdate?.Invoke(this, new PerformanceMetrics(elapsed.TotalMilliseconds, 1000.0 / elapsed.TotalMilliseconds));
     }
 
-    private void EnsureNotDisposed()
+    void EnsureNotDisposed()
     {
         if (_isDisposed)
             throw new ObjectDisposedException(nameof(Renderer));
     }
-    #endregion
 
-    #region IDisposable Implementation
     public void Dispose()
     {
         if (_isDisposed)
             return;
-
         _isDisposed = _isAnalyzerDisposed = true;
-
         _disposalTokenSource.Cancel();
         _renderTimer?.Stop();
         _performanceMonitor.Stop();
@@ -369,12 +321,8 @@ public sealed class Renderer : IDisposable
             _skElement.Unloaded -= OnElementUnloaded;
             _skElement = null;
         }
-
-        Log.Information($"{LogPrefix}Renderer successfully disposed");
+        SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer successfully disposed", forceLog: true);
     }
-    #endregion
 }
 
-#region PerformanceMetrics Struct
-public readonly record struct PerformanceMetrics(double FrameTime, double Fps);
-#endregion
+readonly record struct PerformanceMetrics(double FrameTime, double Fps);
