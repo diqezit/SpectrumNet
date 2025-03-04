@@ -173,7 +173,7 @@ namespace SpectrumNet
 
             float threshold = _isOverlayActive ? Settings.SpawnThresholdOverlay : Settings.SpawnThresholdNormal;
             float baseSize = _isOverlayActive ? Settings.ParticleSizeOverlay : Settings.ParticleSizeNormal;
-            int targetCount = Math.Min(spectrum.Length / 2, 2048);
+            int targetCount = Math.Min(spectrum.Length, 2048);
 
             if (_spectrumBuffer == null)
                 _spectrumBuffer = ArrayPool<float>.Shared.Rent(targetCount);
@@ -265,7 +265,7 @@ namespace SpectrumNet
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ScaleSpectrum(ReadOnlySpan<float> source, Span<float> dest)
         {
-            int srcLen = source.Length / 2, destLen = dest.Length;
+            int srcLen = source.Length, destLen = dest.Length;
             if (srcLen == 0 || destLen == 0) return;
 
             float scale = srcLen / (float)destLen;

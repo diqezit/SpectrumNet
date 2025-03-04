@@ -154,8 +154,8 @@
 
         private void ProcessSpectrumData(float[] spectrum, int barCount, float canvasHeight)
         {
-            int halfSpectrumLength = spectrum.Length / 2;
-            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            int spectrumLength = spectrum.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
 
             if (_previousSpectrum == null || _previousSpectrum.Length != actualBarCount)
             {
@@ -170,7 +170,7 @@
             }
 
             float[] scaledSpectrum = GetFloatBuffer(actualBarCount);
-            ScaleSpectrum(spectrum, scaledSpectrum, actualBarCount, halfSpectrumLength);
+            ScaleSpectrum(spectrum, scaledSpectrum, actualBarCount, spectrumLength);
 
             float[] computedBarValues = GetFloatBuffer(actualBarCount);
             float[] computedPeaks = GetFloatBuffer(actualBarCount);
@@ -256,14 +256,14 @@
         }
 
         public void Render(
-            SKCanvas canvas,
-            float[] spectrum,
+            SKCanvas? canvas,
+            float[]? spectrum,
             SKImageInfo info,
             float barWidth,
             float barSpacing,
             int barCount,
-            SKPaint paint,
-            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+            SKPaint? paint,
+            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 ||
                 paint == null || info.Width <= 0 || info.Height <= 0)
@@ -357,16 +357,16 @@
             }
         }
 
-        private void ScaleSpectrum(float[] spectrum, float[] scaledSpectrum, int barCount, int halfSpectrumLength)
+        private void ScaleSpectrum(float[] spectrum, float[] scaledSpectrum, int barCount, int spectrumLength)
         {
-            float blockSize = halfSpectrumLength / (float)barCount;
+            float blockSize = spectrumLength / (float)barCount;
             int maxThreads = Math.Max(1, Environment.ProcessorCount / 2);
 
             Parallel.For(0, barCount, new ParallelOptions { MaxDegreeOfParallelism = maxThreads }, i =>
             {
                 float sum = 0;
                 int start = (int)(i * blockSize);
-                int end = Math.Min((int)((i + 1) * blockSize), halfSpectrumLength);
+                int end = Math.Min((int)((i + 1) * blockSize), spectrumLength);
 
                 int j = start;
                 int unrollCount = (end - start) / 4 * 4;

@@ -93,7 +93,7 @@ namespace SpectrumNet
 
                 if (semaphoreAcquired)
                 {
-                    int freqBands = Math.Min(spectrum!.Length / 2, DefaultPointCount);
+                    int freqBands = Math.Min(spectrum!.Length, DefaultPointCount);
                     ProcessSpectrum(spectrum, freqBands);
                     UpdateVoronoiPoints(info.Width, info.Height);
                 }
@@ -199,14 +199,13 @@ namespace SpectrumNet
             if (_processedSpectrum == null || _processedSpectrum.Length < freqBands)
                 _processedSpectrum = new float[freqBands];
 
-            // Обработка спектра по диапазонам
-            float spectrumStep = spectrum.Length / (2f * freqBands);
+            float spectrumStep = spectrum.Length / (float)freqBands;
 
             for (int i = 0; i < freqBands; i++)
             {
                 int startBin = (int)(i * spectrumStep);
                 int endBin = (int)((i + 1) * spectrumStep);
-                endBin = Math.Min(endBin, spectrum.Length / 2);
+                endBin = Math.Min(endBin, spectrum.Length);
 
                 float sum = 0;
                 for (int j = startBin; j < endBin; j++)

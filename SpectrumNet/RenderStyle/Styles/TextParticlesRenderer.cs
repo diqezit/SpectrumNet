@@ -142,8 +142,7 @@ namespace SpectrumNet
                     _particleBuffer.Update(_renderCache.UpperBound, _renderCache.LowerBound, _alphaDecayExponent);
                 }
 
-                // spectrum проверен в ValidateRenderParameters и не может быть null здесь
-                int spectrumLength = Math.Min(spectrum!.Length / 2, barCount);
+                int spectrumLength = Math.Min(spectrum!.Length, barCount);
 
                 if (spectrumLength > 0)
                 {

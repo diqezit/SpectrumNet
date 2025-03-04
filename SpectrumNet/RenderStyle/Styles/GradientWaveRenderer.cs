@@ -89,7 +89,7 @@ namespace SpectrumNet
                 float[] renderSpectrum;
                 List<SKPoint> renderPoints;
                 bool semaphoreAcquired = false;
-                int actualBarCount = Math.Min(spectrum!.Length / 2, barCount);
+                int actualBarCount = Math.Min(spectrum!.Length, barCount);
 
                 try
                 {
@@ -309,7 +309,7 @@ namespace SpectrumNet
         #region Spectrum Processing
         private static float[] ScaleSpectrum(float[] spectrum, int targetCount)
         {
-            int spectrumLength = spectrum.Length / 2;
+            int spectrumLength = spectrum.Length;
             float[] scaledSpectrum = new float[targetCount];
             float blockSize = (float)spectrumLength / targetCount;
 

@@ -56,8 +56,8 @@
 
             float[] renderSpectrum;
             bool semaphoreAcquired = false;
-            int halfSpectrumLength = spectrum!.Length / 2;
-            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            int spectrumLength = spectrum!.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
 
             try
             {
@@ -65,7 +65,7 @@
 
                 if (semaphoreAcquired)
                 {
-                    float[] downscaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+                    float[] downscaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
                     _processedSpectrum = SmoothSpectrum(downscaledSpectrum, actualBarCount);
                     EnsureTrigArrays(actualBarCount);
                 }
@@ -73,7 +73,7 @@
                 lock (_spectrumLock)
                 {
                     renderSpectrum = _processedSpectrum ??
-                                    ProcessSynchronously(spectrum, actualBarCount, halfSpectrumLength);
+                                    ProcessSynchronously(spectrum, actualBarCount, spectrumLength);
                 }
             }
             catch (Exception ex)
@@ -138,22 +138,23 @@
             return true;
         }
 
-        private float[] ProcessSynchronously(float[] spectrum, int actualBarCount, int halfSpectrumLength)
+        private float[] ProcessSynchronously(float[] spectrum, int actualBarCount, int spectrumLength)
         {
-            float[] downscaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            // Изменено: используем полную длину спектра
+            float[] downscaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
             return SmoothSpectrum(downscaledSpectrum, actualBarCount);
         }
 
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)halfSpectrumLength / targetCount;
+            float blockSize = (float)spectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
                 int start = (int)(i * blockSize);
                 int end = (int)((i + 1) * blockSize);
-                end = Math.Min(end, halfSpectrumLength);
+                end = Math.Min(end, spectrumLength);
 
                 float sum = 0;
                 for (int j = start; j < end; j++)

@@ -255,8 +255,8 @@ namespace SpectrumNet
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount,
-                           SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+                         float barWidth, float barSpacing, int barCount,
+                         SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
             if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             {
@@ -266,8 +266,8 @@ namespace SpectrumNet
 
             float[] renderSpectrum;
             bool semaphoreAcquired = false;
-            int halfSpectrumLength = spectrum!.Length / 2;
-            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            int spectrumLength = spectrum!.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
 
             try
             {
@@ -323,7 +323,7 @@ namespace SpectrumNet
         {
             if (barCount <= 0) return;
 
-            ProcessSpectrumData(spectrum.AsSpan(0, Math.Min(spectrum.Length / 2, barCount)),
+            ProcessSpectrumData(spectrum.AsSpan(0, Math.Min(spectrum.Length, barCount)),
                 _smoothedSpectrumCache.AsSpan(0, barCount));
 
             _processedSpectrum = _smoothedSpectrumCache;
@@ -334,7 +334,7 @@ namespace SpectrumNet
             if (barCount <= 0) return new float[0];
 
             Span<float> result = stackalloc float[barCount];
-            ProcessSpectrumData(spectrum.AsSpan(0, Math.Min(spectrum.Length / 2, barCount)), result);
+            ProcessSpectrumData(spectrum.AsSpan(0, Math.Min(spectrum.Length, barCount)), result);
 
             var output = new float[barCount];
             result.CopyTo(output.AsSpan(0, barCount));

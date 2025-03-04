@@ -47,7 +47,15 @@
             _smoothingFactor = isOverlayActive ? SmoothingFactorOverlay : SmoothingFactorNormal;
         }
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? basePaint, Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+        public void Render(
+            SKCanvas? canvas,
+            float[]? spectrum,
+            SKImageInfo info, 
+            float barWidth, 
+            float barSpacing,
+
+            int barCount, SKPaint? basePaint, Action<SKCanvas,
+                SKImageInfo> drawPerformanceInfo)
         {
             if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 ||
                 basePaint == null || info.Width <= 0 || info.Height <= 0)
@@ -56,9 +64,9 @@
                 return;
             }
 
-            int halfSpectrumLength = spectrum.Length / 2;
-            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            int spectrumLength = spectrum.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
             float[] smoothedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
             float canvasHeight = info.Height;
 
@@ -66,7 +74,8 @@
             dotPaint.IsAntialias = true;
             dotPaint.FilterQuality = SKFilterQuality.High;
 
-            List<CircleData> circles = CalculateCircleData(smoothedSpectrum, info, barWidth * MaxDotMultiplier * _dotRadiusMultiplier, barWidth + barSpacing, canvasHeight);
+            List<CircleData> circles = CalculateCircleData(smoothedSpectrum, info, barWidth * 
+                MaxDotMultiplier * _dotRadiusMultiplier, barWidth + barSpacing, canvasHeight);
             List<List<CircleData>> circleBins = GroupCirclesByAlphaBin(circles);
 
             DrawCircles(canvas, circleBins, dotPaint);
@@ -74,7 +83,8 @@
             drawPerformanceInfo?.Invoke(canvas, info);
         }
 
-        private List<CircleData> CalculateCircleData(float[] smoothedSpectrum, SKImageInfo info, float multiplier, float totalWidth, float canvasHeight)
+        private List<CircleData> CalculateCircleData(float[] smoothedSpectrum, 
+            SKImageInfo info, float multiplier, float totalWidth, float canvasHeight)
         {
             List<CircleData> circles = new List<CircleData>();
             for (int i = 0; i < smoothedSpectrum.Length; i++)
@@ -138,10 +148,10 @@
             }
         }
 
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)halfSpectrumLength / targetCount;
+            float blockSize = (float)spectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
@@ -151,7 +161,7 @@
                 int start = (int)Math.Floor(startFloat);
                 int end = (int)Math.Ceiling(endFloat);
 
-                end = Math.Min(end, halfSpectrumLength);
+                end = Math.Min(end, spectrumLength);
 
                 if (start >= end)
                     scaledSpectrum[i] = 0f;

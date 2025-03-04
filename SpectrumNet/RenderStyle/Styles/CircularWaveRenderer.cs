@@ -90,12 +90,12 @@ namespace SpectrumNet
 
             float[] renderSpectrum;
             bool semaphoreAcquired = false;
-            int halfSpectrumLength = spectrum!.Length / 2;
+            int spectrumLength = spectrum!.Length;
 
             // Use barCount to limit the number of points, ensuring a minimum
             int pointCount = Math.Max(
                 MinPointCount,
-                Math.Min(Math.Min(halfSpectrumLength, _maxPointCount), barCount)
+                Math.Min(Math.Min(spectrumLength, _maxPointCount), barCount)
             );
 
             // Adjust rotation speed based on bar count - lower speed for fewer bars
@@ -118,7 +118,7 @@ namespace SpectrumNet
                     }
 
                     // Process spectrum data
-                    float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, halfSpectrumLength);
+                    float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, spectrumLength);
                     _processedSpectrum = SmoothSpectrum(scaledSpectrum.AsSpan(), pointCount);
                 }
 
@@ -126,7 +126,7 @@ namespace SpectrumNet
                 lock (_spectrumLock)
                 {
                     renderSpectrum = _processedSpectrum ??
-                                    ProcessSynchronously(spectrum, pointCount, halfSpectrumLength);
+                                    ProcessSynchronously(spectrum, pointCount, spectrumLength);
                 }
             }
             catch (Exception ex)
@@ -207,9 +207,10 @@ namespace SpectrumNet
             return true;
         }
 
-        private float[] ProcessSynchronously(float[] spectrum, int pointCount, int halfSpectrumLength)
+        private float[] ProcessSynchronously(float[] spectrum, int pointCount, int spectrumLength)
         {
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, halfSpectrumLength);
+            // Изменено: используем полную длину спектра
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, spectrumLength);
             return SmoothSpectrum(scaledSpectrum.AsSpan(), pointCount);
         }
         #endregion
@@ -234,15 +235,15 @@ namespace SpectrumNet
             }
         }
 
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             var scaledSpectrum = new float[targetCount];
-            float step = (float)halfSpectrumLength / targetCount;
+            float step = (float)spectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
                 int index = (int)(i * step);
-                if (index < halfSpectrumLength)
+                if (index < spectrumLength)
                 {
                     scaledSpectrum[i] = spectrum[index];
                 }

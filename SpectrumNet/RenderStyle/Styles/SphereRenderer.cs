@@ -131,7 +131,7 @@ namespace SpectrumNet
                 // Если семафор не был получен, используем ранее обработанный спектр
                 if (_processedSpectrum != null)
                 {
-                    int sphereCount = Math.Min(spectrum!.Length / 2, _sphereCount);
+                    int sphereCount = Math.Min(spectrum!.Length, _sphereCount);
                     float centerRadius = info.Height / 2f - (_sphereRadius + _sphereSpacing);
 
                     RenderSpheres(
@@ -186,7 +186,7 @@ namespace SpectrumNet
         private void ProcessSpectrum(float[] spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount)
         {
             AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
-            int sphereCount = Math.Min(spectrum.Length / 2, _sphereCount);
+            int sphereCount = Math.Min(spectrum.Length, _sphereCount);
 
             EnsureProcessedSpectrumCapacity(sphereCount);
 
@@ -284,13 +284,13 @@ namespace SpectrumNet
 
         private static void ScaleSpectrum(float[] source, float[] target, int targetCount)
         {
-            float blockSize = source.Length / (2f * targetCount);
+            float blockSize = source.Length / (float)targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
                 int start = (int)(i * blockSize);
                 int end = (int)((i + 1) * blockSize);
-                end = Math.Min(end, source.Length / 2);
+                end = Math.Min(end, source.Length);
 
                 if (start >= end)
                 {

@@ -76,8 +76,8 @@ namespace SpectrumNet
 
             float[] renderSpectrum;
             bool semaphoreAcquired = false;
-            int halfSpectrumLength = spectrum!.Length / 2;
-            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+            int spectrumLength = spectrum!.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
 
             try
             {
@@ -85,12 +85,12 @@ namespace SpectrumNet
 
                 if (semaphoreAcquired)
                 {
-                    float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+                    float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
                     _processedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
                 }
 
                 renderSpectrum = _processedSpectrum ??
-                                 ProcessSynchronously(spectrum!, actualBarCount, halfSpectrumLength);
+                                 ProcessSynchronously(spectrum!, actualBarCount, spectrumLength);
             }
             catch (Exception ex)
             {
@@ -133,9 +133,9 @@ namespace SpectrumNet
             return true;
         }
 
-        private float[] ProcessSynchronously(float[] spectrum, int actualBarCount, int halfSpectrumLength)
+        private float[] ProcessSynchronously(float[] spectrum, int actualBarCount, int spectrumLength)
         {
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
             return SmoothSpectrum(scaledSpectrum, actualBarCount);
         }
 
@@ -290,17 +290,17 @@ namespace SpectrumNet
         #endregion
 
         #region Spectrum Processing
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)halfSpectrumLength / targetCount;
+            float blockSize = (float)spectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
                 float sum = 0;
                 int start = (int)(i * blockSize);
                 int end = (int)((i + 1) * blockSize);
-                int actualEnd = Math.Min(end, halfSpectrumLength);
+                int actualEnd = Math.Min(end, spectrumLength);
                 int count = actualEnd - start;
 
                 if (count <= 0)

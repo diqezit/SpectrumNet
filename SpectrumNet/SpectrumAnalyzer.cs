@@ -1,8 +1,15 @@
-﻿using Complex = NAudio.Dsp.Complex;
+﻿// SpectrumAnalyser.cs (Complete Code without Regions)
+
+using System;
+using System.Buffers;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using Complex = NAudio.Dsp.Complex;
 #nullable enable
 
 namespace SpectrumNet
 {
+
     public static class Constants
     {
         public const float DefaultAmplificationFactor = 0.5f, DefaultMaxDbValue = 0f, DefaultMinDbValue = -130f,
@@ -15,17 +22,17 @@ namespace SpectrumNet
 
     public enum SpectrumScale
     {
-        Linear,      // Линейная шкала
-        Logarithmic, // Логарифмическая шкала
-        Mel,         // Мел-шкала (психоакустическая)
-        Bark,        // Шкала барков (критические полосы)
-        ERB          // Эквивалентная прямоугольная полоса пропускания
+        Linear,      // Linear scale
+        Logarithmic, // Logarithmic scale
+        Mel,         // Mel scale (psychoacoustic)
+        Bark,        // Bark scale (critical bands)
+        ERB          // Equivalent Rectangular Bandwidth
     }
 
     public interface IFftProcessor
     {
         event EventHandler<FftEventArgs>? FftCalculated;
-        ValueTask AddSamplesAsync(Memory<float> samples, int sampleRate);
+        ValueTask AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate);
         ValueTask DisposeAsync();
         FftWindowType WindowType { get; set; }
         void ResetFftState();
@@ -42,7 +49,7 @@ namespace SpectrumNet
     {
         event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
         SpectralData? GetCurrentSpectrum();
-        Task AddSamplesAsync(float[] samples, int sampleRate, CancellationToken cancellationToken = default);
+        Task AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate, CancellationToken cancellationToken = default);
     }
 
     public interface ISpectrumConverter
@@ -103,6 +110,8 @@ namespace SpectrumNet
         {
             try
             {
+                if (minDbValue > maxDbValue)
+                    throw new ArgumentException("MinDbValue cannot be greater than MaxDbValue.");
                 _context = context;
                 _min = minDbValue;
                 _max = maxDbValue;
@@ -110,7 +119,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error during initialization: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Initialization error: {ex}");
                 throw;
             }
         }
@@ -138,7 +147,12 @@ namespace SpectrumNet
             {
                 try
                 {
-                    UpdateProperty(ref _max, Math.Max(value, _min));
+                    if (value < _min)
+                    {
+                        SmartLogger.Log(LogLevel.Warning, LogPrefix, $"MaxDbValue cannot be less than MinDbValue. Set to {_min}.");
+                        value = _min;
+                    }
+                    UpdateProperty(ref _max, value);
                 }
                 catch (Exception ex)
                 {
@@ -154,7 +168,12 @@ namespace SpectrumNet
             {
                 try
                 {
-                    UpdateProperty(ref _min, Math.Min(value, _max));
+                    if (value > _max)
+                    {
+                        SmartLogger.Log(LogLevel.Warning, LogPrefix, $"MinDbValue cannot be greater than MaxDbValue. Set to {_max}.");
+                        value = _max;
+                    }
+                    UpdateProperty(ref _min, value);
                 }
                 catch (Exception ex)
                 {
@@ -306,13 +325,13 @@ namespace SpectrumNet
             }
         }
 
-        public async Task AddSamplesAsync(float[] samples, int sampleRate, CancellationToken cancellationToken = default)
+        public async Task AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate, CancellationToken cancellationToken = default)
         {
             try
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(SpectrumAnalyzer));
-                if (samples is not { Length: > 0 }) return;
-                await _fftProcessor.AddSamplesAsync(samples, sampleRate).ConfigureAwait(false);
+                if (samples.Length == 0) return;
+                await _fftProcessor.AddSamplesAsync(samples, sampleRate);
             }
             catch (Exception ex)
             {
@@ -438,7 +457,7 @@ namespace SpectrumNet
         private const string LogPrefix = "[FftProcessor] ";
         private readonly int _fftSize;
         private readonly Complex[] _buffer;
-        private readonly Channel<(float[] Samples, int SampleRate)> _channel;
+        private readonly Channel<(ReadOnlyMemory<float> Samples, int SampleRate)> _channel;
         private readonly CancellationTokenSource _cts = new();
         private readonly ArrayPool<float> _pool = ArrayPool<float>.Shared;
         private readonly Dictionary<FftWindowType, float[]> _windows;
@@ -463,7 +482,7 @@ namespace SpectrumNet
                 (_cosCache, _sinCache) = TrigonometricTables.Get(fftSize);
                 _windows = Enum.GetValues<FftWindowType>().ToDictionary(t => t, t => GenerateWindow(fftSize, t));
                 _window = _windows[_windowType];
-                _channel = Channel.CreateUnbounded<(float[], int)>(new UnboundedChannelOptions { SingleReader = true });
+                _channel = Channel.CreateUnbounded<(ReadOnlyMemory<float>, int)>(new UnboundedChannelOptions { SingleReader = true });
                 _parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
                 Task.Run(ProcessAsync);
             }
@@ -493,14 +512,14 @@ namespace SpectrumNet
             }
         }
 
-        public ValueTask AddSamplesAsync(Memory<float> samples, int sampleRate)
+        public ValueTask AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate)
         {
             try
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(FftProcessor));
-                if (sampleRate <= 0 || samples.IsEmpty) return ValueTask.CompletedTask;
-                float[] arr = samples.ToArray();
-                return _channel.Writer.TryWrite((arr, sampleRate)) ? ValueTask.CompletedTask : new ValueTask(_channel.Writer.WriteAsync((arr, sampleRate)).AsTask());
+                if (sampleRate <= 0 || samples.Length == 0) return ValueTask.CompletedTask;
+                return _channel.Writer.TryWrite((samples, sampleRate)) ? ValueTask.CompletedTask
+                    : new ValueTask(_channel.Writer.WriteAsync((samples, sampleRate)).AsTask());
             }
             catch (Exception ex)
             {
@@ -541,7 +560,7 @@ namespace SpectrumNet
 
         private float[] GenerateWindow(int size, FftWindowType type)
         {
-            float[] w = _pool.Rent(size);
+            float[] w = new float[size];
             try
             {
                 Action<int> set = type switch
@@ -559,7 +578,6 @@ namespace SpectrumNet
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error generating window: {ex}");
-                _pool.Return(w);
                 throw;
             }
         }
@@ -588,7 +606,7 @@ namespace SpectrumNet
             }
             catch (OperationCanceledException)
             {
-                // Операция отменена, это ожидаемое поведение при закрытии
+                // Operation canceled, expected behavior on disposal
             }
             catch (Exception ex)
             {
@@ -596,7 +614,7 @@ namespace SpectrumNet
             }
         }
 
-        private void ProcessBatch(float[] samples, int rate)
+        private void ProcessBatch(ReadOnlyMemory<float> samples, int rate)
         {
             try
             {
@@ -605,7 +623,7 @@ namespace SpectrumNet
                 {
                     int count = Math.Min(_fftSize - _sampleCount, samples.Length - pos);
                     if (count <= 0) break;
-                    ProcessChunk(samples.AsSpan(pos, count));
+                    ProcessChunk(samples.Slice(pos, count));
                     pos += count;
                     _sampleCount += count;
                     if (_sampleCount >= _fftSize)
@@ -622,7 +640,7 @@ namespace SpectrumNet
             }
         }
 
-        private void ProcessChunk(ReadOnlySpan<float> chunk)
+        private void ProcessChunk(ReadOnlyMemory<float> chunk)
         {
             try
             {
@@ -630,14 +648,16 @@ namespace SpectrumNet
                 Span<float> temp = stackalloc float[_vecSize];
                 for (int i = 0; i < vecEnd; i += _vecSize)
                 {
-                    chunk.Slice(i, _vecSize).CopyTo(temp);
+                    chunk.Span.Slice(i, _vecSize).CopyTo(temp);
                     Vector<float> s = new Vector<float>(temp);
                     Vector<float> w = new Vector<float>(_window, offset + i);
                     Vector<float> result = s * w;
                     result.CopyTo(temp);
-                    for (int j = 0; j < _vecSize; j++) _buffer[offset + i + j] = new Complex { X = temp[j] };
+                    for (int j = 0; j < _vecSize; j++)
+                        _buffer[offset + i + j] = new Complex { X = temp[j] };
                 }
-                for (int i = vecEnd; i < len; i++) _buffer[offset + i] = new Complex { X = chunk[i] * _window[offset + i] };
+                for (int i = vecEnd; i < len; i++)
+                    _buffer[offset + i] = new Complex { X = chunk.Span[i] * _window[offset + i] };
             }
             catch (Exception ex)
             {
@@ -650,14 +670,7 @@ namespace SpectrumNet
     {
         private const string LogPrefix = "[SpectrumConverter] ";
         private readonly IGainParametersProvider _params;
-        private readonly ArrayPool<float> _pool = ArrayPool<float>.Shared;
-        private readonly int _vecSize = Vector<float>.Count;
         private readonly ParallelOptions _parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
-        private static readonly Vector<float> Zero = Vector<float>.Zero;
-        private static readonly Vector<float> One = Vector<float>.One;
-        private static readonly Vector<float> Ten = new Vector<float>(10f);
-        private static readonly Vector<float> InvLog10 = new Vector<float>(Constants.InvLog10);
-        private static readonly Vector<float> Epsilon = new Vector<float>(Constants.Epsilon);
 
         public SpectrumConverter(IGainParametersProvider parameters)
         {
@@ -679,35 +692,33 @@ namespace SpectrumNet
                 if (fft == null) throw new ArgumentNullException(nameof(fft));
                 if (sampleRate <= 0) throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
 
-                var range = new SpectrumRange(
-                    (int)(Constants.MinFreq * fft.Length / sampleRate),
-                    (int)(Constants.MaxFreq * fft.Length / sampleRate)
-                );
-
-                float[] spectrum = new float[range.Length];
+                int minIndex = (int)(Constants.MinFreq * fft.Length / sampleRate);
+                int maxIndex = Math.Min((int)(Constants.MaxFreq * fft.Length / sampleRate), fft.Length / 2);
+                int spectrumLength = maxIndex - minIndex + 1;
+                float[] spectrum = new float[spectrumLength];
+                SpectrumParameters sp = SpectrumParameters.FromProvider(_params);
 
                 switch (scale)
                 {
                     case SpectrumScale.Linear:
-                        ProcessLinear(fft, spectrum, range, sampleRate);
+                        ProcessLinear(fft, spectrum, minIndex, maxIndex, sp);
                         break;
                     case SpectrumScale.Logarithmic:
-                        ProcessLogarithmic(fft, spectrum, range, sampleRate);
+                        ProcessLogarithmic(fft, spectrum, minIndex, maxIndex, sampleRate, sp);
                         break;
                     case SpectrumScale.Mel:
-                        ProcessMelScale(fft, spectrum, range, sampleRate);
+                        ProcessMelScale(fft, spectrum, sampleRate, sp);
                         break;
                     case SpectrumScale.Bark:
-                        ProcessBarkScale(fft, spectrum, range, sampleRate);
+                        ProcessBarkScale(fft, spectrum, sampleRate, sp);
                         break;
                     case SpectrumScale.ERB:
-                        ProcessERBScale(fft, spectrum, range, sampleRate);
+                        ProcessERBScale(fft, spectrum, sampleRate, sp);
                         break;
                     default:
-                        ProcessLinear(fft, spectrum, range, sampleRate);
+                        ProcessLinear(fft, spectrum, minIndex, maxIndex, sp);
                         break;
                 }
-
                 return spectrum;
             }
             catch (Exception ex)
@@ -717,20 +728,28 @@ namespace SpectrumNet
             }
         }
 
-        private void ProcessLinear(Complex[] fft, float[] spectrum, SpectrumRange range, int sampleRate)
+        private void ProcessLinear(Complex[] fft, float[] spectrum, int minIndex, int maxIndex, SpectrumParameters sp)
         {
             try
             {
-                SpectrumParameters sp = SpectrumParameters.FromProvider(_params);
-
-                Parallel.For(range.MinIndex, range.MaxIndex + 1, i =>
+                if (spectrum.Length < 100)
                 {
-                    if (i < fft.Length && i - range.MinIndex < spectrum.Length)
+                    for (int i = 0; i < spectrum.Length; i++)
                     {
-                        float value = InterpolateSpectrumValue(fft, i, sp);
-                        spectrum[i - range.MinIndex] = value;
+                        int fftIndex = minIndex + i;
+                        if (fftIndex < fft.Length)
+                            spectrum[i] = InterpolateSpectrumValue(fft, fftIndex, sp);
                     }
-                });
+                }
+                else
+                {
+                    Parallel.For(0, spectrum.Length, i =>
+                    {
+                        int fftIndex = minIndex + i;
+                        if (fftIndex < fft.Length)
+                            spectrum[i] = InterpolateSpectrumValue(fft, fftIndex, sp);
+                    });
+                }
             }
             catch (Exception ex)
             {
@@ -738,12 +757,10 @@ namespace SpectrumNet
             }
         }
 
-        private void ProcessMelScale(Complex[] fft, float[] spectrum, SpectrumRange range, int sampleRate)
+        private void ProcessMelScale(Complex[] fft, float[] spectrum, int sampleRate, SpectrumParameters sp)
         {
             try
             {
-                SpectrumParameters sp = SpectrumParameters.FromProvider(_params);
-
                 float minMel = FreqToMel(Constants.MinFreq);
                 float maxMel = FreqToMel(Constants.MaxFreq);
                 float melStep = (maxMel - minMel) / (spectrum.Length - 1);
@@ -753,7 +770,7 @@ namespace SpectrumNet
                     float mel = minMel + i * melStep;
                     float freq = MelToFreq(mel);
                     int bin = (int)(freq * fft.Length / sampleRate);
-                    spectrum[i] = (bin >= 0 && bin < fft.Length) ? CalcValue(Mag(fft[bin]), sp) : 0;
+                    spectrum[i] = (bin >= 0 && bin < fft.Length / 2) ? CalcValue(Mag(fft[bin]), sp) : 0;
                 });
             }
             catch (Exception ex)
@@ -762,12 +779,10 @@ namespace SpectrumNet
             }
         }
 
-        private void ProcessBarkScale(Complex[] fft, float[] spectrum, SpectrumRange range, int sampleRate)
+        private void ProcessBarkScale(Complex[] fft, float[] spectrum, int sampleRate, SpectrumParameters sp)
         {
             try
             {
-                SpectrumParameters sp = SpectrumParameters.FromProvider(_params);
-
                 float minBark = FreqToBark(Constants.MinFreq);
                 float maxBark = FreqToBark(Constants.MaxFreq);
                 float barkStep = (maxBark - minBark) / (spectrum.Length - 1);
@@ -777,7 +792,7 @@ namespace SpectrumNet
                     float bark = minBark + i * barkStep;
                     float freq = BarkToFreq(bark);
                     int bin = (int)(freq * fft.Length / sampleRate);
-                    spectrum[i] = (bin >= 0 && bin < fft.Length) ? CalcValue(Mag(fft[bin]), sp) : 0;
+                    spectrum[i] = (bin >= 0 && bin < fft.Length / 2) ? CalcValue(Mag(fft[bin]), sp) : 0;
                 });
             }
             catch (Exception ex)
@@ -786,12 +801,10 @@ namespace SpectrumNet
             }
         }
 
-        private void ProcessERBScale(Complex[] fft, float[] spectrum, SpectrumRange range, int sampleRate)
+        private void ProcessERBScale(Complex[] fft, float[] spectrum, int sampleRate, SpectrumParameters sp)
         {
             try
             {
-                SpectrumParameters sp = SpectrumParameters.FromProvider(_params);
-
                 float minERB = FreqToERB(Constants.MinFreq);
                 float maxERB = FreqToERB(Constants.MaxFreq);
                 float erbStep = (maxERB - minERB) / (spectrum.Length - 1);
@@ -801,12 +814,33 @@ namespace SpectrumNet
                     float erb = minERB + i * erbStep;
                     float freq = ERBToFreq(erb);
                     int bin = (int)(freq * fft.Length / sampleRate);
-                    spectrum[i] = (bin >= 0 && bin < fft.Length) ? CalcValue(Mag(fft[bin]), sp) : 0;
+                    spectrum[i] = (bin >= 0 && bin < fft.Length / 2) ? CalcValue(Mag(fft[bin]), sp) : 0;
                 });
             }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing ERB scale spectrum: {ex}");
+            }
+        }
+
+        private void ProcessLogarithmic(Complex[] fft, float[] spectrum, int minIndex, int maxIndex, int sampleRate, SpectrumParameters sp)
+        {
+            try
+            {
+                float logMin = MathF.Log10(Constants.MinFreq);
+                float logMax = MathF.Log10(Constants.MaxFreq);
+                float logStep = (logMax - logMin) / (spectrum.Length - 1);
+
+                Parallel.For(0, spectrum.Length, i =>
+                {
+                    float freq = MathF.Pow(10, logMin + i * logStep);
+                    int bin = (int)(freq * fft.Length / sampleRate);
+                    spectrum[i] = (bin >= 0 && bin < fft.Length / 2) ? CalcValue(Mag(fft[bin]), sp) : 0;
+                });
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing logarithmic spectrum: {ex}");
             }
         }
 
@@ -825,7 +859,7 @@ namespace SpectrumNet
             {
                 float centerMag = Mag(fft[index]);
                 float leftMag = index > 0 ? Mag(fft[index - 1]) : centerMag;
-                float rightMag = index < fft.Length - 1 ? Mag(fft[index + 1]) : centerMag;
+                float rightMag = index < fft.Length / 2 - 1 ? Mag(fft[index + 1]) : centerMag;
                 float interpolatedMag = (leftMag + centerMag + rightMag) / 3f;
                 if (interpolatedMag <= 0) return 0;
                 float db = 10f * Constants.InvLog10 * MathF.Log(interpolatedMag);
@@ -837,93 +871,6 @@ namespace SpectrumNet
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error interpolating spectrum value: {ex}");
                 return 0;
             }
-        }
-
-        private void ProcessLogarithmic(Complex[] fft, float[] spectrum, SpectrumRange range, int sampleRate)
-        {
-            try
-            {
-                SpectrumParameters sp = SpectrumParameters.FromProvider(_params);
-                float logMin = MathF.Log10(Constants.MinFreq);
-                float logStep = (MathF.Log10(Constants.MaxFreq) - logMin) / (range.Length - 1);
-
-                Parallel.For(0, range.Length, i =>
-                {
-                    int bin = (int)(MathF.Pow(10, logMin + i * logStep) * fft.Length / sampleRate);
-                    spectrum[i] = (bin >= 0 && bin < fft.Length) ? CalcValue(Mag(fft[bin]), sp) : 0;
-                });
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing logarithmic spectrum: {ex}");
-            }
-        }
-
-        private void ProcessVector(Complex[] fft, float[] spectrum, int index, int minIdx, SpectrumParameters sp)
-        {
-            try
-            {
-                if (index + _vecSize > fft.Length)
-                {
-                    return;
-                }
-
-                int spectrumIndex = index - minIdx;
-                if (spectrumIndex < 0 || spectrumIndex + _vecSize > spectrum.Length)
-                {
-                    return;
-                }
-
-                Span<float> temp = stackalloc float[_vecSize];
-                Vector<float> real = LoadVector(fft, index, c => c.X);
-                Vector<float> imag = LoadVector(fft, index, c => c.Y);
-                Vector<float> mag = Vector.SquareRoot(real * real + imag * imag);
-                mag = Vector.ConditionalSelect(Vector.Equals(mag, Zero), Epsilon, mag);
-                Vector<float> db = Ten * InvLog10 * VectorLog(mag);
-                Vector<float> norm = Vector.Max(Zero, Vector.Min(One, (db - new Vector<float>(sp.MinDb)) / new Vector<float>(sp.DbRange)));
-                ApplyAmp(norm, sp.AmplificationFactor).CopyTo(spectrum, spectrumIndex);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing vector: {ex}");
-            }
-        }
-
-        private struct SpectrumRange
-        {
-            public int MinIndex { get; }
-            public int MaxIndex { get; }
-            public int Length => MaxIndex - MinIndex + 1;
-
-            public SpectrumRange(int minIndex, int maxIndex)
-            {
-                MinIndex = minIndex;
-                MaxIndex = maxIndex;
-            }
-        }
-
-        private static Vector<float> LoadVector(Complex[] fft, int index, Func<Complex, float> selector)
-        {
-            float[] temp = new float[Vector<float>.Count];
-            for (int i = 0; i < Vector<float>.Count; i++) temp[i] = selector(fft[index + i]);
-            return new Vector<float>(temp);
-        }
-
-        private static Vector<float> VectorLog(Vector<float> v)
-        {
-            float[] temp = new float[Vector<float>.Count];
-            v.CopyTo(temp);
-            for (int i = 0; i < temp.Length; i++) temp[i] = MathF.Log(temp[i]);
-            return new Vector<float>(temp);
-        }
-
-        private static Vector<float> ApplyAmp(Vector<float> v, float factor)
-        {
-            float[] temp = new float[Vector<float>.Count];
-            v.CopyTo(temp);
-            for (int i = 0; i < temp.Length; i++)
-                temp[i] = temp[i] < 1e-6f ? 0f : MathF.Pow(temp[i], factor);
-            return new Vector<float>(temp);
         }
 
         private static float CalcValue(float mag, SpectrumParameters sp)

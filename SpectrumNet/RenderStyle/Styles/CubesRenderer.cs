@@ -66,15 +66,15 @@
 
                 if (semaphoreAcquired)
                 {
-                    int halfSpectrumLength = spectrum!.Length / 2;
-                    int actualBarCount = Math.Min(halfSpectrumLength, barCount);
+                    int spectrumLength = spectrum!.Length;
+                    int actualBarCount = Math.Min(spectrumLength, barCount);
 
-                    float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+                    float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
                     _processedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
                 }
 
                 renderSpectrum = _processedSpectrum ??
-                                 ProcessSynchronously(spectrum!, Math.Min(spectrum!.Length / 2, barCount));
+                                 ProcessSynchronously(spectrum!, Math.Min(spectrum!.Length, barCount));
             }
             catch (Exception ex)
             {
@@ -119,8 +119,8 @@
 
         private float[] ProcessSynchronously(float[] spectrum, int targetCount)
         {
-            int halfSpectrumLength = spectrum.Length / 2;
-            var scaledSpectrum = ScaleSpectrum(spectrum, targetCount, halfSpectrumLength);
+            int spectrumLength = spectrum.Length;
+            var scaledSpectrum = ScaleSpectrum(spectrum, targetCount, spectrumLength);
             return SmoothSpectrum(scaledSpectrum, targetCount);
         }
 
@@ -193,16 +193,16 @@
         #endregion
 
         #region Spectrum Processing
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)halfSpectrumLength / targetCount;
+            float blockSize = (float)spectrumLength / targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {
                 int start = (int)Math.Floor(i * blockSize);
                 int end = (int)Math.Ceiling((i + 1) * blockSize);
-                end = end <= start ? start + 1 : Math.Min(end, halfSpectrumLength);
+                end = end <= start ? start + 1 : Math.Min(end, spectrumLength);
 
                 float sum = 0;
                 for (int j = start; j < end; j++)

@@ -131,9 +131,9 @@ namespace SpectrumNet
             {
                 EnsureSpectrumBuffer(spectrum.Length);
 
-                int halfSpectrumLength = spectrum.Length / 2;
-                int actualBarCount = Math.Min(halfSpectrumLength, barCount);
-                float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+                int spectrumLength = spectrum.Length;
+                int actualBarCount = Math.Min(spectrumLength, barCount);
+                float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
 
                 UpdatePreviousSpectrum(spectrum);
 
@@ -150,9 +150,9 @@ namespace SpectrumNet
 
         private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
         {
-            int halfSpectrumLength = spectrum.Length / 2;
-            int actualBarCount = Math.Min(halfSpectrumLength, barCount);
-            return ScaleSpectrum(spectrum, actualBarCount, halfSpectrumLength);
+            int spectrumLength = spectrum.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
+            return ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
         }
 
         private void EnsureSpectrumBuffer(int length)
@@ -164,10 +164,10 @@ namespace SpectrumNet
             }
         }
 
-        private float[] ScaleSpectrum(float[] spectrum, int targetCount, int halfSpectrumLength)
+        private float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)halfSpectrumLength / targetCount;
+            float blockSize = (float)spectrumLength / targetCount;
             float[] localSpectrum = spectrum;
 
             Parallel.For(0, targetCount, i =>
@@ -176,7 +176,7 @@ namespace SpectrumNet
                 int start = (int)(i * blockSize);
                 int end = (int)((i + 1) * blockSize);
 
-                for (int j = start; j < end && j < halfSpectrumLength; j++)
+                for (int j = start; j < end && j < spectrumLength; j++)
                     sum += localSpectrum[j];
 
                 scaledSpectrum[i] = sum / (end - start);

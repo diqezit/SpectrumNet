@@ -97,7 +97,7 @@ namespace SpectrumNet
             _globalAnimationTime = (_globalAnimationTime + AnimationTimeIncrement) % 1000f;
 
             AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
-            int actualHeartCount = Math.Min(spectrum!.Length / 2, _heartCount);
+            int actualHeartCount = Math.Min(spectrum!.Length, _heartCount);
 
             ProcessSpectrum(spectrum, actualHeartCount);
             RenderHeartbeats(canvas!, _cachedSmoothedSpectrum!, info, paint!);
@@ -164,7 +164,7 @@ namespace SpectrumNet
 
         private static void ScaleSpectrum(float[] source, float[] target, int targetCount)
         {
-            float blockSize = source.Length / (2f * targetCount);
+            float blockSize = source.Length / (float)targetCount;
 
             for (int i = 0; i < targetCount; i++)
             {

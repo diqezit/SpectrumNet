@@ -213,7 +213,6 @@
 
             float[] renderSpectrum;
             bool semaphoreAcquired = false;
-            int halfSpectrumLength = spectrum!.Length / 2;
             int renderedBarCount;
 
             try
@@ -222,14 +221,15 @@
 
                 if (semaphoreAcquired)
                 {
-                    int targetBarCount = Math.Min(halfSpectrumLength, barCount);
+                    // Спектр уже содержит только нужные частоты, не нужно делить на 2
+                    int targetBarCount = Math.Min(spectrum!.Length, barCount);
 
-                    float[] scaledSpectrum = ScaleSpectrum(spectrum, targetBarCount, halfSpectrumLength);
+                    float[] scaledSpectrum = ScaleSpectrum(spectrum!, targetBarCount, spectrum!.Length);
                     _processedSpectrum = SmoothSpectrum(scaledSpectrum, targetBarCount);
                 }
 
                 renderSpectrum = _processedSpectrum ??
-                                 ProcessSynchronously(spectrum!, Math.Min(halfSpectrumLength, barCount));
+                                 ProcessSynchronously(spectrum!, Math.Min(spectrum!.Length, barCount));
 
                 renderedBarCount = renderSpectrum.Length;
             }
@@ -276,18 +276,18 @@
 
         private float[] ProcessSynchronously(float[] spectrum, int targetCount)
         {
-            int halfSpectrumLength = spectrum.Length / 2;
-            var scaledSpectrum = ScaleSpectrum(spectrum, targetCount, halfSpectrumLength);
+            // Спектр уже содержит только нужные частоты, не нужно делить на 2
+            var scaledSpectrum = ScaleSpectrum(spectrum, targetCount, spectrum.Length);
             return SmoothSpectrum(scaledSpectrum, targetCount);
         }
 
         private void RenderBars(
-            SKCanvas canvas,
-            float[] spectrum,
-            SKImageInfo info,
-            float barWidth,
-            float barSpacing,
-            SKPaint basePaint)
+             SKCanvas canvas,
+             float[] spectrum,
+             SKImageInfo info,
+             float barWidth,
+             float barSpacing,
+             SKPaint basePaint)
         {
             float totalBarWidth = barWidth + barSpacing;
             float canvasHeight = info.Height;
@@ -376,17 +376,17 @@
         #endregion
 
         #region Spectrum Processing
-        private static float[] ScaleSpectrum(float[] spectrum, int barCount, int halfSpectrumLength)
+        private static float[] ScaleSpectrum(float[] spectrum, int barCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[barCount];
-            float blockSize = (float)halfSpectrumLength / barCount;
+            float blockSize = (float)spectrumLength / barCount;
 
             for (int i = 0; i < barCount; i++)
             {
                 float sum = 0;
                 int start = (int)(i * blockSize);
                 int end = (int)((i + 1) * blockSize);
-                end = Math.Min(end, halfSpectrumLength);
+                end = Math.Min(end, spectrumLength);
 
                 for (int j = start; j < end; j++)
                 {
