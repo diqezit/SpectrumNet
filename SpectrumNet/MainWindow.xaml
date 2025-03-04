@@ -492,14 +492,14 @@
                    HorizontalAlignment="Right"
                    VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="2"
-                  Grid.Column="1"
-                  x:Name="FftWindowTypeComboBox"
-                  ItemsSource="{Binding AvailableFftWindowTypes}"
-                  SelectedItem="{Binding SelectedFftWindowType, Mode=TwoWay}"
-                  Width="200"
-                  HorizontalAlignment="Left"
-                  VerticalAlignment="Center"
-                  Style="{DynamicResource ModernComboBoxStyle}"/>
+          Grid.Column="1"
+          x:Name="FftWindowTypeComboBox"
+          ItemsSource="{Binding AvailableFftWindowTypes}"
+          SelectedItem="{Binding WindowType, Mode=TwoWay}"
+          Width="200"
+          HorizontalAlignment="Left"
+          VerticalAlignment="Center"
+          Style="{DynamicResource ModernComboBoxStyle}"/>
 
                                     <!-- Строка 4 (новая) - Выбор типа шкалы -->
                                     <TextBlock Grid.Row="3"
@@ -512,7 +512,7 @@
                   Grid.Column="1"
                   x:Name="ScaleTypeComboBox"
                   ItemsSource="{Binding AvailableScaleTypes}"
-                  SelectedItem="{Binding SelectedScaleType, Mode=TwoWay}"
+                  SelectedItem="{Binding ScaleType, Mode=TwoWay}"
                   Width="200"
                   HorizontalAlignment="Left"
                   VerticalAlignment="Center"
