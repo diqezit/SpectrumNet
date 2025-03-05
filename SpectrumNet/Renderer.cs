@@ -156,7 +156,16 @@ namespace SpectrumNet
             }
 
             var spectrum = GetSpectrumData();
-            if (spectrum == null || !TryCalcRenderParams(info, out float barWidth, out float barSpacing, out int barCount))
+            if (spectrum == null)
+            {
+                if (!_controller.IsRecording)
+                {
+                    RenderPlaceholder(canvas);
+                }
+                return;
+            }
+
+            if (!TryCalcRenderParams(info, out float barWidth, out float barSpacing, out int barCount))
             {
                 RenderPlaceholder(canvas);
                 return;
