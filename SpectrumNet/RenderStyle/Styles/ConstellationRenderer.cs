@@ -4,525 +4,576 @@ namespace SpectrumNet
 {
     public sealed class ConstellationRenderer : ISpectrumRenderer, IDisposable
     {
+        #region Constants
+        private const int DEFAULT_STAR_COUNT = 120,    // default star count
+                      OVERLAY_STAR_COUNT = 80,         // overlay star count
+                      UPDATE_INTERVAL = 16,            // update interval in ms
+                      MIN_STAR_X = 100,                // min initial X
+                      MAX_STAR_X = 900,                // max initial X
+                      MIN_STAR_Y = 100,                // min initial Y
+                      MAX_STAR_Y = 700,                // max initial Y
+                      EDGE_REPULSION_DISTANCE = 120;   // edge repulsion distance
+
+        private const float MIN_STAR_SIZE = 3.0f,        // min star size (pixels)
+                        MAX_STAR_SIZE = 9.0f,           // max star size (pixels)
+                        DEFAULT_BRIGHTNESS = 0.65f,      // default brightness (0-1)
+                        BRIGHTNESS_VARIATION = 0.35f,    // brightness random variation
+                        MIN_BRIGHTNESS = 0.38f,          // min brightness allowed
+                        MAX_BRIGHTNESS = 1.0f,           // max brightness allowed
+                        GLOW_RADIUS = 3.0f,              // glow blur radius
+                        FADE_IN_SPEED = 2.2f,            // fade-in speed
+                        FADE_OUT_SPEED = 1.5f,           // fade-out speed
+
+                        TIME_STEP = 0.016f,              // physics timestep (sec)
+                        BASE_STAR_VELOCITY = 2.5f,       // base velocity
+                        STAR_ACCELERATION = 0.25f,       // acceleration factor
+                        STAR_DAMPING = 0.95f,            // damping factor
+                        MAX_SPEED = 12.0f,               // max star speed
+                        VELOCITY_LERP = 0.08f,           // velocity interpolation factor
+
+                        SMOOTHING_FACTOR = 0.15f,        // spectrum smoothing factor
+                        TWINKLE_SPEED = 1.4f,            // twinkle animation speed
+                        TWINKLE_INFLUENCE = 0.22f,       // twinkle brightness influence
+                        SPECTRUM_INFLUENCE = 0.5f,       // spectrum brightness influence
+                        SPECTRUM_AMPLIFICATION = 3.0f,   // spectrum amplification factor
+                        SPECTRUM_SIZE_INFLUENCE = 0.4f,  // spectrum size influence
+                        DIRECTION_CHANGE_CHANCE = 0.008f,// chance to change direction
+                        BASE_TWINKLE_SPEED = 0.6f,       // base twinkle speed
+                        MAX_TWINKLE_SPEED_VARIATION = 1.0f, // max twinkle speed variation
+
+                        EDGE_REPULSION_FORCE = 0.45f,    // edge repulsion force
+                        REPULSION_CURVE_POWER = 2.5f,    // repulsion falloff exponent
+
+                        MIN_STAR_LIFETIME = 5.0f,        // min lifetime (sec)
+                        MAX_STAR_LIFETIME = 15.0f,       // max lifetime (sec)
+                        SPAWN_THRESHOLD = 0.1f,          // spectrum threshold for spawning
+                        MAX_SPAWN_RATE = 5.0f,           // max stars spawned per sec
+                        SPECTRUM_TIMEOUT = 0.3f,         // spectrum timeout (sec)
+                        FORCE_CLEAR_TIMEOUT = 2.0f,      // force clear timeout (sec)
+                        FREQUENCY_FORCE_FACTOR = 0.5f,   // frequency force factor
+
+                        UNIT_RADIUS = 1.0f;              // unit radius for shader drawing
+
+        private const byte MIN_STAR_COLOR_VALUE = 130,       // min color component
+                           MAX_STAR_COLOR_VARIATION = 50,     // max color variation
+                           BASE_STAR_COLOR = 210;             // base star color value
+        #endregion
+
         #region Fields
         private static ConstellationRenderer? _instance;
-        private bool _isInitialized;
-        private bool _isOverlayActive;
+        private bool _isInitialized, _isOverlayActive;
         private volatile bool _disposed;
         private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
 
-        private float[]? _processedSpectrum;
-        private List<Star>? _stars;
-        private List<Constellation>? _constellations;
-        private SKPaint? _starPaint;
-        private SKPaint? _linePaint;
-        private SKPaint? _glowPaint;
-        private Random _random = new();
+        private float _lowSpectrum, _midSpectrum, _highSpectrum, _processedSpectrum;
+        private float _spectrumEnergy, _spawnAccumulator, _lastSpectrumUpdateTime, _timeSinceLastSpectrum;
+        private bool _hasActiveSpectrum; // indicates if spectrum data is active
+
+        private Star[]? _stars;
+        private SKPaint? _starPaint, _glowPaint;
+        private SKShader? _starShader, _glowShader;
+        private readonly Random _random = new();
         private float _time;
-        private float _rotationAngle;
+        private int _starCount;
+        private SKImageInfo _lastRenderInfo;
+        private readonly object _starsLock = new();
+        private readonly CancellationTokenSource _updateTokenSource = new();
+        private Task? _updateTask;
+        private volatile bool _needsUpdate;
+        private SKSurface? _renderSurface;
         #endregion
 
-        #region Constants
-        private const int DefaultStarCount = 150;
-        private const int OverlayStarCount = 100;
-        private const int ConstellationCount = 5;
-        private const float SmoothingFactor = 0.1f;
-        private const float MinStarSize = 1f;
-        private const float MaxStarSize = 5f;
-        private const byte ConstellationLineAlpha = 80; 
-        private const float BassThreshold = 0.4f;
-        private const byte StarGlowAlpha = 120; 
-        private const float TimeStep = 0.016f;
-        private const float RotationSpeed = 0.01f;
-        private const float TwinkleSpeed = 3f;
-        #endregion
+        #region Initialization
+        private ConstellationRenderer()
+        {
+            InitializeShadersAndPaints();
+            StartUpdateLoop();
+        }
 
-        #region Constructor and Initialization
-        private ConstellationRenderer() { }
+        ~ConstellationRenderer() => Dispose(false);
 
         public static ConstellationRenderer GetInstance() => _instance ??= new ConstellationRenderer();
 
         public void Initialize()
         {
             if (_isInitialized) return;
+            _starCount = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
+            InitializeStars(_starCount);
+            _isInitialized = true;
+            Log.Debug("ConstellationRenderer initialized");
+        }
 
+        private void InitializeShadersAndPaints()
+        {
             _starPaint = new SKPaint
             {
                 IsAntialias = true,
-                Style = SKPaintStyle.Fill
+                Style = SKPaintStyle.Fill,
+                FilterQuality = SKFilterQuality.High,
+                BlendMode = SKBlendMode.SrcOver,
             };
 
-            _linePaint = new SKPaint
-            {
-                IsAntialias = true,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 1.0f,
-                StrokeCap = SKStrokeCap.Round
-            };
+            _glowShader = SKShader.CreateRadialGradient(
+                new SKPoint(0, 0), UNIT_RADIUS,
+                new SKColor[] { new SKColor(255, 255, 255, 128), SKColors.Transparent },
+                new float[] { 0.0f, 1.0f },
+                SKShaderTileMode.Clamp);
 
             _glowPaint = new SKPaint
             {
                 IsAntialias = true,
                 Style = SKPaintStyle.Fill,
-                ImageFilter = SKImageFilter.CreateBlur(4f, 4f)
+                FilterQuality = SKFilterQuality.High,
+                BlendMode = SKBlendMode.Plus,
+                Shader = _glowShader,
+                ImageFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_RADIUS)
             };
-
-            int starCount = _isOverlayActive ? OverlayStarCount : DefaultStarCount;
-            InitializeStars(starCount);
-            CreateConstellations();
-
-            _isInitialized = true;
-            Log.Debug("ConstellationRenderer initialized");
-        }
-
-        public void Configure(bool isOverlayActive)
-        {
-            if (_isOverlayActive == isOverlayActive) return;
-
-            _isOverlayActive = isOverlayActive;
-            int starCount = _isOverlayActive ? OverlayStarCount : DefaultStarCount;
-            InitializeStars(starCount);
         }
         #endregion
 
-        #region Rendering
-        public void Render(
-            SKCanvas? canvas,
-            float[]? spectrum,
-            SKImageInfo info,
-            float barWidth,
-            float barSpacing,
-            int barCount,
-            SKPaint? paint,
-            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        #region Public Interface
+        public void Configure(bool isOverlayActive)
         {
-            if (!ValidateRenderParams(canvas, spectrum, info, paint, drawPerformanceInfo))
-                return;
+            if (_disposed) throw new ObjectDisposedException(nameof(ConstellationRenderer));
+            if (_isOverlayActive == isOverlayActive) return;
+            _isOverlayActive = isOverlayActive;
+            _starCount = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
+            InitializeStars(_starCount);
+        }
 
+        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
+                           float barWidth, float barSpacing, int barCount, SKPaint? paint,
+                           Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        {
+            if (!ValidateRenderParams(canvas, info, paint)) return;
             bool semaphoreAcquired = false;
             try
             {
                 semaphoreAcquired = _spectrumSemaphore.Wait(0);
-
                 if (semaphoreAcquired)
                 {
-                    ProcessSpectrum(spectrum!);
-                    UpdateStars(info);
+                    _timeSinceLastSpectrum += TIME_STEP;
+                    bool hasNewSpectrumData = spectrum != null && spectrum.Length >= 2;
+                    if (hasNewSpectrumData)
+                    {
+                        ProcessSpectrum(spectrum!);
+                        _hasActiveSpectrum = true;
+                        _lastSpectrumUpdateTime = _time;
+                        _timeSinceLastSpectrum = 0;
+                    }
+                    else
+                    {
+                        _spectrumEnergy = 0;
+                        if (_time - _lastSpectrumUpdateTime > SPECTRUM_TIMEOUT)
+                        {
+                            _hasActiveSpectrum = false;
+                            _processedSpectrum = 0;
+                        }
+                    }
+                    if (info.Width != _lastRenderInfo.Width || info.Height != _lastRenderInfo.Height || _renderSurface == null)
+                        UpdateRenderSurfaces(info);
+                    _needsUpdate = true;
+                    if (_timeSinceLastSpectrum > FORCE_CLEAR_TIMEOUT) ClearAllStars();
                 }
-
-                RenderStarField(canvas!, info, paint!);
+                RenderStarField(canvas!, info);
                 drawPerformanceInfo?.Invoke(canvas!, info);
             }
             catch (Exception ex)
             {
                 Log.Error($"Error in ConstellationRenderer.Render: {ex.Message}");
             }
-            finally
-            {
-                if (semaphoreAcquired)
-                    _spectrumSemaphore.Release();
-            }
+            finally { if (semaphoreAcquired) _spectrumSemaphore.Release(); }
         }
 
-        private void RenderStarField(SKCanvas canvas, SKImageInfo info, SKPaint basePaint)
+        private void ClearAllStars()
         {
-            if (_stars == null || _constellations == null ||
-                _starPaint == null || _linePaint == null || _glowPaint == null ||
-                _processedSpectrum == null)
-                return;
-
-            // Очищаем холст черным цветом
-            canvas.Clear(SKColors.Black);
-
-            // Настраиваем цвета на основе базовой кисти
-            SKColor baseColor = basePaint.Color;
-
-            // Настраиваем центр вращения
-            canvas.Save();
-            canvas.Translate(info.Width / 2, info.Height / 2);
-            canvas.RotateRadians(_rotationAngle);
-            canvas.Translate(-info.Width / 2, -info.Height / 2);
-
-            // Первым слоем рисуем созвездия
-            bool showConstellations = _processedSpectrum[0] > BassThreshold;
-
-            if (showConstellations)
+            if (_stars == null) return;
+            lock (_starsLock)
             {
-                _linePaint.Color = baseColor.WithAlpha(ConstellationLineAlpha); // Теперь ConstellationLineAlpha - byte
-
-                foreach (var constellation in _constellations)
-                {
-                    if (!constellation.IsActive) continue;
-
-                    // Рисуем линии созвездия
-                    for (int i = 0; i < constellation.LineIndices.Count; i += 2)
-                    {
-                        int idx1 = constellation.LineIndices[i];
-                        int idx2 = constellation.LineIndices[i + 1];
-
-                        if (idx1 < _stars.Count && idx2 < _stars.Count)
-                        {
-                            var star1 = _stars[idx1];
-                            var star2 = _stars[idx2];
-
-                            if (star1.IsActive && star2.IsActive)
-                            {
-                                // Рисуем линию с пульсацией в зависимости от спектра
-                                float pulseFactor = 0.5f + _processedSpectrum[1] * 0.5f;
-                                _linePaint.StrokeWidth = 1.0f * pulseFactor;
-
-                                canvas.DrawLine(star1.X, star1.Y, star2.X, star2.Y, _linePaint);
-                            }
-                        }
-                    }
-                }
+                for (int i = 0; i < _stars.Length; i++)
+                    _stars[i] = _stars[i] with { IsActive = false, Opacity = 0 };
             }
-
-            // Вторым слоем рисуем звезды
-            foreach (var star in _stars)
-            {
-                if (!star.IsActive) continue;
-
-                // Вычисляем яркость звезды на основе её мерцания и соответствующей частоты
-                float brightness = star.Brightness;
-                int freqBand = Math.Min(star.FrequencyBand, _processedSpectrum.Length - 1);
-                float spectrumFactor = _processedSpectrum[freqBand];
-
-                // Сияние для ярких звезд
-                if (brightness > 0.7f || spectrumFactor > 0.7f)
-                {
-                    float glowSize = star.Size * (1 + spectrumFactor);
-                    // Явное преобразование результата умножения float в byte
-                    byte glowAlpha = (byte)Math.Clamp((int)(StarGlowAlpha * brightness), 0, 255);
-                    _glowPaint.Color = star.Color.WithAlpha(glowAlpha);
-                    canvas.DrawCircle(star.X, star.Y, glowSize * 2, _glowPaint);
-                }
-
-                // Рисуем саму звезду
-                // Явное преобразование результата умножения float в byte
-                byte starAlpha = (byte)Math.Clamp((int)(255 * brightness), 0, 255);
-                _starPaint.Color = star.Color.WithAlpha(starAlpha);
-                canvas.DrawCircle(star.X, star.Y, star.Size, _starPaint);
-            }
-
-            canvas.Restore();
         }
         #endregion
 
-        #region Star and Constellation Management
-        private void InitializeStars(int count)
+        #region Rendering Pipeline
+        private void UpdateRenderSurfaces(SKImageInfo info)
         {
-            _stars = new List<Star>(count);
-
-            // Создаем звезды разных размеров и цветов
-            for (int i = 0; i < count; i++)
-            {
-                float size = MinStarSize + (float)_random.NextDouble() * (MaxStarSize - MinStarSize);
-
-                // Звезды с разными цветовыми оттенками
-                byte r = (byte)(180 + _random.Next(0, 75));
-                byte g = (byte)(180 + _random.Next(0, 75));
-                byte b = (byte)(180 + _random.Next(0, 75));
-
-                // Небольшая вероятность для цветных звезд
-                if (_random.NextDouble() < 0.2)
-                {
-                    // Красные, синие или желтые звезды
-                    switch (_random.Next(3))
-                    {
-                        case 0: // Красные
-                            r = (byte)(200 + _random.Next(0, 55));
-                            g = (byte)(100 + _random.Next(0, 55));
-                            b = (byte)(100 + _random.Next(0, 30));
-                            break;
-                        case 1: // Синие
-                            r = (byte)(100 + _random.Next(0, 30));
-                            g = (byte)(150 + _random.Next(0, 50));
-                            b = (byte)(220 + _random.Next(0, 35));
-                            break;
-                        case 2: // Желтые
-                            r = (byte)(220 + _random.Next(0, 35));
-                            g = (byte)(220 + _random.Next(0, 35));
-                            b = (byte)(100 + _random.Next(0, 50));
-                            break;
-                    }
-                }
-
-                _stars.Add(new Star
-                {
-                    X = _random.Next(100, 900),
-                    Y = _random.Next(100, 700),
-                    Size = size,
-                    Brightness = 0.5f + (float)_random.NextDouble() * 0.5f,
-                    TwinkleFactor = (float)_random.NextDouble() * 6.28f, // Случайная фаза
-                    TwinkleSpeed = 0.5f + (float)_random.NextDouble() * 2f, // Случайная скорость
-                    Color = new SKColor(r, g, b),
-                    IsActive = true,
-                    FrequencyBand = _random.Next(0, 3) // Случайный диапазон частот (0-2)
-                });
-            }
+            _lastRenderInfo = info;
+            _renderSurface?.Dispose();
+            _renderSurface = SKSurface.Create(info);
         }
 
-        private void CreateConstellations()
+        private void RenderStarField(SKCanvas canvas, SKImageInfo info)
         {
-            if (_stars == null || _stars.Count < 10) return;
-
-            _constellations = new List<Constellation>();
-
-            // Создаем несколько созвездий, выбирая случайные звезды
-            for (int c = 0; c < ConstellationCount; c++)
+            if (_stars == null || _starPaint == null || _glowPaint == null || _renderSurface == null) return;
+            _renderSurface.Canvas.Clear(SKColors.Transparent);
+            SKCanvas renderCanvas = _renderSurface.Canvas;
+            lock (_starsLock)
             {
-                // Выбираем начальную звезду
-                int startIdx = _random.Next(_stars.Count);
-                List<int> constellationStars = new() { startIdx };
-
-                // Определяем размер созвездия (3-8 звезд)
-                int constellationSize = 3 + _random.Next(5);
-
-                // Находим ближайшие звезды для созвездия
-                for (int i = 1; i < constellationSize; i++)
+                foreach (var star in _stars)
                 {
-                    int lastStarIdx = constellationStars[^1];
-                    float lastX = _stars[lastStarIdx].X;
-                    float lastY = _stars[lastStarIdx].Y;
-
-                    // Найти ближайшую звезду, которая еще не в созвездии
-                    float minDist = float.MaxValue;
-                    int nearestIdx = -1;
-
-                    for (int j = 0; j < _stars.Count; j++)
+                    if (!star.IsActive || star.Lifetime <= 0 || star.Opacity <= 0.01f) continue;
+                    if (star.X < -10 || star.X > info.Width + 10 || star.Y < -10 || star.Y > info.Height + 10) continue;
+                    float lifetimeRatio = star.Lifetime / star.MaxLifetime;
+                    float fadeEffect = lifetimeRatio < 0.2f ? lifetimeRatio / 0.2f : 1.0f;
+                    float finalOpacity = star.Opacity * fadeEffect;
+                    if (finalOpacity < 0.01f) continue;
+                    byte alpha = (byte)Clamp((int)(255 * star.Brightness * finalOpacity), 0, 255);
+                    float dynamicSize = star.Size * (0.7f + lifetimeRatio * 0.3f);
+                    if (star.Brightness > DEFAULT_BRIGHTNESS || _spectrumEnergy > 0.45f)
                     {
-                        if (constellationStars.Contains(j)) continue;
+                        float glowSize = dynamicSize * (2.2f + _spectrumEnergy * 1.2f) * finalOpacity;
+                        byte glowAlpha = (byte)(alpha * 0.6f);
+                        _glowPaint.Color = star.Color.WithAlpha(glowAlpha);
+                        renderCanvas.Save();
+                        renderCanvas.Translate(star.X, star.Y);
+                        renderCanvas.Scale(glowSize, glowSize);
+                        renderCanvas.DrawCircle(0, 0, UNIT_RADIUS, _glowPaint);
+                        renderCanvas.Restore();
+                    }
+                    _starPaint.Color = star.Color.WithAlpha(alpha);
+                    renderCanvas.Save();
+                    renderCanvas.Translate(star.X, star.Y);
+                    renderCanvas.Scale(dynamicSize, dynamicSize);
+                    renderCanvas.DrawCircle(0, 0, UNIT_RADIUS, _starPaint);
+                    renderCanvas.Restore();
+                }
+            }
+            using SKImage finalSnapshot = _renderSurface.Snapshot();
+            canvas.DrawImage(finalSnapshot, 0, 0);
+        }
+        #endregion
 
-                        float dx = _stars[j].X - lastX;
-                        float dy = _stars[j].Y - lastY;
-                        float dist = dx * dx + dy * dy;
-
-                        // Ограничиваем расстояние между звездами
-                        if (dist < minDist && dist < 40000) // ~200 пикселей
+        #region Physics and Simulation
+        private void StartUpdateLoop()
+        {
+            _updateTask = Task.Run(async () =>
+            {
+                float accumulatedTime = 0;
+                while (!_updateTokenSource.IsCancellationRequested)
+                {
+                    if (_needsUpdate && _isInitialized)
+                    {
+                        _time += TIME_STEP;
+                        accumulatedTime += TIME_STEP;
+                        if (accumulatedTime >= TIME_STEP && _stars != null && _lastRenderInfo.Width > 0)
                         {
-                            minDist = dist;
-                            nearestIdx = j;
+                            if (_hasActiveSpectrum)
+                                UpdateStars(_lastRenderInfo);
+                            else
+                                FadeOutStars();
+                            accumulatedTime -= TIME_STEP;
                         }
+                        _needsUpdate = false;
                     }
+                    await Task.Delay(UPDATE_INTERVAL, _updateTokenSource.Token);
+                }
+            }, _updateTokenSource.Token);
+        }
 
-                    if (nearestIdx != -1)
-                    {
-                        constellationStars.Add(nearestIdx);
-                    }
+        private void FadeOutStars()
+        {
+            if (_stars == null) return;
+            lock (_starsLock)
+            {
+                for (int i = 0; i < _stars.Length; i++)
+                {
+                    var star = _stars[i];
+                    if (!star.IsActive) continue;
+                    float newOpacity = Math.Max(star.Opacity - TIME_STEP * FADE_OUT_SPEED, 0);
+                    if (newOpacity <= 0.01f)
+                        _stars[i] = star with { IsActive = false, Opacity = 0 };
                     else
                     {
-                        // Не нашли подходящую звезду, заканчиваем созвездие
-                        break;
+                        float newLifetime = Math.Max(star.Lifetime - TIME_STEP * 2, 0);
+                        if (newLifetime <= 0)
+                            _stars[i] = star with { IsActive = false, Lifetime = 0, Opacity = 0 };
+                        else
+                            _stars[i] = star with
+                            {
+                                Opacity = newOpacity,
+                                Lifetime = newLifetime,
+                                VelocityX = star.VelocityX * 0.9f,
+                                VelocityY = star.VelocityY * 0.9f
+                            };
                     }
                 }
-
-                // Создаем линии между звездами
-                List<int> lines = new();
-                for (int i = 0; i < constellationStars.Count - 1; i++)
-                {
-                    lines.Add(constellationStars[i]);
-                    lines.Add(constellationStars[i + 1]);
-                }
-
-                _constellations.Add(new Constellation
-                {
-                    StarIndices = constellationStars,
-                    LineIndices = lines,
-                    IsActive = _random.NextDouble() > 0.3 // 70% шанс активности
-                });
             }
         }
 
         private void UpdateStars(SKImageInfo info)
         {
-            if (_stars == null || _processedSpectrum == null) return;
-
-            _time += TimeStep;
-
-            // Обновляем угол вращения
-            float rotationMultiplier = 1.0f;
-            if (_processedSpectrum.Length > 0)
+            if (_stars == null) return;
+            float screenWidth = info.Width, screenHeight = info.Height;
+            if (_hasActiveSpectrum && _midSpectrum >= SPAWN_THRESHOLD)
             {
-                rotationMultiplier = 1.0f + _processedSpectrum[0] * 2.0f;
+                _spawnAccumulator += _midSpectrum * TIME_STEP * MAX_SPAWN_RATE;
+                SpawnNewStars(screenWidth, screenHeight);
             }
-            _rotationAngle += RotationSpeed * rotationMultiplier * TimeStep;
-
-            // Обновляем звезды
-            for (int i = 0; i < _stars.Count; i++)
+            lock (_starsLock)
             {
-                var star = _stars[i];
-
-                // Обновляем мерцание
-                float twinkling = (float)Math.Sin(_time * TwinkleSpeed * star.TwinkleSpeed + star.TwinkleFactor);
-
-                // Применяем влияние спектра на яркость
-                int freqBand = Math.Min(star.FrequencyBand, _processedSpectrum.Length - 1);
-                float spectrumFactor = _processedSpectrum[freqBand];
-
-                // Вычисляем новую яркость
-                float targetBrightness = 0.5f + (twinkling * 0.25f) + (spectrumFactor * 0.25f);
-                star.Brightness = Math.Clamp(targetBrightness, 0.3f, 1.0f);
-
-                _stars[i] = star;
-            }
-
-            // Обновляем видимость созвездий
-            if (_constellations != null && _processedSpectrum.Length > 0)
-            {
-                bool bassActive = _processedSpectrum[0] > BassThreshold;
-
-                if (bassActive)
+                for (int i = 0; i < _stars.Length; i++)
                 {
-                    // Активируем случайные созвездия при сильном басе
-                    for (int i = 0; i < _constellations.Count; i++)
+                    var star = _stars[i];
+                    if (!star.IsActive) continue;
+                    float newLifetime = star.Lifetime - TIME_STEP;
+                    if (newLifetime <= 0)
                     {
-                        var constellation = _constellations[i];
-
-                        if (!constellation.IsActive && _random.NextDouble() < 0.05)
-                        {
-                            constellation.IsActive = true;
-                            _constellations[i] = constellation;
-                        }
+                        _stars[i] = star with { IsActive = false, Lifetime = 0, Opacity = 0 };
+                        continue;
+                    }
+                    float newOpacity = Math.Min(star.Opacity + TIME_STEP * FADE_IN_SPEED, 1.0f);
+                    float twinkling = MathF.Sin(_time * TWINKLE_SPEED * star.TwinkleSpeed + star.TwinkleFactor);
+                    float targetBrightness = Clamp(DEFAULT_BRIGHTNESS + (twinkling * TWINKLE_INFLUENCE) + (_spectrumEnergy * SPECTRUM_INFLUENCE), MIN_BRIGHTNESS, MAX_BRIGHTNESS);
+                    float forceX = 0, forceY = 0;
+                    CalculateEdgeRepulsion(star, screenWidth, screenHeight, ref forceX, ref forceY);
+                    float inertiaFactor = 1.0f / (0.8f + star.Mass * 0.5f);
+                    Vector2 acceleration = new Vector2(forceX, forceY) * STAR_ACCELERATION * inertiaFactor;
+                    float spectrumAcceleration = 1.0f + _spectrumEnergy * 1.5f;
+                    acceleration *= spectrumAcceleration;
+                    Vector2 frequencyForce = new Vector2((_highSpectrum - _lowSpectrum), _midSpectrum) * FREQUENCY_FORCE_FACTOR;
+                    acceleration += frequencyForce;
+                    Vector2 currentVelocity = new Vector2(star.VelocityX, star.VelocityY);
+                    Vector2 targetVelocity = currentVelocity + acceleration;
+                    float lifetimeRatio = newLifetime / star.MaxLifetime;
+                    float dampingFactor = STAR_DAMPING;
+                    if (lifetimeRatio < 0.3f)
+                        dampingFactor *= (0.8f + lifetimeRatio * 0.2f);
+                    targetVelocity *= dampingFactor;
+                    float maxSpeed = MAX_SPEED * (0.5f + _spectrumEnergy * 0.8f);
+                    float speedSq = Vector2.Dot(targetVelocity, targetVelocity);
+                    if (speedSq > maxSpeed * maxSpeed)
+                        targetVelocity = Vector2.Normalize(targetVelocity) * maxSpeed;
+                    float velocityLerpFactor = VELOCITY_LERP * (1.0f + _spectrumEnergy * 0.5f);
+                    Vector2 newVelocity = currentVelocity + (targetVelocity - currentVelocity) * velocityLerpFactor;
+                    float newX = star.X + newVelocity.X, newY = star.Y + newVelocity.Y;
+                    if (newX < -EDGE_REPULSION_DISTANCE) newX = screenWidth + 10;
+                    else if (newX > screenWidth + EDGE_REPULSION_DISTANCE) newX = -10;
+                    if (newY < -EDGE_REPULSION_DISTANCE) newY = screenHeight + 10;
+                    else if (newY > screenHeight + EDGE_REPULSION_DISTANCE) newY = -10;
+                    float speed = newVelocity.Length();
+                    _stars[i] = new Star
+                    {
+                        X = newX,
+                        Y = newY,
+                        Size = star.Size,
+                        Brightness = star.Brightness + (targetBrightness - star.Brightness) * (0.08f + _spectrumEnergy * 0.15f),
+                        TwinkleFactor = star.TwinkleFactor,
+                        TwinkleSpeed = star.TwinkleSpeed,
+                        Color = star.Color,
+                        IsActive = true,
+                        VelocityX = newVelocity.X,
+                        VelocityY = newVelocity.Y,
+                        Mass = star.Mass,
+                        Speed = speed,
+                        Lifetime = newLifetime,
+                        MaxLifetime = star.MaxLifetime,
+                        Opacity = newOpacity
+                    };
+                }
+                if (_random.NextDouble() < DIRECTION_CHANGE_CHANCE * (1 + _spectrumEnergy * 3) && _stars.Length > 0)
+                {
+                    int randomIndex = _random.Next(_stars.Length);
+                    if (randomIndex < _stars.Length && _stars[randomIndex].IsActive)
+                    {
+                        float currentAngle = MathF.Atan2(_stars[randomIndex].VelocityY, _stars[randomIndex].VelocityX);
+                        float angleChange = (float)(_random.NextDouble() * 0.5 - 0.25) * MathF.PI;
+                        float newAngle = currentAngle + angleChange;
+                        float magnitude = BASE_STAR_VELOCITY * (0.8f + _spectrumEnergy * 1.2f) * (0.8f + _stars[randomIndex].Mass * 0.4f);
+                        float newVelX = MathF.Cos(newAngle) * magnitude;
+                        float newVelY = MathF.Sin(newAngle) * magnitude;
+                        _stars[randomIndex] = _stars[randomIndex] with { VelocityX = newVelX, VelocityY = newVelY };
                     }
                 }
-                else
-                {
-                    // Деактивируем случайные созвездия при слабом басе
-                    for (int i = 0; i < _constellations.Count; i++)
-                    {
-                        var constellation = _constellations[i];
+            }
+        }
 
-                        if (constellation.IsActive && _random.NextDouble() < 0.01)
+        private void CalculateEdgeRepulsion(in Star star, float screenWidth, float screenHeight, ref float forceX, ref float forceY)
+        {
+            float edgeDistX = Math.Min(star.X, screenWidth - star.X);
+            float edgeDistY = Math.Min(star.Y, screenHeight - star.Y);
+            float normalizedEdgeDistX = Clamp(edgeDistX / EDGE_REPULSION_DISTANCE, 0, 1);
+            float normalizedEdgeDistY = Clamp(edgeDistY / EDGE_REPULSION_DISTANCE, 0, 1);
+            float edgeForceX = EDGE_REPULSION_FORCE * (1 - MathF.Pow(normalizedEdgeDistX, REPULSION_CURVE_POWER)) * MathF.Sign(screenWidth / 2 - star.X);
+            float edgeForceY = EDGE_REPULSION_FORCE * (1 - MathF.Pow(normalizedEdgeDistY, REPULSION_CURVE_POWER)) * MathF.Sign(screenHeight / 2 - star.Y);
+            forceX += edgeForceX;
+            forceY += edgeForceY;
+        }
+
+        private void SpawnNewStars(float screenWidth, float screenHeight)
+        {
+            if (_stars == null || _midSpectrum < SPAWN_THRESHOLD) return;
+            int starsToSpawn = (int)_spawnAccumulator;
+            _spawnAccumulator -= starsToSpawn;
+            lock (_starsLock)
+            {
+                for (int i = 0; i < starsToSpawn; i++)
+                {
+                    int availableSlot = -1;
+                    for (int j = 0; j < _stars.Length; j++)
+                    {
+                        if (!_stars[j].IsActive || _stars[j].Lifetime <= 0)
                         {
-                            constellation.IsActive = false;
-                            _constellations[i] = constellation;
+                            availableSlot = j;
+                            break;
                         }
                     }
+                    if (availableSlot == -1) continue;
+                    float x = _random.Next(0, (int)screenWidth);
+                    float y = _random.Next(0, (int)screenHeight);
+                    float starSize = MIN_STAR_SIZE + (MAX_STAR_SIZE - MIN_STAR_SIZE) * (float)_random.NextDouble();
+                    float lifetime = MIN_STAR_LIFETIME + (MAX_STAR_LIFETIME - MIN_STAR_LIFETIME) * (float)_random.NextDouble();
+                    float brightness = DEFAULT_BRIGHTNESS + (float)_random.NextDouble() * BRIGHTNESS_VARIATION;
+
+                    byte r = (byte)(_random.Next(MIN_STAR_COLOR_VALUE, 255));
+                    byte g = (byte)(_random.Next(MIN_STAR_COLOR_VALUE, 255));
+                    byte b = (byte)(_random.Next(MIN_STAR_COLOR_VALUE, 255));
+                    var color = new SKColor(r, g, b);
+
+                    float initialSpeedMultiplier = 0.5f + _midSpectrum * 1.5f;
+                    float baseAngle = (float)(_random.NextDouble() * MathF.PI * 2);
+                    float angleOffset = (_highSpectrum - _lowSpectrum) * 0.5f;
+                    float angle = baseAngle + angleOffset;
+                    float vx = MathF.Cos(angle) * BASE_STAR_VELOCITY * initialSpeedMultiplier;
+                    float vy = MathF.Sin(angle) * BASE_STAR_VELOCITY * initialSpeedMultiplier;
+                    _stars[availableSlot] = new Star
+                    {
+                        X = x,
+                        Y = y,
+                        Size = starSize,
+                        Brightness = brightness,
+                        TwinkleFactor = (float)_random.NextDouble() * MathF.PI * 2,
+                        TwinkleSpeed = BASE_TWINKLE_SPEED + (float)_random.NextDouble() * MAX_TWINKLE_SPEED_VARIATION,
+                        Color = color,
+                        IsActive = true,
+                        VelocityX = vx,
+                        VelocityY = vy,
+                        Mass = starSize * 0.5f + 0.5f,
+                        Speed = MathF.Sqrt(vx * vx + vy * vy),
+                        Lifetime = lifetime,
+                        MaxLifetime = lifetime,
+                        Opacity = 0.01f
+                    };
                 }
             }
         }
         #endregion
 
         #region Spectrum Processing
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private void ProcessSpectrum(float[] spectrum)
         {
-            // Обрабатываем спектр, разделяя на 3 диапазона
-            int lows = spectrum.Length / 8;
-            int mids = spectrum.Length / 3;
-
-            // Средние значения по диапазонам
-            float lowAvg = CalculateAverage(spectrum, 0, lows);
-            float midAvg = CalculateAverage(spectrum, lows, mids);
-            float highAvg = CalculateAverage(spectrum, mids, spectrum.Length / 2);
-
-            // Инициализируем массив, если нужно
-            if (_processedSpectrum == null || _processedSpectrum.Length < 3)
-            {
-                _processedSpectrum = new float[3];
-                _processedSpectrum[0] = lowAvg;
-                _processedSpectrum[1] = midAvg;
-                _processedSpectrum[2] = highAvg;
-            }
-            else
-            {
-                // Применяем сглаживание
-                _processedSpectrum[0] += (lowAvg - _processedSpectrum[0]) * SmoothingFactor;
-                _processedSpectrum[1] += (midAvg - _processedSpectrum[1]) * SmoothingFactor;
-                _processedSpectrum[2] += (highAvg - _processedSpectrum[2]) * SmoothingFactor;
-            }
-
-            // Ограничиваем максимальные значения
-            for (int i = 0; i < _processedSpectrum.Length; i++)
-            {
-                _processedSpectrum[i] = Math.Min(_processedSpectrum[i] * 3, 1.0f); // Усиливаем для лучшей видимости
-            }
-        }
-
-        private float CalculateAverage(float[] data, int start, int end)
-        {
-            float sum = 0;
-            for (int i = start; i < end; i++)
-            {
-                sum += data[i];
-            }
-            return sum / (end - start);
-        }
-        #endregion
-
-        #region Structures
-        private struct Star
-        {
-            public float X;
-            public float Y;
-            public float Size;
-            public float Brightness;
-            public float TwinkleFactor;
-            public float TwinkleSpeed;
-            public SKColor Color;
-            public bool IsActive;
-            public int FrequencyBand;
-        }
-
-        private struct Constellation
-        {
-            public List<int> StarIndices;
-            public List<int> LineIndices;
-            public bool IsActive;
+            if (spectrum == null || spectrum.Length < 3) return;
+            int totalLength = spectrum.Length, bandLength = totalLength / 3;
+            float lowSum = 0, midSum = 0, highSum = 0;
+            for (int i = 0; i < bandLength; i++) lowSum += spectrum[i];
+            for (int i = bandLength; i < 2 * bandLength; i++) midSum += spectrum[i];
+            for (int i = 2 * bandLength; i < totalLength; i++) highSum += spectrum[i];
+            float avgLow = lowSum / bandLength, avgMid = midSum / bandLength, avgHigh = highSum / (totalLength - 2 * bandLength);
+            _lowSpectrum = _lowSpectrum + (avgLow - _lowSpectrum) * SMOOTHING_FACTOR;
+            _midSpectrum = _midSpectrum + (avgMid - _midSpectrum) * SMOOTHING_FACTOR;
+            _highSpectrum = _highSpectrum + (avgHigh - _highSpectrum) * SMOOTHING_FACTOR;
+            _processedSpectrum = Math.Min(_midSpectrum * SPECTRUM_AMPLIFICATION, MAX_BRIGHTNESS);
+            _spectrumEnergy = _processedSpectrum;
         }
         #endregion
 
         #region Helper Methods
-        private bool ValidateRenderParams(
-            SKCanvas? canvas,
-            float[]? spectrum,
-            SKImageInfo info,
-            SKPaint? paint,
-            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float Clamp(float value, float min, float max) => value < min ? min : value > max ? max : value;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ValidateRenderParams(SKCanvas? canvas, SKImageInfo info, SKPaint? paint)
+            => !_disposed && _isInitialized && canvas is not null && paint is not null && info.Width > 0 && info.Height > 0;
+        #endregion
+
+        #region Star Initialization
+        private void InitializeStars(int count)
         {
-            if (_disposed)
-                return false;
-
-            if (!_isInitialized)
+            if (_disposed) throw new ObjectDisposedException(nameof(ConstellationRenderer));
+            lock (_starsLock)
             {
-                Log.Error("ConstellationRenderer not initialized before rendering");
-                return false;
-            }
+                _stars = new Star[count];
+                for (int i = 0; i < count; i++)
+                {
+                    byte r = (byte)(_random.Next(MIN_STAR_COLOR_VALUE, 255));
+                    byte g = (byte)(_random.Next(MIN_STAR_COLOR_VALUE, 255));
+                    byte b = (byte)(_random.Next(MIN_STAR_COLOR_VALUE, 255));
 
-            if (canvas == null ||
-                spectrum == null || spectrum.Length < 2 ||
-                paint == null ||
-                drawPerformanceInfo == null ||
-                info.Width <= 0 || info.Height <= 0)
-            {
-                Log.Error("Invalid render parameters for ConstellationRenderer");
-                return false;
+                    _stars[i] = new Star
+                    {
+                        X = _random.Next(MIN_STAR_X, MAX_STAR_X),
+                        Y = _random.Next(MIN_STAR_Y, MAX_STAR_Y),
+                        Size = MIN_STAR_SIZE + (float)_random.NextDouble() * (MAX_STAR_SIZE - MIN_STAR_SIZE),
+                        Brightness = DEFAULT_BRIGHTNESS + (float)_random.NextDouble() * BRIGHTNESS_VARIATION,
+                        TwinkleFactor = (float)_random.NextDouble() * MathF.PI * 2,
+                        TwinkleSpeed = BASE_TWINKLE_SPEED + (float)_random.NextDouble() * MAX_TWINKLE_SPEED_VARIATION,
+                        Color = new SKColor(r, g, b),
+                        IsActive = false,
+                        VelocityX = 0,
+                        VelocityY = 0,
+                        Mass = 1.0f,
+                        Speed = 0,
+                        Lifetime = 0,
+                        MaxLifetime = 0,
+                        Opacity = 0
+                    };
+                }
             }
-
-            return true;
         }
         #endregion
 
         #region Disposal
         public void Dispose()
         {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
             if (_disposed) return;
-
-            _spectrumSemaphore.Dispose();
-            _starPaint?.Dispose();
-            _linePaint?.Dispose();
-            _glowPaint?.Dispose();
-
+            if (disposing)
+            {
+                _updateTokenSource.Cancel();
+                try { _updateTask?.Wait(500); } catch { }
+                _updateTokenSource.Dispose();
+                _spectrumSemaphore.Dispose();
+                _starPaint?.Dispose();
+                _glowPaint?.Dispose();
+                _renderSurface?.Dispose();
+            }
             _starPaint = null;
-            _linePaint = null;
             _glowPaint = null;
+            _renderSurface = null;
             _stars = null;
-            _constellations = null;
-            _processedSpectrum = null;
-
             _disposed = true;
             _isInitialized = false;
-            Log.Debug("ConstellationRenderer disposed");
+        }
+        #endregion
+
+        #region Data Structures
+        private readonly record struct Star
+        {
+            public float X { get; init; }
+            public float Y { get; init; }
+            public float Size { get; init; }
+            public float Brightness { get; init; }
+            public float TwinkleFactor { get; init; }
+            public float TwinkleSpeed { get; init; }
+            public SKColor Color { get; init; }
+            public bool IsActive { get; init; }
+            public float VelocityX { get; init; }
+            public float VelocityY { get; init; }
+            public float Mass { get; init; }
+            public float Speed { get; init; }
+            public float Lifetime { get; init; }
+            public float MaxLifetime { get; init; }
+            public float Opacity { get; init; }
         }
         #endregion
     }
