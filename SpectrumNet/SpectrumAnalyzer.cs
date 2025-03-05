@@ -71,11 +71,16 @@ namespace SpectrumNet
         public float AmplificationFactor { get; }
         public SpectrumParameters(float minDb, float dbRange, float amplificationFactor) =>
             (MinDb, DbRange, AmplificationFactor) = (minDb, dbRange, amplificationFactor);
-        public static SpectrumParameters FromProvider(IGainParametersProvider provider)
+        public static SpectrumParameters FromProvider(IGainParametersProvider? provider)
         {
             if (provider is null)
                 throw new ArgumentNullException(nameof(provider));
-            return new SpectrumParameters(provider.MinDbValue, Math.Max(provider.MaxDbValue - provider.MinDbValue, Constants.Epsilon), provider.AmplificationFactor);
+
+            return new SpectrumParameters(
+                provider.MinDbValue,
+                Math.Max(provider.MaxDbValue - provider.MinDbValue, Constants.Epsilon),
+                provider.AmplificationFactor
+            );
         }
     }
 
@@ -544,7 +549,7 @@ namespace SpectrumNet
         private readonly IGainParametersProvider _params;
         private readonly ParallelOptions _parallelOpts = new() { MaxDegreeOfParallelism = Environment.ProcessorCount };
 
-        public SpectrumConverter(IGainParametersProvider parameters) =>
+        public SpectrumConverter(IGainParametersProvider? parameters) =>
             _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
 
         public float[] ConvertToSpectrum(Complex[] fft, int sampleRate, SpectrumScale scale)

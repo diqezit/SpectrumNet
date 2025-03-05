@@ -477,7 +477,7 @@
                                     <ComboBox Grid.Row="1"
                   Grid.Column="1"
                   x:Name="StyleComboBox"
-                  ItemsSource="{Binding AvailableStyles.Keys}"
+                  ItemsSource="{Binding AvailablePalettes.Keys}"
                   SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
                   Width="200"
                   HorizontalAlignment="Left"

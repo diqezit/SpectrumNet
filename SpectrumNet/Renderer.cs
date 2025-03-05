@@ -1,5 +1,15 @@
 ﻿#nullable enable
 
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Threading;
+using System.Windows.Threading;
+using SkiaSharp;
+using SkiaSharp.Views.Desktop;
+
 namespace SpectrumNet
 {
     public readonly record struct PerformanceMetrics(double FrameTime, double Fps);
@@ -7,7 +17,7 @@ namespace SpectrumNet
     public sealed class Renderer : IDisposable
     {
         const int RENDER_TIMEOUT_MS = 16;
-        const string DEFAULT_STYLE = "Gradient";
+        const string DEFAULT_STYLE = "Solid";
         const string MESSAGE = "Push start to begin record...";
         const string LogPrefix = "[Renderer] ";
 
@@ -52,17 +62,21 @@ namespace SpectrumNet
 
         void InitializeRenderer()
         {
-            var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(DEFAULT_STYLE);
-            _currentState = new RenderState(paint?.Clone() ?? throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style"),
+            // Get the default palette from the new system.
+            var (color, brush) = _spectrumStyles.GetColorAndBrush(DEFAULT_STYLE);
+            _currentState = new RenderState(brush.Clone() ?? throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style"),
                                             RenderStyle.Bars, DEFAULT_STYLE);
 
             _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS) };
             _renderTimer.Tick += (_, _) => RequestRender();
             _renderTimer.Start();
 
-            _skElement!.PaintSurface += RenderFrame;
-            _skElement.Loaded += OnElementLoaded;
-            _skElement.Unloaded += OnElementUnloaded;
+            if (_skElement != null)
+            {
+                _skElement.PaintSurface += RenderFrame;
+                _skElement.Loaded += OnElementLoaded;
+                _skElement.Unloaded += OnElementUnloaded;
+            }
 
             _performanceMonitor.Start();
             _controller.PropertyChanged += OnControllerPropertyChanged;
@@ -71,6 +85,8 @@ namespace SpectrumNet
 
         void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
+            if (e == null) return;
+
             switch (e.PropertyName)
             {
                 case nameof(IAudioVisualizationController.IsRecording):
@@ -87,8 +103,8 @@ namespace SpectrumNet
                 case nameof(IAudioVisualizationController.SelectedStyle):
                     if (!string.IsNullOrEmpty(_controller.SelectedStyle))
                     {
-                        var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(_controller.SelectedStyle);
-                        UpdateSpectrumStyle(_controller.SelectedStyle, startColor, endColor);
+                        var (color, brush) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
+                        UpdateSpectrumStyle(_controller.SelectedStyle, color, brush);
                     }
                     break;
                 case nameof(IAudioVisualizationController.WindowType):
@@ -104,10 +120,13 @@ namespace SpectrumNet
             }
         }
 
-        void OnElementLoaded(object sender, RoutedEventArgs e) =>
-            UpdateRenderDimensions((int)_skElement!.ActualWidth, (int)_skElement.ActualHeight);
+        void OnElementLoaded(object? sender, RoutedEventArgs e)
+        {
+            if (_skElement != null)
+                UpdateRenderDimensions((int)_skElement.ActualWidth, (int)_skElement.ActualHeight);
+        }
 
-        void OnElementUnloaded(object sender, RoutedEventArgs e)
+        void OnElementUnloaded(object? sender, RoutedEventArgs e)
         {
             _renderTimer?.Stop();
             _performanceMonitor.Stop();
@@ -115,6 +134,8 @@ namespace SpectrumNet
 
         public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
         {
+            if (e == null) return;
+
             if (_controller.IsOverlayActive && sender == _controller.SpectrumCanvas)
             {
                 e.Surface.Canvas.Clear(SKColors.Transparent);
@@ -147,6 +168,8 @@ namespace SpectrumNet
 
         void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
         {
+            if (canvas == null) return;
+
             canvas.Clear(SKColors.Transparent);
 
             if (_controller.IsTransitioning || ShouldRenderPlaceholder())
@@ -190,6 +213,8 @@ namespace SpectrumNet
 
         void RenderSpectrum(SKCanvas canvas, SpectralData spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount)
         {
+            if (canvas == null || spectrum == null) return;
+
             var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _controller.IsOverlayActive);
             renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint, PerfomanceMetrics.DrawPerformanceInfo);
         }
@@ -209,6 +234,8 @@ namespace SpectrumNet
 
         static void RenderPlaceholder(SKCanvas canvas)
         {
+            if (canvas == null) return;
+
             using var paint = new SKPaint
             {
                 Color = SKColors.OrangeRed,
@@ -231,8 +258,8 @@ namespace SpectrumNet
             var styleName = _controller.SelectedStyle;
             if (!string.IsNullOrEmpty(styleName) && styleName != _currentState.StyleName)
             {
-                var (startColor, endColor, _) = _spectrumStyles.GetColorsAndBrush(styleName);
-                UpdateSpectrumStyle(styleName, startColor, endColor);
+                var (color, brush) = _spectrumStyles.GetColorAndBrush(styleName);
+                UpdateSpectrumStyle(styleName, color, brush);
                 needsUpdate = true;
             }
             if (needsUpdate)
@@ -248,17 +275,14 @@ namespace SpectrumNet
             RequestRender();
         }
 
-        public void UpdateSpectrumStyle(string styleName, SKColor startColor, SKColor endColor)
+        public void UpdateSpectrumStyle(string styleName, SKColor color, SKPaint brush)
         {
             EnsureNotDisposed();
             if (string.IsNullOrEmpty(styleName) || styleName == _currentState.StyleName)
                 return;
-            var (_, _, paint) = _spectrumStyles.GetColorsAndBrush(styleName);
-            if (paint == null)
-                return;
             var oldPaint = _currentState.Paint;
-            _currentState = new RenderState(paint.Clone(), _currentState.Style, styleName);
-            oldPaint.Dispose();
+            _currentState = new RenderState(brush.Clone() ?? throw new InvalidOperationException("Brush clone failed"), _currentState.Style, styleName);
+            oldPaint?.Dispose();
             RequestRender();
         }
 
@@ -299,7 +323,7 @@ namespace SpectrumNet
             if (_controller is INotifyPropertyChanged notifier)
                 notifier.PropertyChanged -= OnControllerPropertyChanged;
 
-            _currentState.Paint.Dispose();
+            _currentState.Paint?.Dispose();
             _renderLock.Dispose();
             _disposalTokenSource.Dispose();
 

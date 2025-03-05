@@ -8,7 +8,8 @@ namespace SpectrumNet
                          MonitorDelay = 16,
                          BarCount = 60;
         public const double BarSpacing = 4;
-        public const string DefaultStyle = "Gradient",
+
+        public const string DefaultStyle = "Solid",
                             ReadyStatus = "Ready",
                             RecordingStatus = "Recording...";
     }
@@ -18,7 +19,7 @@ namespace SpectrumNet
         private const string LogPrefix = "[MainWindow] ";
 
         private record MainWindowSettings(
-            string Style = "Gradient",
+            string Style = "Solid",
             double BarSpacing = 4,
             int BarCount = 60,
             string StatusText = "Ready"
@@ -37,12 +38,12 @@ namespace SpectrumNet
         private SpectrumScale _selectedScaleType = SpectrumScale.Linear;
         private OverlayWindow? _overlayWindow;
         private Renderer? _renderer;
-        private SpectrumBrushes _spectrumStyles = null!;
+        private SpectrumBrushes? _spectrumStyles;
         private SpectrumAnalyzer? _analyzer;
         private AudioCaptureManager? _captureManager;
         private CompositeDisposable? _disposables;
-        private GainParameters _gainParameters = null!;
-        private SKElement _renderElement = null!;
+        private GainParameters? _gainParameters;
+        private SKElement? _renderElement;
         private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
         #region IAudioVisualizationController Properties
@@ -83,10 +84,9 @@ namespace SpectrumNet
 
         public bool CanStartCapture => _captureManager != null && !IsRecording;
 
-        public new Dispatcher Dispatcher => Application.Current.Dispatcher;
+        public new Dispatcher Dispatcher => Application.Current?.Dispatcher ?? throw new InvalidOperationException("Application.Current is null");
 
-        public GainParameters GainParameters => _gainParameters ??
-            throw new InvalidOperationException("Gain parameters not initialized");
+        public GainParameters GainParameters => _gainParameters ?? throw new InvalidOperationException("Gain parameters not initialized");
 
         public bool IsOverlayActive
         {
@@ -178,11 +178,9 @@ namespace SpectrumNet
             }
         }
 
-        public SKElement SpectrumCanvas => _renderElement ??
-            throw new InvalidOperationException("Render element not initialized");
+        public SKElement SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
 
-        public SpectrumBrushes SpectrumStyles => _spectrumStyles ??
-            throw new InvalidOperationException("Spectrum styles not initialized");
+        public SpectrumBrushes SpectrumStyles => _spectrumStyles ?? throw new InvalidOperationException("Spectrum styles not initialized");
 
         public string StatusText
         {
@@ -201,12 +199,9 @@ namespace SpectrumNet
 
                 try
                 {
-                    if (_analyzer != null)
-                    {
-                        _analyzer.SetWindowType(value);
-                        _renderer?.RequestRender();
-                        _renderElement?.InvalidateVisual();
-                    }
+                    _analyzer?.SetWindowType(value);
+                    _renderer?.RequestRender();
+                    _renderElement?.InvalidateVisual();
                 }
                 catch (Exception ex)
                 {
@@ -219,7 +214,7 @@ namespace SpectrumNet
 
         #region Additional Public Properties
 
-        public static bool IsDarkTheme => ThemeManager.Instance.IsDarkTheme;
+        public static bool IsDarkTheme => ThemeManager.Instance?.IsDarkTheme ?? false;
 
         public static IEnumerable<RenderStyle> AvailableDrawingTypes =>
             Enum.GetValues<RenderStyle>().OrderBy(s => s.ToString());
@@ -230,11 +225,9 @@ namespace SpectrumNet
         public static IEnumerable<SpectrumScale> AvailableScaleTypes =>
             Enum.GetValues<SpectrumScale>().OrderBy(s => s.ToString());
 
-        public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
-            _spectrumStyles?.Styles?
-                .OrderBy(kvp => kvp.Key)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value) ??
-                new Dictionary<string, StyleDefinition>();
+        public IReadOnlyDictionary<string, Palette> AvailablePalettes =>
+            _spectrumStyles?.RegisteredPalettes?.OrderBy(kvp => kvp.Key)
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value) ?? new Dictionary<string, Palette>();
 
         public bool IsPopupOpen
         {
@@ -361,15 +354,11 @@ namespace SpectrumNet
 
                 _spectrumStyles = new SpectrumBrushes();
                 if (_spectrumStyles == null)
-                {
                     throw new InvalidOperationException("Failed to create SpectrumBrushes");
-                }
 
                 _disposables = new CompositeDisposable();
                 if (_disposables == null)
-                {
                     throw new InvalidOperationException("Failed to create CompositeDisposable");
-                }
 
                 var syncContext = SynchronizationContext.Current ??
                     throw new InvalidOperationException("SynchronizationContext.Current is null");
@@ -379,27 +368,20 @@ namespace SpectrumNet
                     new SpectrumConverter(_gainParameters),
                     syncContext
                 );
-
                 if (_analyzer == null)
-                {
                     throw new InvalidOperationException("Failed to create SpectrumAnalyzer");
-                }
 
                 _disposables.Add(_analyzer);
 
                 _captureManager = new AudioCaptureManager(this);
                 if (_captureManager == null)
-                {
                     throw new InvalidOperationException("Failed to create AudioCaptureManager");
-                }
 
                 _disposables.Add(_captureManager);
 
                 _renderer = new Renderer(_spectrumStyles, this, _analyzer, _renderElement);
                 if (_renderer == null)
-                {
                     throw new InvalidOperationException("Failed to create Renderer");
-                }
 
                 _disposables.Add(_renderer);
 
@@ -425,7 +407,7 @@ namespace SpectrumNet
 
             PropertyChanged += (_, args) =>
             {
-                if (args.PropertyName == nameof(IsRecording))
+                if (args?.PropertyName == nameof(IsRecording))
                     StatusText = IsRecording ? MwConstants.RecordingStatus : MwConstants.ReadyStatus;
             };
         }
@@ -433,13 +415,16 @@ namespace SpectrumNet
         private void ConfigureTheme()
         {
             var tm = ThemeManager.Instance;
-            tm.RegisterWindow(this);
-            _themePropertyChangedHandler = (_, e) =>
+            if (tm != null)
             {
-                if (e.PropertyName == nameof(ThemeManager.IsDarkTheme))
-                    OnPropertyChanged(nameof(IsDarkTheme));
-            };
-            tm.PropertyChanged += _themePropertyChangedHandler;
+                tm.RegisterWindow(this);
+                _themePropertyChangedHandler = (_, e) =>
+                {
+                    if (e?.PropertyName == nameof(ThemeManager.IsDarkTheme))
+                        OnPropertyChanged(nameof(IsDarkTheme));
+                };
+                tm.PropertyChanged += _themePropertyChangedHandler;
+            }
         }
 
         #endregion
@@ -570,11 +555,29 @@ namespace SpectrumNet
             }
         }
 
+        private void OnOverlayButtonClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (IsOverlayActive)
+                    CloseOverlay();
+                else
+                    OpenOverlay();
+
+                SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
+                _renderElement?.InvalidateVisual();
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error toggling overlay: {ex}");
+            }
+        }
+
         #endregion
 
         #region Event Handlers
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
         {
             if (e == null)
             {
@@ -600,7 +603,7 @@ namespace SpectrumNet
             }
         }
 
-        private void OnRendering(object? sender, EventArgs e)
+        private void OnRendering(object? sender, EventArgs? e)
         {
             try
             {
@@ -612,7 +615,7 @@ namespace SpectrumNet
             }
         }
 
-        private void OnStateChanged(object? sender, EventArgs e)
+        private void OnStateChanged(object? sender, EventArgs? e)
         {
             if (MaximizeButton == null || MaximizeIcon == null) return;
 
@@ -628,11 +631,11 @@ namespace SpectrumNet
             }
         }
 
-        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e)
+        private void OnThemeToggleButtonChanged(object? sender, RoutedEventArgs? e)
         {
             try
             {
-                ThemeManager.Instance.ToggleTheme();
+                ThemeManager.Instance?.ToggleTheme();
             }
             catch (Exception ex)
             {
@@ -640,13 +643,9 @@ namespace SpectrumNet
             }
         }
 
-        private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e)
+        private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs? e)
         {
-            if (e == null)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "SizeChanged called with null arguments");
-                return;
-            }
+            if (e == null) return;
 
             try
             {
@@ -658,9 +657,9 @@ namespace SpectrumNet
             }
         }
 
-        private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void OnComboBoxSelectionChanged(object? sender, SelectionChangedEventArgs? e)
         {
-            if (sender is not ComboBox cb) return;
+            if (sender is not ComboBox cb || e == null) return;
 
             try
             {
@@ -683,7 +682,7 @@ namespace SpectrumNet
             }
         }
 
-        private async void OnWindowClosed(object? sender, EventArgs e)
+        private async void OnWindowClosed(object? sender, EventArgs? e)
         {
             try
             {
@@ -701,14 +700,8 @@ namespace SpectrumNet
 
                 if (_captureManager != null)
                 {
-                    try
-                    {
-                        await _captureManager.StopCaptureAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping capture: {ex}");
-                    }
+                    try { await _captureManager.StopCaptureAsync(); }
+                    catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping capture: {ex}"); }
                     DisposeSafe(_captureManager, "capture manager");
                     _captureManager = null;
                 }
@@ -723,20 +716,17 @@ namespace SpectrumNet
                 DisposeSafe(_cleanupCts, "cleanup token source");
 
                 if (_themePropertyChangedHandler != null && ThemeManager.Instance != null)
-                {
                     ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
-                }
 
                 if (_overlayWindow != null)
                 {
                     _overlayWindow.Close();
-                    _overlayWindow.Dispose(); 
+                    DisposeSafe(_overlayWindow, "overlay window");
                     _overlayWindow = null;
                 }
 
                 _isDisposed = true;
-
-                Application.Current.Shutdown();
+                Application.Current?.Shutdown();
             }
             catch (Exception ex)
             {
@@ -744,22 +734,16 @@ namespace SpectrumNet
             }
         }
 
-        private void OnWindowDrag(object sender, MouseButtonEventArgs e)
+        private void OnWindowDrag(object? sender, System.Windows.Input.MouseButtonEventArgs? e)
         {
-            if (e.ChangedButton == MouseButton.Left)
+            if (e?.ChangedButton == System.Windows.Input.MouseButton.Left)
             {
-                try
-                {
-                    DragMove();
-                }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error moving window: {ex}");
-                }
+                try { DragMove(); }
+                catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error moving window: {ex}"); }
             }
         }
 
-        private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
+        private void OnWindowMouseDoubleClick(object? sender, System.Windows.Input.MouseButtonEventArgs? e)
         {
             if (e == null) return;
 
@@ -779,7 +763,7 @@ namespace SpectrumNet
                     }
                 }
 
-                if (e.ChangedButton == MouseButton.Left)
+                if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
                 {
                     e.Handled = true;
                     MaximizeWindow();
@@ -791,9 +775,9 @@ namespace SpectrumNet
             }
         }
 
-        private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        private void OnSliderValueChanged(object? sender, RoutedPropertyChangedEventArgs<double>? e)
         {
-            if (sender is not Slider slider) return;
+            if (sender is not Slider slider || e == null) return;
 
             try
             {
@@ -842,9 +826,9 @@ namespace SpectrumNet
             }
         }
 
-        private void ToggleButtonContainer_MouseDown(object sender, MouseButtonEventArgs e)
+        private void ToggleButtonContainer_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left)
+            if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
                 ToggleControlPanelButton_Click(ToggleControlPanelButton, new RoutedEventArgs());
         }
 
@@ -914,24 +898,6 @@ namespace SpectrumNet
             }
         }
 
-        private void OnOverlayButtonClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (IsOverlayActive)
-                    CloseOverlay();
-                else
-                    OpenOverlay();
-
-                SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
-                _renderElement?.InvalidateVisual();
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error toggling overlay: {ex}");
-            }
-        }
-
         #endregion
 
         #region Helper Methods
@@ -975,7 +941,7 @@ namespace SpectrumNet
             WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
         private void UpdateProps() =>
-                    OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
+            OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
 
         private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName)
         {
