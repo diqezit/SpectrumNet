@@ -116,7 +116,6 @@ namespace SpectrumNet
             }
         }
 
-        // Убрано условие if(IsRecording) — переинициализация выполняется всегда
         public async Task ReinitializeCaptureAsync()
         {
             try
@@ -136,7 +135,6 @@ namespace SpectrumNet
 
                 _lastDeviceId = device.ID;
 
-                // Переинициализация UI и компонентов захвата выполняется всегда
                 DisposeCaptureState(_state);
                 _state = null;
 
@@ -337,17 +335,41 @@ namespace SpectrumNet
             if (e.BytesRecorded <= 0 || _state?.Analyzer == null)
                 return;
 
-            var samples = new float[e.BytesRecorded / 4];
+            var waveFormat = _state.Capture.WaveFormat;
+            int channels = waveFormat.Channels;                  // Usually 2 for stereo
+            int totalFloatSamples = e.BytesRecorded / 4;         // Total float values in e.Buffer
+            int frameCount = totalFloatSamples / channels;       // Number of frames (one value per channel in each frame)
+
+            // Array for "mono" samples
+            float[] monoSamples = new float[frameCount];
+
             try
             {
-                Buffer.BlockCopy(e.Buffer, 0, samples, 0, e.BytesRecorded);
+                // Iterate over all frames (each contains [channels] float values)
+                for (int frame = 0; frame < frameCount; frame++)
+                {
+                    float sum = 0f;
+                    // Sum all channels (usually 2: L+R) and divide by their number,
+                    // to get the "average" (mono).
+                    for (int ch = 0; ch < channels; ch++)
+                    {
+                        // Byte offset within e.Buffer
+                        int sampleIndex = (frame * channels + ch) * 4;
+                        float sampleValue = BitConverter.ToSingle(e.Buffer, sampleIndex);
+                        sum += sampleValue;
+                    }
+                    monoSamples[frame] = sum / channels;
+                }
             }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing audio data: {ex}");
                 return;
             }
-            _ = _state.Analyzer.AddSamplesAsync(samples, _state.Capture.WaveFormat.SampleRate);
+
+            // Now monoSamples contains 1 channel (sum of left and right).
+            // Pass the MONO array to the analyzer.
+            _ = _state.Analyzer.AddSamplesAsync(monoSamples, waveFormat.SampleRate);
         }
 
         private async Task MonitorCaptureAsync(CancellationToken token)

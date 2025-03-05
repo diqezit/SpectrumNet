@@ -11,8 +11,6 @@ namespace SpectrumNet
         public const float KaiserBeta = 5f;
         public const float BesselEpsilon = 1e-10f;
         public const float InvLog10 = 0.43429448190325182765f;
-        public const float MinFreq = 20f;
-        public const float MaxFreq = 24000f;
         public const int DefaultFftSize = 2048;
     }
 
@@ -51,8 +49,11 @@ namespace SpectrumNet
     {
         public Complex[] Result { get; }
         public int SampleRate { get; }
-        public FftEventArgs(Complex[] result, int sampleRate) =>
-            (Result, SampleRate) = (result, sampleRate);
+        public FftEventArgs(Complex[] result, int sampleRate)
+        {
+            Result = result ?? throw new ArgumentNullException(nameof(result));
+            SampleRate = sampleRate;
+        }
     }
 
     public class SpectralDataEventArgs : EventArgs
@@ -70,8 +71,12 @@ namespace SpectrumNet
         public float AmplificationFactor { get; }
         public SpectrumParameters(float minDb, float dbRange, float amplificationFactor) =>
             (MinDb, DbRange, AmplificationFactor) = (minDb, dbRange, amplificationFactor);
-        public static SpectrumParameters FromProvider(IGainParametersProvider p) =>
-            new SpectrumParameters(p.MinDbValue, Math.Max(p.MaxDbValue - p.MinDbValue, Constants.Epsilon), p.AmplificationFactor);
+        public static SpectrumParameters FromProvider(IGainParametersProvider provider)
+        {
+            if (provider is null)
+                throw new ArgumentNullException(nameof(provider));
+            return new SpectrumParameters(provider.MinDbValue, Math.Max(provider.MaxDbValue - provider.MinDbValue, Constants.Epsilon), provider.AmplificationFactor);
+        }
     }
 
     public sealed class GainParameters : IGainParametersProvider, INotifyPropertyChanged
@@ -217,7 +222,15 @@ namespace SpectrumNet
                 throw new ObjectDisposedException(nameof(SpectrumAnalyzer));
             if (samples.Length == 0)
                 return;
-            await _fftProcessor.AddSamplesAsync(samples, sampleRate);
+            try
+            {
+                await _fftProcessor.AddSamplesAsync(samples, sampleRate);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, "[SpectrumAnalyzer]", $"Error adding samples: {ex}");
+                throw;
+            }
         }
 
         private void ResetSpectrum()
@@ -228,14 +241,23 @@ namespace SpectrumNet
                 _context);
         }
 
-        // Публичный метод-обёртка для безопасного сброса спектра.
+        // Public wrapper method for safe spectrum reset.
         public void SafeReset() => ResetSpectrum();
 
         private void OnFftCalculated(object? sender, FftEventArgs e)
         {
             if (e.Result.Length == 0)
                 return;
-            float[] spectrum = _converter.ConvertToSpectrum(e.Result, e.SampleRate, _scaleType);
+            float[] spectrum;
+            try
+            {
+                spectrum = _converter.ConvertToSpectrum(e.Result, e.SampleRate, _scaleType);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, "[SpectrumAnalyzer]", $"Error converting FFT to spectrum: {ex}");
+                return;
+            }
             var data = new SpectralData(spectrum, DateTime.UtcNow);
             lock (_lock)
             {
@@ -250,7 +272,16 @@ namespace SpectrumNet
                 return;
             _fftProcessor.FftCalculated -= OnFftCalculated;
             if (_fftProcessor is IAsyncDisposable ad)
-                ad.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            {
+                try
+                {
+                    ad.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    SmartLogger.Log(LogLevel.Error, "[SpectrumAnalyzer]", $"Error disposing FFT processor: {ex}");
+                }
+            }
             _disposed = true;
             Helpers.InvokeEvent(Disposed, this, EventArgs.Empty, _context);
             GC.SuppressFinalize(this);
@@ -297,6 +328,8 @@ namespace SpectrumNet
         private static readonly ConcurrentDictionary<int, (float[] Cos, float[] Sin)> _tables = new();
         public static (float[] Cos, float[] Sin) Get(int size)
         {
+            if (size <= 0)
+                throw new ArgumentException("Size must be positive", nameof(size));
             return _tables.GetOrAdd(size, s =>
             {
                 var cos = new float[s];
@@ -332,7 +365,7 @@ namespace SpectrumNet
         public FftProcessor(int fftSize = Constants.DefaultFftSize)
         {
             if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
-                throw new ArgumentException("FFT size must be a positive power of 2");
+                throw new ArgumentException("FFT size must be a positive power of 2", nameof(fftSize));
             _fftSize = fftSize;
             _buffer = new Complex[fftSize];
             (_cosCache, _sinCache) = TrigonometricTables.Get(fftSize);
@@ -356,7 +389,9 @@ namespace SpectrumNet
                 if (_windowType == value)
                     return;
                 _windowType = value;
-                _window = _windows[value];
+                if (!_windows.TryGetValue(value, out var window) || window is null)
+                    throw new InvalidOperationException($"Window type {value} not found or is null.");
+                _window = window;
                 ResetFftState();
             }
         }
@@ -365,7 +400,9 @@ namespace SpectrumNet
         {
             if (_disposed)
                 throw new ObjectDisposedException(nameof(FftProcessor));
-            if (sampleRate <= 0 || samples.Length == 0)
+            if (sampleRate <= 0)
+                throw new ArgumentException("Sample rate must be greater than zero.", nameof(sampleRate));
+            if (samples.Length == 0)
                 return ValueTask.CompletedTask;
             return _channel.Writer.TryWrite((samples, sampleRate))
                 ? ValueTask.CompletedTask
@@ -385,8 +422,18 @@ namespace SpectrumNet
             _disposed = true;
             _cts.Cancel();
             _channel.Writer.Complete();
-            await Task.CompletedTask;
-            _cts.Dispose();
+            try
+            {
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, "[FftProcessor]", $"Error during disposal: {ex}");
+            }
+            finally
+            {
+                _cts.Dispose();
+            }
         }
 
         private float[] GenerateWindow(int size, FftWindowType type)
@@ -436,7 +483,7 @@ namespace SpectrumNet
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, "[FftProcessor] ", $"Error in FFT processing loop: {ex}");
+                SmartLogger.Log(LogLevel.Error, "[FftProcessor]", $"Error in FFT processing loop: {ex}");
             }
         }
 
@@ -453,7 +500,17 @@ namespace SpectrumNet
                 _sampleCount += count;
                 if (_sampleCount >= _fftSize)
                 {
-                    FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
+                    try
+                    {
+                        // FastFourierTransform.FFT реализован через NAudio.Dsp
+                        FastFourierTransform.FFT(true, (int)Math.Log2(_fftSize), _buffer);
+                    }
+                    catch (Exception ex)
+                    {
+                        SmartLogger.Log(LogLevel.Error, "[FftProcessor]", $"FFT calculation failed: {ex}");
+                        ResetFftState();
+                        return;
+                    }
                     Helpers.InvokeEvent(FftCalculated, this, new FftEventArgs(_buffer, rate));
                     ResetFftState();
                 }
@@ -492,110 +549,148 @@ namespace SpectrumNet
 
         public float[] ConvertToSpectrum(Complex[] fft, int sampleRate, SpectrumScale scale)
         {
-            if (fft == null)
+            if (fft is null)
                 throw new ArgumentNullException(nameof(fft));
             if (sampleRate <= 0)
                 throw new ArgumentException("Invalid sample rate", nameof(sampleRate));
 
-            int minIndex = (int)(Constants.MinFreq * fft.Length / sampleRate);
-            int maxIndex = Math.Min((int)(Constants.MaxFreq * fft.Length / sampleRate), fft.Length / 2);
-            int spectrumLength = maxIndex - minIndex + 1;
-            float[] spectrum = new float[spectrumLength];
-            SpectrumParameters sp = SpectrumParameters.FromProvider(_params);
+            int nBins = fft.Length / 2 + 1;
+            float[] spectrum = new float[nBins];
+
+            SpectrumParameters spectrumParams = SpectrumParameters.FromProvider(_params);
 
             switch (scale)
             {
                 case SpectrumScale.Linear:
-                    ProcessLinear(fft, spectrum, minIndex, maxIndex, sp);
+                    ProcessLinear(fft, spectrum, nBins, spectrumParams);
                     break;
                 case SpectrumScale.Logarithmic:
-                    ProcessScale(fft, spectrum, sampleRate, MathF.Log10(Constants.MinFreq),
-                        MathF.Log10(Constants.MaxFreq), x => MathF.Pow(10, x), sp);
+                    ProcessScale(fft, spectrum, nBins, sampleRate,
+                                                    minDomain: MathF.Log10(1f),
+                                                    maxDomain: MathF.Log10(sampleRate / 2f),
+                                                    domainToFreq: x => MathF.Pow(10, x),
+                                                    spectrumParams);
                     break;
                 case SpectrumScale.Mel:
-                    ProcessScale(fft, spectrum, sampleRate, FreqToMel(Constants.MinFreq),
-                        FreqToMel(Constants.MaxFreq), MelToFreq, sp);
+                    ProcessScale(fft, spectrum, nBins, sampleRate,
+                                                    minDomain: FreqToMel(1f),
+                                                    maxDomain: FreqToMel(sampleRate / 2f),
+                                                    domainToFreq: MelToFreq,
+                                                    spectrumParams);
                     break;
                 case SpectrumScale.Bark:
-                    ProcessScale(fft, spectrum, sampleRate, FreqToBark(Constants.MinFreq),
-                        FreqToBark(Constants.MaxFreq), BarkToFreq, sp);
+                    ProcessScale(fft, spectrum, nBins, sampleRate,
+                                                    minDomain: FreqToBark(1f),
+                                                    maxDomain: FreqToBark(sampleRate / 2f),
+                                                    domainToFreq: BarkToFreq,
+                                                    spectrumParams);
                     break;
                 case SpectrumScale.ERB:
-                    ProcessScale(fft, spectrum, sampleRate, FreqToERB(Constants.MinFreq),
-                        FreqToERB(Constants.MaxFreq), ERBToFreq, sp);
+                    ProcessScale(fft, spectrum, nBins, sampleRate,
+                                                    minDomain: FreqToERB(1f),
+                                                    maxDomain: FreqToERB(sampleRate / 2f),
+                                                    domainToFreq: ERBToFreq,
+                                                    spectrumParams);
                     break;
                 default:
-                    ProcessLinear(fft, spectrum, minIndex, maxIndex, sp);
+                    ProcessLinear(fft, spectrum, nBins, spectrumParams);
                     break;
             }
             return spectrum;
         }
 
-        private void ProcessLinear(Complex[] fft, float[] spectrum, int minIndex, int maxIndex, SpectrumParameters sp)
+        /// <summary>
+        /// Linear processing: simple interpolation by indices from 0 to nBins-1.
+        /// </summary>
+        private void ProcessLinear(Complex[] fft, float[] spectrum, int nBins, SpectrumParameters spectrumParams)
         {
-            if (spectrum.Length < 100)
+            if (nBins < 100)
             {
-                for (int i = 0; i < spectrum.Length; i++)
+                for (int i = 0; i < nBins; i++)
                 {
-                    int fftIndex = minIndex + i;
-                    if (fftIndex < fft.Length)
-                        spectrum[i] = InterpolateSpectrumValue(fft, fftIndex, sp);
+                    spectrum[i] = InterpolateSpectrumValue(fft, i, nBins, spectrumParams);
                 }
             }
             else
             {
-                Parallel.For(0, spectrum.Length, i =>
+                Parallel.For(0, nBins, _parallelOpts, i =>
                 {
-                    int fftIndex = minIndex + i;
-                    if (fftIndex < fft.Length)
-                        spectrum[i] = InterpolateSpectrumValue(fft, fftIndex, sp);
+                    spectrum[i] = InterpolateSpectrumValue(fft, i, nBins, spectrumParams);
                 });
             }
         }
 
-        private void ProcessScale(Complex[] fft, float[] spectrum, int sampleRate, float minDomain, float maxDomain, Func<float, float> domainToFreq, SpectrumParameters sp)
+        /// <summary>
+        /// Processing of non-linear scales (Log, Mel, Bark, ERB).
+        /// Converts the domain value to frequency, then normalizes it to the index range [0, nBins-1].
+        /// </summary>
+        private void ProcessScale(
+            Complex[] fft,
+            float[] spectrum,
+            int nBins,
+            int sampleRate,
+            float minDomain,
+            float maxDomain,
+            Func<float, float> domainToFreq,
+            SpectrumParameters spectrumParams)
         {
-            float step = (maxDomain - minDomain) / (spectrum.Length - 1);
-            Parallel.For(0, spectrum.Length, i =>
+            float step = (maxDomain - minDomain) / (nBins - 1);
+            float halfSampleRate = sampleRate * 0.5f;
+            Parallel.For(0, nBins, _parallelOpts, i =>
             {
                 float domainValue = minDomain + i * step;
                 float freq = domainToFreq(domainValue);
-                int bin = (int)(freq * fft.Length / sampleRate);
-                spectrum[i] = (bin >= 0 && bin < fft.Length / 2)
-                    ? CalcValue(Mag(fft[bin]), sp)
-                    : 0;
+                float binFloat = (freq / halfSampleRate) * (nBins - 1);
+                int bin = (int)MathF.Round(binFloat);
+                bin = Math.Clamp(bin, 0, nBins - 1);
+
+                float mag = Magnitude(fft[bin]);
+                spectrum[i] = CalcValue(mag, spectrumParams);
             });
         }
 
+        /// <summary>
+        /// Amplitude interpolation: averages the value of the current, left, and right bins for smoothing.
+        /// </summary>
+        private float InterpolateSpectrumValue(Complex[] fft, int index, int nBins, SpectrumParameters spectrumParams)
+        {
+            float centerMag = Magnitude(fft[index]);
+            float leftMag = index > 0 ? Magnitude(fft[index - 1]) : centerMag;
+            float rightMag = index < nBins - 1 ? Magnitude(fft[index + 1]) : centerMag;
+            float interpolatedMag = (leftMag + centerMag + rightMag) / 3f;
+            if (interpolatedMag <= 0)
+                return 0f;
+            // Calculate the coefficient for conversion to dB
+            float dBFactor = 10f * Constants.InvLog10;
+            float db = dBFactor * MathF.Log(interpolatedMag);
+            float norm = Math.Clamp((db - spectrumParams.MinDb) / spectrumParams.DbRange, 0f, 1f);
+            return norm < 1e-6f ? 0f : MathF.Pow(norm, spectrumParams.AmplificationFactor);
+        }
+
+        /// <summary>
+        /// Converts magnitude (amplitude) to dB, normalizes it, and applies a gain factor.
+        /// </summary>
+        private static float CalcValue(float mag, SpectrumParameters spectrumParams)
+        {
+            if (mag <= 0f)
+                return 0f;
+            float dBFactor = 10f * Constants.InvLog10;
+            float db = dBFactor * MathF.Log(mag);
+            float norm = Math.Clamp((db - spectrumParams.MinDb) / spectrumParams.DbRange, 0f, 1f);
+            return norm < 1e-6f ? 0f : MathF.Pow(norm, spectrumParams.AmplificationFactor);
+        }
+
+        /// <summary>
+        /// Calculates the magnitude (squared modulus) of a complex number.
+        /// </summary>
+        private static float Magnitude(Complex c) => c.X * c.X + c.Y * c.Y;
+
+        // ---------------- Frequency conversion methods (Mel, Bark, ERB) ----------------
         private static float FreqToMel(float freq) => 2595f * MathF.Log10(1 + freq / 700f);
         private static float MelToFreq(float mel) => 700f * (MathF.Pow(10, mel / 2595f) - 1);
         private static float FreqToBark(float freq) => 13f * MathF.Atan(0.00076f * freq) + 3.5f * MathF.Atan(MathF.Pow(freq / 7500f, 2));
         private static float BarkToFreq(float bark) => 1960f * (bark + 0.53f) / (26.28f - bark);
         private static float FreqToERB(float freq) => 21.4f * MathF.Log10(0.00437f * freq + 1);
         private static float ERBToFreq(float erb) => (MathF.Pow(10, erb / 21.4f) - 1) / 0.00437f;
-
-        private float InterpolateSpectrumValue(Complex[] fft, int index, SpectrumParameters sp)
-        {
-            float centerMag = Mag(fft[index]);
-            float leftMag = index > 0 ? Mag(fft[index - 1]) : centerMag;
-            float rightMag = index < fft.Length / 2 - 1 ? Mag(fft[index + 1]) : centerMag;
-            float interpolatedMag = (leftMag + centerMag + rightMag) / 3f;
-            if (interpolatedMag <= 0)
-                return 0;
-            float db = 10f * Constants.InvLog10 * MathF.Log(interpolatedMag);
-            float norm = Math.Clamp((db - sp.MinDb) / sp.DbRange, 0, 1);
-            return norm < 1e-6f ? 0 : MathF.Pow(norm, sp.AmplificationFactor);
-        }
-
-        private static float CalcValue(float mag, SpectrumParameters sp)
-        {
-            if (mag == 0)
-                return 0;
-            float db = 10f * Constants.InvLog10 * MathF.Log(mag);
-            float norm = Math.Clamp((db - sp.MinDb) / sp.DbRange, 0, 1);
-            return norm < 1e-6f ? 0 : MathF.Pow(norm, sp.AmplificationFactor);
-        }
-
-        private static float Mag(Complex c) => c.X * c.X + c.Y * c.Y;
     }
 }
