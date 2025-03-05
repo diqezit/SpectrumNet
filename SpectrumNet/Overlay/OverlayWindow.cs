@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using System.Windows.Media;
-
 namespace SpectrumNet
 {
     public sealed record OverlayConfiguration(
@@ -102,32 +100,61 @@ namespace SpectrumNet
             if (_renderContext is null) return;
 
             _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
-            _renderContext.Value.RenderTimer.Tick += (_, _) => ForceRedraw();
+            _renderContext.Value.RenderTimer.Tick += RenderTimerTick;
 
-            Closing += (_, _) => { _renderContext?.RenderTimer.Stop(); Dispose(); };
-            SourceInitialized += (_, _) => { ConfigureWindowStyleEx(); _renderContext?.RenderTimer.Start(); };
+            Closing += OnClosing;
+            SourceInitialized += OnSourceInitialized;
 
             if (_configuration.EnableEscapeToClose)
             {
-                KeyDown += (_, e) =>
-                {
-                    if (e.Key == Key.Escape)
-                    {
-                        e.Handled = true;
-                        Close();
-                    }
-                };
+                KeyDown += OnKeyDown;
             }
 
-            DpiChanged += (_, _) => { _cacheBitmap?.Dispose(); _cacheBitmap = null; ForceRedraw(); };
+            DpiChanged += OnDpiChanged;
+            IsVisibleChanged += OnIsVisibleChanged;
+            SizeChanged += OnSizeChanged;
+        }
 
-            IsVisibleChanged += (_, _) =>
+        private void RenderTimerTick(object? sender, EventArgs e) => ForceRedraw();
+
+        private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+        {
+            _renderContext?.RenderTimer.Stop();
+            Dispose();
+        }
+
+        private void OnSourceInitialized(object? sender, EventArgs e)
+        {
+            ConfigureWindowStyleEx();
+            _renderContext?.RenderTimer.Start();
+        }
+
+        private void OnKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
             {
-                if (IsVisible) _renderContext?.RenderTimer.Start();
-                else _renderContext?.RenderTimer.Stop();
-            };
+                e.Handled = true;
+                Close();
+            }
+        }
 
-            SizeChanged += (_, _) => { _cacheBitmap?.Dispose(); _cacheBitmap = null; };
+        private void OnDpiChanged(object? sender, DpiChangedEventArgs e)
+        {
+            _cacheBitmap?.Dispose();
+            _cacheBitmap = null;
+            ForceRedraw();
+        }
+
+        private void OnIsVisibleChanged(object? sender, DependencyPropertyChangedEventArgs e)
+        {
+            if (IsVisible) _renderContext?.RenderTimer.Start();
+            else _renderContext?.RenderTimer.Stop();
+        }
+
+        private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
+        {
+            _cacheBitmap?.Dispose();
+            _cacheBitmap = null;
         }
 
         private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args)
@@ -187,7 +214,20 @@ namespace SpectrumNet
             if (_renderContext != null)
             {
                 _renderContext.Value.SkElement.PaintSurface -= HandlePaintSurface;
+                _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
                 _renderContext.Value.RenderTimer.Stop();
+
+                Closing -= OnClosing;
+                SourceInitialized -= OnSourceInitialized;
+
+                if (_configuration.EnableEscapeToClose)
+                {
+                    KeyDown -= OnKeyDown;
+                }
+
+                DpiChanged -= OnDpiChanged;
+                IsVisibleChanged -= OnIsVisibleChanged;
+                SizeChanged -= OnSizeChanged;
             }
 
             _disposalTokenSource.Cancel();

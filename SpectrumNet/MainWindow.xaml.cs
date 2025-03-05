@@ -701,8 +701,14 @@ namespace SpectrumNet
 
                 if (_captureManager != null)
                 {
-                    try { await _captureManager.StopCaptureAsync(); }
-                    catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping capture: {ex}"); }
+                    try
+                    {
+                        await _captureManager.StopCaptureAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping capture: {ex}");
+                    }
                     DisposeSafe(_captureManager, "capture manager");
                     _captureManager = null;
                 }
@@ -721,7 +727,16 @@ namespace SpectrumNet
                     ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
                 }
 
+                if (_overlayWindow != null)
+                {
+                    _overlayWindow.Close();
+                    _overlayWindow.Dispose(); 
+                    _overlayWindow = null;
+                }
+
                 _isDisposed = true;
+
+                Application.Current.Shutdown();
             }
             catch (Exception ex)
             {
