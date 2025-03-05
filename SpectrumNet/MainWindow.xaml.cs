@@ -25,11 +25,13 @@ namespace SpectrumNet
         );
 
         private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
+        private readonly CancellationTokenSource _cleanupCts = new();
         private MainWindowSettings _state = new();
         private bool _isOverlayActive, _isPopupOpen,
                      _isOverlayTopmost = true,
                      _isControlPanelVisible = true,
-                     _isTransitioning;
+                     _isTransitioning,
+                     _isDisposed;
         private RenderStyle _selectedDrawingType = RenderStyle.Bars;
         private FftWindowType _selectedFftWindowType = FftWindowType.Hann;
         private SpectrumScale _selectedScaleType = SpectrumScale.Linear;
@@ -47,25 +49,44 @@ namespace SpectrumNet
 
         public SpectrumAnalyzer Analyzer
         {
-            get => _analyzer!;
+            get => _analyzer ?? throw new InvalidOperationException("Analyzer not initialized");
             set => _analyzer = value ?? throw new ArgumentNullException(nameof(Analyzer));
         }
 
         public int BarCount
         {
             get => _state.BarCount;
-            set => UpdateState(s => s with { BarCount = value }, nameof(BarCount));
+            set
+            {
+                if (value <= 0)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set invalid bar count: {value}");
+                    value = MwConstants.BarCount;
+                }
+                UpdateState(s => s with { BarCount = value }, nameof(BarCount));
+            }
         }
 
         public double BarSpacing
         {
             get => _state.BarSpacing;
-            set => UpdateState(s => s with { BarSpacing = value }, nameof(BarSpacing));
+            set
+            {
+                if (value < 0)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set negative spacing: {value}");
+                    value = MwConstants.BarSpacing;
+                }
+                UpdateState(s => s with { BarSpacing = value }, nameof(BarSpacing));
+            }
         }
 
         public bool CanStartCapture => _captureManager != null && !IsRecording;
 
-        public GainParameters GainParameters => _gainParameters;
+        public new Dispatcher Dispatcher => Application.Current.Dispatcher;
+
+        public GainParameters GainParameters => _gainParameters ??
+            throw new InvalidOperationException("Gain parameters not initialized");
 
         public bool IsOverlayActive
         {
@@ -76,7 +97,15 @@ namespace SpectrumNet
                 _isOverlayActive = value;
                 OnPropertyChanged(nameof(IsOverlayActive));
                 SpectrumRendererFactory.ConfigureAllRenderers(value);
-                _renderElement?.InvalidateVisual();
+
+                try
+                {
+                    _renderElement?.InvalidateVisual();
+                }
+                catch (Exception ex)
+                {
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating visualization: {ex}");
+                }
             }
         }
 
@@ -110,9 +139,17 @@ namespace SpectrumNet
                 if (_selectedScaleType == value) return;
                 _selectedScaleType = value;
                 OnPropertyChanged(nameof(ScaleType));
-                _analyzer?.SetScaleType(value);
-                _renderer?.RequestRender();
-                _renderElement?.InvalidateVisual();
+
+                try
+                {
+                    _analyzer?.SetScaleType(value);
+                    _renderer?.RequestRender();
+                    _renderElement?.InvalidateVisual();
+                }
+                catch (Exception ex)
+                {
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error changing scale type: {ex}");
+                }
             }
         }
 
@@ -130,17 +167,27 @@ namespace SpectrumNet
         public string SelectedStyle
         {
             get => _state.Style;
-            set => UpdateState(s => s with { Style = value }, nameof(SelectedStyle));
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Attempt to set empty style name");
+                    value = MwConstants.DefaultStyle;
+                }
+                UpdateState(s => s with { Style = value }, nameof(SelectedStyle));
+            }
         }
 
-        public SKElement SpectrumCanvas => _renderElement;
+        public SKElement SpectrumCanvas => _renderElement ??
+            throw new InvalidOperationException("Render element not initialized");
 
-        public SpectrumBrushes SpectrumStyles => _spectrumStyles;
+        public SpectrumBrushes SpectrumStyles => _spectrumStyles ??
+            throw new InvalidOperationException("Spectrum styles not initialized");
 
         public string StatusText
         {
             get => _state.StatusText;
-            set => UpdateState(s => s with { StatusText = value }, nameof(StatusText));
+            set => UpdateState(s => s with { StatusText = value ?? string.Empty }, nameof(StatusText));
         }
 
         public FftWindowType WindowType
@@ -151,11 +198,19 @@ namespace SpectrumNet
                 if (_selectedFftWindowType == value) return;
                 _selectedFftWindowType = value;
                 OnPropertyChanged(nameof(WindowType));
-                if (_analyzer != null)
+
+                try
                 {
-                    _analyzer.SetWindowType(value);
-                    _renderer?.RequestRender();
-                    _renderElement?.InvalidateVisual();
+                    if (_analyzer != null)
+                    {
+                        _analyzer.SetWindowType(value);
+                        _renderer?.RequestRender();
+                        _renderElement?.InvalidateVisual();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error changing FFT window type: {ex}");
                 }
             }
         }
@@ -178,7 +233,8 @@ namespace SpectrumNet
         public IReadOnlyDictionary<string, StyleDefinition> AvailableStyles =>
             _spectrumStyles?.Styles?
                 .OrderBy(kvp => kvp.Key)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value) ?? new Dictionary<string, StyleDefinition>();
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value) ??
+                new Dictionary<string, StyleDefinition>();
 
         public bool IsPopupOpen
         {
@@ -204,20 +260,55 @@ namespace SpectrumNet
 
         public float MinDbLevel
         {
-            get => _gainParameters.MinDbValue;
-            set => UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel));
+            get => _gainParameters?.MinDbValue ?? SharedConstants.DefaultMinDb;
+            set
+            {
+                if (_gainParameters == null) return;
+
+                if (value >= _gainParameters.MaxDbValue)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix,
+                        $"Min dB level ({value}) must be less than max ({_gainParameters.MaxDbValue})");
+                    value = _gainParameters.MaxDbValue - 1;
+                }
+
+                UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel));
+            }
         }
 
         public float MaxDbLevel
         {
-            get => _gainParameters.MaxDbValue;
-            set => UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
+            get => _gainParameters?.MaxDbValue ?? SharedConstants.DefaultMaxDb;
+            set
+            {
+                if (_gainParameters == null) return;
+
+                if (value <= _gainParameters.MinDbValue)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix,
+                        $"Max dB level ({value}) must be greater than min ({_gainParameters.MinDbValue})");
+                    value = _gainParameters.MinDbValue + 1;
+                }
+
+                UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
+            }
         }
 
         public float AmplificationFactor
         {
-            get => _gainParameters.AmplificationFactor;
-            set => UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
+            get => _gainParameters?.AmplificationFactor ?? SharedConstants.DefaultAmplificationFactor;
+            set
+            {
+                if (_gainParameters == null) return;
+
+                if (value < 0)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Amplification factor cannot be negative: {value}");
+                    value = 0;
+                }
+
+                UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
+            }
         }
 
         #endregion
@@ -229,12 +320,21 @@ namespace SpectrumNet
             try
             {
                 InitializeComponent();
+                var syncContext = SynchronizationContext.Current ??
+                    throw new InvalidOperationException("No synchronization context. Window must be created in UI thread.");
+
                 _gainParameters = new GainParameters(
-                    SynchronizationContext.Current ?? throw new InvalidOperationException("No synchronization context"),
+                    syncContext,
                     SharedConstants.DefaultMinDb,
                     SharedConstants.DefaultMaxDb,
                     SharedConstants.DefaultAmplificationFactor
                 );
+
+                if (_gainParameters == null)
+                {
+                    throw new InvalidOperationException("Failed to create gain parameters");
+                }
+
                 DataContext = this;
                 InitComponents();
                 InitEventHandlers();
@@ -245,7 +345,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to initialize main window: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Critical error during window initialization: {ex}");
                 throw;
             }
         }
@@ -256,37 +356,73 @@ namespace SpectrumNet
         {
             try
             {
-                _renderElement = spectrumCanvas ?? throw new InvalidOperationException("spectrumCanvas is null");
+                _renderElement = spectrumCanvas ??
+                    throw new InvalidOperationException("Canvas not found in window template");
+
                 _spectrumStyles = new SpectrumBrushes();
+                if (_spectrumStyles == null)
+                {
+                    throw new InvalidOperationException("Failed to create SpectrumBrushes");
+                }
+
                 _disposables = new CompositeDisposable();
-                var syncContext = SynchronizationContext.Current ?? throw new InvalidOperationException("SynchronizationContext.Current is null");
+                if (_disposables == null)
+                {
+                    throw new InvalidOperationException("Failed to create CompositeDisposable");
+                }
+
+                var syncContext = SynchronizationContext.Current ??
+                    throw new InvalidOperationException("SynchronizationContext.Current is null");
+
                 _analyzer = new SpectrumAnalyzer(
                     new FftProcessor { WindowType = WindowType },
                     new SpectrumConverter(_gainParameters),
                     syncContext
                 );
+
+                if (_analyzer == null)
+                {
+                    throw new InvalidOperationException("Failed to create SpectrumAnalyzer");
+                }
+
                 _disposables.Add(_analyzer);
+
                 _captureManager = new AudioCaptureManager(this);
+                if (_captureManager == null)
+                {
+                    throw new InvalidOperationException("Failed to create AudioCaptureManager");
+                }
+
                 _disposables.Add(_captureManager);
+
                 _renderer = new Renderer(_spectrumStyles, this, _analyzer, _renderElement);
+                if (_renderer == null)
+                {
+                    throw new InvalidOperationException("Failed to create Renderer");
+                }
+
                 _disposables.Add(_renderer);
+
                 SelectedDrawingType = RenderStyle.Bars;
                 UpdateState(s => s with { Style = MwConstants.DefaultStyle }, nameof(SelectedStyle));
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to initialize components: {ex}");
-                throw;
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Critical error initializing components: {ex}");
+                throw new InvalidOperationException("Failed to initialize components", ex);
             }
         }
 
         private void InitEventHandlers()
         {
-            _renderElement.PaintSurface += OnPaintSurface;
+            if (_renderElement != null)
+                _renderElement.PaintSurface += OnPaintSurface;
+
             SizeChanged += OnWindowSizeChanged;
             StateChanged += OnStateChanged;
             MouseDoubleClick += OnWindowMouseDoubleClick;
             Closed += OnWindowClosed;
+
             PropertyChanged += (_, args) =>
             {
                 if (args.PropertyName == nameof(IsRecording))
@@ -312,7 +448,12 @@ namespace SpectrumNet
 
         public async Task StartCaptureAsync()
         {
-            if (_captureManager == null) return;
+            if (_captureManager == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Attempt to start capture with no CaptureManager");
+                return;
+            }
+
             try
             {
                 await _captureManager.StartCaptureAsync();
@@ -320,13 +461,18 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to start audio capture: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error starting audio capture: {ex}");
             }
         }
 
         public async Task StopCaptureAsync()
         {
-            if (_captureManager == null) return;
+            if (_captureManager == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Attempt to stop capture with no CaptureManager");
+                return;
+            }
+
             try
             {
                 await _captureManager.StopCaptureAsync();
@@ -334,7 +480,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to stop audio capture: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping audio capture: {ex}");
             }
         }
 
@@ -362,28 +508,57 @@ namespace SpectrumNet
                             EnableHardwareAcceleration: true
                         )
                     );
+
+                    if (_overlayWindow == null)
+                    {
+                        SmartLogger.Log(LogLevel.Error, LogPrefix, "Failed to create overlay window");
+                        return;
+                    }
+
                     _overlayWindow.Closed += (_, _) => OnOverlayClosed();
                     _overlayWindow.Show();
                 }
+
                 IsOverlayActive = true;
                 SpectrumRendererFactory.ConfigureAllRenderers(true);
                 _renderElement?.InvalidateVisual();
-                UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth, (int)SystemParameters.PrimaryScreenHeight);
+                UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth,
+                                         (int)SystemParameters.PrimaryScreenHeight);
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to open overlay window: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error opening overlay window: {ex}");
             }
         }
 
-        private void CloseOverlay() => _overlayWindow?.Close();
+        private void CloseOverlay()
+        {
+            try
+            {
+                _overlayWindow?.Close();
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error closing overlay: {ex}");
+                if (_overlayWindow != null)
+                {
+                    DisposeSafe(_overlayWindow, "overlay window");
+                    _overlayWindow = null;
+                    IsOverlayActive = false;
+                }
+            }
+        }
 
         private void OnOverlayClosed()
         {
             try
             {
-                _overlayWindow?.Dispose();
-                _overlayWindow = null;
+                if (_overlayWindow != null)
+                {
+                    DisposeSafe(_overlayWindow, "overlay window");
+                    _overlayWindow = null;
+                }
+
                 IsOverlayActive = false;
                 SpectrumRendererFactory.ConfigureAllRenderers(false);
                 _renderElement?.InvalidateVisual();
@@ -391,7 +566,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error closing overlay: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error handling overlay closed: {ex}");
             }
         }
 
@@ -401,33 +576,92 @@ namespace SpectrumNet
 
         public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
         {
+            if (e == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "PaintSurface called with null arguments");
+                return;
+            }
+
             if (IsOverlayActive && sender == _renderElement)
             {
                 e.Surface.Canvas.Clear(SKColors.Transparent);
                 return;
             }
-            _renderer?.RenderFrame(sender, e);
+
+            try
+            {
+                _renderer?.RenderFrame(sender, e);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering frame: {ex}");
+                try { e.Surface.Canvas.Clear(SKColors.Transparent); }
+                catch { /* ignore cleanup errors */ }
+            }
         }
 
-        private void OnRendering(object? sender, EventArgs e) => _renderElement?.InvalidateVisual();
+        private void OnRendering(object? sender, EventArgs e)
+        {
+            try
+            {
+                _renderElement?.InvalidateVisual();
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating visualization: {ex}");
+            }
+        }
 
         private void OnStateChanged(object? sender, EventArgs e)
         {
             if (MaximizeButton == null || MaximizeIcon == null) return;
-            MaximizeIcon.Data = Geometry.Parse(WindowState == WindowState.Maximized
-                ? "M0,0 L20,0 L20,20 L0,20 Z"
-                : "M2,2 H18 V18 H2 Z");
+
+            try
+            {
+                MaximizeIcon.Data = Geometry.Parse(WindowState == WindowState.Maximized
+                    ? "M0,0 L20,0 L20,20 L0,20 Z"
+                    : "M2,2 H18 V18 H2 Z");
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error changing icon: {ex}");
+            }
         }
 
-        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e) =>
-            ThemeManager.Instance.ToggleTheme();
+        private void OnThemeToggleButtonChanged(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                ThemeManager.Instance.ToggleTheme();
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error toggling theme: {ex}");
+            }
+        }
 
-        private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) =>
-            _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+        private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e)
+        {
+            if (e == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "SizeChanged called with null arguments");
+                return;
+            }
+
+            try
+            {
+                _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating dimensions: {ex}");
+            }
+        }
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (sender is not ComboBox cb) return;
+
             try
             {
                 switch (cb.Name)
@@ -445,80 +679,131 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in combo box selection change: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error handling selection change: {ex}");
             }
         }
 
         private async void OnWindowClosed(object? sender, EventArgs e)
         {
-            CompositionTarget.Rendering -= OnRendering;
-            _renderElement.PaintSurface -= OnPaintSurface;
-            SizeChanged -= OnWindowSizeChanged;
-            StateChanged -= OnStateChanged;
-            MouseDoubleClick -= OnWindowMouseDoubleClick;
-
-            if (_captureManager != null)
+            try
             {
-                try { await _captureManager.StopCaptureAsync(); }
-                catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping capture: {ex}"); }
-                DisposeSafe(_captureManager, "capture manager");
-                _captureManager = null;
-            }
+                _cleanupCts.Cancel();
 
-            DisposeSafe(_analyzer, "analyzer");
-            _analyzer = null;
-            DisposeSafe(_renderer, "renderer");
-            _renderer = null;
-            DisposeSafe(_disposables, "disposables");
-            _disposables = null;
-            DisposeSafe(_transitionSemaphore, "transition semaphore");
+                CompositionTarget.Rendering -= OnRendering;
+
+                if (_renderElement != null)
+                    _renderElement.PaintSurface -= OnPaintSurface;
+
+                SizeChanged -= OnWindowSizeChanged;
+                StateChanged -= OnStateChanged;
+                MouseDoubleClick -= OnWindowMouseDoubleClick;
+                Closed -= OnWindowClosed;
+
+                if (_captureManager != null)
+                {
+                    try { await _captureManager.StopCaptureAsync(); }
+                    catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping capture: {ex}"); }
+                    DisposeSafe(_captureManager, "capture manager");
+                    _captureManager = null;
+                }
+
+                DisposeSafe(_analyzer, "analyzer");
+                _analyzer = null;
+                DisposeSafe(_renderer, "renderer");
+                _renderer = null;
+                DisposeSafe(_disposables, "disposables");
+                _disposables = null;
+                DisposeSafe(_transitionSemaphore, "transition semaphore");
+                DisposeSafe(_cleanupCts, "cleanup token source");
+
+                if (_themePropertyChangedHandler != null && ThemeManager.Instance != null)
+                {
+                    ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
+                }
+
+                _isDisposed = true;
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error releasing resources: {ex}");
+            }
         }
 
         private void OnWindowDrag(object sender, MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left) DragMove();
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                try
+                {
+                    DragMove();
+                }
+                catch (Exception ex)
+                {
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error moving window: {ex}");
+                }
+            }
         }
 
         private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
         {
-            if (e.OriginalSource is DependencyObject originalElement)
+            if (e == null) return;
+
+            try
             {
-                DependencyObject? element = originalElement;
-                while (element != null)
+                if (e.OriginalSource is DependencyObject originalElement)
                 {
-                    if (element is CheckBox)
+                    DependencyObject? element = originalElement;
+                    while (element != null)
                     {
-                        e.Handled = true;
-                        return;
+                        if (element is CheckBox)
+                        {
+                            e.Handled = true;
+                            return;
+                        }
+                        element = VisualTreeHelper.GetParent(element);
                     }
-                    element = VisualTreeHelper.GetParent(element);
+                }
+
+                if (e.ChangedButton == MouseButton.Left)
+                {
+                    e.Handled = true;
+                    MaximizeWindow();
                 }
             }
-            if (e.ChangedButton == MouseButton.Left)
+            catch (Exception ex)
             {
-                e.Handled = true;
-                MaximizeWindow();
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error handling double click: {ex}");
             }
         }
 
         private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (sender is not Slider slider) return;
-            var sliderActions = new Dictionary<string, Action<double>>
+
+            try
             {
-                ["barSpacingSlider"] = value => UpdateState(s => s with { BarSpacing = value }, nameof(BarSpacing)),
-                ["barCountSlider"] = value => UpdateState(s => s with { BarCount = (int)value }, nameof(BarCount)),
-                ["minDbLevelSlider"] = value => MinDbLevel = (float)value,
-                ["maxDbLevelSlider"] = value => MaxDbLevel = (float)value,
-                ["amplificationFactorSlider"] = value => AmplificationFactor = (float)value
-            };
-            if (sliderActions.TryGetValue(slider.Name, out var act))
-                act(slider.Value);
+                var sliderActions = new Dictionary<string, Action<double>>
+                {
+                    ["barSpacingSlider"] = value => BarSpacing = value,
+                    ["barCountSlider"] = value => BarCount = (int)value,
+                    ["minDbLevelSlider"] = value => MinDbLevel = (float)value,
+                    ["maxDbLevelSlider"] = value => MaxDbLevel = (float)value,
+                    ["amplificationFactorSlider"] = value => AmplificationFactor = (float)value
+                };
+
+                if (sliderActions.TryGetValue(slider.Name, out var action))
+                    action(slider.Value);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error handling slider change: {ex}");
+            }
         }
 
         private void OnButtonClick(object sender, RoutedEventArgs e)
         {
             if (sender is not Button btn) return;
+
             try
             {
                 var actions = new Dictionary<string, Action>
@@ -532,6 +817,7 @@ namespace SpectrumNet
                     ["MaximizeButton"] = MaximizeWindow,
                     ["CloseButton"] = CloseWindow
                 };
+
                 if (actions.TryGetValue(btn.Name, out var act))
                     act();
             }
@@ -551,16 +837,29 @@ namespace SpectrumNet
         {
             try
             {
+                if (ControlPanel == null || ToggleControlPanelButton == null)
+                {
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, "UI elements not found");
+                    return;
+                }
+
                 if (IsControlPanelVisible)
                 {
                     if (FindResource("HidePanelAnimation") is Storyboard hidePanelSB)
                     {
                         hidePanelSB.Completed += (s, ev) =>
                         {
-                            ControlPanel.Visibility = Visibility.Collapsed;
-                            IsControlPanelVisible = false;
-                            if (FindResource("HidePanelAndButtonAnimation") is Storyboard hidePanelAndButtonSB)
-                                hidePanelAndButtonSB.Begin(this);
+                            try
+                            {
+                                ControlPanel.Visibility = Visibility.Collapsed;
+                                IsControlPanelVisible = false;
+                                if (FindResource("HidePanelAndButtonAnimation") is Storyboard hidePanelAndButtonSB)
+                                    hidePanelAndButtonSB.Begin(this);
+                            }
+                            catch (Exception ex)
+                            {
+                                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in hide panel animation: {ex}");
+                            }
                         };
                         hidePanelSB.Begin(ControlPanel);
                     }
@@ -574,9 +873,11 @@ namespace SpectrumNet
                         showPanelSB.Begin(ControlPanel);
                     IsControlPanelVisible = true;
                 }
+
                 var pulseTransform = new ScaleTransform(1.0, 1.0);
                 var originalTransform = ToggleControlPanelButton.RenderTransform;
                 ToggleControlPanelButton.RenderTransform = pulseTransform;
+
                 var pulseAnimation = new DoubleAnimation
                 {
                     From = 1.0,
@@ -585,8 +886,10 @@ namespace SpectrumNet
                     AutoReverse = true,
                     EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                 };
+
                 pulseTransform.BeginAnimation(ScaleTransform.ScaleXProperty, pulseAnimation);
                 pulseTransform.BeginAnimation(ScaleTransform.ScaleYProperty, pulseAnimation);
+
                 pulseAnimation.Completed += (s, args) =>
                     ToggleControlPanelButton.RenderTransform = originalTransform;
             }
@@ -604,6 +907,7 @@ namespace SpectrumNet
                     CloseOverlay();
                 else
                     OpenOverlay();
+
                 SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
                 _renderElement?.InvalidateVisual();
             }
@@ -619,46 +923,104 @@ namespace SpectrumNet
 
         private void UpdateOverlayTopmostState()
         {
-            if (_overlayWindow?.IsInitialized == true)
-                _overlayWindow.Topmost = IsOverlayTopmost;
+            try
+            {
+                if (_overlayWindow?.IsInitialized == true)
+                    _overlayWindow.Topmost = IsOverlayTopmost;
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating topmost state: {ex}");
+            }
         }
 
-        private void UpdateRendererDimensions(int width, int height) =>
-            _renderer?.UpdateRenderDimensions(width, height);
+        private void UpdateRendererDimensions(int width, int height)
+        {
+            try
+            {
+                if (width <= 0 || height <= 0)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Invalid dimensions for renderer: {width}x{height}");
+                    return;
+                }
+
+                _renderer?.UpdateRenderDimensions(width, height);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating renderer dimensions: {ex}");
+            }
+        }
 
         private void CloseWindow() => Close();
+
         private void MinimizeWindow() => WindowState = WindowState.Minimized;
-        private void MaximizeWindow() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+        private void MaximizeWindow() =>
+            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
         private void UpdateProps() =>
-            OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
+                    OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));
 
         private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName)
         {
-            setter(newValue);
-            OnPropertyChanged(propertyName);
-            _renderElement?.InvalidateVisual();
+            if (setter == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Null delegate passed for parameter update");
+                return;
+            }
+
+            try
+            {
+                setter(newValue);
+                OnPropertyChanged(propertyName);
+                _renderElement?.InvalidateVisual();
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating gain parameter: {ex}");
+            }
         }
 
         private void UpdateState(Func<MainWindowSettings, MainWindowSettings> updater, string propertyName)
         {
-            _state = updater(_state);
-            OnPropertyChanged(propertyName);
+            if (updater == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Null delegate passed for state update");
+                return;
+            }
+
+            try
+            {
+                _state = updater(_state);
+                OnPropertyChanged(propertyName);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating state: {ex}");
+            }
         }
 
         private void UpdateToggleButtonContent()
         {
-            if (ToggleButtonIcon?.RenderTransform is RotateTransform rt)
+            try
             {
-                rt.BeginAnimation(
-                    RotateTransform.AngleProperty,
-                    new DoubleAnimation
-                    {
-                        To = IsControlPanelVisible ? 0 : 180,
-                        Duration = TimeSpan.FromSeconds(0.3),
-                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                    }
-                );
+                if (ToggleButtonIcon?.RenderTransform is RotateTransform rt)
+                {
+                    rt.BeginAnimation(
+                        RotateTransform.AngleProperty,
+                        new DoubleAnimation
+                        {
+                            To = IsControlPanelVisible ? 0 : 180,
+                            Duration = TimeSpan.FromSeconds(0.3),
+                            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                        }
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating toggle button: {ex}");
             }
         }
 
@@ -666,27 +1028,46 @@ namespace SpectrumNet
         {
             if (EqualityComparer<T>.Default.Equals(field, value))
                 return false;
+
             field = value;
             OnPropertyChanged(propertyName ?? string.Empty);
-            callback?.Invoke();
+
+            try
+            {
+                callback?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error executing callback in SetField: {ex}");
+            }
+
             return true;
         }
 
         public void OnPropertyChanged(params string[] propertyNames)
         {
-            foreach (var name in propertyNames)
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            try
+            {
+                foreach (var name in propertyNames)
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error notifying property change: {ex}");
+            }
         }
 
         private void DisposeSafe(IDisposable? disposable, string name)
         {
+            if (disposable == null) return;
+
             try
             {
-                disposable?.Dispose();
+                disposable.Dispose();
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error disposing {name}: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error disposing resource {name}: {ex}");
             }
         }
 
