@@ -89,7 +89,7 @@ public interface IAudioVisualizationController : INotifyPropertyChanged
     /// <br/>
     /// Получает или задает рендерер, используемый для отрисовки спектра.
     /// </summary>
-    Renderer Renderer { get; set; }
+    Renderer? Renderer { get; set; }
 
     /// <summary>
     /// Gets or sets the spectrum scale type (e.g., linear, logarithmic).

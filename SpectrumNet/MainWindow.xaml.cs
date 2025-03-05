@@ -1,7 +1,4 @@
-﻿using System.Windows.Media;
-using System.Windows.Media.Animation;
-
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet
 {
@@ -99,10 +96,10 @@ namespace SpectrumNet
 
         public bool IsTransitioning => _isTransitioning;
 
-        public Renderer Renderer
+        public Renderer? Renderer
         {
-            get => _renderer!;
-            set => _renderer = value ?? throw new ArgumentNullException(nameof(Renderer));
+            get => _renderer;
+            set => _renderer = value;
         }
 
         public SpectrumScale ScaleType
@@ -113,12 +110,9 @@ namespace SpectrumNet
                 if (_selectedScaleType == value) return;
                 _selectedScaleType = value;
                 OnPropertyChanged(nameof(ScaleType));
-                if (_analyzer != null)
-                {
-                    _analyzer.SetScaleType(value);
-                    _renderer?.RequestRender();
-                    _renderElement?.InvalidateVisual();
-                }
+                _analyzer?.SetScaleType(value);
+                _renderer?.RequestRender();
+                _renderElement?.InvalidateVisual();
             }
         }
 

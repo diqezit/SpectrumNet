@@ -27,3 +27,6 @@ global using System.Windows.Threading;
 global using System.Numerics;
 global using System.Buffers;
 global using Vector = System.Numerics.Vector;
+global using Complex = NAudio.Dsp.Complex;
+global using System.Windows.Media;
+global using System.Windows.Media.Animation;
