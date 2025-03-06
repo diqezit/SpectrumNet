@@ -1,59 +1,85 @@
 ﻿#nullable enable
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using SkiaSharp;
 
 namespace SpectrumNet
 {
     public sealed class WaterfallRenderer : ISpectrumRenderer, IDisposable
     {
+        #region Fields
         private static WaterfallRenderer? _instance;
         private bool _isInitialized;
         private bool _isOverlayActive;
         private volatile bool _disposed;
         private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
+        private const string LogPrefix = "[WaterfallRenderer] ";
+
+        private const float MIN_SIGNAL = 1e-6f;          // Minimum signal value to avoid log(0)
+        private const int DEFAULT_BUFFER_HEIGHT = 256;   // Default spectrogram buffer height
+        private const int OVERLAY_BUFFER_HEIGHT = 128;   // Buffer height when overlay is active
+        private const int DEFAULT_SPECTRUM_WIDTH = 1024; // Default spectrum width
+        private const int COLOR_PALETTE_SIZE = 256;      // Size of the color palette array
+        private const int SEMAPHORE_TIMEOUT_MS = 5;      // Timeout for semaphore wait in ms
+        private const int MIN_BAR_COUNT = 10;            // Minimum number of bars
+        private const float DETAIL_SCALE_FACTOR = 0.8f;  // Factor for detail scaling based on bar width
+        private const float ZOOM_THRESHOLD = 2.0f;       // Threshold for applying zoom-based enhancement
+
+        private const float BLUE_THRESHOLD = 0.25f;      // Threshold for deep blue to light blue
+        private const float CYAN_THRESHOLD = 0.5f;       // Threshold for cyan to yellow
+        private const float YELLOW_THRESHOLD = 0.75f;    // Threshold for yellow to red
+
+        private const int LOW_BAR_COUNT_THRESHOLD = 64;  // Threshold for low detail rendering
+        private const int HIGH_BAR_COUNT_THRESHOLD = 256; // Threshold for high detail rendering
 
         private float[]? _currentSpectrum;
         private float[][]? _spectrogramBuffer;
-        private int _bufferHead = 0;
+        private int _bufferHead;
+        private SKBitmap? _waterfallBitmap;
+        private float _lastBarWidth;
+        private int _lastBarCount;
+        private float _lastBarSpacing;
+        private bool _needsBufferResize;
 
-        private SKBitmap? _waterfallBitmap; // Переиспользуемый битмап
+        private readonly ObjectPool<float[]> _spectrumPool = new(
+            () => new float[DEFAULT_SPECTRUM_WIDTH],
+            array => Array.Clear(array, 0, array.Length),
+            initialCount: 2);
 
-        private const int DefaultBufferHeight = 256;
-        private const int OverlayBufferHeight = 128;
+        private static readonly int[] _colorPalette = InitColorPalette();
+        #endregion
 
-        // Исходные сигнальные значения: минимальное (не равное нулю, чтобы избежать log(0)) и максимальное
-        private const float MinimumSignal = 1e-6f;
-        private const float MaximumSignal = 5000f;
-
-        // Диапазон децибел: от -100 дБ (минимум) до 0 дБ (максимум)
-        private const float minDB = -100f;
-        private const float maxDB = 0f;
-
-        // Предвычисленная палитра из 256 цветов для SDR waterfall (ARGB)
-        private static int[]? _colorPalette;
-
+        #region Constructors
         private WaterfallRenderer() { }
+        #endregion
 
+        #region Public Methods
         public static WaterfallRenderer GetInstance() => _instance ??= new WaterfallRenderer();
 
         public void Initialize()
         {
             if (_isInitialized) return;
-            int bufferHeight = _isOverlayActive ? OverlayBufferHeight : DefaultBufferHeight;
-            InitializeSpectrogramBuffer(bufferHeight);
-            InitializeColorPalette();
+
+            int bufferHeight = _isOverlayActive ? OVERLAY_BUFFER_HEIGHT : DEFAULT_BUFFER_HEIGHT;
+            InitializeSpectrogramBuffer(bufferHeight, DEFAULT_SPECTRUM_WIDTH);
             _isInitialized = true;
-            Log.Debug("WaterfallRenderer инициализирован для SDR waterplot визуализации");
+
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Initialized for SDR waterfall visualization");
         }
 
         public void Configure(bool isOverlayActive)
         {
             if (_isOverlayActive == isOverlayActive) return;
+
             _isOverlayActive = isOverlayActive;
-            int bufferHeight = _isOverlayActive ? OverlayBufferHeight : DefaultBufferHeight;
-            InitializeSpectrogramBuffer(bufferHeight);
+            int bufferHeight = _isOverlayActive ? OVERLAY_BUFFER_HEIGHT : DEFAULT_BUFFER_HEIGHT;
+
+            if (_spectrogramBuffer != null)
+            {
+                int currentWidth = _spectrogramBuffer[0].Length;
+                InitializeSpectrogramBuffer(bufferHeight, currentWidth);
+            }
+            else
+            {
+                InitializeSpectrogramBuffer(bufferHeight, DEFAULT_SPECTRUM_WIDTH);
+            }
         }
 
         public void Render(
@@ -66,61 +92,101 @@ namespace SpectrumNet
             SKPaint? paint,
             Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            if (!ValidateRenderParams(canvas, spectrum, info, paint))
+            if (canvas == null)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Canvas cannot be null");
                 return;
+            }
+
+            if (!ValidateRenderParams(canvas, info, barWidth, barCount, barSpacing))
+                return;
+
+            bool parametersChanged = CheckParametersChanged(barWidth, barSpacing, barCount);
 
             bool semaphoreAcquired = false;
             try
             {
-                semaphoreAcquired = _spectrumSemaphore.Wait(5);
-                if (semaphoreAcquired && spectrum != null)
+                semaphoreAcquired = _spectrumSemaphore.Wait(SEMAPHORE_TIMEOUT_MS);
+                if (semaphoreAcquired)
                 {
-                    UpdateSpectrogramBuffer(spectrum);
+                    float[]? adjustedSpectrum = spectrum;
+                    if (spectrum != null && parametersChanged)
+                    {
+                        adjustedSpectrum = AdjustSpectrumResolution(spectrum, barCount, barWidth);
+                    }
+
+                    UpdateSpectrogramBuffer(adjustedSpectrum);
+
+                    if (_needsBufferResize && parametersChanged)
+                    {
+                        ResizeBufferForBarParameters(barCount);
+                        _needsBufferResize = false;
+                    }
                 }
 
-                if (_spectrogramBuffer == null)
+                if (_spectrogramBuffer == null || _disposed)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Spectrogram buffer is null or renderer is disposed");
                     return;
+                }
 
                 int bufferHeight = _spectrogramBuffer.Length;
                 int spectrumWidth = _spectrogramBuffer[0].Length;
 
-                // Переиспользование битмапа: создаём его один раз или при изменении размеров
-                if (_waterfallBitmap == null || _waterfallBitmap.Width != spectrumWidth || _waterfallBitmap.Height != bufferHeight)
+                if (_waterfallBitmap == null ||
+                    _waterfallBitmap.Width != spectrumWidth ||
+                    _waterfallBitmap.Height != bufferHeight)
                 {
                     _waterfallBitmap?.Dispose();
                     _waterfallBitmap = new SKBitmap(spectrumWidth, bufferHeight);
                 }
 
-                // Обновляем пиксели битмапа с использованием предвычисленной палитры и параллельной обработки
-                unsafe
+                RenderQuality quality = CalculateRenderQuality(barCount);
+
+                UpdateBitmapSafe(_waterfallBitmap, _spectrogramBuffer, _bufferHead, spectrumWidth, bufferHeight, quality);
+
+                float totalBarsWidth = barCount * barWidth + (barCount - 1) * barSpacing;
+                float startX = (info.Width - totalBarsWidth) / 2;
+
+                SKRect destRect = new(
+                    left: Math.Max(startX, 0),
+                    top: 0,
+                    right: Math.Min(startX + totalBarsWidth, info.Width),
+                    bottom: info.Height);
+
+                if (canvas.QuickReject(destRect)) return;
+
+                SKFilterQuality filterQuality = barCount > HIGH_BAR_COUNT_THRESHOLD
+                    ? SKFilterQuality.High
+                    : (barCount < LOW_BAR_COUNT_THRESHOLD ? SKFilterQuality.Low : SKFilterQuality.Medium);
+
+                using var renderPaint = new SKPaint
                 {
-                    int* basePtr = (int*)_waterfallBitmap.GetPixels();
-                    Parallel.For(0, bufferHeight, y =>
-                    {
-                        int bufferIndex = (_bufferHead + 1 + y) % bufferHeight;
-                        int rowOffset = y * spectrumWidth;
-                        for (int x = 0; x < spectrumWidth; x++)
-                        {
-                            float value = _spectrogramBuffer[bufferIndex][x];
-                            // Инвертируем нормализацию: таким образом фон становится темным, а сигнал – ярким.
-                            float normalized = 1 - NormalizeValue(value);
-                            int paletteIndex = (int)(normalized * 255f);
-                            paletteIndex = paletteIndex < 0 ? 0 : (paletteIndex > 255 ? 255 : paletteIndex);
-                            basePtr[rowOffset + x] = _colorPalette![paletteIndex];
-                        }
-                    });
+                    FilterQuality = filterQuality,
+                    IsAntialias = barCount > HIGH_BAR_COUNT_THRESHOLD
+                };
+
+                canvas.Clear(SKColors.Black);
+                canvas.DrawBitmap(_waterfallBitmap, destRect, renderPaint);
+
+                if (barWidth > ZOOM_THRESHOLD)
+                {
+                    ApplyZoomEnhancement(canvas, destRect, barWidth, barCount, barSpacing);
                 }
 
-                // Очищаем канву (фон – черный, как принято в SDR)
-                canvas!.Clear(SKColors.Black);
-                SKRect destRect = new SKRect(0, 0, info.Width, info.Height);
-                canvas.DrawBitmap(_waterfallBitmap, destRect);
-
-                // drawPerformanceInfo?.Invoke(canvas, info);
+                drawPerformanceInfo?.Invoke(canvas, info);
+            }
+            catch (ObjectDisposedException ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Resource already disposed: {ex.Message}");
+            }
+            catch (ArgumentException ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Invalid argument: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Log.Error($"Error in WaterfallRenderer.Render: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Render error: {ex.Message}");
             }
             finally
             {
@@ -129,132 +195,584 @@ namespace SpectrumNet
             }
         }
 
-        /// <summary>
-        /// Предвычисление палитры для спектрограммы.
-        /// Градиент: от темно-синего через синий, голубой, зеленый, желтый к красному.
-        /// </summary>
-        private static void InitializeColorPalette()
+        public void Dispose()
         {
-            if (_colorPalette != null) return;
-            _colorPalette = new int[256];
-            for (int i = 0; i < 256; i++)
+            if (_disposed)
+                return;
+
+            _disposed = true;
+
+            _spectrumSemaphore.Dispose();
+            _waterfallBitmap?.Dispose();
+            _spectrogramBuffer = null;
+            _currentSpectrum = null;
+            _isInitialized = false;
+
+            _spectrumPool.Clear();
+
+            GC.SuppressFinalize(this);
+        }
+        #endregion
+
+        #region Private Methods
+        private static int[] InitColorPalette()
+        {
+            int[] palette = new int[COLOR_PALETTE_SIZE];
+
+            for (int i = 0; i < COLOR_PALETTE_SIZE; i++)
             {
-                float normalized = i / 255f;
+                float normalized = i / (float)(COLOR_PALETTE_SIZE - 1);
                 SKColor color = GetSpectrogramColor(normalized);
-                _colorPalette[i] = (color.Alpha << 24) | (color.Red << 16) | (color.Green << 8) | color.Blue;
+                palette[i] = (color.Alpha << 24) | (color.Red << 16) | (color.Green << 8) | color.Blue;
             }
+
+            return palette;
         }
 
-        /// <summary>
-        /// Функция расчета цвета спектрограммы для заданного нормализованного значения.
-        /// Градиент: от темно-синего (не чистый черный) к синему, голубому, зеленому, желтому и красному.
-        /// </summary>
         private static SKColor GetSpectrogramColor(float normalized)
         {
             normalized = Math.Clamp(normalized, 0f, 1f);
-            if (normalized < 0.25f)
+
+            if (normalized < BLUE_THRESHOLD)
             {
-                // От темно-синего к синему
-                float t = normalized / 0.25f;
-                byte r = 0;
-                byte g = (byte)(t * 50);
-                byte b = (byte)(50 + t * 205);
-                return new SKColor(r, g, b, 255);
+                float t = normalized / BLUE_THRESHOLD;
+                return new SKColor(0, (byte)(t * 50), (byte)(50 + t * 205), 255);
             }
-            else if (normalized < 0.5f)
+            else if (normalized < CYAN_THRESHOLD)
             {
-                // От синего к голубому
-                float t = (normalized - 0.25f) / 0.25f;
-                byte r = 0;
-                byte g = (byte)(50 + t * 205);
-                byte b = 255;
-                return new SKColor(r, g, b, 255);
+                float t = (normalized - BLUE_THRESHOLD) / (CYAN_THRESHOLD - BLUE_THRESHOLD);
+                return new SKColor(0, (byte)(50 + t * 205), 255, 255);
             }
-            else if (normalized < 0.75f)
+            else if (normalized < YELLOW_THRESHOLD)
             {
-                // От голубого к зеленому/желтому
-                float t = (normalized - 0.5f) / 0.25f;
-                byte r = (byte)(t * 255);
-                byte g = 255;
-                byte b = (byte)(255 - t * 255);
-                return new SKColor(r, g, b, 255);
+                float t = (normalized - CYAN_THRESHOLD) / (YELLOW_THRESHOLD - CYAN_THRESHOLD);
+                return new SKColor((byte)(t * 255), 255, (byte)(255 - t * 255), 255);
             }
             else
             {
-                // От желтого к красному
-                float t = (normalized - 0.75f) / 0.25f;
-                byte r = 255;
-                byte g = (byte)(255 - t * 255);
-                byte b = 0;
-                return new SKColor(r, g, b, 255);
+                float t = (normalized - YELLOW_THRESHOLD) / (1f - YELLOW_THRESHOLD);
+                return new SKColor(255, (byte)(255 - t * 255), 0, 255);
             }
         }
 
-        /// <summary>
-        /// Нормализует значение сигнала, переводя его в децибелы с логарифмическим масштабом.
-        /// Значения нормализуются в диапазоне от minDB до maxDB.
-        /// </summary>
-        private float NormalizeValue(float value)
+        private bool CheckParametersChanged(float barWidth, float barSpacing, int barCount)
         {
-            const float epsilon = 1e-6f;
-            float dB = 20f * (float)Math.Log10(value + epsilon);
-            return Math.Clamp((dB - minDB) / (maxDB - minDB), 0f, 1f);
+            bool changed = Math.Abs(_lastBarWidth - barWidth) > 0.1f ||
+                           Math.Abs(_lastBarSpacing - barSpacing) > 0.1f ||
+                           _lastBarCount != barCount;
+
+            if (changed)
+            {
+                _lastBarWidth = barWidth;
+                _lastBarSpacing = barSpacing;
+                _lastBarCount = barCount;
+                _needsBufferResize = true;
+            }
+
+            return changed;
         }
 
-        private void InitializeSpectrogramBuffer(int bufferHeight)
+        private void ResizeBufferForBarParameters(int barCount)
         {
-            int spectrumWidth = _currentSpectrum?.Length ?? 1024;
-            _spectrogramBuffer = new float[bufferHeight][];
-            for (int i = 0; i < bufferHeight; i++)
+            if (_spectrogramBuffer == null) return;
+
+            int bufferHeight = _spectrogramBuffer.Length;
+            int newWidth = CalculateOptimalSpectrumWidth(barCount);
+
+            if (_spectrogramBuffer[0].Length != newWidth)
             {
-                _spectrogramBuffer[i] = new float[spectrumWidth];
-                for (int j = 0; j < spectrumWidth; j++)
+                InitializeSpectrogramBuffer(bufferHeight, newWidth);
+            }
+        }
+
+        private int CalculateOptimalSpectrumWidth(int barCount)
+        {
+            int baseWidth = Math.Max(barCount, MIN_BAR_COUNT);
+            int width = 1;
+            while (width < baseWidth)
+            {
+                width *= 2;
+            }
+
+            return Math.Max(width, DEFAULT_SPECTRUM_WIDTH / 4);
+        }
+
+        private float[] AdjustSpectrumResolution(float[] spectrum, int barCount, float barWidth)
+        {
+            if (spectrum == null || barCount <= 0)
+                return spectrum ?? Array.Empty<float>();
+
+            if (spectrum.Length == barCount) return spectrum;
+
+            float[] result = _spectrumPool.Get(barCount);
+
+            float detailLevel = Math.Max(0.1f, Math.Min(1.0f, barWidth * DETAIL_SCALE_FACTOR));
+            float ratio = (float)spectrum.Length / barCount;
+
+            if (ratio > 1.0f)
+            {
+                Parallel.For(0, barCount, i =>
                 {
-                    _spectrogramBuffer[i][j] = MinimumSignal;
+                    int startIdx = (int)(i * ratio);
+                    int endIdx = Math.Min((int)((i + 1) * ratio), spectrum.Length);
+
+                    float sum = 0;
+                    float peak = 0;
+                    int count = endIdx - startIdx;
+
+                    if (count <= 0) return;
+
+                    if (Vector.IsHardwareAccelerated && count >= Vector<float>.Count)
+                    {
+                        int vectorSize = Vector<float>.Count;
+                        int vectorCount = count / vectorSize;
+
+                        for (int v = 0; v < vectorCount; v++)
+                        {
+                            Vector<float> values = new Vector<float>(spectrum, startIdx + v * vectorSize);
+                            sum += VectorSum(values);
+                            peak = Math.Max(peak, VectorMax(values));
+                        }
+
+                        for (int j = startIdx + vectorCount * vectorSize; j < endIdx; j++)
+                        {
+                            sum += spectrum[j];
+                            peak = Math.Max(peak, spectrum[j]);
+                        }
+                    }
+                    else
+                    {
+                        for (int j = startIdx; j < endIdx; j++)
+                        {
+                            sum += spectrum[j];
+                            peak = Math.Max(peak, spectrum[j]);
+                        }
+                    }
+
+                    result[i] = (sum / count) * (1 - detailLevel) + peak * detailLevel;
+                });
+            }
+            else
+            {
+                for (int i = 0; i < barCount; i++)
+                {
+                    float exactIdx = i * ratio;
+                    int idx1 = (int)exactIdx;
+                    int idx2 = Math.Min(idx1 + 1, spectrum.Length - 1);
+                    float frac = exactIdx - idx1;
+
+                    result[i] = spectrum[idx1] * (1 - frac) + spectrum[idx2] * frac;
                 }
             }
-            _bufferHead = 0;
+
+            return result;
         }
 
-        private void UpdateSpectrogramBuffer(float[] spectrum)
+        private enum RenderQuality { Low, Medium, High }
+
+        private RenderQuality CalculateRenderQuality(int barCount)
         {
-            if (_spectrogramBuffer == null)
-                return;
-            int bufferHeight = _spectrogramBuffer.Length;
-            if (_currentSpectrum == null || _currentSpectrum.Length != spectrum.Length)
-            {
-                _currentSpectrum = new float[spectrum.Length];
-                InitializeSpectrogramBuffer(bufferHeight);
-            }
-            Array.Copy(spectrum, _currentSpectrum, spectrum.Length);
-            _bufferHead = (_bufferHead + 1) % bufferHeight;
-            Array.Copy(spectrum, _spectrogramBuffer[_bufferHead], Math.Min(spectrum.Length, _spectrogramBuffer[_bufferHead].Length));
+            if (barCount > HIGH_BAR_COUNT_THRESHOLD) return RenderQuality.High;
+            if (barCount < LOW_BAR_COUNT_THRESHOLD) return RenderQuality.Low;
+            return RenderQuality.Medium;
         }
 
-        private bool ValidateRenderParams(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint)
+        private void ApplyZoomEnhancement(SKCanvas canvas, SKRect destRect, float barWidth, int barCount, float barSpacing)
+        {
+            if (canvas == null || _disposed) return;
+
+            if (barWidth < ZOOM_THRESHOLD) return;
+
+            using var paint = new SKPaint
+            {
+                Color = new SKColor(255, 255, 255, 40),
+                StrokeWidth = 1,
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke
+            };
+
+            int gridStep = Math.Max(1, barCount / 10);
+
+            using (var path = new SKPath())
+            {
+                for (int i = 0; i < barCount; i += gridStep)
+                {
+                    float x = destRect.Left + i * (barWidth + barSpacing) + barWidth / 2;
+                    path.MoveTo(x, destRect.Top);
+                    path.LineTo(x, destRect.Bottom);
+                }
+                canvas.DrawPath(path, paint);
+            }
+
+            if (barWidth > ZOOM_THRESHOLD * 1.5f)
+            {
+                using var textPaint = new SKPaint
+                {
+                    Color = SKColors.White,
+                    TextSize = 10,
+                    IsAntialias = true
+                };
+
+                for (int i = 0; i < barCount; i += gridStep * 2)
+                {
+                    float x = destRect.Left + i * (barWidth + barSpacing) + barWidth / 2;
+                    string marker = $"{i}";
+                    float textWidth = textPaint.MeasureText(marker);
+                    canvas.DrawText(marker, x - textWidth / 2, destRect.Bottom - 5, textPaint);
+                }
+            }
+        }
+
+        private void InitializeSpectrogramBuffer(int bufferHeight, int spectrumWidth)
+        {
+            if (bufferHeight <= 0 || spectrumWidth <= 0)
+            {
+                throw new ArgumentException("Buffer dimensions must be positive");
+            }
+
+            if (_spectrogramBuffer == null ||
+                _spectrogramBuffer.Length != bufferHeight ||
+                _spectrogramBuffer[0].Length != spectrumWidth)
+            {
+                if (_spectrogramBuffer != null)
+                {
+                    for (int i = 0; i < _spectrogramBuffer.Length; i++)
+                    {
+                        _spectrogramBuffer[i] = null!;
+                    }
+                }
+
+                _spectrogramBuffer = new float[bufferHeight][];
+
+                if (bufferHeight > 32)
+                {
+                    Parallel.For(0, bufferHeight, i =>
+                    {
+                        _spectrogramBuffer[i] = new float[spectrumWidth];
+                        Array.Fill(_spectrogramBuffer[i], MIN_SIGNAL);
+                    });
+                }
+                else
+                {
+                    for (int i = 0; i < bufferHeight; i++)
+                    {
+                        _spectrogramBuffer[i] = new float[spectrumWidth];
+                        Array.Fill(_spectrogramBuffer[i], MIN_SIGNAL);
+                    }
+                }
+
+                _bufferHead = 0;
+            }
+        }
+
+        private void UpdateSpectrogramBuffer(float[]? spectrum)
+        {
+            if (_spectrogramBuffer == null || _disposed)
+                return;
+
+            int bufferHeight = _spectrogramBuffer.Length;
+            int spectrumWidth = _spectrogramBuffer[0].Length;
+
+            if (spectrum == null)
+            {
+                Array.Fill(_spectrogramBuffer[_bufferHead], MIN_SIGNAL);
+            }
+            else
+            {
+                if (_currentSpectrum == null || _currentSpectrum.Length != spectrum.Length)
+                {
+                    _currentSpectrum = new float[spectrum.Length];
+                }
+
+                Array.Copy(spectrum, _currentSpectrum, spectrum.Length);
+
+                if (spectrum.Length == spectrumWidth)
+                {
+                    Array.Copy(spectrum, _spectrogramBuffer[_bufferHead], spectrumWidth);
+                }
+                else if (spectrum.Length > spectrumWidth)
+                {
+                    float ratio = (float)spectrum.Length / spectrumWidth;
+
+                    if (Vector.IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
+                    {
+                        Parallel.For(0, spectrumWidth, i =>
+                        {
+                            int startIdx = (int)(i * ratio);
+                            int endIdx = Math.Min((int)((i + 1) * ratio), spectrum.Length);
+
+                            if (endIdx - startIdx >= Vector<float>.Count)
+                            {
+                                int vectorSize = Vector<float>.Count;
+                                int vectorizedLength = ((endIdx - startIdx) / vectorSize) * vectorSize;
+
+                                float maxVal = MIN_SIGNAL;
+                                for (int j = startIdx; j < startIdx + vectorizedLength; j += vectorSize)
+                                {
+                                    Vector<float> values = new Vector<float>(spectrum, j);
+                                    maxVal = Math.Max(maxVal, VectorMax(values));
+                                }
+
+                                for (int j = startIdx + vectorizedLength; j < endIdx; j++)
+                                {
+                                    maxVal = Math.Max(maxVal, spectrum[j]);
+                                }
+
+                                _spectrogramBuffer[_bufferHead][i] = maxVal;
+                            }
+                            else
+                            {
+                                float maxVal = MIN_SIGNAL;
+                                for (int j = startIdx; j < endIdx; j++)
+                                {
+                                    maxVal = Math.Max(maxVal, spectrum[j]);
+                                }
+                                _spectrogramBuffer[_bufferHead][i] = maxVal;
+                            }
+                        });
+                    }
+                    else
+                    {
+                        for (int i = 0; i < spectrumWidth; i++)
+                        {
+                            int startIdx = (int)(i * ratio);
+                            int endIdx = Math.Min((int)((i + 1) * ratio), spectrum.Length);
+                            float maxVal = MIN_SIGNAL;
+
+                            for (int j = startIdx; j < endIdx; j++)
+                            {
+                                maxVal = Math.Max(maxVal, spectrum[j]);
+                            }
+
+                            _spectrogramBuffer[_bufferHead][i] = maxVal;
+                        }
+                    }
+                }
+                else
+                {
+                    float ratio = (float)spectrum.Length / spectrumWidth;
+                    for (int i = 0; i < spectrumWidth; i++)
+                    {
+                        float exactIdx = i * ratio;
+                        int idx1 = (int)exactIdx;
+                        int idx2 = Math.Min(idx1 + 1, spectrum.Length - 1);
+                        float frac = exactIdx - idx1;
+
+                        _spectrogramBuffer[_bufferHead][i] =
+                            spectrum[idx1] * (1 - frac) + spectrum[idx2] * frac;
+                    }
+                }
+            }
+
+            _bufferHead = (_bufferHead + 1) % bufferHeight;
+        }
+
+        private bool ValidateRenderParams(
+            SKCanvas canvas,
+            SKImageInfo info,
+            float barWidth,
+            int barCount,
+            float barSpacing)
         {
             if (_disposed)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Cannot render: instance is disposed");
                 return false;
+            }
+
             if (!_isInitialized)
             {
                 Initialize();
                 return false;
             }
-            if (canvas == null || info.Width <= 0 || info.Height <= 0)
+
+            if (info.Width <= 0 || info.Height <= 0)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Invalid canvas dimensions");
                 return false;
+            }
+
+            if (barCount <= 0)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Bar count must be positive");
+                return false;
+            }
+
+            if (barWidth <= 0)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Bar width must be positive");
+                return false;
+            }
+
+            if (barSpacing < 0)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Bar spacing cannot be negative");
+                return false;
+            }
+
             return true;
         }
 
-        public void Dispose()
+        private void UpdateBitmapSafe(
+            SKBitmap bitmap,
+            float[][] spectrogramBuffer,
+            int bufferHead,
+            int spectrumWidth,
+            int bufferHeight,
+            RenderQuality quality)
         {
-            if (_disposed)
+            if (bitmap == null || spectrogramBuffer == null || _disposed)
                 return;
-            _spectrumSemaphore.Dispose();
-            _waterfallBitmap?.Dispose();
-            _spectrogramBuffer = null;
-            _currentSpectrum = null;
-            _disposed = true;
-            _isInitialized = false;
+
+            IntPtr pixelsPtr = bitmap.GetPixels();
+            if (pixelsPtr == IntPtr.Zero)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Invalid bitmap pixels pointer");
+                return;
+            }
+
+            int[] pixels = ArrayPool<int>.Shared.Rent(spectrumWidth * bufferHeight);
+
+            try
+            {
+                float colorEnhancement = quality switch
+                {
+                    RenderQuality.High => 1.2f,
+                    RenderQuality.Low => 0.9f,
+                    _ => 1.0f
+                };
+
+                if (Vector.IsHardwareAccelerated && spectrumWidth >= Vector<float>.Count)
+                {
+                    Parallel.For(0, bufferHeight, y =>
+                    {
+                        int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
+                        int rowOffset = y * spectrumWidth;
+                        int vectorizedWidth = spectrumWidth - (spectrumWidth % Vector<float>.Count);
+
+                        for (int x = 0; x < vectorizedWidth; x += Vector<float>.Count)
+                        {
+                            Vector<float> values = new Vector<float>(spectrogramBuffer[bufferIndex], x);
+
+                            if (Math.Abs(colorEnhancement - 1.0f) > float.Epsilon)
+                            {
+                                values = Vector.Multiply(values, colorEnhancement);
+                            }
+
+                            for (int i = 0; i < Vector<float>.Count; i++)
+                            {
+                                float normalized = Math.Clamp(values[i], 0f, 1f);
+                                int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
+                                pixels[rowOffset + x + i] = _colorPalette[paletteIndex];
+                            }
+                        }
+
+                        for (int x = vectorizedWidth; x < spectrumWidth; x++)
+                        {
+                            float value = spectrogramBuffer[bufferIndex][x];
+                            if (Math.Abs(colorEnhancement - 1.0f) > float.Epsilon)
+                            {
+                                value *= colorEnhancement;
+                            }
+                            float normalized = Math.Clamp(value, 0f, 1f);
+                            int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
+                            pixels[rowOffset + x] = _colorPalette[paletteIndex];
+                        }
+                    });
+                }
+                else
+                {
+                    Parallel.For(0, bufferHeight, y =>
+                    {
+                        int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
+                        int rowOffset = y * spectrumWidth;
+
+                        for (int x = 0; x < spectrumWidth; x++)
+                        {
+                            float value = spectrogramBuffer[bufferIndex][x];
+                            if (Math.Abs(colorEnhancement - 1.0f) > float.Epsilon)
+                            {
+                                value *= colorEnhancement;
+                            }
+                            float normalized = Math.Clamp(value, 0f, 1f);
+                            int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
+                            pixels[rowOffset + x] = _colorPalette[paletteIndex];
+                        }
+                    });
+                }
+
+                Marshal.Copy(pixels, 0, pixelsPtr, spectrumWidth * bufferHeight);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Bitmap update error: {ex.Message}");
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(pixels);
+            }
         }
+
+        private static float VectorSum(Vector<float> vector)
+        {
+            float sum = 0;
+            for (int i = 0; i < Vector<float>.Count; i++)
+            {
+                sum += vector[i];
+            }
+            return sum;
+        }
+
+        private static float VectorMax(Vector<float> vector)
+        {
+            float max = float.MinValue;
+            for (int i = 0; i < Vector<float>.Count; i++)
+            {
+                max = Math.Max(max, vector[i]);
+            }
+            return max;
+        }
+        #endregion
+
+        #region Object Pool Implementation
+        private class ObjectPool<T>
+        {
+            private readonly ConcurrentBag<T> _objects;
+            private readonly Func<T> _objectGenerator;
+            private readonly Action<T> _objectReset;
+
+            public ObjectPool(Func<T> objectGenerator, Action<T> objectReset, int initialCount = 0)
+            {
+                _objectGenerator = objectGenerator ?? throw new ArgumentNullException(nameof(objectGenerator));
+                _objectReset = objectReset ?? throw new ArgumentNullException(nameof(objectReset));
+                _objects = new ConcurrentBag<T>();
+
+                for (int i = 0; i < initialCount; i++)
+                {
+                    _objects.Add(_objectGenerator());
+                }
+            }
+
+            public T Get(int size = 0)
+            {
+                if (_objects.TryTake(out T? item))
+                {
+                    return item;
+                }
+                return _objectGenerator();
+            }
+
+            public void Return(T item)
+            {
+                _objectReset(item);
+                _objects.Add(item);
+            }
+
+            public void Clear()
+            {
+                while (_objects.TryTake(out _)) { }
+            }
+        }
+        #endregion
     }
 }
