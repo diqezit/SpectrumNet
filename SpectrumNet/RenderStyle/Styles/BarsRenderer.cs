@@ -156,6 +156,26 @@
         private float[]? _processedSpectrum;
         private float _smoothingFactor = 0.3f;
         private SKPaint? _glowPaint;
+        private RenderQuality _quality = RenderQuality.Medium;
+        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        private bool _useGlowEffect = true;
+        private bool _useAntiAlias = true;
+        #endregion
+
+        #region Properties
+        /// <inheritdoc />
+        public RenderQuality Quality
+        {
+            get => _quality;
+            set
+            {
+                if (_quality != value)
+                {
+                    _quality = value;
+                    ApplyQualitySettings();
+                }
+            }
+        }
         #endregion
 
         #region Constructor and Initialization
@@ -177,20 +197,54 @@
                 _isInitialized = true;
                 _glowPaint = new SKPaint
                 {
-                    IsAntialias = true,
+                    IsAntialias = _useAntiAlias,
                     Style = SKPaintStyle.Fill,
                     ImageFilter = SKImageFilter.CreateBlur(5f, 5f)
                 };
                 Log.Debug("BarsRenderer initialized");
             }
         }
+
+        /// <summary>
+        /// Applies quality settings based on current quality level
+        /// </summary>
+        private void ApplyQualitySettings()
+        {
+            switch (_quality)
+            {
+                case RenderQuality.Low:
+                    _useAntiAlias = false;
+                    _filterQuality = SKFilterQuality.Low;
+                    _useGlowEffect = false;
+                    break;
+                case RenderQuality.Medium:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.Medium;
+                    _useGlowEffect = true;
+                    break;
+                case RenderQuality.High:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.High;
+                    _useGlowEffect = true;
+                    break;
+            }
+
+            // Update glow paint if it exists
+            if (_glowPaint != null)
+            {
+                _glowPaint.IsAntialias = _useAntiAlias;
+            }
+
+            Log.Debug($"BarsRenderer quality set to {_quality}");
+        }
         #endregion
 
         #region Configuration
         /// <inheritdoc />
-        public void Configure(bool isOverlayActive)
+        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
             _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+            Quality = quality;
         }
         #endregion
 
@@ -293,12 +347,12 @@
             float canvasHeight = info.Height;
 
             using var barPaint = basePaint.Clone();
-            barPaint.IsAntialias = true;
-            barPaint.FilterQuality = SKFilterQuality.High;
+            barPaint.IsAntialias = _useAntiAlias;
+            barPaint.FilterQuality = _filterQuality;
 
             using var highlightPaint = new SKPaint
             {
-                IsAntialias = true,
+                IsAntialias = _useAntiAlias,
                 Style = SKPaintStyle.Fill,
                 Color = SKColors.White
             };
@@ -314,7 +368,7 @@
 
                 float x = i * totalBarWidth;
 
-                if (_glowPaint != null && magnitude > 0.6f)
+                if (_useGlowEffect && _glowPaint != null && magnitude > 0.6f)
                 {
                     _glowPaint.Color = barPaint.Color.WithAlpha((byte)(magnitude * 255f * GlowEffectAlpha));
                     _path.Reset();
@@ -326,7 +380,7 @@
 
                 RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
 
-                if (barHeight > cornerRadius * 2)
+                if (barHeight > cornerRadius * 2 && _quality != RenderQuality.Low)
                 {
                     float highlightWidth = barWidth * HighlightWidthProportion;
                     float highlightHeight = MathF.Min(barHeight * HighlightHeightProportion, MaxHighlightHeight);

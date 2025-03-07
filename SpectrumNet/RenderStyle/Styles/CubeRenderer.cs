@@ -1,4 +1,5 @@
 ﻿#nullable enable
+
 namespace SpectrumNet
 {
     public sealed class CubeRenderer : ISpectrumRenderer, IDisposable
@@ -37,20 +38,26 @@ namespace SpectrumNet
         #region Constants
         private static class Constants
         {
-            public const float BaseCubeSize = 0.5f;
-            public const float MinCubeSize = 0.2f;
-            public const float MaxCubeSize = 1.0f;
-            public const float CubeSizeResponseFactor = 0.5f;
-            public const float BaseRotationSpeed = 0.5f;
-            public const float SpectrumRotationInfluence = 0.015f;
-            public const float MaxRotationSpeed = 0.05f;
-            public const float AmbientLight = 0.4f;
-            public const float DiffuseLight = 0.6f;
-            public const float BaseAlpha = 0.9f;
-            public const float SpectrumAlphaInfluence = 0.1f;
-            public const float EdgeAlphaMultiplier = 0.8f;
-            public static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.5f, 0.7f, -1.0f));
+            // Cube properties
+            public const float BaseCubeSize = 0.5f;       // Базовый размер куба
+            public const float MinCubeSize = 0.2f;        // Минимальный размер куба
+            public const float MaxCubeSize = 1.0f;        // Максимальный размер куба
+            public const float CubeSizeResponseFactor = 0.5f; // Фактор изменения размера от спектра
 
+            // Rotation properties
+            public const float BaseRotationSpeed = 0.5f;  // Базовая скорость вращения
+            public const float SpectrumRotationInfluence = 0.015f; // Влияние спектра на скорость
+            public const float MaxRotationSpeed = 0.05f;  // Максимальная скорость вращения
+
+            // Lighting properties
+            public const float AmbientLight = 0.4f;       // Интенсивность окружающего света
+            public const float DiffuseLight = 0.6f;       // Интенсивность диффузного света
+            public static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.5f, 0.7f, -1.0f)); // Направление света
+
+            // Color properties
+            public const float BaseAlpha = 0.9f;          // Базовая прозрачность граней
+            public const float SpectrumAlphaInfluence = 0.1f; // Влияние спектра на прозрачность
+            public const float EdgeAlphaMultiplier = 0.8f; // Множитель прозрачности краев
             public static readonly SKColor[] FaceColors = {
                 new SKColor(255, 100, 100),  // Красноватый
                 new SKColor(100, 255, 100),  // Зеленоватый
@@ -91,7 +98,15 @@ namespace SpectrumNet
         private bool _isDisposed;
         private readonly SKPaint[] _facePaints;
         private readonly SKPaint _edgePaint;
-        private DateTime _lastUpdateTime = DateTime.Now; // Для отслеживания времени
+        private DateTime _lastUpdateTime = DateTime.Now;
+
+        // RenderQuality fields
+        private RenderQuality _quality = RenderQuality.Medium;
+        private bool _useAntiAlias = true;
+        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        private bool _useAdvancedEffects = true;
+
+        private const string LogPrefix = "[CubeRenderer] ";
         #endregion
 
         #region Initialization
@@ -152,7 +167,7 @@ namespace SpectrumNet
 
         private Vector3[] CalculateFaceNormals()
         {
-            Vector3[] normals = new Vector3[6]; // 6 граней куба
+            Vector3[] normals = new Vector3[6];
             normals[0] = new Vector3(0, 0, 1);   // Front
             normals[1] = new Vector3(0, 0, -1);  // Back
             normals[2] = new Vector3(0, 1, 0);   // Top
@@ -165,7 +180,55 @@ namespace SpectrumNet
 
         #region Public Methods
         public void Initialize() { }
-        public void Configure(bool isOverlayActive) { }
+
+        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        {
+            Quality = quality;
+        }
+
+        public RenderQuality Quality
+        {
+            get => _quality;
+            set
+            {
+                if (_quality != value)
+                {
+                    _quality = value;
+                    ApplyQualitySettings();
+                }
+            }
+        }
+
+        private void ApplyQualitySettings()
+        {
+            switch (_quality)
+            {
+                case RenderQuality.Low:
+                    _useAntiAlias = false;
+                    _filterQuality = SKFilterQuality.Low;
+                    _useAdvancedEffects = false;
+                    break;
+                case RenderQuality.Medium:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.Medium;
+                    _useAdvancedEffects = true;
+                    break;
+                case RenderQuality.High:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.High;
+                    _useAdvancedEffects = true;
+                    break;
+            }
+
+            foreach (var paint in _facePaints)
+            {
+                paint.IsAntialias = _useAntiAlias;
+                paint.FilterQuality = _filterQuality;
+            }
+
+            _edgePaint.IsAntialias = _useAntiAlias;
+            _edgePaint.FilterQuality = _filterQuality;
+        }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
             float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
@@ -174,12 +237,10 @@ namespace SpectrumNet
             _lastImageInfo = info;
             SubmitSpectrumForProcessing(spectrum, barCount);
 
-            // Вычисляем время, прошедшее с последнего обновления
             DateTime now = DateTime.Now;
             float deltaTime = (float)(now - _lastUpdateTime).TotalSeconds;
             _lastUpdateTime = now;
 
-            // Обновляем углы вращения на основе времени
             _rotationAngleX = (_rotationAngleX + _rotationSpeedX * deltaTime) % MathF.Tau;
             _rotationAngleY = (_rotationAngleY + _rotationSpeedY * deltaTime) % MathF.Tau;
             _rotationAngleZ = (_rotationAngleZ + _rotationSpeedZ * deltaTime) % MathF.Tau;
@@ -236,7 +297,7 @@ namespace SpectrumNet
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Log.Error($"Error in cube processing thread: {ex.Message}"); }
+            catch (Exception ex) { Console.WriteLine($"{LogPrefix}Error in cube processing thread: {ex.Message}"); }
         }
 
         private void ComputeCubeData(float[] spectrum, int barCount, SKImageInfo info)
@@ -274,7 +335,7 @@ namespace SpectrumNet
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Log.Error($"Error computing cube data: {ex.Message}"); }
+            catch (Exception ex) { Console.WriteLine($"{LogPrefix}Error computing cube data: {ex.Message}"); }
         }
         #endregion
 
@@ -324,8 +385,11 @@ namespace SpectrumNet
 
                 canvas.DrawPath(path, facePaint);
 
-                _edgePaint.Color = SKColors.White.WithAlpha((byte)(alpha * Constants.EdgeAlphaMultiplier));
-                canvas.DrawPath(path, _edgePaint);
+                if (_useAdvancedEffects)
+                {
+                    _edgePaint.Color = SKColors.White.WithAlpha((byte)(alpha * Constants.EdgeAlphaMultiplier));
+                    canvas.DrawPath(path, _edgePaint);
+                }
             }
         }
         #endregion

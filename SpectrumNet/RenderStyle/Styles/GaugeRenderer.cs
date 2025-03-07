@@ -2,77 +2,97 @@
 {
     public static class GaugeConstants
     {
+        // Constants related to decibel (dB) values
         public static class Db
         {
-            public const float Max = 5f,
-                              Min = -30f,
-                              PeakThreshold = 5f;
+            public const float Max = 5f;     // Maximum dB value for the gauge
+            public const float Min = -30f;   // Minimum dB value for the gauge
+            public const float PeakThreshold = 5f;     // Threshold for peak indicator activation
         }
+
+        // Constants related to angle calculations for the gauge
         public static class Angle
         {
-            public const float Start = -150f,
-                              End = -30f,
-                              TotalRange = End - Start;
+            public const float Start = -150f;     // Starting angle for the gauge scale
+            public const float End = -30f;      // Ending angle for the gauge scale
+            public const float TotalRange = End - Start;// Total angular range of the gauge
         }
+
+        // Constants for needle properties
         public static class Needle
         {
-            public const float DefaultLengthMultiplier = 1.55f,
-                              DefaultCenterYOffsetMultiplier = 0.4f,
-                              StrokeWidth = 2.25f,
-                              CenterCircleRadiusOverlay = 0.015f,
-                              CenterCircleRadius = 0.02f;
+            public const float DefaultLengthMultiplier = 1.55f; // Default multiplier for needle length
+            public const float DefaultCenterYOffsetMultiplier = 0.4f;  // Default multiplier for needle center Y offset
+            public const float StrokeWidth = 2.25f; // Stroke width for the needle
+            public const float CenterCircleRadiusOverlay = 0.015f;// Radius of center circle in overlay mode
+            public const float CenterCircleRadius = 0.02f; // Radius of center circle in normal mode
+            public const float BaseWidthMultiplier = 2.5f;  // Multiplier for needle base width
         }
+
+        // Constants for background and frame properties
         public static class Background
         {
-            public const float OuterFrameCornerRadius = 8f,
-                              InnerFramePadding = 4f,
-                              InnerFrameCornerRadius = 6f,
-                              BackgroundPadding = 4f,
-                              BackgroundCornerRadius = 4f,
-                              VuTextSizeFactor = 0.2f,
-                              VuTextBottomOffsetFactor = 0.2f;
+            public const float OuterFrameCornerRadius = 8f;   // Corner radius for outer frame
+            public const float InnerFramePadding = 4f;   // Padding for inner frame
+            public const float InnerFrameCornerRadius = 6f;   // Corner radius for inner frame
+            public const float BackgroundPadding = 4f;   // Padding for background
+            public const float BackgroundCornerRadius = 4f;   // Corner radius for background
+            public const float VuTextSizeFactor = 0.2f; // Factor for VU text size
+            public const float VuTextBottomOffsetFactor = 0.2f; // Factor for VU text bottom offset
         }
+
+        // Constants for scale properties
         public static class Scale
         {
-            public const float CenterYOffsetFactor = 0.15f,
-                              RadiusXFactorOverlay = 0.4f,
-                              RadiusXFactor = 0.45f,
-                              RadiusYFactorOverlay = 0.45f,
-                              RadiusYFactor = 0.5f,
-                              TextOffsetFactorOverlay = 0.1f,
-                              TextOffsetFactor = 0.12f,
-                              TextSizeFactorOverlay = 0.08f,
-                              TextSizeFactor = 0.1f,
-                              TickLengthZeroFactorOverlay = 0.12f,
-                              TickLengthZeroFactor = 0.15f,
-                              TickLengthFactorOverlay = 0.07f,
-                              TickLengthFactor = 0.08f,
-                              TickLengthMinorFactorOverlay = 0.05f,
-                              TickLengthMinorFactor = 0.06f;
+            public const float CenterYOffsetFactor = 0.15f; // Factor for scale center Y offset
+            public const float RadiusXFactorOverlay = 0.4f;  // Factor for X radius in overlay mode
+            public const float RadiusXFactor = 0.45f; // Factor for X radius in normal mode
+            public const float RadiusYFactorOverlay = 0.45f; // Factor for Y radius in overlay mode
+            public const float RadiusYFactor = 0.5f;  // Factor for Y radius in normal mode
+            public const float TextOffsetFactorOverlay = 0.1f;  // Factor for text offset in overlay mode
+            public const float TextOffsetFactor = 0.12f; // Factor for text offset in normal mode
+            public const float TextSizeFactorOverlay = 0.08f; // Factor for text size in overlay mode
+            public const float TextSizeFactor = 0.1f;  // Factor for text size in normal mode
+            public const float TickLengthZeroFactorOverlay = 0.12f; // Factor for zero tick length in overlay mode
+            public const float TickLengthZeroFactor = 0.15f; // Factor for zero tick length in normal mode
+            public const float TickLengthFactorOverlay = 0.07f; // Factor for major tick length in overlay mode
+            public const float TickLengthFactor = 0.08f; // Factor for major tick length in normal mode
+            public const float TickLengthMinorFactorOverlay = 0.05f; // Factor for minor tick length in overlay mode
+            public const float TickLengthMinorFactor = 0.06f; // Factor for minor tick length in normal mode
+            public const float TickStrokeWidth = 1.8f;  // Stroke width for scale ticks
+            public const float TextSizeMultiplierZero = 1.15f; // Multiplier for "0" text size
         }
+
+        // Constants for peak lamp properties
         public static class PeakLamp
         {
-            public const float RadiusFactorOverlay = 0.04f,
-                              RadiusFactor = 0.05f,
-                              LampXOffsetFactorOverlay = 0.12f,
-                              LampXOffsetFactor = 0.1f,
-                              LampYOffsetFactorOverlay = 0.18f,
-                              LampYOffsetFactor = 0.2f,
-                              TextSizeFactorOverlay = 1.2f,
-                              TextSizeFactor = 1.5f,
-                              TextYOffsetFactor = 2.5f,
-                              RimStrokeWidth = 1f;
+            public const float RadiusFactorOverlay = 0.04f; // Factor for lamp radius in overlay mode
+            public const float RadiusFactor = 0.05f; // Factor for lamp radius in normal mode
+            public const float LampXOffsetFactorOverlay = 0.12f; // Factor for lamp X offset in overlay mode
+            public const float LampXOffsetFactor = 0.1f;  // Factor for lamp X offset in normal mode
+            public const float LampYOffsetFactorOverlay = 0.18f; // Factor for lamp Y offset in overlay mode
+            public const float LampYOffsetFactor = 0.2f;  // Factor for lamp Y offset in normal mode
+            public const float TextSizeFactorOverlay = 1.2f;  // Factor for text size in overlay mode
+            public const float TextSizeFactor = 1.5f;  // Factor for text size in normal mode
+            public const float TextYOffsetFactor = 2.5f;  // Factor for text Y offset
+            public const float RimStrokeWidth = 1f;    // Stroke width for lamp rim
+            public const float GlowRadiusMultiplier = 1.5f;  // Multiplier for glow radius when active
+            public const float InnerRadiusMultiplier = 0.8f;  // Multiplier for inner lamp radius
         }
+
+        // Constants for rendering properties
         public static class Rendering
         {
-            public const float AspectRatio = 2.0f,
-                              GaugeRectPadding = 0.8f,
-                              MinDbClamp = 1e-10f,
-                              Margin = 0.05f;
+            public const float AspectRatio = 2.0f;   // Aspect ratio for the gauge
+            public const float GaugeRectPadding = 0.8f;   // Padding factor for gauge rectangle
+            public const float MinDbClamp = 1e-10f; // Minimum value for dB calculation to avoid log(0)
+            public const float Margin = 0.05f;  // Margin for needle position clamping
         }
+
+        // Constants for minor marks
         public static class MinorMarks
         {
-            public const int Divisor = 3;
+            public const int Divisor = 3;                 // Divisor for minor marks between major marks
         }
     }
 
@@ -120,8 +140,15 @@
         private GaugeRendererConfig _config = GaugeRendererConfig.Default;
         private bool _disposed;
 
+        // Quality rendering fields (stub)
+        private RenderQuality _quality = RenderQuality.Medium;
+        private bool _useAntiAlias = true;
+        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        private bool _useAdvancedEffects = true;
+
         private int _peakHoldCounter = 0;
-        private const int _peakHoldDuration = 15; // Hold the peak indicator for 15 frames
+        private const int PeakHoldDuration = 15; // Hold the peak indicator for 15 frames
+        private const string LogPrefix = "[GaugeRenderer]";
 
         private static readonly Lazy<GaugeRenderer> Instance = new(() => new GaugeRenderer(),
                                                                   LazyThreadSafetyMode.ExecutionAndPublication);
@@ -169,7 +196,47 @@
             _config = GaugeRendererConfig.Default;
         }
 
-        public void Configure(bool isOverlayActive) => _config = _config.WithOverlayMode(isOverlayActive);
+        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        {
+            _config = _config.WithOverlayMode(isOverlayActive);
+            Quality = quality; // Stub: quality settings applied but not used in rendering yet
+        }
+
+        public RenderQuality Quality
+        {
+            get => _quality;
+            set
+            {
+                if (_quality != value)
+                {
+                    _quality = value;
+                    ApplyQualitySettings();
+                }
+            }
+        }
+
+        private void ApplyQualitySettings()
+        {
+            switch (_quality)
+            {
+                case RenderQuality.Low:
+                    _useAntiAlias = false;
+                    _filterQuality = SKFilterQuality.Low;
+                    _useAdvancedEffects = false;
+                    break;
+                case RenderQuality.Medium:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.Medium;
+                    _useAdvancedEffects = true;
+                    break;
+                case RenderQuality.High:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.High;
+                    _useAdvancedEffects = true;
+                    break;
+            }
+            // Stub: paint objects not updated with quality settings yet
+        }
 
         private static void InitializeMinorMarks()
         {
@@ -184,6 +251,26 @@
             }
         }
 
+        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? paint)
+        {
+            if (canvas == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Canvas is null");
+                return false;
+            }
+            if (spectrum == null || spectrum.Length == 0)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Spectrum is null or empty");
+                return false;
+            }
+            if (paint == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Paint is null");
+                return false;
+            }
+            return true;
+        }
+
         public void Render(SKCanvas? canvas,
                           float[]? spectrum,
                           SKImageInfo info,
@@ -193,18 +280,18 @@
                           SKPaint? paint,
                           Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
         {
-            if (canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
+            if (!ValidateRenderParameters(canvas, spectrum, paint))
                 return;
 
             using var _ = new SKAutoCanvasRestore(canvas);
             try
             {
-                UpdateGaugeState(spectrum);
-                RenderGaugeComponents(canvas, info, drawPerformanceInfo);
+                UpdateGaugeState(spectrum!);
+                RenderGaugeComponents(canvas!, info, drawPerformanceInfo);
             }
             catch (Exception ex)
             {
-                Log.Error($"Rendering error: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Rendering error: {ex.Message}");
             }
         }
 
@@ -298,17 +385,18 @@
             float radiusY = rect.Height * (isOverlayActive ? GaugeConstants.Scale.RadiusYFactorOverlay
                                                           : GaugeConstants.Scale.RadiusYFactor);
 
-            using var tickPaint = new SKPaint { IsAntialias = true, StrokeWidth = 1.8f };
+            using var tickPaint = new SKPaint
+            {
+                IsAntialias = true,
+                StrokeWidth = GaugeConstants.Scale.TickStrokeWidth
+            };
 
-            // Improved text paint with custom typeface and shadow
             using var textPaint = new SKPaint
             {
                 Color = SKColors.Black,
                 IsAntialias = true,
                 Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold),
-                ImageFilter = SKImageFilter.CreateDropShadow(
-                    0.5f, 0.5f, 0.5f, 0.5f,
-                    new SKColor(255, 255, 255, 180))
+                ImageFilter = SKImageFilter.CreateDropShadow(0.5f, 0.5f, 0.5f, 0.5f, new SKColor(255, 255, 255, 180))
             };
 
             foreach (var (value, label) in MajorMarks)
@@ -344,7 +432,6 @@
             float x2 = centerX + radiusX * (float)Math.Cos(radian);
             float y2 = centerY + radiusY * (float)Math.Sin(radian);
 
-            // Enhanced tick colors with gradients for major marks
             if (label != null)
             {
                 using var tickGradient = SKShader.CreateLinearGradient(
@@ -355,7 +442,6 @@
                         : new[] { new SKColor(60, 60, 60), new SKColor(100, 100, 100) },
                     null,
                     SKShaderTileMode.Clamp);
-
                 tickPaint.Shader = tickGradient;
                 canvas.DrawLine(x1, y1, x2, y2, tickPaint);
                 tickPaint.Shader = null;
@@ -373,10 +459,9 @@
                 textPaint.TextSize = radiusY * (isOverlayActive ? GaugeConstants.Scale.TextSizeFactorOverlay
                                                                : GaugeConstants.Scale.TextSizeFactor);
 
-                // Make "0" text slightly larger and emphasized
                 if (value == 0)
                 {
-                    textPaint.TextSize *= 1.15f;
+                    textPaint.TextSize *= GaugeConstants.Scale.TextSizeMultiplierZero;
                     textPaint.FakeBoldText = true;
                 }
                 else
@@ -384,7 +469,6 @@
                     textPaint.FakeBoldText = false;
                 }
 
-                // Red color for positive values
                 textPaint.Color = value >= 0 ? new SKColor(200, 0, 0) : SKColors.Black;
 
                 float textX = x2 + textOffset * (float)Math.Cos(radian);
@@ -410,17 +494,11 @@
             float needleX = centerX + unitX * needleLength;
             float needleY = centerY + unitY * needleLength;
 
-            // Create a needle path for more stylish appearance
             using var needlePath = new SKPath();
-
-            // Calculate needle width at base
-            float baseWidth = GaugeConstants.Needle.StrokeWidth * 2.5f;
-
-            // Calculate perpendicular vector for needle width
+            float baseWidth = GaugeConstants.Needle.StrokeWidth * GaugeConstants.Needle.BaseWidthMultiplier;
             float perpX = -unitY;
             float perpY = unitX;
 
-            // Define needle points
             float tipX = needleX;
             float tipY = needleY;
             float baseLeftX = centerX + perpX * baseWidth;
@@ -428,20 +506,15 @@
             float baseRightX = centerX - perpX * baseWidth;
             float baseRightY = centerY - perpY * baseWidth;
 
-            // Draw needle as a triangle
             needlePath.MoveTo(tipX, tipY);
             needlePath.LineTo(baseLeftX, baseLeftY);
             needlePath.LineTo(baseRightX, baseRightY);
             needlePath.Close();
 
-            // Create gradient for needle
             using var needleGradient = SKShader.CreateLinearGradient(
                 new SKPoint(centerX, centerY),
                 new SKPoint(needleX, needleY),
-                new[] {
-            new SKColor(40, 40, 40),
-            needlePosition > 0.75f ? SKColors.Red : new SKColor(180, 0, 0)
-                },
+                new[] { new SKColor(40, 40, 40), needlePosition > 0.75f ? SKColors.Red : new SKColor(180, 0, 0) },
                 null,
                 SKShaderTileMode.Clamp);
 
@@ -449,17 +522,11 @@
             {
                 Style = SKPaintStyle.Fill,
                 Shader = needleGradient,
-                IsAntialias = true
+                IsAntialias = true,
+                ImageFilter = SKImageFilter.CreateDropShadow(2f, 2f, 1.5f, 1.5f, SKColors.Black.WithAlpha(100))
             };
-
-            // Add shadow effect to needle
-            needlePaint.ImageFilter = SKImageFilter.CreateDropShadow(
-                2f, 2f, 1.5f, 1.5f,
-                SKColors.Black.WithAlpha(100));
-
             canvas.DrawPath(needlePath, needlePaint);
 
-            // Draw needle outline for definition
             using var outlinePaint = new SKPaint
             {
                 Style = SKPaintStyle.Stroke,
@@ -469,11 +536,9 @@
             };
             canvas.DrawPath(needlePath, outlinePaint);
 
-            // Draw center pivot with metallic effect
             float centerCircleRadius = rect.Width * (isOverlayActive ? GaugeConstants.Needle.CenterCircleRadiusOverlay
                                                                     : GaugeConstants.Needle.CenterCircleRadius);
 
-            // Create metallic gradient for pivot
             using var pivotGradient = SKShader.CreateRadialGradient(
                 new SKPoint(centerX - centerCircleRadius * 0.3f, centerY - centerCircleRadius * 0.3f),
                 centerCircleRadius * 2,
@@ -487,22 +552,18 @@
                 Style = SKPaintStyle.Fill,
                 IsAntialias = true
             };
-
             canvas.DrawCircle(centerX, centerY, centerCircleRadius, centerCirclePaint);
 
-            // Add slight highlight to pivot
             using var highlightPaint = new SKPaint
             {
                 Color = SKColors.White.WithAlpha(150),
                 Style = SKPaintStyle.Fill,
                 IsAntialias = true
             };
-
-            canvas.DrawCircle(
-                centerX - centerCircleRadius * 0.25f,
-                centerY - centerCircleRadius * 0.25f,
-                centerCircleRadius * 0.4f,
-                highlightPaint);
+            canvas.DrawCircle(centerX - centerCircleRadius * 0.25f,
+                             centerY - centerCircleRadius * 0.25f,
+                             centerCircleRadius * 0.4f,
+                             highlightPaint);
         }
 
         private void DrawPeakLamp(SKCanvas canvas, SKRect rect, bool isOverlayActive)
@@ -518,32 +579,28 @@
             float lampY = rect.Top + rect.Height * (isOverlayActive ? GaugeConstants.PeakLamp.LampYOffsetFactorOverlay
                                                                    : GaugeConstants.PeakLamp.LampYOffsetFactor);
 
-            // Fixed peak lamp logic - use a brighter red when active and add glow effect
             SKColor lampColor = _state.PeakActive ? SKColors.Red : new SKColor(80, 0, 0);
             SKColor glowColor = _state.PeakActive ? SKColors.Red.WithAlpha(80) : SKColors.Transparent;
 
-            // Draw glow effect when lamp is active
             if (_state.PeakActive)
             {
                 using var glowPaint = new SKPaint
                 {
                     Color = glowColor,
-                    MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, lampRadius * 0.5f),
+                    MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, lampRadius * GaugeConstants.PeakLamp.GlowRadiusMultiplier),
                     IsAntialias = true
                 };
-                canvas.DrawCircle(lampX, lampY, lampRadius * 1.5f, glowPaint);
+                canvas.DrawCircle(lampX, lampY, lampRadius * GaugeConstants.PeakLamp.GlowRadiusMultiplier, glowPaint);
             }
 
-            // Create realistic lamp appearance with gradient
             using var innerGradient = SKShader.CreateRadialGradient(
                 new SKPoint(lampX - lampRadius * 0.2f, lampY - lampRadius * 0.2f),
-                lampRadius * 0.8f,
+                lampRadius * GaugeConstants.PeakLamp.InnerRadiusMultiplier,
                 _state.PeakActive
                     ? new[] { SKColors.White, new SKColor(255, 180, 180), lampColor }
                     : new[] { new SKColor(220, 220, 220), new SKColor(180, 0, 0), new SKColor(80, 0, 0) },
                 new[] { 0.0f, 0.3f, 1.0f },
-                SKShaderTileMode.Clamp
-            );
+                SKShaderTileMode.Clamp);
 
             using var innerPaint = new SKPaint
             {
@@ -551,9 +608,8 @@
                 Shader = innerGradient,
                 IsAntialias = true
             };
-            canvas.DrawCircle(lampX, lampY, lampRadius * 0.8f, innerPaint);
+            canvas.DrawCircle(lampX, lampY, lampRadius * GaugeConstants.PeakLamp.InnerRadiusMultiplier, innerPaint);
 
-            // Add glass-like reflection effect
             using var reflectionPaint = new SKPaint
             {
                 Color = SKColors.White.WithAlpha(180),
@@ -562,7 +618,6 @@
             };
             canvas.DrawCircle(lampX - lampRadius * 0.3f, lampY - lampRadius * 0.3f, lampRadius * 0.25f, reflectionPaint);
 
-            // Enhanced rim with beveled edge look
             using var rimPaint = new SKPaint
             {
                 Color = new SKColor(40, 40, 40),
@@ -572,11 +627,11 @@
             };
             canvas.DrawCircle(lampX, lampY, lampRadius, rimPaint);
 
-            // Improved PEAK text with shadow and custom typeface
             using var peakTextPaint = new SKPaint
             {
                 Color = _state.PeakActive ? SKColors.Red : new SKColor(180, 0, 0),
-                TextSize = lampRadius * GaugeConstants.PeakLamp.TextSizeFactor * 1.2f,
+                TextSize = lampRadius * (isOverlayActive ? GaugeConstants.PeakLamp.TextSizeFactorOverlay
+                                                        : GaugeConstants.PeakLamp.TextSizeFactor) * 1.2f,
                 TextAlign = SKTextAlign.Center,
                 Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold),
                 IsAntialias = true,
@@ -645,18 +700,15 @@
             _state.TargetNeedlePosition = CalculateNeedlePosition(smoothedDb);
             UpdateNeedlePosition();
 
-            // Updated peak lamp logic - activate immediately when needle reaches +5 dB
-            // Convert the +5 dB threshold to a normalized needle position value
             float thresholdPosition = CalculateNeedlePosition(GaugeConstants.Db.PeakThreshold);
-
             if (_state.CurrentNeedlePosition >= thresholdPosition)
             {
                 _state.PeakActive = true;
-                _peakHoldCounter = _peakHoldDuration; // Hold the peak lamp on for a duration
+                _peakHoldCounter = PeakHoldDuration;
             }
             else if (_peakHoldCounter > 0)
             {
-                _peakHoldCounter--; // Keep lamp on during countdown
+                _peakHoldCounter--;
             }
             else
             {

@@ -2,27 +2,6 @@
 
 namespace SpectrumNet
 {
-    #region Structs
-    /// <summary>
-    /// Structure for storing cached values used in spectrum rendering.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct RenderCache
-    {
-        /// <summary>Width of the rendering area.</summary>
-        public float Width;
-        /// <summary>Height of the rendering area.</summary>
-        public float Height;
-        /// <summary>Lower bound of the display area.</summary>
-        public float LowerBound;
-        /// <summary>Upper bound of the spectral range.</summary>
-        public float UpperBound;
-        /// <summary>Step size for spectrum discretization.</summary>
-        public float StepSize;
-        /// <summary>Height of the overlay.</summary>
-        public float OverlayHeight;
-    }
-    #endregion
 
     #region Enums
     /// <summary>
@@ -34,26 +13,36 @@ namespace SpectrumNet
         Bars,
         CircularBars,
         CircularWave,
-        Constellation, 
+        Constellation,
         Cube,
         Cubes,
-        Fire,       
+        Fire,
         Gauge,
-        Glitch,         
+        Glitch,
         GradientWave,
         Heartbeat,
         Kenwood,
         LedMeter,
         Loudness,
         Particles,
-        Polar,        
+        Polar,
         Raindrops,
         Rainbow,
         SphereRenderer,
         TextParticles,
         Voronoi,
-        Waterfall,   
+        Waterfall,
         Waveform
+    }
+
+    /// <summary>
+    /// Enumeration of rendering quality levels.
+    /// </summary>
+    public enum RenderQuality
+    {
+        Low,
+        Medium,
+        High
     }
     #endregion
 
@@ -79,9 +68,13 @@ namespace SpectrumNet
                     float barSpacing, int barCount, SKPaint? paint,
                     Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
 
-        /// <summary>Configures the renderer for overlay mode.</summary>
+        /// <summary>Configures the renderer for overlay mode and quality settings.</summary>
         /// <param name="isOverlayActive">Whether overlay mode is active.</param>
-        void Configure(bool isOverlayActive);
+        /// <param name="quality">Rendering quality level.</param>
+        void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
+
+        /// <summary>Gets or sets the current rendering quality.</summary>
+        RenderQuality Quality { get; set; }
     }
     #endregion
 
@@ -95,6 +88,25 @@ namespace SpectrumNet
         private static readonly object _lock = new();
         private static readonly Dictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
         private static readonly HashSet<RenderStyle> _initializedRenderers = new();
+        private static RenderQuality _globalQuality = RenderQuality.Medium;
+        #endregion
+
+        #region Public Properties
+        /// <summary>
+        /// Gets or sets the global rendering quality for all renderers.
+        /// </summary>
+        public static RenderQuality GlobalQuality
+        {
+            get => _globalQuality;
+            set
+            {
+                if (_globalQuality != value)
+                {
+                    _globalQuality = value;
+                    ConfigureAllRenderers(isOverlayActive: null, _globalQuality);
+                }
+            }
+        }
         #endregion
 
         #region Public Methods
@@ -103,12 +115,15 @@ namespace SpectrumNet
         /// </summary>
         /// <param name="style">Rendering style.</param>
         /// <param name="isOverlayActive">Whether overlay mode is active.</param>
+        /// <param name="quality">Rendering quality level.</param>
         /// <returns>Renderer instance.</returns>
-        public static ISpectrumRenderer CreateRenderer(RenderStyle style, bool isOverlayActive)
+        public static ISpectrumRenderer CreateRenderer(RenderStyle style, bool isOverlayActive, RenderQuality? quality = null)
         {
+            RenderQuality actualQuality = quality ?? _globalQuality;
+
             if (_rendererCache.TryGetValue(style, out var cachedRenderer))
             {
-                cachedRenderer.Configure(isOverlayActive);
+                cachedRenderer.Configure(isOverlayActive, actualQuality);
                 return cachedRenderer;
             }
 
@@ -116,7 +131,7 @@ namespace SpectrumNet
             {
                 if (_rendererCache.TryGetValue(style, out cachedRenderer))
                 {
-                    cachedRenderer.Configure(isOverlayActive);
+                    cachedRenderer.Configure(isOverlayActive, actualQuality);
                     return cachedRenderer;
                 }
 
@@ -136,7 +151,7 @@ namespace SpectrumNet
                     }
                 }
 
-                renderer.Configure(isOverlayActive);
+                renderer.Configure(isOverlayActive, actualQuality);
                 _rendererCache[style] = renderer;
                 return renderer;
             }
@@ -162,15 +177,46 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Configures all cached renderers for overlay mode.
+        /// Configures all cached renderers for overlay mode and quality.
         /// </summary>
-        /// <param name="isOverlayActive">Whether overlay mode is active.</param>
-        public static void ConfigureAllRenderers(bool isOverlayActive)
+        /// <param name="isOverlayActive">Whether overlay mode is active (null to keep current).</param>
+        /// <param name="quality">Rendering quality level (null to keep current).</param>
+        public static void ConfigureAllRenderers(bool? isOverlayActive, RenderQuality? quality = null)
         {
             lock (_lock)
             {
                 foreach (var renderer in _rendererCache.Values)
-                    renderer.Configure(isOverlayActive);
+                {
+                    if (isOverlayActive.HasValue && quality.HasValue)
+                    {
+                        renderer.Configure(isOverlayActive.Value, quality.Value);
+                    }
+                    else if (isOverlayActive.HasValue)
+                    {
+                        renderer.Configure(isOverlayActive.Value, renderer.Quality);
+                    }
+                    else if (quality.HasValue)
+                    {
+                        renderer.Configure(isOverlayActive: false, quality.Value);
+                        renderer.Quality = quality.Value;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Sets the quality for a specific renderer style.
+        /// </summary>
+        /// <param name="style">Rendering style.</param>
+        /// <param name="quality">Rendering quality level.</param>
+        public static void SetRendererQuality(RenderStyle style, RenderQuality quality)
+        {
+            lock (_lock)
+            {
+                if (_rendererCache.TryGetValue(style, out var renderer))
+                {
+                    renderer.Quality = quality;
+                }
             }
         }
         #endregion

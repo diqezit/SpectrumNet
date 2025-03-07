@@ -18,20 +18,51 @@ namespace SpectrumNet
         private Random _random = new();
         private float _timeAccumulator;
         private int _scanlinePosition;
+
+        private const string LogPrefix = "[GlitchRenderer]";
+
+        // Настройки качества рендеринга
+        private RenderQuality _quality = RenderQuality.Medium;
+        private bool _useAntiAlias = true;
+        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        private bool _useAdvancedEffects = true;
+
+        // Переиспользуемые SKPaint для минимизации выделений памяти
+        private SKPaint? _redPaint;
+        private SKPaint? _bluePaint;
+        private SKPaint? _scanlinePaint;
+        private SKPaint? _noisePaint;
         #endregion
 
         #region Constants
-        private const float GlitchThreshold = 0.5f;
-        private const float MaxGlitchOffset = 30f;
-        private const float MinGlitchDuration = 0.05f;
-        private const float MaxGlitchDuration = 0.3f;
-        private const float ScanlineSpeed = 1.5f;
-        private const float ScanlineAlpha = 40;
-        private const float ScanlineHeight = 3f;
-        private const float RgbSplitMax = 10f;
-        private const float TimeStep = 0.016f;
-        private const float SmoothingFactor = 0.2f;
-        private const int MaxGlitchSegments = 10;
+        private static class Constants
+        {
+            // Glitch Effect Parameters
+            public const float GlitchThreshold = 0.5f;  // Threshold for glitch activation based on spectrum activity
+            public const float MaxGlitchOffset = 30f;   // Maximum horizontal offset for glitch segments
+            public const int MaxGlitchSegments = 10;    // Maximum number of concurrent glitch segments
+
+            // Scanline Parameters
+            public const float ScanlineSpeed = 1.5f;  // Speed of scanline movement across the screen
+            public const byte ScanlineAlpha = 40;    // Alpha value for scanline transparency
+            public const float ScanlineHeight = 3f;    // Height of the scanline
+
+            // RGB Split Parameters
+            public const float RgbSplitMax = 10f;   // Maximum offset for RGB split effect
+
+            // Timing and Animation
+            public const float TimeStep = 0.016f;// Time step for animation updates (approximately 60 FPS)
+            public const float MinGlitchDuration = 0.05f; // Minimum duration of a glitch segment
+            public const float MaxGlitchDuration = 0.3f;  // Maximum duration of a glitch segment
+
+            // Spectrum Processing
+            public const int BandCount = 3;     // Number of frequency bands (low, mid, high)
+            public const int ProcessedSpectrumSize = 128;// Size of the processed spectrum array
+            public const float SpectrumScale = 2.0f;  // Scaling factor for spectrum visualization
+            public const float SpectrumClamp = 1.0f;  // Maximum value for spectrum data
+            public const float Sensitivity = 3.0f;  // Sensitivity factor for band activity detection
+            public const float SmoothingFactor = 0.2f;  // Smoothing factor for band activity over time
+        }
         #endregion
 
         #region Constructor and Initialization
@@ -45,19 +76,62 @@ namespace SpectrumNet
 
             _bitmapPaint = new SKPaint
             {
-                IsAntialias = true,
-                FilterQuality = SKFilterQuality.Medium
+                IsAntialias = _useAntiAlias,
+                FilterQuality = _filterQuality
+            };
+
+            _redPaint = new SKPaint
+            {
+                Color = SKColors.Red.WithAlpha(100),
+                BlendMode = SKBlendMode.SrcOver,
+                IsAntialias = _useAntiAlias,
+                FilterQuality = _filterQuality
+            };
+
+            _bluePaint = new SKPaint
+            {
+                Color = SKColors.Blue.WithAlpha(100),
+                BlendMode = SKBlendMode.SrcOver,
+                IsAntialias = _useAntiAlias,
+                FilterQuality = _filterQuality
+            };
+
+            _scanlinePaint = new SKPaint
+            {
+                Color = SKColors.White.WithAlpha(Constants.ScanlineAlpha),
+                Style = SKPaintStyle.Fill
+            };
+
+            _noisePaint = new SKPaint
+            {
+                Style = SKPaintStyle.Fill
             };
 
             _glitchSegments = new List<GlitchSegment>();
 
             _isInitialized = true;
-            Log.Debug("GlitchRenderer initialized");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "GlitchRenderer initialized");
         }
 
-        public void Configure(bool isOverlayActive)
+        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
             _isOverlayActive = isOverlayActive;
+            Quality = quality;
+        }
+        #endregion
+
+        #region Properties
+        public RenderQuality Quality
+        {
+            get => _quality;
+            set
+            {
+                if (_quality != value)
+                {
+                    _quality = value;
+                    ApplyQualitySettings();
+                }
+            }
         }
         #endregion
 
@@ -92,7 +166,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                Log.Error($"Error in GlitchRenderer.Render: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in GlitchRenderer.Render: {ex.Message}");
             }
             finally
             {
@@ -103,133 +177,67 @@ namespace SpectrumNet
 
         private void RenderGlitchEffect(SKCanvas canvas, SKImageInfo info, SKPaint basePaint)
         {
-            if (_bufferBitmap == null || _bitmapPaint == null || _glitchSegments == null)
+            if (_bufferBitmap == null || _bitmapPaint == null || _glitchSegments == null || _processedSpectrum == null)
                 return;
 
-            // Очищаем буфер для нового кадра
             using (var bufferCanvas = new SKCanvas(_bufferBitmap))
             {
                 bufferCanvas.Clear(SKColors.Black);
-
-                // Рисуем базовые элементы (например, спектральные линии)
                 DrawBaseSpectrum(bufferCanvas, info, basePaint);
 
-                // Добавляем RGB-сдвиг, если спектр активен
-                if (_processedSpectrum != null && _processedSpectrum[2] > GlitchThreshold * 0.5f)
+                if (_useAdvancedEffects && _processedSpectrum[2] > Constants.GlitchThreshold * 0.5f)
                 {
-                    float rgbSplit = _processedSpectrum[2] * RgbSplitMax;
-
-                    using var redPaint = new SKPaint
-                    {
-                        Color = SKColors.Red.WithAlpha(100),
-                        BlendMode = SKBlendMode.SrcOver
-                    };
-
-                    using var bluePaint = new SKPaint
-                    {
-                        Color = SKColors.Blue.WithAlpha(100),
-                        BlendMode = SKBlendMode.SrcOver
-                    };
-
-                    // Рисуем сдвинутые копии в красном и синем каналах
+                    float rgbSplit = _processedSpectrum[2] * Constants.RgbSplitMax;
                     bufferCanvas.Save();
                     bufferCanvas.Translate(-rgbSplit, 0);
-                    DrawBaseSpectrum(bufferCanvas, info, redPaint);
+                    DrawBaseSpectrum(bufferCanvas, info, _redPaint!);
                     bufferCanvas.Restore();
 
                     bufferCanvas.Save();
                     bufferCanvas.Translate(rgbSplit, 0);
-                    DrawBaseSpectrum(bufferCanvas, info, bluePaint);
+                    DrawBaseSpectrum(bufferCanvas, info, _bluePaint!);
                     bufferCanvas.Restore();
                 }
 
-                // Рисуем сканлайн
-                using (var scanlinePaint = new SKPaint
-                {
-                    Color = SKColors.White.WithAlpha((byte)ScanlineAlpha),
-                    Style = SKPaintStyle.Fill
-                })
-                {
-                    bufferCanvas.DrawRect(
-                        0,
-                        _scanlinePosition,
-                        info.Width,
-                        ScanlineHeight,
-                        scanlinePaint);
-                }
+                bufferCanvas.DrawRect(
+                    0,
+                    _scanlinePosition,
+                    info.Width,
+                    Constants.ScanlineHeight,
+                    _scanlinePaint!);
 
-                // Применяем цифровой шум, если спектр активен
-                if (_processedSpectrum != null && _processedSpectrum[1] > GlitchThreshold * 0.3f)
+                if (_useAdvancedEffects && _processedSpectrum[1] > Constants.GlitchThreshold * 0.3f)
                 {
                     DrawDigitalNoise(bufferCanvas, info, _processedSpectrum[1]);
                 }
             }
 
-            // Рисуем сегменты глитча
-            foreach (var segment in _glitchSegments)
+            var activeSegments = _glitchSegments.Where(s => s.IsActive).OrderBy(s => s.Y).ToList();
+            int currentY = 0;
+
+            foreach (var segment in activeSegments)
             {
-                if (!segment.IsActive) continue;
+                if (currentY < segment.Y)
+                {
+                    SKRect sourceRect = new SKRect(0, currentY, info.Width, segment.Y);
+                    SKRect destRect = new SKRect(0, currentY, info.Width, segment.Y);
+                    canvas.DrawBitmap(_bufferBitmap, sourceRect, destRect);
+                }
+                currentY = segment.Y + segment.Height;
+            }
 
-                // Копируем части буфера со смещением для создания эффекта глитча
-                SKRect sourceRect = new SKRect(
-                    0,
-                    segment.Y,
-                    info.Width,
-                    segment.Y + segment.Height);
-
-                SKRect destRect = new SKRect(
-                    segment.XOffset,
-                    segment.Y,
-                    segment.XOffset + info.Width,
-                    segment.Y + segment.Height);
-
+            if (currentY < info.Height)
+            {
+                SKRect sourceRect = new SKRect(0, currentY, info.Width, info.Height);
+                SKRect destRect = new SKRect(0, currentY, info.Width, info.Height);
                 canvas.DrawBitmap(_bufferBitmap, sourceRect, destRect);
             }
 
-            // Рисуем неискаженные части
-            for (int y = 0; y < info.Height;)
+            foreach (var segment in activeSegments)
             {
-                bool isGlitched = false;
-                int segmentHeight = 0;
-
-                // Проверяем, находится ли текущая строка в глитч-сегменте
-                foreach (var segment in _glitchSegments)
-                {
-                    if (segment.IsActive && y >= segment.Y && y < segment.Y + segment.Height)
-                    {
-                        isGlitched = true;
-                        segmentHeight = segment.Y + segment.Height - y;
-                        break;
-                    }
-                }
-
-                if (!isGlitched)
-                {
-                    // Находим следующий глитч-сегмент (если есть)
-                    int nextGlitchY = info.Height;
-                    foreach (var segment in _glitchSegments)
-                    {
-                        if (segment.IsActive && segment.Y > y && segment.Y < nextGlitchY)
-                        {
-                            nextGlitchY = segment.Y;
-                        }
-                    }
-
-                    // Рисуем неискаженную часть до следующего глитча
-                    int height = nextGlitchY - y;
-
-                    SKRect sourceRect = new SKRect(0, y, info.Width, y + height);
-                    SKRect destRect = new SKRect(0, y, info.Width, y + height);
-
-                    canvas.DrawBitmap(_bufferBitmap, sourceRect, destRect);
-
-                    y += height;
-                }
-                else
-                {
-                    // Пропускаем глитч-сегмент
-                    y += segmentHeight;
-                }
+                SKRect sourceRect = new SKRect(0, segment.Y, info.Width, segment.Y + segment.Height);
+                SKRect destRect = new SKRect(segment.XOffset, segment.Y, segment.XOffset + info.Width, segment.Y + segment.Height);
+                canvas.DrawBitmap(_bufferBitmap, sourceRect, destRect);
             }
         }
 
@@ -237,8 +245,7 @@ namespace SpectrumNet
         {
             if (_processedSpectrum == null) return;
 
-            // Рисуем простые линии спектра
-            float barCount = Math.Min(128, _processedSpectrum.Length);
+            float barCount = Math.Min(Constants.ProcessedSpectrumSize, _processedSpectrum.Length);
             float barWidth = info.Width / barCount;
 
             for (int i = 0; i < barCount; i++)
@@ -247,7 +254,6 @@ namespace SpectrumNet
                 float x = i * barWidth;
                 float height = amplitude * info.Height * 0.5f;
 
-                // Рисуем линию
                 canvas.DrawLine(
                     x,
                     info.Height / 2 - height / 2,
@@ -259,23 +265,16 @@ namespace SpectrumNet
 
         private void DrawDigitalNoise(SKCanvas canvas, SKImageInfo info, float intensity)
         {
-            // Рисуем цифровой шум (случайные пиксели)
             int noiseCount = (int)(intensity * 1000);
+            _noisePaint!.Color = SKColors.White.WithAlpha((byte)(intensity * 150));
 
-            using (var noisePaint = new SKPaint
+            for (int i = 0; i < noiseCount; i++)
             {
-                Color = SKColors.White.WithAlpha((byte)(intensity * 150)),
-                Style = SKPaintStyle.Fill
-            })
-            {
-                for (int i = 0; i < noiseCount; i++)
-                {
-                    float x = _random.Next(0, info.Width);
-                    float y = _random.Next(0, info.Height);
-                    float size = 1 + _random.Next(0, 3);
+                float x = _random.Next(0, info.Width);
+                float y = _random.Next(0, info.Height);
+                float size = 1 + _random.Next(0, 3);
 
-                    canvas.DrawRect(x, y, size, size, noisePaint);
-                }
+                canvas.DrawRect(x, y, size, size, _noisePaint);
             }
         }
         #endregion
@@ -296,19 +295,16 @@ namespace SpectrumNet
         {
             if (_glitchSegments == null || _processedSpectrum == null) return;
 
-            _timeAccumulator += TimeStep;
-
-            // Обновляем позицию сканлайна
-            _scanlinePosition = (int)(_scanlinePosition + ScanlineSpeed);
+            _timeAccumulator += Constants.TimeStep;
+            _scanlinePosition = (int)(_scanlinePosition + Constants.ScanlineSpeed);
             if (_scanlinePosition >= info.Height)
                 _scanlinePosition = 0;
 
-            // Обновляем существующие глитч-сегменты
             for (int i = _glitchSegments.Count - 1; i >= 0; i--)
             {
                 var segment = _glitchSegments[i];
+                segment.Duration -= Constants.TimeStep;
 
-                segment.Duration -= TimeStep;
                 if (segment.Duration <= 0)
                 {
                     segment.IsActive = false;
@@ -316,31 +312,24 @@ namespace SpectrumNet
                 }
                 else
                 {
-                    // Случайно меняем смещение для активных сегментов
                     if (_random.NextDouble() < 0.2)
                     {
-                        segment.XOffset = (float)(MaxGlitchOffset * (_random.NextDouble() * 2 - 1) *
+                        segment.XOffset = (float)(Constants.MaxGlitchOffset * (_random.NextDouble() * 2 - 1) *
                                                 _processedSpectrum[0]);
                     }
-
                     _glitchSegments[i] = segment;
                 }
             }
 
-            // Создаем новые глитч-сегменты, если активность спектра выше порога
-            if (_processedSpectrum[0] > GlitchThreshold && _glitchSegments.Count < MaxGlitchSegments)
+            if (_processedSpectrum[0] > Constants.GlitchThreshold && _glitchSegments.Count < Constants.MaxGlitchSegments)
             {
                 if (_random.NextDouble() < _processedSpectrum[0] * 0.4)
                 {
                     int segmentHeight = (int)(20 + _random.NextDouble() * 50);
                     int y = _random.Next(0, info.Height - segmentHeight);
-
-                    float duration = MinGlitchDuration +
-                                   (float)_random.NextDouble() *
-                                   (MaxGlitchDuration - MinGlitchDuration);
-
-                    float xOffset = (float)(MaxGlitchOffset * (_random.NextDouble() * 2 - 1) *
-                                          _processedSpectrum[0]);
+                    float duration = Constants.MinGlitchDuration +
+                                   (float)_random.NextDouble() * (Constants.MaxGlitchDuration - Constants.MinGlitchDuration);
+                    float xOffset = (float)(Constants.MaxGlitchOffset * (_random.NextDouble() * 2 - 1) * _processedSpectrum[0]);
 
                     _glitchSegments.Add(new GlitchSegment
                     {
@@ -358,17 +347,14 @@ namespace SpectrumNet
         #region Spectrum Processing
         private void ProcessSpectrum(float[] spectrum)
         {
-            int bands = 3; // Низкие, средние, высокие частоты
-
-            if (_processedSpectrum == null || _processedSpectrum.Length < 128)
+            if (_processedSpectrum == null || _processedSpectrum.Length < Constants.ProcessedSpectrumSize)
             {
-                _processedSpectrum = new float[128];
+                _processedSpectrum = new float[Constants.ProcessedSpectrumSize];
             }
 
-            // Масштабируем спектр до 128 точек для визуализации
-            for (int i = 0; i < 128; i++)
+            for (int i = 0; i < Constants.ProcessedSpectrumSize; i++)
             {
-                float index = (float)i * spectrum.Length / (2f * 128);
+                float index = (float)i * spectrum.Length / (2f * Constants.ProcessedSpectrumSize);
                 int baseIndex = (int)index;
                 float lerp = index - baseIndex;
 
@@ -382,21 +368,18 @@ namespace SpectrumNet
                     _processedSpectrum[i] = spectrum[spectrum.Length / 2 - 1];
                 }
 
-                // Усиливаем для лучшей видимости
-                _processedSpectrum[i] *= 2.0f;
-                _processedSpectrum[i] = Math.Min(_processedSpectrum[i], 1.0f);
+                _processedSpectrum[i] *= Constants.SpectrumScale;
+                _processedSpectrum[i] = Math.Min(_processedSpectrum[i], Constants.SpectrumClamp);
             }
 
-            // Вычисляем активность по диапазонам для эффектов глитча
-            float[] bandActivity = new float[bands];
-            int bandSize = spectrum.Length / (2 * bands);
+            float[] bandActivity = new float[Constants.BandCount];
+            int bandSize = spectrum.Length / (2 * Constants.BandCount);
 
-            for (int band = 0; band < bands; band++)
+            for (int band = 0; band < Constants.BandCount; band++)
             {
                 float sum = 0;
                 int start = band * bandSize;
-                int end = (band + 1) * bandSize;
-                end = Math.Min(end, spectrum.Length / 2);
+                int end = Math.Min((band + 1) * bandSize, spectrum.Length / 2);
 
                 for (int i = start; i < end; i++)
                 {
@@ -405,25 +388,63 @@ namespace SpectrumNet
 
                 float avg = sum / (end - start);
 
-                // Применяем сглаживание
                 if (band < _processedSpectrum.Length)
                 {
-                    if (_processedSpectrum[band] == 0) // Первая инициализация
+                    if (_processedSpectrum[band] == 0)
                     {
-                        bandActivity[band] = avg * 3; // Увеличиваем чувствительность
+                        bandActivity[band] = avg * Constants.Sensitivity;
                     }
                     else
                     {
                         bandActivity[band] = _processedSpectrum[band] +
-                                           (avg * 3 - _processedSpectrum[band]) * SmoothingFactor;
+                                           (avg * Constants.Sensitivity - _processedSpectrum[band]) * Constants.SmoothingFactor;
                     }
                 }
             }
 
-            // Обновляем первые 3 значения обработанного спектра с активностью диапазонов
-            for (int i = 0; i < bands; i++)
+            for (int i = 0; i < Constants.BandCount; i++)
             {
-                _processedSpectrum[i] = Math.Min(bandActivity[i], 1.0f);
+                _processedSpectrum[i] = Math.Min(bandActivity[i], Constants.SpectrumClamp);
+            }
+        }
+        #endregion
+
+        #region Quality Settings
+        private void ApplyQualitySettings()
+        {
+            switch (_quality)
+            {
+                case RenderQuality.Low:
+                    _useAntiAlias = false;
+                    _filterQuality = SKFilterQuality.Low;
+                    _useAdvancedEffects = false;
+                    break;
+                case RenderQuality.Medium:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.Medium;
+                    _useAdvancedEffects = true;
+                    break;
+                case RenderQuality.High:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.High;
+                    _useAdvancedEffects = true;
+                    break;
+            }
+
+            if (_bitmapPaint != null)
+            {
+                _bitmapPaint.IsAntialias = _useAntiAlias;
+                _bitmapPaint.FilterQuality = _filterQuality;
+            }
+            if (_redPaint != null)
+            {
+                _redPaint.IsAntialias = _useAntiAlias;
+                _redPaint.FilterQuality = _filterQuality;
+            }
+            if (_bluePaint != null)
+            {
+                _bluePaint.IsAntialias = _useAntiAlias;
+                _bluePaint.FilterQuality = _filterQuality;
             }
         }
         #endregion
@@ -452,7 +473,7 @@ namespace SpectrumNet
 
             if (!_isInitialized)
             {
-                Log.Error("GlitchRenderer not initialized before rendering");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "GlitchRenderer not initialized before rendering");
                 return false;
             }
 
@@ -462,7 +483,7 @@ namespace SpectrumNet
                 drawPerformanceInfo == null ||
                 info.Width <= 0 || info.Height <= 0)
             {
-                Log.Error("Invalid render parameters for GlitchRenderer");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Invalid render parameters for GlitchRenderer");
                 return false;
             }
 
@@ -478,15 +499,23 @@ namespace SpectrumNet
             _spectrumSemaphore.Dispose();
             _bufferBitmap?.Dispose();
             _bitmapPaint?.Dispose();
+            _redPaint?.Dispose();
+            _bluePaint?.Dispose();
+            _scanlinePaint?.Dispose();
+            _noisePaint?.Dispose();
 
-            _bitmapPaint = null;
             _bufferBitmap = null;
+            _bitmapPaint = null;
+            _redPaint = null;
+            _bluePaint = null;
+            _scanlinePaint = null;
+            _noisePaint = null;
             _glitchSegments = null;
             _processedSpectrum = null;
 
             _disposed = true;
             _isInitialized = false;
-            Log.Debug("GlitchRenderer disposed");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "GlitchRenderer disposed");
         }
         #endregion
     }

@@ -77,6 +77,13 @@ public interface IAudioVisualizationController : INotifyPropertyChanged
     bool IsTransitioning { get; }
 
     /// <summary>
+    /// Gets or sets the quality level for spectrum rendering.
+    /// <br/>
+    /// Получает или задает уровень качества отрисовки спектра.
+    /// </summary>
+    RenderQuality RenderQuality { get; set; }
+
+    /// <summary>
     /// Notifies listeners that a property value has changed, implementing the INotifyPropertyChanged interface.
     /// <br/>
     /// Уведомляет слушателей об изменении значения свойства, реализуя интерфейс INotifyPropertyChanged.

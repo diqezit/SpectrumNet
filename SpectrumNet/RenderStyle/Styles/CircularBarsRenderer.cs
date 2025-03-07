@@ -5,24 +5,27 @@ namespace SpectrumNet
     public class CircularBarsRenderer : ISpectrumRenderer, IDisposable
     {
         #region Constants
-        private const float RADIUS_PROPORTION = 0.8f;  // Proportional radius of the visualization circle relative to canvas size
-        private const float INNER_RADIUS_FACTOR = 0.9f;  // Proportion of the main radius for inner circle
-        private const float MIN_STROKE_WIDTH = 2f;    // Minimum width for bar strokes
-        private const float SPECTRUM_MULTIPLIER = 0.5f;  // Amplifies spectrum values for more visible effect
-        private const float SMOOTHING_FACTOR = 0.3f;  // Controls how quickly the bars respond to changes (0-1, higher = more responsive)
-        private const float MIN_MAGNITUDE_THRESHOLD = 0.01f; // Minimum magnitude threshold for rendering a bar
-        private const float MAX_BAR_HEIGHT = 1.5f;  // Maximum height multiplier for bars
-        private const float MIN_BAR_HEIGHT = 0.01f; // Minimum height multiplier for bars
-        private const float GLOW_RADIUS = 3f;    // Blur radius for glow effects
-        private const float HIGHLIGHT_ALPHA = 0.7f;  // Alpha value for highlight effects
-        private const float GLOW_INTENSITY = 0.4f;  // Intensity multiplier for glow effects
-        private const float BAR_SPACING_FACTOR = 0.7f;  // Bar spacing factor to prevent overlap
-        private const float HIGHLIGHT_POSITION = 0.7f;  // Highlight position factor (0-1)
-        private const float HIGHLIGHT_INTENSITY = 0.5f;  // Highlight intensity multiplier
-        private const byte INNER_CIRCLE_ALPHA = 80;    // Inner circle alpha (0-255)
-        private const int PARALLEL_BATCH_SIZE = 32;    // Batch size for parallel processing
-        private const float GLOW_THRESHOLD = 0.6f;  // Threshold for applying glow effects
-        private const float HIGHLIGHT_THRESHOLD = 0.4f;  // Threshold for applying highlight effects
+        private static class Constants
+        {
+            public const float RADIUS_PROPORTION = 0.8f;     // Доля радиуса визуализации относительно размера холста
+            public const float INNER_RADIUS_FACTOR = 0.9f;     // Доля основного радиуса для внутреннего круга
+            public const float MIN_STROKE_WIDTH = 2f;       // Минимальная ширина линий баров
+            public const float SPECTRUM_MULTIPLIER = 0.5f;     // Усиление значений спектра для визуального эффекта
+            public const float SMOOTHING_FACTOR = 0.3f;     // Фактор сглаживания (0-1, выше = быстрее реакция)
+            public const float MIN_MAGNITUDE_THRESHOLD = 0.01f;    // Минимальный порог величины для отрисовки бара
+            public const float MAX_BAR_HEIGHT = 1.5f;     // Максимальный множитель высоты баров
+            public const float MIN_BAR_HEIGHT = 0.01f;    // Минимальный множитель высоты баров
+            public const float GLOW_RADIUS = 3f;       // Радиус размытия для эффекта свечения
+            public const float HIGHLIGHT_ALPHA = 0.7f;     // Альфа-значение для эффекта подсветки
+            public const float GLOW_INTENSITY = 0.4f;     // Интенсивность свечения
+            public const float BAR_SPACING_FACTOR = 0.7f;     // Фактор расстояния между барами
+            public const float HIGHLIGHT_POSITION = 0.7f;     // Позиция подсветки (0-1)
+            public const float HIGHLIGHT_INTENSITY = 0.5f;     // Интенсивность подсветки
+            public const byte INNER_CIRCLE_ALPHA = 80;       // Альфа внутреннего круга (0-255)
+            public const int PARALLEL_BATCH_SIZE = 32;       // Размер пакета для параллельной обработки
+            public const float GLOW_THRESHOLD = 0.6f;     // Порог для эффекта свечения
+            public const float HIGHLIGHT_THRESHOLD = 0.4f;     // Порог для эффекта подсветки
+        }
         #endregion
 
         #region Fields
@@ -40,6 +43,12 @@ namespace SpectrumNet
         private readonly SKPaint _highlightPaint = new();
         private readonly SKPaint _glowPaint = new();
         private readonly SKPaint _innerCirclePaint = new();
+
+        // Настройки качества отрисовки
+        private RenderQuality _quality = RenderQuality.Medium;
+        private bool _useAntiAlias = true;
+        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        private bool _useAdvancedEffects = true;
         #endregion
 
         #region Constructor and Initialization
@@ -50,17 +59,14 @@ namespace SpectrumNet
 
         private void InitializePaints()
         {
-            _barPaint.IsAntialias = true;
             _barPaint.Style = SKPaintStyle.Stroke;
             _barPaint.StrokeCap = SKStrokeCap.Round;
 
-            _highlightPaint.IsAntialias = true;
             _highlightPaint.Style = SKPaintStyle.Stroke;
-            _highlightPaint.Color = SKColors.White.WithAlpha((byte)(255 * HIGHLIGHT_ALPHA));
+            _highlightPaint.Color = SKColors.White.WithAlpha((byte)(255 * Constants.HIGHLIGHT_ALPHA));
 
-            _glowPaint.IsAntialias = true;
             _glowPaint.Style = SKPaintStyle.Stroke;
-            _glowPaint.ImageFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_RADIUS);
+            _glowPaint.ImageFilter = SKImageFilter.CreateBlur(Constants.GLOW_RADIUS, Constants.GLOW_RADIUS);
 
             _innerCirclePaint.Style = SKPaintStyle.Stroke;
         }
@@ -71,10 +77,26 @@ namespace SpectrumNet
         {
             if (_isInitialized) return;
             _isInitialized = true;
-            Log.Debug("CircularBarsRenderer initialized");
+            Log.Debug("[CircularBarsRenderer] CircularBarsRenderer initialized");
         }
 
-        public void Configure(bool isOverlayActive) { }
+        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        {
+            Quality = quality;
+        }
+
+        public RenderQuality Quality
+        {
+            get => _quality;
+            set
+            {
+                if (_quality != value)
+                {
+                    _quality = value;
+                    ApplyQualitySettings();
+                }
+            }
+        }
         #endregion
 
         #region Public Rendering
@@ -112,7 +134,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                Log.Error($"Error processing spectrum: {ex.Message}");
+                Log.Error($"[CircularBarsRenderer] Error processing spectrum: {ex.Message}");
                 return;
             }
             finally
@@ -125,7 +147,7 @@ namespace SpectrumNet
 
             float centerX = info.Width / 2;
             float centerY = info.Height / 2;
-            float mainRadius = Math.Min(centerX, centerY) * RADIUS_PROPORTION;
+            float mainRadius = Math.Min(centerX, centerY) * Constants.RADIUS_PROPORTION;
             float adjustedBarWidth = AdjustBarWidthForBarCount(barWidth, actualBarCount, Math.Min(info.Width, info.Height));
 
             UpdatePaintsFromBase(basePaint!, adjustedBarWidth);
@@ -143,9 +165,9 @@ namespace SpectrumNet
 
         private float AdjustBarWidthForBarCount(float barWidth, int barCount, float minDimension)
         {
-            float circumference = (float)(2 * Math.PI * RADIUS_PROPORTION * minDimension / 2);
-            float maxWidth = circumference / barCount * BAR_SPACING_FACTOR;
-            return Math.Max(Math.Min(barWidth, maxWidth), MIN_STROKE_WIDTH);
+            float circumference = (float)(2 * Math.PI * Constants.RADIUS_PROPORTION * minDimension / 2);
+            float maxWidth = circumference / barCount * Constants.BAR_SPACING_FACTOR;
+            return Math.Max(Math.Min(barWidth, maxWidth), Constants.MIN_STROKE_WIDTH);
         }
         #endregion
 
@@ -158,7 +180,7 @@ namespace SpectrumNet
         {
             if (!_isInitialized)
             {
-                Log.Error("CircularBarsRenderer not initialized before rendering");
+                Log.Error("[CircularBarsRenderer] CircularBarsRenderer not initialized before rendering");
                 return false;
             }
 
@@ -167,7 +189,7 @@ namespace SpectrumNet
                 basePaint == null ||
                 info.Width <= 0 || info.Height <= 0)
             {
-                Log.Error("Invalid render parameters for CircularBarsRenderer");
+                Log.Error("[CircularBarsRenderer] Invalid render parameters for CircularBarsRenderer");
                 return false;
             }
 
@@ -195,7 +217,7 @@ namespace SpectrumNet
             float[] scaledSpectrum = new float[targetCount];
             float blockSize = (float)spectrumLength / targetCount;
 
-            if (targetCount >= PARALLEL_BATCH_SIZE && Vector.IsHardwareAccelerated)
+            if (targetCount >= Constants.PARALLEL_BATCH_SIZE && Vector.IsHardwareAccelerated)
             {
                 Parallel.For(0, targetCount, i =>
                 {
@@ -240,9 +262,9 @@ namespace SpectrumNet
                 {
                     Vector<float> currentValues = new Vector<float>(spectrum, i);
                     Vector<float> previousValues = new Vector<float>(_previousSpectrum!, i);
-                    Vector<float> smoothedValues = previousValues + (currentValues - previousValues) * SMOOTHING_FACTOR;
-                    Vector<float> minVector = new Vector<float>(MIN_BAR_HEIGHT);
-                    Vector<float> maxVector = new Vector<float>(MAX_BAR_HEIGHT);
+                    Vector<float> smoothedValues = previousValues + (currentValues - previousValues) * Constants.SMOOTHING_FACTOR;
+                    Vector<float> minVector = new Vector<float>(Constants.MIN_BAR_HEIGHT);
+                    Vector<float> maxVector = new Vector<float>(Constants.MAX_BAR_HEIGHT);
                     smoothedValues = Vector.Min(Vector.Max(smoothedValues, minVector), maxVector);
                     smoothedValues.CopyTo(scaledSpectrum, i);
                     smoothedValues.CopyTo(_previousSpectrum!, i);
@@ -269,8 +291,8 @@ namespace SpectrumNet
         {
             if (_previousSpectrum == null) return;
             float currentValue = spectrum[i];
-            float smoothedValue = _previousSpectrum[i] + (currentValue - _previousSpectrum[i]) * SMOOTHING_FACTOR;
-            scaledSpectrum[i] = Math.Clamp(smoothedValue, MIN_BAR_HEIGHT, MAX_BAR_HEIGHT);
+            float smoothedValue = _previousSpectrum[i] + (currentValue - _previousSpectrum[i]) * Constants.SMOOTHING_FACTOR;
+            scaledSpectrum[i] = Math.Clamp(smoothedValue, Constants.MIN_BAR_HEIGHT, Constants.MAX_BAR_HEIGHT);
             _previousSpectrum[i] = scaledSpectrum[i];
         }
 
@@ -293,12 +315,23 @@ namespace SpectrumNet
 
         private void UpdatePaintsFromBase(SKPaint basePaint, float barWidth)
         {
+            _barPaint.IsAntialias = _useAntiAlias;
+            _barPaint.FilterQuality = _filterQuality;
             _barPaint.Color = basePaint.Color;
             _barPaint.StrokeWidth = barWidth;
+
+            _highlightPaint.IsAntialias = _useAntiAlias;
+            _highlightPaint.FilterQuality = _filterQuality;
             _highlightPaint.StrokeWidth = barWidth * 0.6f;
+
+            _glowPaint.IsAntialias = _useAntiAlias;
+            _glowPaint.FilterQuality = _filterQuality;
             _glowPaint.Color = basePaint.Color;
             _glowPaint.StrokeWidth = barWidth * 1.2f;
-            _innerCirclePaint.Color = basePaint.Color.WithAlpha(INNER_CIRCLE_ALPHA);
+
+            _innerCirclePaint.IsAntialias = _useAntiAlias;
+            _innerCirclePaint.FilterQuality = _filterQuality;
+            _innerCirclePaint.Color = basePaint.Color.WithAlpha(Constants.INNER_CIRCLE_ALPHA);
             _innerCirclePaint.StrokeWidth = barWidth * 0.5f;
         }
         #endregion
@@ -313,11 +346,20 @@ namespace SpectrumNet
             float mainRadius,
             float barWidth)
         {
-            canvas.DrawCircle(centerX, centerY, mainRadius * INNER_RADIUS_FACTOR, _innerCirclePaint);
+            canvas.DrawCircle(centerX, centerY, mainRadius * Constants.INNER_RADIUS_FACTOR, _innerCirclePaint);
             EnsureBarVectors(barCount);
-            RenderGlowEffects(canvas, spectrum, barCount, centerX, centerY, mainRadius);
+
+            if (_useAdvancedEffects)
+            {
+                RenderGlowEffects(canvas, spectrum, barCount, centerX, centerY, mainRadius);
+            }
+
             RenderMainBars(canvas, spectrum, barCount, centerX, centerY, mainRadius);
-            RenderHighlights(canvas, spectrum, barCount, centerX, centerY, mainRadius);
+
+            if (_useAdvancedEffects)
+            {
+                RenderHighlights(canvas, spectrum, barCount, centerX, centerY, mainRadius);
+            }
         }
 
         private void RenderGlowEffects(
@@ -332,9 +374,8 @@ namespace SpectrumNet
             for (int i = 0; i < barCount; i++)
             {
                 float magnitude = spectrum[i];
-                if (magnitude <= GLOW_THRESHOLD) continue;
-                float radius = mainRadius + magnitude * mainRadius * SPECTRUM_MULTIPLIER;
-                byte glowAlpha = (byte)(255 * magnitude * GLOW_INTENSITY);
+                if (magnitude <= Constants.GLOW_THRESHOLD) continue;
+                float radius = mainRadius + magnitude * mainRadius * Constants.SPECTRUM_MULTIPLIER;
                 var path = _barPathPool.Get();
                 AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
                 batchPath.AddPath(path);
@@ -343,7 +384,7 @@ namespace SpectrumNet
 
             if (!batchPath.IsEmpty)
             {
-                _glowPaint.Color = _glowPaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY));
+                _glowPaint.Color = _glowPaint.Color.WithAlpha((byte)(255 * Constants.GLOW_INTENSITY));
                 canvas.DrawPath(batchPath, _glowPaint);
             }
         }
@@ -360,8 +401,8 @@ namespace SpectrumNet
             for (int i = 0; i < barCount; i++)
             {
                 float magnitude = spectrum[i];
-                if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
-                float radius = mainRadius + magnitude * mainRadius * SPECTRUM_MULTIPLIER;
+                if (magnitude < Constants.MIN_MAGNITUDE_THRESHOLD) continue;
+                float radius = mainRadius + magnitude * mainRadius * Constants.SPECTRUM_MULTIPLIER;
                 var path = _barPathPool.Get();
                 AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
                 batchPath.AddPath(path);
@@ -386,9 +427,9 @@ namespace SpectrumNet
             for (int i = 0; i < barCount; i++)
             {
                 float magnitude = spectrum[i];
-                if (magnitude <= HIGHLIGHT_THRESHOLD) continue;
-                float radius = mainRadius + magnitude * mainRadius * SPECTRUM_MULTIPLIER;
-                float innerPoint = mainRadius + (radius - mainRadius) * HIGHLIGHT_POSITION;
+                if (magnitude <= Constants.HIGHLIGHT_THRESHOLD) continue;
+                float radius = mainRadius + magnitude * mainRadius * Constants.SPECTRUM_MULTIPLIER;
+                float innerPoint = mainRadius + (radius - mainRadius) * Constants.HIGHLIGHT_POSITION;
                 var path = _barPathPool.Get();
                 AddBarToPath(path, i, centerX, centerY, innerPoint, radius);
                 batchPath.AddPath(path);
@@ -397,7 +438,7 @@ namespace SpectrumNet
 
             if (!batchPath.IsEmpty)
             {
-                _highlightPaint.Color = _highlightPaint.Color.WithAlpha((byte)(255 * HIGHLIGHT_INTENSITY));
+                _highlightPaint.Color = _highlightPaint.Color.WithAlpha((byte)(255 * Constants.HIGHLIGHT_INTENSITY));
                 canvas.DrawPath(batchPath, _highlightPaint);
             }
         }
@@ -407,14 +448,8 @@ namespace SpectrumNet
         {
             if (_barVectors == null) return;
             Vector2 vector = _barVectors[index];
-            path.MoveTo(
-                centerX + innerRadius * vector.X,
-                centerY + innerRadius * vector.Y
-            );
-            path.LineTo(
-                centerX + outerRadius * vector.X,
-                centerY + outerRadius * vector.Y
-            );
+            path.MoveTo(centerX + innerRadius * vector.X, centerY + innerRadius * vector.Y);
+            path.LineTo(centerX + outerRadius * vector.X, centerY + outerRadius * vector.Y);
         }
         #endregion
 
@@ -501,13 +536,48 @@ namespace SpectrumNet
                 _processedSpectrum = null;
             }
             _disposed = true;
-            Log.Debug("CircularBarsRenderer disposed");
+            Log.Debug("[CircularBarsRenderer] CircularBarsRenderer disposed");
         }
 
         public void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
+        }
+        #endregion
+
+        #region Quality Settings
+        private void ApplyQualitySettings()
+        {
+            switch (_quality)
+            {
+                case RenderQuality.Low:
+                    _useAntiAlias = false;
+                    _filterQuality = SKFilterQuality.Low;
+                    _useAdvancedEffects = false;
+                    break;
+                case RenderQuality.Medium:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.Medium;
+                    _useAdvancedEffects = true;
+                    break;
+                case RenderQuality.High:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.High;
+                    _useAdvancedEffects = true;
+                    break;
+            }
+
+            UpdatePaintQuality(_barPaint);
+            UpdatePaintQuality(_highlightPaint);
+            UpdatePaintQuality(_glowPaint);
+            UpdatePaintQuality(_innerCirclePaint);
+        }
+
+        private void UpdatePaintQuality(SKPaint paint)
+        {
+            paint.IsAntialias = _useAntiAlias;
+            paint.FilterQuality = _filterQuality;
         }
         #endregion
     }

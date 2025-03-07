@@ -4,26 +4,8 @@ namespace SpectrumNet
 {
     public sealed class CircularWaveRenderer : ISpectrumRenderer, IDisposable
     {
-        #region Fields
-        private static CircularWaveRenderer? _instance;
-        private bool _isInitialized;
-        private bool _isOverlayActive;
-        private float _rotation, _rotationSpeed = DefaultRotationSpeed;
-        private float _radiusProportion = DefaultRadiusProportion;
-        private float _amplitudeScale = DefaultAmplitudeScale;
-        private float _minMagnitudeThreshold = DefaultMinMagnitudeThreshold;
-        private float _smoothingFactor = DefaultSmoothingFactor;
-
-        private float[]? _previousSpectrum, _processedSpectrum;
-        private float[]? _precomputedCosValues, _precomputedSinValues;
-        private int _previousPointCount, _maxPointCount = DefaultMaxPointCount;
-        private SKFont? _cachedFont;
-        private readonly SKPath _path = new();
-        private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
-        private readonly object _spectrumLock = new();
-        private bool _disposed;
-
         #region Constants
+        private const string LogPrefix = "[CircularWaveRenderer] ";
         private const float DefaultRotationSpeed = 0.5f;
         private const float DefaultRadiusProportion = 0.4f;
         private const float DefaultAmplitudeScale = 0.5f;
@@ -36,26 +18,62 @@ namespace SpectrumNet
         private const float WaveAlphaMultiplier = 1.2f;
         private const int MinPointCount = 12;
         #endregion
+
+        #region Fields
+        private static CircularWaveRenderer? _instance;
+        private bool _isInitialized;
+        private bool _isOverlayActive;
+        private float _rotation;
+        private float _rotationSpeed = DefaultRotationSpeed;
+        private float _radiusProportion = DefaultRadiusProportion;
+        private float _amplitudeScale = DefaultAmplitudeScale;
+        private float _minMagnitudeThreshold = DefaultMinMagnitudeThreshold;
+        private float _smoothingFactor = DefaultSmoothingFactor;
+
+        private float[]? _previousSpectrum;
+        private float[]? _processedSpectrum;
+        private float[]? _precomputedCosValues;
+        private float[]? _precomputedSinValues;
+        private int _previousPointCount;
+        private int _maxPointCount = DefaultMaxPointCount;
+        private SKFont? _cachedFont;
+        private readonly SKPath _path = new();
+        private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
+        private readonly object _spectrumLock = new();
+        private bool _disposed;
+
+        // RenderQuality fields
+        private RenderQuality _quality = RenderQuality.Medium;
+        private bool _useAntiAlias = true;
+        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        private bool _useAdvancedEffects = true;
         #endregion
 
         #region Constructor and Initialization
         private CircularWaveRenderer() { }
 
-        public static CircularWaveRenderer GetInstance() => _instance ??= new CircularWaveRenderer();
+        public static CircularWaveRenderer GetInstance()
+        {
+            return _instance ??= new CircularWaveRenderer();
+        }
 
         public void Initialize()
         {
             if (!_isInitialized)
             {
                 _isInitialized = true;
-                Log.Debug("CircularWaveRenderer initialized");
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "CircularWaveRenderer initialized");
             }
         }
         #endregion
 
         #region Configuration
-        public void Configure(bool isOverlayActive) =>
-            _smoothingFactor = (_isOverlayActive = isOverlayActive) ? OverlaySmoothingFactor : DefaultSmoothingFactor;
+        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        {
+            _isOverlayActive = isOverlayActive;
+            Quality = quality;
+            _smoothingFactor = isOverlayActive ? OverlaySmoothingFactor : DefaultSmoothingFactor;
+        }
 
         public void ConfigureAdvanced(
             bool? isOverlayActive = null,
@@ -71,6 +89,41 @@ namespace SpectrumNet
             _amplitudeScale = amplitudeScale ?? _amplitudeScale;
             _minMagnitudeThreshold = minMagnitudeThreshold ?? _minMagnitudeThreshold;
             _maxPointCount = maxPointCount ?? _maxPointCount;
+        }
+
+        public RenderQuality Quality
+        {
+            get => _quality;
+            set
+            {
+                if (_quality != value)
+                {
+                    _quality = value;
+                    ApplyQualitySettings();
+                }
+            }
+        }
+
+        private void ApplyQualitySettings()
+        {
+            switch (_quality)
+            {
+                case RenderQuality.Low:
+                    _useAntiAlias = false;
+                    _filterQuality = SKFilterQuality.Low;
+                    _useAdvancedEffects = false;
+                    break;
+                case RenderQuality.Medium:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.Medium;
+                    _useAdvancedEffects = true;
+                    break;
+                case RenderQuality.High:
+                    _useAntiAlias = true;
+                    _filterQuality = SKFilterQuality.High;
+                    _useAdvancedEffects = true;
+                    break;
+            }
         }
         #endregion
 
@@ -88,83 +141,53 @@ namespace SpectrumNet
             if (!ValidateRenderParameters(canvas, spectrum, info, paint))
                 return;
 
-            float[] renderSpectrum;
-            bool semaphoreAcquired = false;
-            int spectrumLength = spectrum!.Length;
-
-            // Use barCount to limit the number of points, ensuring a minimum
-            int pointCount = Math.Max(
-                MinPointCount,
-                Math.Min(Math.Min(spectrumLength, _maxPointCount), barCount)
-            );
-
-            // Adjust rotation speed based on bar count - lower speed for fewer bars
+            int pointCount = Math.Max(MinPointCount, Math.Min(Math.Min(spectrum!.Length, _maxPointCount), barCount));
             float adjustedRotationSpeed = _rotationSpeed * (0.5f + 0.5f * pointCount / Math.Max(barCount, 1));
 
-            try
+            // Process spectrum asynchronously
+            Task.Run(async () =>
             {
-                semaphoreAcquired = _spectrumSemaphore.Wait(0);
-
-                if (semaphoreAcquired)
+                try
                 {
-                    // Update rotation for animation with adjusted speed
+                    await _spectrumSemaphore.WaitAsync();
                     _rotation = (_rotation + adjustedRotationSpeed) % 360f;
-
-                    // Ensure trig values are precomputed
                     if (_previousPointCount != pointCount)
                     {
                         PrecomputeTrigonometryValues(pointCount);
                         _previousPointCount = pointCount;
                     }
-
-                    // Process spectrum data
-                    float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, spectrumLength);
-                    _processedSpectrum = SmoothSpectrum(scaledSpectrum.AsSpan(), pointCount);
+                    float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, spectrum.Length);
+                    _processedSpectrum = SmoothSpectrum(scaledSpectrum, pointCount);
                 }
-
-                // Use processed spectrum or calculate synchronously if needed
-                lock (_spectrumLock)
+                catch (Exception ex)
                 {
-                    renderSpectrum = _processedSpectrum ??
-                                    ProcessSynchronously(spectrum, pointCount, spectrumLength);
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing spectrum: {ex.Message}");
                 }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Error processing spectrum: {ex.Message}");
-                return;
-            }
-            finally
-            {
-                if (semaphoreAcquired)
+                finally
                 {
                     _spectrumSemaphore.Release();
                 }
+            });
+
+            float[] renderSpectrum;
+            lock (_spectrumLock)
+            {
+                renderSpectrum = _processedSpectrum ?? ProcessSynchronously(spectrum!, pointCount, spectrum.Length);
             }
 
-            try
+            float radius = MathF.Min(info.Width, info.Height) * _radiusProportion *
+                           (1f + 0.1f * (1f - (float)Math.Min(barCount, 100) / 100f));
+            float amplitudeScale = _amplitudeScale * (1f + 0.2f * (1f - (float)Math.Min(barCount, 100) / 100f));
+
+            RenderCircularWave(canvas!, renderSpectrum, pointCount, radius, info.Width / 2f, info.Height / 2f, paint!, amplitudeScale, barWidth);
+
+            if (drawPerformanceInfo != null)
             {
-                // Adjust radius based on bar count - larger radius for fewer bars
-                float radius = MathF.Min(info.Width, info.Height) * _radiusProportion *
-                               (1f + 0.1f * (1f - (float)Math.Min(barCount, 100) / 100f));
-
-                // Adjust amplitude scale based on bar count - stronger effect for fewer bars
-                float amplitudeScale = _amplitudeScale * (1f + 0.2f * (1f - (float)Math.Min(barCount, 100) / 100f));
-
-                RenderCircularWave(canvas!, renderSpectrum, pointCount, radius, info.Width / 2f, info.Height / 2f, paint!, amplitudeScale, barWidth);
-
-                if (drawPerformanceInfo != null)
-                {
-                    drawPerformanceInfo(canvas!, info);
-                }
-                else
-                {
-                    DefaultDrawPerformanceInfo(canvas!, info, paint!);
-                }
+                drawPerformanceInfo(canvas!, info);
             }
-            catch (Exception ex)
+            else
             {
-                Log.Error($"Error rendering wave: {ex.Message}");
+                DefaultDrawPerformanceInfo(canvas!, info, paint!);
             }
         }
 
@@ -176,31 +199,31 @@ namespace SpectrumNet
         {
             if (!_isInitialized)
             {
-                Log.Error("CircularWaveRenderer not initialized before rendering");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "CircularWaveRenderer not initialized before rendering");
                 return false;
             }
 
             if (canvas == null)
             {
-                Log.Error("Cannot render with null canvas");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Cannot render with null canvas");
                 return false;
             }
 
             if (spectrum == null || spectrum.Length == 0)
             {
-                Log.Error("Cannot render with null or empty spectrum");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Cannot render with null or empty spectrum");
                 return false;
             }
 
             if (paint == null)
             {
-                Log.Error("Cannot render with null paint");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Cannot render with null paint");
                 return false;
             }
 
             if (info.Width <= 0 || info.Height <= 0)
             {
-                Log.Error("Cannot render with invalid canvas dimensions");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Cannot render with invalid canvas dimensions");
                 return false;
             }
 
@@ -209,9 +232,8 @@ namespace SpectrumNet
 
         private float[] ProcessSynchronously(float[] spectrum, int pointCount, int spectrumLength)
         {
-            // Изменено: используем полную длину спектра
             float[] scaledSpectrum = ScaleSpectrum(spectrum, pointCount, spectrumLength);
-            return SmoothSpectrum(scaledSpectrum.AsSpan(), pointCount);
+            return SmoothSpectrum(scaledSpectrum, pointCount);
         }
         #endregion
 
@@ -219,9 +241,7 @@ namespace SpectrumNet
         private void PrecomputeTrigonometryValues(int pointCount)
         {
             if (_precomputedCosValues?.Length == pointCount)
-            {
                 return;
-            }
 
             _precomputedCosValues = new float[pointCount];
             _precomputedSinValues = new float[pointCount];
@@ -252,7 +272,7 @@ namespace SpectrumNet
             return scaledSpectrum;
         }
 
-        private float[] SmoothSpectrum(ReadOnlySpan<float> scaledSpectrum, int pointCount)
+        private float[] SmoothSpectrum(float[] scaledSpectrum, int pointCount)
         {
             if (_previousSpectrum == null || _previousSpectrum.Length != pointCount)
             {
@@ -261,11 +281,33 @@ namespace SpectrumNet
 
             var smoothedSpectrum = new float[pointCount];
 
-            for (int i = 0; i < pointCount; i++)
+            if (Vector.IsHardwareAccelerated && pointCount >= Vector<float>.Count)
             {
-                smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) +
-                                      scaledSpectrum[i] * _smoothingFactor;
-                _previousSpectrum[i] = smoothedSpectrum[i];
+                int vectorSize = Vector<float>.Count;
+                int vectorizedLength = pointCount - (pointCount % vectorSize);
+
+                for (int i = 0; i < vectorizedLength; i += vectorSize)
+                {
+                    Vector<float> currentValues = new Vector<float>(scaledSpectrum, i);
+                    Vector<float> previousValues = new Vector<float>(_previousSpectrum, i);
+                    Vector<float> smoothedValues = previousValues * (1 - _smoothingFactor) + currentValues * _smoothingFactor;
+                    smoothedValues.CopyTo(smoothedSpectrum, i);
+                    smoothedValues.CopyTo(_previousSpectrum, i);
+                }
+
+                for (int i = vectorizedLength; i < pointCount; i++)
+                {
+                    smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) + scaledSpectrum[i] * _smoothingFactor;
+                    _previousSpectrum[i] = smoothedSpectrum[i];
+                }
+            }
+            else
+            {
+                for (int i = 0; i < pointCount; i++)
+                {
+                    smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) + scaledSpectrum[i] * _smoothingFactor;
+                    _previousSpectrum[i] = smoothedSpectrum[i];
+                }
             }
 
             return smoothedSpectrum;
@@ -275,7 +317,7 @@ namespace SpectrumNet
         #region Wave Rendering
         private void RenderCircularWave(
             SKCanvas canvas,
-            ReadOnlySpan<float> spectrum,
+            float[] spectrum,
             int pointCount,
             float radius,
             float centerX,
@@ -284,15 +326,12 @@ namespace SpectrumNet
             float amplitudeScale,
             float barWidth)
         {
-            // Calculate rotation matrix
             float rad = _rotation * MathF.PI / 180f;
             float cosDelta = MathF.Cos(rad);
             float sinDelta = MathF.Sin(rad);
 
-            // Reset path for new drawing
             _path.Reset();
 
-            // Find the maximum amplitude for alpha calculation
             float maxAmplitude = 0;
             for (int i = 0; i < pointCount; i++)
             {
@@ -300,7 +339,6 @@ namespace SpectrumNet
                     maxAmplitude = spectrum[i];
             }
 
-            // Draw the wave outline
             bool firstPoint = true;
             for (int i = 0; i < pointCount; i++)
             {
@@ -327,57 +365,47 @@ namespace SpectrumNet
                 }
             }
 
-            // Only render if we have at least one point
             if (!firstPoint)
             {
                 _path.Close();
 
-                // Adjust alpha based on overall intensity
                 byte alpha = (byte)(paint.Color.Alpha * Math.Min(maxAmplitude * WaveAlphaMultiplier, 1.0f));
-
-                // Adjust blur radius based on bar width
                 float blurRadius = Math.Max(4f, Math.Min(barWidth * 0.8f, 12f));
 
-                // Draw outer glow
-                using (var glowPaint = paint.Clone())
+                if (_useAdvancedEffects)
                 {
+                    using var glowPaint = paint.Clone();
+                    glowPaint.IsAntialias = _useAntiAlias;
+                    glowPaint.FilterQuality = _filterQuality;
                     glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius);
-                    SKColor baseColor = paint.Color;
-                    glowPaint.Color = new SKColor(
-                        baseColor.Red,
-                        baseColor.Green,
-                        baseColor.Blue,
-                        (byte)(alpha * DefaultGlowIntensity));
+                    glowPaint.Color = paint.Color.WithAlpha((byte)(alpha * DefaultGlowIntensity));
                     canvas.DrawPath(_path, glowPaint);
-                }
 
-                // Draw inner glow for high intensity waves
-                if (maxAmplitude > HighIntensityThreshold)
-                {
-                    using (var innerGlowPaint = paint.Clone())
+                    if (maxAmplitude > HighIntensityThreshold)
                     {
+                        using var innerGlowPaint = paint.Clone();
+                        innerGlowPaint.IsAntialias = _useAntiAlias;
+                        innerGlowPaint.FilterQuality = _filterQuality;
                         innerGlowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius * 0.5f);
                         innerGlowPaint.Color = new SKColor(255, 255, 255, (byte)(alpha * 0.3f));
                         canvas.DrawPath(_path, innerGlowPaint);
                     }
                 }
 
-                // Draw main outline with thickness adjusted by bar width
-                using (var outlinePaint = paint.Clone())
-                {
-                    outlinePaint.Color = outlinePaint.Color.WithAlpha(alpha);
-                    outlinePaint.StrokeWidth = Math.Max(1f, barWidth * 0.2f);
-                    outlinePaint.Style = SKPaintStyle.Stroke;
-                    canvas.DrawPath(_path, outlinePaint);
-                }
+                using var outlinePaint = paint.Clone();
+                outlinePaint.IsAntialias = _useAntiAlias;
+                outlinePaint.FilterQuality = _filterQuality;
+                outlinePaint.Color = paint.Color.WithAlpha(alpha);
+                outlinePaint.StrokeWidth = Math.Max(1f, barWidth * 0.2f);
+                outlinePaint.Style = SKPaintStyle.Stroke;
+                canvas.DrawPath(_path, outlinePaint);
 
-                // Fill with semi-transparent color
-                using (var fillPaint = paint.Clone())
-                {
-                    fillPaint.Style = SKPaintStyle.Fill;
-                    fillPaint.Color = fillPaint.Color.WithAlpha((byte)(alpha * 0.4f));
-                    canvas.DrawPath(_path, fillPaint);
-                }
+                using var fillPaint = paint.Clone();
+                fillPaint.IsAntialias = _useAntiAlias;
+                fillPaint.FilterQuality = _filterQuality;
+                fillPaint.Style = SKPaintStyle.Fill;
+                fillPaint.Color = paint.Color.WithAlpha((byte)(alpha * 0.4f));
+                canvas.DrawPath(_path, fillPaint);
             }
         }
 
@@ -389,11 +417,11 @@ namespace SpectrumNet
                 using SKPaint textPaint = new SKPaint
                 {
                     Color = SKColors.White,
-                    IsAntialias = true,
+                    IsAntialias = _useAntiAlias,
+                    FilterQuality = _filterQuality,
                     TextSize = 24
                 };
 
-                // Cache SKFont for better performance
                 if (_cachedFont == null ||
                     _cachedFont.Size != textPaint.TextSize ||
                     _cachedFont.Typeface != textPaint.Typeface)
@@ -408,7 +436,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                Log.Error($"Error drawing performance info: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error drawing performance info: {ex.Message}");
             }
         }
         #endregion
@@ -433,7 +461,7 @@ namespace SpectrumNet
                 }
                 _disposed = true;
                 _isInitialized = false;
-                Log.Debug("CircularWaveRenderer disposed");
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "CircularWaveRenderer disposed");
             }
         }
         #endregion

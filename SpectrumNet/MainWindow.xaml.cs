@@ -22,7 +22,8 @@ namespace SpectrumNet
             string Style = "Solid",
             double BarSpacing = 4,
             int BarCount = 60,
-            string StatusText = "Ready"
+            string StatusText = "Ready",
+            RenderQuality Quality = RenderQuality.Medium
         );
 
         private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
@@ -164,6 +165,29 @@ namespace SpectrumNet
             }
         }
 
+        public RenderQuality RenderQuality
+        {
+            get => _state.Quality;
+            set
+            {
+                if (_state.Quality == value) return;
+                UpdateState(s => s with { Quality = value }, nameof(RenderQuality));
+
+                try
+                {
+                    SpectrumRendererFactory.GlobalQuality = value;
+                    _renderer?.RequestRender();
+                    _renderElement?.InvalidateVisual();
+
+                    SmartLogger.Log(LogLevel.Information, LogPrefix, $"Render quality set to {value}");
+                }
+                catch (Exception ex)
+                {
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating render quality: {ex}");
+                }
+            }
+        }
+
         public string SelectedStyle
         {
             get => _state.Style;
@@ -228,6 +252,9 @@ namespace SpectrumNet
         public IReadOnlyDictionary<string, Palette> AvailablePalettes =>
             _spectrumStyles?.RegisteredPalettes?.OrderBy(kvp => kvp.Key)
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value) ?? new Dictionary<string, Palette>();
+
+        public static IEnumerable<RenderQuality> AvailableRenderQualities =>
+            Enum.GetValues<RenderQuality>().OrderBy(q => (int)q);
 
         public bool IsPopupOpen
         {
@@ -379,6 +406,8 @@ namespace SpectrumNet
 
                 _disposables.Add(_captureManager);
 
+                SpectrumRendererFactory.GlobalQuality = _state.Quality;
+
                 _renderer = new Renderer(_spectrumStyles, this, _analyzer, _renderElement);
                 if (_renderer == null)
                     throw new InvalidOperationException("Failed to create Renderer");
@@ -404,6 +433,7 @@ namespace SpectrumNet
             StateChanged += OnStateChanged;
             MouseDoubleClick += OnWindowMouseDoubleClick;
             Closed += OnWindowClosed;
+            KeyDown += MainWindow_KeyDown; 
 
             PropertyChanged += (_, args) =>
             {
@@ -674,6 +704,9 @@ namespace SpectrumNet
                     case "ScaleTypeComboBox" when cb.SelectedItem is SpectrumScale scale:
                         ScaleType = scale;
                         break;
+                    case "RenderQualityComboBox" when cb.SelectedItem is RenderQuality quality:
+                        RenderQuality = quality;
+                        break;
                 }
             }
             catch (Exception ex)
@@ -823,6 +856,35 @@ namespace SpectrumNet
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error handling button click: {btn.Name} - {ex}");
+            }
+        }
+
+        private void MainWindow_KeyDown(object sender, KeyEventArgs e)
+        {
+            try
+            {
+                switch (e.Key)
+                {
+                    case Key.F10:
+                        RenderQuality = RenderQuality.Low;
+                        e.Handled = true;
+                        SmartLogger.Log(LogLevel.Information, LogPrefix, "Quality set to Low via hotkey");
+                        break;
+                    case Key.F11:
+                        RenderQuality = RenderQuality.Medium;
+                        e.Handled = true;
+                        SmartLogger.Log(LogLevel.Information, LogPrefix, "Quality set to Medium via hotkey");
+                        break;
+                    case Key.F12:
+                        RenderQuality = RenderQuality.High;
+                        e.Handled = true;
+                        SmartLogger.Log(LogLevel.Information, LogPrefix, "Quality set to High via hotkey");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error handling key down: {ex}");
             }
         }
 

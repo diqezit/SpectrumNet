@@ -386,6 +386,7 @@
                                                    HorizontalAlignment="Center"
                                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     </Grid>
+                                    
                                     <Grid Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="120"/>
@@ -411,112 +412,133 @@
                                                    HorizontalAlignment="Center"
                                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     </Grid>
-                                    <!-- Чекбокс для Always on top -->
+
+                                    <!-- Выбор качества отрисовки -->
+                                    <Grid Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="40"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   Text="Render quality:"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   Margin="0,0,10,0"/>
+                                        <ComboBox Grid.Column="1"
+                                                  x:Name="RenderQualityComboBox"
+                                                  ItemsSource="{Binding AvailableRenderQualities}"
+                                                  SelectedItem="{Binding RenderQuality, Mode=TwoWay}"
+                                                  SelectionChanged="OnComboBoxSelectionChanged"
+                                                  Style="{StaticResource ModernComboBoxStyle}"
+                                                  VerticalAlignment="Center"
+                                                  Height="24"/>
+                                        <TextBlock Grid.Column="2" Visibility="Hidden"/>
+                                    </Grid>
+
                                     <Grid Margin="0,8,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="120"/>
                                             <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                                            Text="Overlay mode:"
-               VerticalAlignment="Center"
-               HorizontalAlignment="Right"
-               Foreground="{DynamicResource TextPrimaryBrush}"
-               Margin="0,0,10,0"/>
+                                                   Text="Overlay mode:"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   Margin="0,0,10,0"/>
                                         <CheckBox Grid.Column="1"
-              Content="Always on top" 
-              IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
-              Style="{StaticResource ModernCheckBoxStyle}"
-              VerticalAlignment="Center"/>
+                                                  Content="Always on top" 
+                                                  IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
+                                                  Style="{StaticResource ModernCheckBoxStyle}"
+                                                  VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Visibility="Hidden"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>
 
                             <!-- Правая панель настроек -->
                             <Border Grid.Column="1"
-        CornerRadius="8"
-        Background="{DynamicResource ControlsPanelBackgroundBrush}"
-        Padding="15">
+                                    CornerRadius="8"
+                                    Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                    Padding="15">
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="40"/>
                                         <RowDefinition Height="40"/>
                                         <RowDefinition Height="40"/>
                                         <RowDefinition Height="40"/>
-                                        <!-- Добавлена новая строка -->
                                     </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <!-- Строка 1 -->
                                     <TextBlock Grid.Row="0"
-                   Text="Renderer:"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   Margin="0,0,10,0"
-                   HorizontalAlignment="Right"
-                   VerticalAlignment="Center"/>
+                                               Text="Renderer:"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               Margin="0,0,10,0"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="0"
-                  Grid.Column="1"
-                  x:Name="RenderStyleComboBox"
-                  ItemsSource="{Binding AvailableDrawingTypes}"
-                  SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"
-                  Width="200"
-                  HorizontalAlignment="Left"
-                  VerticalAlignment="Center"
-                  Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              Grid.Column="1"
+                                              x:Name="RenderStyleComboBox"
+                                              ItemsSource="{Binding AvailableDrawingTypes}"
+                                              SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"
+                                              Width="200"
+                                              HorizontalAlignment="Left"
+                                              VerticalAlignment="Center"
+                                              Style="{DynamicResource ModernComboBoxStyle}"/>
 
-                                    <!-- Строка 2 -->
                                     <TextBlock Grid.Row="1"
-                   Text="Paint:"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   Margin="0,0,10,0"
-                   HorizontalAlignment="Right"
-                   VerticalAlignment="Center"/>
+                                               Text="Paint:"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               Margin="0,0,10,0"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="1"
-                  Grid.Column="1"
-                  x:Name="StyleComboBox"
-                  ItemsSource="{Binding AvailablePalettes.Keys}"
-                  SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
-                  Width="200"
-                  HorizontalAlignment="Left"
-                  VerticalAlignment="Center" 
-                  Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              Grid.Column="1"
+                                              x:Name="StyleComboBox"
+                                              ItemsSource="{Binding AvailablePalettes.Keys}"
+                                              SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
+                                              Width="200"
+                                              HorizontalAlignment="Left"
+                                              VerticalAlignment="Center" 
+                                              Style="{DynamicResource ModernComboBoxStyle}"/>
 
-                                    <!-- Строка 3 -->
                                     <TextBlock Grid.Row="2"
-                   Text="Window FFT:"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   Margin="0,0,10,0"
-                   HorizontalAlignment="Right"
-                   VerticalAlignment="Center"/>
+                                               Text="Window FFT:"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               Margin="0,0,10,0"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="2"
-          Grid.Column="1"
-          x:Name="FftWindowTypeComboBox"
-          ItemsSource="{Binding AvailableFftWindowTypes}"
-          SelectedItem="{Binding WindowType, Mode=TwoWay}"
-          Width="200"
-          HorizontalAlignment="Left"
-          VerticalAlignment="Center"
-          Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              Grid.Column="1"
+                                              x:Name="FftWindowTypeComboBox"
+                                              ItemsSource="{Binding AvailableFftWindowTypes}"
+                                              SelectedItem="{Binding WindowType, Mode=TwoWay}"
+                                              Width="200"
+                                              HorizontalAlignment="Left"
+                                              VerticalAlignment="Center"
+                                              Style="{DynamicResource ModernComboBoxStyle}"/>
 
-                                    <!-- Строка 4 (новая) - Выбор типа шкалы -->
                                     <TextBlock Grid.Row="3"
-                   Text="Scale Type:"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   Margin="0,0,10,0"
-                   HorizontalAlignment="Right"
-                   VerticalAlignment="Center"/>
+                                               Text="Scale Type:"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               Margin="0,0,10,0"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"/>
                                     <ComboBox Grid.Row="3"
-                  Grid.Column="1"
-                  x:Name="ScaleTypeComboBox"
-                  ItemsSource="{Binding AvailableScaleTypes}"
-                  SelectedItem="{Binding ScaleType, Mode=TwoWay}"
-                  Width="200"
-                  HorizontalAlignment="Left"
-                  VerticalAlignment="Center"
-                  Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              Grid.Column="1"
+                                              x:Name="ScaleTypeComboBox"
+                                              ItemsSource="{Binding AvailableScaleTypes}"
+                                              SelectedItem="{Binding ScaleType, Mode=TwoWay}"
+                                              Width="200"
+                                              HorizontalAlignment="Left"
+                                              VerticalAlignment="Center"
+                                              Style="{DynamicResource ModernComboBoxStyle}"/>
                                 </Grid>
                             </Border>
                         </Grid>

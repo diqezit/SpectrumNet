@@ -1,15 +1,5 @@
 ﻿#nullable enable
 
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Threading;
-using System.Windows.Threading;
-using SkiaSharp;
-using SkiaSharp.Views.Desktop;
-
 namespace SpectrumNet
 {
     public readonly record struct PerformanceMetrics(double FrameTime, double Fps);
@@ -21,7 +11,7 @@ namespace SpectrumNet
         const string MESSAGE = "Push start to begin record...";
         const string LogPrefix = "[Renderer] ";
 
-        record struct RenderState(SKPaint Paint, RenderStyle Style, string StyleName);
+        record struct RenderState(SKPaint Paint, RenderStyle Style, string StyleName, RenderQuality Quality);
 
         readonly SemaphoreSlim _renderLock = new(1, 1);
         readonly SpectrumBrushes _spectrumStyles;
@@ -37,6 +27,7 @@ namespace SpectrumNet
         volatile bool _shouldShowPlaceholder = true;
 
         public string CurrentStyleName => _currentState.StyleName;
+        public RenderQuality CurrentQuality => _currentState.Quality;
         public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
 
         public bool ShouldShowPlaceholder
@@ -64,8 +55,11 @@ namespace SpectrumNet
         {
             // Get the default palette from the new system.
             var (color, brush) = _spectrumStyles.GetColorAndBrush(DEFAULT_STYLE);
-            _currentState = new RenderState(brush.Clone() ?? throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style"),
-                                            RenderStyle.Bars, DEFAULT_STYLE);
+            _currentState = new RenderState(
+                brush.Clone() ?? throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style"),
+                RenderStyle.Bars,
+                DEFAULT_STYLE,
+                RenderQuality.Medium);
 
             _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS) };
             _renderTimer.Tick += (_, _) => RequestRender();
@@ -106,6 +100,9 @@ namespace SpectrumNet
                         var (color, brush) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
                         UpdateSpectrumStyle(_controller.SelectedStyle, color, brush);
                     }
+                    break;
+                case nameof(IAudioVisualizationController.RenderQuality):
+                    UpdateRenderQuality(_controller.RenderQuality);
                     break;
                 case nameof(IAudioVisualizationController.WindowType):
                 case nameof(IAudioVisualizationController.ScaleType):
@@ -215,7 +212,11 @@ namespace SpectrumNet
         {
             if (canvas == null || spectrum == null) return;
 
-            var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _controller.IsOverlayActive);
+            var renderer = SpectrumRendererFactory.CreateRenderer(
+                _currentState.Style,
+                _controller.IsOverlayActive,
+                _currentState.Quality);
+
             renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint, PerfomanceMetrics.DrawPerformanceInfo);
         }
 
@@ -250,11 +251,13 @@ namespace SpectrumNet
         {
             EnsureNotDisposed();
             bool needsUpdate = false;
+
             if (_currentState.Style != _controller.SelectedDrawingType)
             {
                 UpdateRenderStyle(_controller.SelectedDrawingType);
                 needsUpdate = true;
             }
+
             var styleName = _controller.SelectedStyle;
             if (!string.IsNullOrEmpty(styleName) && styleName != _currentState.StyleName)
             {
@@ -262,6 +265,13 @@ namespace SpectrumNet
                 UpdateSpectrumStyle(styleName, color, brush);
                 needsUpdate = true;
             }
+
+            if (_currentState.Quality != _controller.RenderQuality)
+            {
+                UpdateRenderQuality(_controller.RenderQuality);
+                needsUpdate = true;
+            }
+
             if (needsUpdate)
                 RequestRender();
         }
@@ -281,9 +291,27 @@ namespace SpectrumNet
             if (string.IsNullOrEmpty(styleName) || styleName == _currentState.StyleName)
                 return;
             var oldPaint = _currentState.Paint;
-            _currentState = new RenderState(brush.Clone() ?? throw new InvalidOperationException("Brush clone failed"), _currentState.Style, styleName);
+            _currentState = _currentState with
+            {
+                Paint = brush.Clone() ?? throw new InvalidOperationException("Brush clone failed"),
+                StyleName = styleName
+            };
             oldPaint?.Dispose();
             RequestRender();
+        }
+
+        public void UpdateRenderQuality(RenderQuality quality)
+        {
+            EnsureNotDisposed();
+            if (_currentState.Quality == quality)
+                return;
+
+            _currentState = _currentState with { Quality = quality };
+            SpectrumRendererFactory.GlobalQuality = quality;
+
+            RequestRender();
+
+            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Render quality updated to {quality}", forceLog: true);
         }
 
         public void RequestRender()
@@ -323,10 +351,6 @@ namespace SpectrumNet
             if (_controller is INotifyPropertyChanged notifier)
                 notifier.PropertyChanged -= OnControllerPropertyChanged;
 
-            _currentState.Paint?.Dispose();
-            _renderLock.Dispose();
-            _disposalTokenSource.Dispose();
-
             if (_skElement != null)
             {
                 _skElement.PaintSurface -= RenderFrame;
@@ -334,6 +358,12 @@ namespace SpectrumNet
                 _skElement.Unloaded -= OnElementUnloaded;
                 _skElement = null;
             }
+
+            _currentState.Paint?.Dispose();
+            _renderLock.Dispose();
+            _disposalTokenSource.Dispose();
+
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
         }
     }
 }
