@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-namespace SpectrumNet;
+﻿namespace SpectrumNet;
 
 public readonly record struct PerformanceMetrics(double FrameTime, double Fps);
 
@@ -106,9 +104,12 @@ public static class PerformanceMetricsManager
         return metrics;
     }
 
-    public static void DrawPerformanceInfo(SKCanvas canvas, SKImageInfo info)
+    public static void DrawPerformanceInfo(SKCanvas? canvas, SKImageInfo info, bool showPerformanceInfo)
     {
         if (canvas == null || info.Width <= 0 || info.Height <= 0)
+            return;
+
+        if (!showPerformanceInfo)
             return;
 
         try

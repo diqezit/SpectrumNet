@@ -12,7 +12,8 @@ namespace SpectrumNet
                      _isOverlayTopmost = true,
                      _isControlPanelVisible = true,
                      _isTransitioning,
-                     _isDisposed;
+                     _isDisposed,
+                     _showPerformanceInfo = true;
         private RenderStyle _selectedDrawingType = RenderStyle.Bars;
         private FftWindowType _selectedFftWindowType = FftWindowType.Hann;
         private SpectrumScale _selectedScaleType = SpectrumScale.Linear;
@@ -103,6 +104,20 @@ namespace SpectrumNet
                 else
                     _ = StopCaptureAsync();
                 OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
+            }
+        }
+
+        public bool ShowPerformanceInfo
+        {
+            get => _showPerformanceInfo;
+            set
+            {
+                if (_showPerformanceInfo != value)
+                {
+                    _showPerformanceInfo = value;
+                    OnPropertyChanged(nameof(ShowPerformanceInfo));
+                    _renderer?.RequestRender(); 
+                }
             }
         }
 

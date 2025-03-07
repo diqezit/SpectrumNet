@@ -146,4 +146,11 @@ public interface IAudioVisualizationController : INotifyPropertyChanged
     /// Получает или задает тип окна FFT (Fast Fourier Transform), используемый для анализа спектра.
     /// </summary>
     FftWindowType WindowType { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether performance information should be displayed.
+    /// <br/>
+    /// Получает или задает значение, указывающее, следует ли отображать информацию о производительности.
+    /// </summary>
+    bool ShowPerformanceInfo { get; set; }
 }

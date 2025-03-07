@@ -226,7 +226,7 @@ namespace SpectrumNet
                 barSpacing,
                 barCount,
                 _currentState.Paint,
-                PerformanceMetricsManager.DrawPerformanceInfo);
+                (c, i) => PerformanceMetricsManager.DrawPerformanceInfo(c, i, _controller.ShowPerformanceInfo));
         }
 
         bool TryCalcRenderParams(SKImageInfo info, out float barWidth, out float barSpacing, out int barCount)

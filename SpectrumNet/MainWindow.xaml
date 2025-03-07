@@ -367,10 +367,10 @@
 
                             <!-- Левая панель настроек -->
                             <Border Grid.Column="0"
-                                    CornerRadius="8"
-                                    Background="{DynamicResource ControlsPanelBackgroundBrush}"
-                                    Padding="15"
-                                    Margin="0,0,15,0">
+        CornerRadius="8"
+        Background="{DynamicResource ControlsPanelBackgroundBrush}"
+        Padding="15"
+        Margin="0,0,15,0">
                                 <StackPanel>
                                     <Grid Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
@@ -379,24 +379,24 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                                                   Text="Interval:"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Right"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"
-                                                   Margin="0,0,10,0"/>
+                       Text="Interval:"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Right"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,0,10,0"/>
                                         <Slider Grid.Column="1"
-                                                x:Name="barSpacingSlider"
-                                                Minimum="1" Maximum="15"
-                                                Value="{Binding BarSpacing, Mode=TwoWay}"
-                                                ValueChanged="OnSliderValueChanged"
-                                                Style="{DynamicResource ModernSliderStyle}"
-                                                VerticalAlignment="Center"
-                                                Height="20"/>
+                    x:Name="barSpacingSlider"
+                    Minimum="1" Maximum="15"
+                    Value="{Binding BarSpacing, Mode=TwoWay}"
+                    ValueChanged="OnSliderValueChanged"
+                    Style="{DynamicResource ModernSliderStyle}"
+                    VerticalAlignment="Center"
+                    Height="20"/>
                                         <TextBlock Grid.Column="2"
-                                                   Text="{Binding BarSpacing, StringFormat='{}{0:F0}'}"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Center"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                       Text="{Binding BarSpacing, StringFormat='{}{0:F0}'}"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Center"
+                       Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     </Grid>
 
                                     <Grid Margin="0,0,0,12">
@@ -406,23 +406,23 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                                                   Text="Number of strips:"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Right"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"
-                                                   Margin="0,0,10,0"/>
+                       Text="Number of strips:"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Right"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,0,10,0"/>
                                         <Slider Grid.Column="1"
-                                                x:Name="barCountSlider"
-                                                Minimum="10" Maximum="500"
-                                                Value="{Binding BarCount, Mode=TwoWay}"
-                                                Style="{DynamicResource ModernSliderStyle}"
-                                                VerticalAlignment="Center"
-                                                Height="20"/>
+                    x:Name="barCountSlider"
+                    Minimum="10" Maximum="500"
+                    Value="{Binding BarCount, Mode=TwoWay}"
+                    Style="{DynamicResource ModernSliderStyle}"
+                    VerticalAlignment="Center"
+                    Height="20"/>
                                         <TextBlock Grid.Column="2"
-                                                   Text="{Binding BarCount, StringFormat='{}{0:F0}'}"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Center"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                       Text="{Binding BarCount, StringFormat='{}{0:F0}'}"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Center"
+                       Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     </Grid>
 
                                     <!-- Выбор качества отрисовки -->
@@ -433,19 +433,19 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                                                   Text="Render quality:"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Right"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"
-                                                   Margin="0,0,10,0"/>
+                       Text="Render quality:"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Right"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,0,10,0"/>
                                         <ComboBox Grid.Column="1"
-                                                  x:Name="RenderQualityComboBox"
-                                                  ItemsSource="{Binding AvailableRenderQualities}"
-                                                  SelectedItem="{Binding RenderQuality, Mode=TwoWay}"
-                                                  SelectionChanged="OnComboBoxSelectionChanged"
-                                                  Style="{StaticResource ModernComboBoxStyle}"
-                                                  VerticalAlignment="Center"
-                                                  Height="24"/>
+                      x:Name="RenderQualityComboBox"
+                      ItemsSource="{Binding AvailableRenderQualities}"
+                      SelectedItem="{Binding RenderQuality, Mode=TwoWay}"
+                      SelectionChanged="OnComboBoxSelectionChanged"
+                      Style="{StaticResource ModernComboBoxStyle}"
+                      VerticalAlignment="Center"
+                      Height="24"/>
                                         <TextBlock Grid.Column="2" Visibility="Hidden"/>
                                     </Grid>
 
@@ -456,16 +456,37 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                                                   Text="Overlay mode:"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Right"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"
-                                                   Margin="0,0,10,0"/>
+                       Text="Overlay mode:"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Right"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,0,10,0"/>
                                         <CheckBox Grid.Column="1"
-                                                  Content="Always on top" 
-                                                  IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
-                                                  Style="{StaticResource ModernCheckBoxStyle}"
-                                                  VerticalAlignment="Center"/>
+                      Content="Always on top" 
+                      IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
+                      Style="{StaticResource ModernCheckBoxStyle}"
+                      VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Visibility="Hidden"/>
+                                    </Grid>
+
+                                    <!-- Чекбокс для отображения производительности -->
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="40"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                       Text="Performance Info:"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Right"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,0,10,0"/>
+                                        <CheckBox Grid.Column="1"
+                      Content="Show FPS"
+                      IsChecked="{Binding ShowPerformanceInfo, Mode=TwoWay}"
+                      Style="{StaticResource ModernCheckBoxStyle}"
+                      VerticalAlignment="Center"/>
                                         <TextBlock Grid.Column="2" Visibility="Hidden"/>
                                     </Grid>
                                 </StackPanel>
