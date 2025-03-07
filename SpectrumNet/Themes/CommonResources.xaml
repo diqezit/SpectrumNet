@@ -528,4 +528,81 @@
         </Setter>
     </Style>
 
+    <!-- Стиль для Thumb (ползунка) в ScrollBar -->
+    <Style x:Key="ScrollBarThumbStyle" TargetType="Thumb">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="MinHeight" Value="20"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="6"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Стиль для ScrollBar -->
+    <Style x:Key="ModernScrollBarStyle" TargetType="ScrollBar">
+        <Setter Property="Background" Value="{DynamicResource BackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="Width" Value="12"/>
+        <Setter Property="MinWidth" Value="12"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid x:Name="Bg" Background="{TemplateBinding Background}">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource ScrollBarThumbStyle}"/>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ModernTextBoxStyle" TargetType="TextBox">
+        <Setter Property="Background" Value="{DynamicResource TextBoxBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBoxForegroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource TextBoxBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1.5"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="Regular"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="TextBoxBorder"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="6">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                  Margin="{TemplateBinding Padding}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TextBoxBorder" Property="BorderBrush" Value="{DynamicResource TextBoxHoverBorderBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="TextBoxBorder" Property="BorderBrush" Value="{DynamicResource TextBoxFocusBorderBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Background" Value="{DynamicResource TextBoxDisabledBackgroundBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextBoxDisabledForegroundBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

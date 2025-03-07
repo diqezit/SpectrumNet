@@ -967,7 +967,21 @@ namespace SpectrumNet
                     ["StartCaptureButton"] = async () => await StartCaptureAsync(),
                     ["StopCaptureButton"] = async () => await StopCaptureAsync(),
                     ["OverlayButton"] = () => OnOverlayButtonClick(sender, e),
-                    ["OpenSettingsButton"] = () => new SettingsWindow().ShowDialog(),
+                    ["OpenSettingsButton"] = () =>
+                    {
+                        if (this.OpenSettingsButton != null)
+                        {
+                            this.OpenSettingsButton.IsEnabled = false;
+                            try
+                            {
+                                new SettingsWindow().ShowDialog();
+                            }
+                            finally
+                            {
+                                this.OpenSettingsButton.IsEnabled = true;
+                            }
+                        }
+                    },
                     ["OpenPopupButton"] = () => IsPopupOpen = !IsPopupOpen,
                     ["MinimizeButton"] = MinimizeWindow,
                     ["MaximizeButton"] = MaximizeWindow,

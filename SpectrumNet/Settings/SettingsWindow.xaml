@@ -22,6 +22,12 @@
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
+        <!-- Ресурс преобразователя для placeholder -->
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
+        <!-- Стиль для ScrollBar -->
+        <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
+
         <!-- Стиль для вложенных GroupBox -->
         <Style x:Key="SettingsGroupBoxStyle" TargetType="GroupBox">
             <Setter Property="Margin" Value="0,8"/>
@@ -50,9 +56,9 @@
             <Setter Property="HeaderTemplate">
                 <Setter.Value>
                     <DataTemplate>
-                        <TextBlock Text="{Binding}" 
-                                   FontSize="16" 
-                                   FontWeight="Bold" 
+                        <TextBlock Text="{Binding}"
+                                   FontSize="16"
+                                   FontWeight="Bold"
                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                     </DataTemplate>
                 </Setter.Value>
@@ -70,6 +76,45 @@
             <Setter Property="Height" Value="15"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="8,4"/>
+        </Style>
+
+        <!-- Новый стиль для TextBox -->
+        <Style x:Key="ModernTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource TextBoxBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBoxForegroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource TextBoxBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1.5"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Regular"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="TextBoxBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                          Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TextBoxBorder" Property="BorderBrush" Value="{DynamicResource TextBoxHoverBorderBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter TargetName="TextBoxBorder" Property="BorderBrush" Value="{DynamicResource TextBoxFocusBorderBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="{DynamicResource TextBoxDisabledBackgroundBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextBoxDisabledForegroundBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
@@ -116,8 +161,8 @@
             </Border>
 
             <!-- Content -->
-            <Border Padding="16" 
-                    Grid.Row="1" 
+            <Border Padding="16"
+                    Grid.Row="1"
                     Background="{DynamicResource SurfaceBrush}">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -301,20 +346,20 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
 
-                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Z Depth:" 
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Z Depth:"
                                                        Style="{StaticResource SettingsTextBlockStyle}"/>
                                             <Slider Grid.Row="0" Grid.Column="1" Minimum="100" Maximum="1000"
-                                                    Value="{Binding MaxZDepth, Mode=TwoWay}" 
+                                                    Value="{Binding MaxZDepth, Mode=TwoWay}"
                                                     Style="{StaticResource AlignedSliderStyle}"/>
-                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxZDepth, StringFormat='{}{0:F2}'}" 
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxZDepth, StringFormat='{}{0:F2}'}"
                                                        Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Minimum Z Depth:" 
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Minimum Z Depth:"
                                                        Style="{StaticResource SettingsTextBlockStyle}"/>
                                             <Slider Grid.Row="1" Grid.Column="1" Minimum="100" Maximum="1000"
-                                                    Value="{Binding MinZDepth, Mode=TwoWay}" 
+                                                    Value="{Binding MinZDepth, Mode=TwoWay}"
                                                     Style="{StaticResource AlignedSliderStyle}"/>
-                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MinZDepth, StringFormat='{}{0:F2}'}" 
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MinZDepth, StringFormat='{}{0:F2}'}"
                                                        Style="{StaticResource SettingsTextBlockStyle}"/>
 
                                             <TextBlock Grid.Row="2" Grid.Column="0" Text="Overlay offset multiplier:"
@@ -530,11 +575,21 @@
 
                                             <TextBlock Grid.Row="6" Grid.Column="0" Text="ASCII Characters:"
                                                        Style="{StaticResource SettingsTextBlockStyle}"/>
-                                            <TextBox Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2"
-                                                     Text="{Binding DonutAsciiChars, Mode=TwoWay}"
-                                                     Margin="8,4"
-                                                     VerticalAlignment="Center"
-                                                     Height="28"/>
+                                            <Grid Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2">
+                                                <TextBox x:Name="AsciiCharsTextBox"
+                                                         Text="{Binding DonutAsciiChars, Mode=TwoWay}"
+                                                         Margin="8,4"
+                                                         VerticalAlignment="Center"
+                                                         Height="28"
+                                                         Style="{StaticResource ModernTextBoxStyle}"/>
+                                                <TextBlock Text="Enter ASCII characters"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                                           Margin="12,4"
+                                                           VerticalAlignment="Center"
+                                                           HorizontalAlignment="Left"
+                                                           IsHitTestVisible="False"
+                                                           Visibility="{Binding ElementName=AsciiCharsTextBox, Path=Text.IsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            </Grid>
                                         </Grid>
                                     </GroupBox>
 

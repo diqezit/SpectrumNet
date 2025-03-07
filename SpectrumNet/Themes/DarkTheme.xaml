@@ -18,6 +18,8 @@
     <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#2F3436"/>
 
     <!-- Цвета для кнопок -->
+    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#252A2B"/>
+    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#3A4042"/>
     <SolidColorBrush x:Key="ButtonPressedBorderBrush" Color="#454A4D"/>
     <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#1A1D1E"/>
@@ -32,11 +34,16 @@
     <SolidColorBrush x:Key="WindowForegroundBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="WindowControlPressedBrush" Color="#3A4042"/>
     <SolidColorBrush x:Key="WindowControlHoverBrush" Color="#2F3436"/>
+    <SolidColorBrush x:Key="WindowBorderBrush" Color="#2F3436"/>
 
     <!-- Цвета для TextBox -->
     <SolidColorBrush x:Key="TextBoxBackgroundBrush" Color="#1A1D1E"/>
     <SolidColorBrush x:Key="TextBoxBorderBrush" Color="#2F3436"/>
     <SolidColorBrush x:Key="TextBoxForegroundBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="TextBoxDisabledBackgroundBrush" Color="#252A2B"/>
+    <SolidColorBrush x:Key="TextBoxDisabledForegroundBrush" Color="#666A6D"/>
+    <SolidColorBrush x:Key="TextBoxHoverBorderBrush" Color="#3A4042"/>
+    <SolidColorBrush x:Key="TextBoxFocusBorderBrush" Color="#4D7DFE"/>
 
     <!-- Цвета для ComboBox -->
     <SolidColorBrush x:Key="ComboBoxBackgroundBrush" Color="#1A1D1E"/>
@@ -77,12 +84,7 @@
     <SolidColorBrush x:Key="SliderBackgroundBrush" Color="#252A2B"/>
     <SolidColorBrush x:Key="SliderBorderBrush" Color="#2F3436"/>
 
-    <!-- Кнопка -->
-    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#252A2B"/>
-    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF"/>
-
-    <!-- Добавленные ресурсы -->
-    <SolidColorBrush x:Key="WindowBorderBrush" Color="#2F3436"/>
+    <!-- Дополнительные ресурсы -->
     <SolidColorBrush x:Key="ControlsPanelBackgroundBrush" Color="#252A2B"/>
     <SolidColorBrush x:Key="TitleBarBackgroundBrush" Color="#4D7DFE"/>
 </ResourceDictionary>

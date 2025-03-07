@@ -1,7 +1,7 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- Main Colors -->
+    <!-- Основные цвета -->
     <SolidColorBrush x:Key="BackgroundBrush" Color="#F5F7FA"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1A1F36"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4E5D78"/>
@@ -18,6 +18,8 @@
     <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#F0F4FF"/>
 
     <!-- Цвета для кнопок -->
+    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#1A1F36"/>
     <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#D8E0FF"/>
     <SolidColorBrush x:Key="ButtonPressedBorderBrush" Color="#B8C4FF"/>
     <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#F5F7FA"/>
@@ -32,11 +34,16 @@
     <SolidColorBrush x:Key="WindowForegroundBrush" Color="#1A1F36"/>
     <SolidColorBrush x:Key="WindowControlPressedBrush" Color="#E6EBFF"/>
     <SolidColorBrush x:Key="WindowControlHoverBrush" Color="#F0F4FF"/>
+    <SolidColorBrush x:Key="WindowBorderBrush" Color="#E6E8F0"/>
 
     <!-- Цвета для TextBox -->
     <SolidColorBrush x:Key="TextBoxBackgroundBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="TextBoxBorderBrush" Color="#E6E8F0"/>
     <SolidColorBrush x:Key="TextBoxForegroundBrush" Color="#1A1F36"/>
+    <SolidColorBrush x:Key="TextBoxDisabledBackgroundBrush" Color="#F5F7FA"/>
+    <SolidColorBrush x:Key="TextBoxDisabledForegroundBrush" Color="#A6B1C4"/>
+    <SolidColorBrush x:Key="TextBoxHoverBorderBrush" Color="#D8E0FF"/>
+    <SolidColorBrush x:Key="TextBoxFocusBorderBrush" Color="#2E5BFF"/>
 
     <!-- Цвета для ComboBox -->
     <SolidColorBrush x:Key="ComboBoxBackgroundBrush" Color="#FFFFFF"/>
@@ -77,12 +84,7 @@
     <SolidColorBrush x:Key="SliderBackgroundBrush" Color="#F0F4FF"/>
     <SolidColorBrush x:Key="SliderBorderBrush" Color="#E6E8F0"/>
 
-    <!-- Кнопка -->
-    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#1A1F36"/>
-
-    <!-- Добавленные ресурсы -->
-    <SolidColorBrush x:Key="WindowBorderBrush" Color="#E6E8F0"/>
+    <!-- Дополнительные ресурсы -->
     <SolidColorBrush x:Key="ControlsPanelBackgroundBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="TitleBarBackgroundBrush" Color="#2E5BFF"/>
 </ResourceDictionary>
