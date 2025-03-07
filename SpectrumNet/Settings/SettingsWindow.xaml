@@ -22,6 +22,7 @@
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
+        <!-- Стиль для вложенных GroupBox -->
         <Style x:Key="SettingsGroupBoxStyle" TargetType="GroupBox">
             <Setter Property="Margin" Value="0,8"/>
             <Setter Property="Padding" Value="8"/>
@@ -39,11 +40,32 @@
             </Setter>
         </Style>
 
+        <!-- Стиль для основного GroupBox рендеров -->
+        <Style x:Key="RendererGroupBoxStyle" TargetType="GroupBox">
+            <Setter Property="Margin" Value="0,16,0,0"/>
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="HeaderTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" 
+                                   FontSize="16" 
+                                   FontWeight="Bold" 
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Стиль для текстовых блоков -->
         <Style x:Key="SettingsTextBlockStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             <Setter Property="Margin" Value="8,4"/>
         </Style>
 
+        <!-- Стиль для слайдеров -->
         <Style x:Key="AlignedSliderStyle" TargetType="Slider" BasedOn="{StaticResource ModernSliderStyle}">
             <Setter Property="Height" Value="15"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
@@ -106,385 +128,620 @@
                     <ScrollViewer Grid.Row="0"
                                   VerticalScrollBarVisibility="Auto">
                         <StackPanel>
-                            <GroupBox Header="Basic particle settings"
-                                      Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="255"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
+                            <!-- Настройки рендера Particles -->
+                            <GroupBox Header="Particles Renderer Settings" Style="{StaticResource RendererGroupBoxStyle}">
+                                <StackPanel>
+                                    <GroupBox Header="Particle Settings" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
 
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Particle decay:"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="0" Grid.Column="1" Minimum="0.001"
-                                            Maximum="0.1"
-                                            Value="{Binding ParticleLifeDecay, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleLifeDecay, StringFormat='{}{0:F3}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum particles:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="100" Maximum="5000"
+                                                    Value="{Binding MaxParticles, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxParticles, StringFormat='{}{0:F0}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Particle life time:"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="0.01"
-                                            Maximum="5"
-                                            Value="{Binding ParticleLife, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ParticleLife, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
-                                </Grid>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Particle life time:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0.01" Maximum="5"
+                                                    Value="{Binding ParticleLife, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ParticleLife, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Particle decay:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.001" Maximum="0.1"
+                                                    Value="{Binding ParticleLifeDecay, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding ParticleLifeDecay, StringFormat='{}{0:F3}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="Particle Appearance" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Particle size (normal):"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="1.0" Maximum="5.0"
+                                                    Value="{Binding ParticleSizeNormal, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleSizeNormal, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Particle size (overlay):"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="1.0" Maximum="5.0"
+                                                    Value="{Binding ParticleSizeOverlay, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ParticleSizeOverlay, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Transparency decay exponent:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.1" Maximum="3.0"
+                                                    Value="{Binding AlphaDecayExponent, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding AlphaDecayExponent, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="Particle Movement" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Minimum speed:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="0.1" Maximum="10.0"
+                                                    Value="{Binding ParticleVelocityMin, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleVelocityMin, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Maximum speed:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1" Maximum="10.0"
+                                                    Value="{Binding ParticleVelocityMax, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ParticleVelocityMax, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Speed multiplier:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.5" Maximum="5.0"
+                                                    Value="{Binding VelocityMultiplier, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding VelocityMultiplier, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="Particle Spawn Settings" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Spawn threshold (normal):"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="0.1" Maximum="1.0"
+                                                    Value="{Binding SpawnThresholdNormal, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SpawnThresholdNormal, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Spawn threshold (overlay):"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1" Maximum="1.0"
+                                                    Value="{Binding SpawnThresholdOverlay, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding SpawnThresholdOverlay, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Spawn probability:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.01" Maximum="1.0"
+                                                    Value="{Binding SpawnProbability, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding SpawnProbability, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="Depth of Field" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Z Depth:" 
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="100" Maximum="1000"
+                                                    Value="{Binding MaxZDepth, Mode=TwoWay}" 
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxZDepth, StringFormat='{}{0:F2}'}" 
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Minimum Z Depth:" 
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="100" Maximum="1000"
+                                                    Value="{Binding MinZDepth, Mode=TwoWay}" 
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MinZDepth, StringFormat='{}{0:F2}'}" 
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Overlay offset multiplier:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.1" Maximum="5.0"
+                                                    Value="{Binding OverlayOffsetMultiplier, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding OverlayOffsetMultiplier, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Overlay height multiplier:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="3" Grid.Column="1" Minimum="0.1" Maximum="5.0"
+                                                    Value="{Binding OverlayHeightMultiplier, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding OverlayHeightMultiplier, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+                                </StackPanel>
                             </GroupBox>
 
-                            <GroupBox Header="Spawn parameters"
-                                      Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="255"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
+                            <!-- Настройки рендера AsciiDonut -->
+                            <GroupBox Header="AsciiDonut Renderer Settings" Style="{StaticResource RendererGroupBoxStyle}">
+                                <StackPanel>
+                                    <GroupBox Header="ASCII Donut Geometry" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
 
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Spawn threshold (overlay):"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="0" Grid.Column="1" Minimum="0.1"
-                                            Maximum="1.0"
-                                            Value="{Binding SpawnThresholdOverlay, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SpawnThresholdOverlay, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Donut Segments:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="10" Maximum="80"
+                                                    Value="{Binding DonutSegments, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding DonutSegments, StringFormat='{}{0:F0}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Spawn threshold (normal):"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1"
-                                            Maximum="1.0"
-                                            Value="{Binding SpawnThresholdNormal, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding SpawnThresholdNormal, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}"/>
-                                </Grid>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Donut Radius:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="1.0" Maximum="5.0"
+                                                    Value="{Binding DonutRadius, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding DonutRadius, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Tube Radius:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.3" Maximum="2.0"
+                                                    Value="{Binding DonutTubeRadius, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding DonutTubeRadius, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Donut Scale:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="3" Grid.Column="1" Minimum="0.5" Maximum="3.0"
+                                                    Value="{Binding DonutScale, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DonutScale, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Font Size:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="4" Grid.Column="1" Minimum="6" Maximum="24"
+                                                    Value="{Binding DonutFontSize, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding DonutFontSize, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="ASCII Donut Rotation" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Base Rotation Intensity:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="0.1" Maximum="1.0"
+                                                    Value="{Binding DonutBaseRotationIntensity, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding DonutBaseRotationIntensity, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Spectrum Intensity Scale:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0.5" Maximum="3.0"
+                                                    Value="{Binding DonutSpectrumIntensityScale, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding DonutSpectrumIntensityScale, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Rotation Speed X:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.001" Maximum="0.02"
+                                                    Value="{Binding DonutRotationSpeedX, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding DonutRotationSpeedX, StringFormat='{}{0:F4}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Rotation Speed Y:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="3" Grid.Column="1" Minimum="0.001" Maximum="0.02"
+                                                    Value="{Binding DonutRotationSpeedY, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DonutRotationSpeedY, StringFormat='{}{0:F4}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Rotation Speed Z:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="4" Grid.Column="1" Minimum="0.001" Maximum="0.02"
+                                                    Value="{Binding DonutRotationSpeedZ, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding DonutRotationSpeedZ, StringFormat='{}{0:F4}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Smoothing Factor Rotation:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="5" Grid.Column="1" Minimum="0.5" Maximum="0.99"
+                                                    Value="{Binding DonutSmoothingFactorRotation, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding DonutSmoothingFactorRotation, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="ASCII Donut Appearance" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Base Alpha Intensity:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="0.1" Maximum="1.0"
+                                                    Value="{Binding DonutBaseAlphaIntensity, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding DonutBaseAlphaIntensity, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Max Spectrum Alpha Scale:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1" Maximum="1.0"
+                                                    Value="{Binding DonutMaxSpectrumAlphaScale, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding DonutMaxSpectrumAlphaScale, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimum Alpha Value:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.0" Maximum="0.5"
+                                                    Value="{Binding DonutMinAlphaValue, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding DonutMinAlphaValue, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Alpha Range:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="3" Grid.Column="1" Minimum="0.2" Maximum="1.0"
+                                                    Value="{Binding DonutAlphaRange, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DonutAlphaRange, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Depth Offset:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="4" Grid.Column="1" Minimum="3.0" Maximum="15.0"
+                                                    Value="{Binding DonutDepthOffset, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding DonutDepthOffset, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Depth Scale Factor:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="5" Grid.Column="1" Minimum="0.5" Maximum="2.5"
+                                                    Value="{Binding DonutDepthScaleFactor, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding DonutDepthScaleFactor, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="6" Grid.Column="0" Text="ASCII Characters:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <TextBox Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2"
+                                                     Text="{Binding DonutAsciiChars, Mode=TwoWay}"
+                                                     Margin="8,4"
+                                                     VerticalAlignment="Center"
+                                                     Height="28"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="ASCII Donut Quality" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Low Quality Skip Factor:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="0" Maximum="5"
+                                                    Value="{Binding DonutLowQualitySkipFactor, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding DonutLowQualitySkipFactor, StringFormat='{}{0:F0}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Medium Quality Skip Factor:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="3"
+                                                    Value="{Binding DonutMediumQualitySkipFactor, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding DonutMediumQualitySkipFactor, StringFormat='{}{0:F0}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="High Quality Skip Factor:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="1"
+                                                    Value="{Binding DonutHighQualitySkipFactor, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding DonutHighQualitySkipFactor, StringFormat='{}{0:F0}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Smoothing Factor Spectrum:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="3" Grid.Column="1" Minimum="0.05" Maximum="0.5"
+                                                    Value="{Binding DonutSmoothingFactorSpectrum, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DonutSmoothingFactorSpectrum, StringFormat='{}{0:F2}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+                                </StackPanel>
                             </GroupBox>
 
-                            <GroupBox Header="Speed parameters"
-                                      Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="255"/>
-                                        <ColumnDefinition/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
+                            <!-- Настройки рендера Raindrops -->
+                            <GroupBox Header="Raindrops Renderer Settings" Style="{StaticResource RendererGroupBoxStyle}">
+                                <StackPanel>
+                                    <GroupBox Header="Raindrops Settings" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
 
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Minimum speed:"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Column="1" Minimum="0.1"
-                                            Maximum="10.0"
-                                            Value="{Binding ParticleVelocityMin, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleVelocityMin, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Raindrops:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="100" Maximum="2000"
+                                                    Value="{Binding MaxRaindrops, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxRaindrops, StringFormat='{}{0:F0}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Maximum speed:"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1"
-                                            Maximum="10.0"
-                                            Value="{Binding ParticleVelocityMax, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ParticleVelocityMax, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Base Fall Speed:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="1" Maximum="30"
+                                                    Value="{Binding BaseFallSpeed, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding BaseFallSpeed, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
 
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Speed multiplier:"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Row="2" Grid.Column="1" Minimum="0.5"
-                                            Maximum="5.0"
-                                            Value="{Binding VelocityMultiplier, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding VelocityMultiplier, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                </Grid>
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Raindrop Size:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="1" Maximum="10"
+                                                    Value="{Binding RaindropSize, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding RaindropSize, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Splash Particle Size:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="3" Grid.Column="1" Minimum="1" Maximum="5"
+                                                    Value="{Binding SplashParticleSize, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding SplashParticleSize, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Splash Upward Force:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="4" Grid.Column="1" Minimum="1" Maximum="20"
+                                                    Value="{Binding SplashUpwardForce, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding SplashUpwardForce, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Speed Variation:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="5" Grid.Column="1" Minimum="0" Maximum="10"
+                                                    Value="{Binding SpeedVariation, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding SpeedVariation, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Intensity Speed Multiplier:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="6" Grid.Column="1" Minimum="1" Maximum="10"
+                                                    Value="{Binding IntensitySpeedMultiplier, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding IntensitySpeedMultiplier, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+
+                                    <GroupBox Header="Time Settings" Style="{StaticResource SettingsGroupBoxStyle}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="255"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Time Scale Factor:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="0" Grid.Column="1" Minimum="10" Maximum="120"
+                                                    Value="{Binding TimeScaleFactor, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding TimeScaleFactor, StringFormat='{}{0:F1}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Maximum Time Step:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="1" Grid.Column="1" Minimum="0.01" Maximum="0.5"
+                                                    Value="{Binding MaxTimeStep, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MaxTimeStep, StringFormat='{}{0:F3}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimum Time Step:"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                            <Slider Grid.Row="2" Grid.Column="1" Minimum="0.0001" Maximum="0.01"
+                                                    Value="{Binding MinTimeStep, Mode=TwoWay}"
+                                                    Style="{StaticResource AlignedSliderStyle}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding MinTimeStep, StringFormat='{}{0:F4}'}"
+                                                       Style="{StaticResource SettingsTextBlockStyle}"/>
+                                        </Grid>
+                                    </GroupBox>
+                                </StackPanel>
                             </GroupBox>
 
-                            <GroupBox Header="Size parameters"
-                                      Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="255"/>
-                                        <ColumnDefinition/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Particle size (overlay):"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Column="1" Minimum="1.0"
-                                            Maximum="5.0"
-                                            Value="{Binding ParticleSizeOverlay, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ParticleSizeOverlay, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Particle size (normal):"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="1.0"
-                                            Maximum="5.0"
-                                            Value="{Binding ParticleSizeNormal, Mode=TwoWay}"
-                                            Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ParticleSizeNormal, StringFormat='{}{0:F2}'}"
-                                               Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Depth of field" Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="255"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Z Depth:" Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="0" Grid.Column="1" Minimum="100" Maximum="1000"
-                                            Value="{Binding MaxZDepth, Mode=TwoWay}" Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxZDepth, StringFormat='{}{0:F2}'}" Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Minimum Z Depth:" Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="100" Maximum="1000"
-                        Value="{Binding MinZDepth, Mode=TwoWay}" Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MinZDepth, StringFormat='{}{0:F2}'}" Style="{StaticResource SettingsTextBlockStyle}"/>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Raindrops Settings" Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="255"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum Raindrops:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="0" Grid.Column="1" Minimum="100"
-                        Maximum="2000"
-                        Value="{Binding MaxRaindrops, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxRaindrops, StringFormat='{}{0:F0}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Base Fall Speed:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="1"
-                        Maximum="30"
-                        Value="{Binding BaseFallSpeed, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding BaseFallSpeed, StringFormat='{}{0:F1}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Raindrop Size:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="2" Grid.Column="1" Minimum="1"
-                        Maximum="10"
-                        Value="{Binding RaindropSize, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding RaindropSize, StringFormat='{}{0:F1}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Splash Particle Size:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="3" Grid.Column="1" Minimum="1"
-                        Maximum="5"
-                        Value="{Binding SplashParticleSize, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding SplashParticleSize, StringFormat='{}{0:F1}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Splash Upward Force:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="4" Grid.Column="1" Minimum="1"
-                        Maximum="20"
-                        Value="{Binding SplashUpwardForce, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding SplashUpwardForce, StringFormat='{}{0:F1}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Speed Variation:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="5" Grid.Column="1" Minimum="0"
-                        Maximum="10"
-                        Value="{Binding SpeedVariation, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding SpeedVariation, StringFormat='{}{0:F1}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Intensity Speed Multiplier:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="6" Grid.Column="1" Minimum="1"
-                        Maximum="10"
-                        Value="{Binding IntensitySpeedMultiplier, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding IntensitySpeedMultiplier, StringFormat='{}{0:F1}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Time Settings" Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="255"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Time Scale Factor:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="0" Grid.Column="1" Minimum="10"
-                        Maximum="120"
-                        Value="{Binding TimeScaleFactor, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding TimeScaleFactor, StringFormat='{}{0:F1}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Maximum Time Step:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="0.01"
-                        Maximum="0.5"
-                        Value="{Binding MaxTimeStep, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding MaxTimeStep, StringFormat='{}{0:F3}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimum Time Step:"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                    <Slider Grid.Row="2" Grid.Column="1" Minimum="0.0001"
-                        Maximum="0.01"
-                        Value="{Binding MinTimeStep, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding MinTimeStep, StringFormat='{}{0:F4}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}"/>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Additional settings"
-                  Style="{DynamicResource SettingsGroupBoxStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="250"/>
-                                        <ColumnDefinition/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Maximum particles:"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Column="1" Minimum="100"
-                        Maximum="5000"
-                        Value="{Binding MaxParticles, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding MaxParticles, StringFormat='{}{0:F0}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Transparency decay exponent:"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Row="1" Grid.Column="1" Minimum="0.1"
-                        Maximum="3.0"
-                        Value="{Binding AlphaDecayExponent, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding AlphaDecayExponent, StringFormat='{}{0:F2}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Spawn probability:"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Row="2" Grid.Column="1" Minimum="0.01"
-                        Maximum="1.0"
-                        Value="{Binding SpawnProbability, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding SpawnProbability, StringFormat='{}{0:F2}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Overlay offset multiplier:"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Row="3" Grid.Column="1" Minimum="0.1"
-                        Maximum="5.0"
-                        Value="{Binding OverlayOffsetMultiplier, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding OverlayOffsetMultiplier, StringFormat='{}{0:F2}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Overlay height multiplier:"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                    <Slider Grid.Row="4" Grid.Column="1" Minimum="0.1"
-                        Maximum="5.0"
-                        Value="{Binding OverlayHeightMultiplier, Mode=TwoWay}"
-                        Style="{StaticResource AlignedSliderStyle}" Height="15" Margin="8,0,8,0"/>
-                                    <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding OverlayHeightMultiplier, StringFormat='{}{0:F2}'}"
-                           Style="{StaticResource SettingsTextBlockStyle}" Margin="8,4,8,4"/>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Information"
-                  Style="{DynamicResource SettingsGroupBoxStyle}">
+                            <!-- Информационный раздел -->
+                            <GroupBox Header="Information" Style="{StaticResource SettingsGroupBoxStyle}">
                                 <StackPanel Margin="8,4">
                                     <TextBlock Text="Hints:"
-                           FontWeight="Bold"
-                           Margin="0,0,0,4"
-                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                               FontWeight="Bold"
+                                               Margin="0,0,0,4"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBlock Text="• For optimal performance, it is recommended to start by adjusting the basic settings"
-                           TextWrapping="Wrap"
-                           Margin="8,2"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                               TextWrapping="Wrap"
+                                               Margin="8,2"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
                                     <TextBlock Text="• Changing the maximum number of particles can greatly affect performance"
-                           TextWrapping="Wrap"
-                           Margin="8,2"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                               TextWrapping="Wrap"
+                                               Margin="8,2"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
                                     <TextBlock Text="• Use 'Reset' to return to the default settings"
-                           TextWrapping="Wrap"
-                           Margin="8,2"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                               TextWrapping="Wrap"
+                                               Margin="8,2"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
                                     <TextBlock Text="• Time Scale Factor affects how fast raindrops fall - higher values make them fall faster"
-                           TextWrapping="Wrap"
-                           Margin="8,2"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                               TextWrapping="Wrap"
+                                               Margin="8,2"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
                                     <TextBlock Text="• Base Fall Speed controls the default speed of raindrops"
-                           TextWrapping="Wrap"
-                           Margin="8,2"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                               TextWrapping="Wrap"
+                                               Margin="8,2"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="• Donut Segments affect rendering quality - higher values look better but use more CPU"
+                                               TextWrapping="Wrap"
+                                               Margin="8,2"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="• ASCII Characters define the symbols used for rendering the donut (from darkest to brightest)"
+                                               TextWrapping="Wrap"
+                                               Margin="8,2"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
                                 </StackPanel>
                             </GroupBox>
 
@@ -501,14 +758,13 @@
                                 Margin="8,0"
                                 Style="{StaticResource ModernButtonStyle}"
                                 Height="40"
-                                Width="120" />
-
+                                Width="120"/>
                         <Button Content="Apply"
                                 Click="OnApplyButton_Click"
                                 Margin="8,0"
                                 Style="{StaticResource ModernButtonStyle}"
                                 Height="40"
-                                Width="120" />
+                                Width="120"/>
                     </StackPanel>
                 </Grid>
             </Border>

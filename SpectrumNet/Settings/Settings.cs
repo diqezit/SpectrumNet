@@ -54,17 +54,49 @@ namespace SpectrumNet
         float UIAmplificationFactor { get; set; }
         bool IsDarkTheme { get; set; }
 
+        // Настройки для AsciiDonutRenderer
+        int DonutSegments { get; set; }
+        float DonutRadius { get; set; }
+        float DonutTubeRadius { get; set; }
+        float DonutScale { get; set; }
+        float DonutDepthOffset { get; set; }
+        float DonutDepthScaleFactor { get; set; }
+        float DonutCharOffsetX { get; set; }
+        float DonutCharOffsetY { get; set; }
+        float DonutFontSize { get; set; }
+        float DonutBaseRotationIntensity { get; set; }
+        float DonutSpectrumIntensityScale { get; set; }
+        float DonutSmoothingFactorSpectrum { get; set; }
+        float DonutSmoothingFactorRotation { get; set; }
+        float DonutMaxRotationAngleChange { get; set; }
+        float DonutRotationSpeedX { get; set; }
+        float DonutRotationSpeedY { get; set; }
+        float DonutRotationSpeedZ { get; set; }
+        float DonutBarCountScaleFactorDonutScale { get; set; }
+        float DonutBarCountScaleFactorAlpha { get; set; }
+        float DonutBaseAlphaIntensity { get; set; }
+        float DonutMaxSpectrumAlphaScale { get; set; }
+        float DonutMinAlphaValue { get; set; }
+        float DonutAlphaRange { get; set; }
+        float DonutRotationIntensityMin { get; set; }
+        float DonutRotationIntensityMax { get; set; }
+        float DonutRotationIntensitySmoothingFactor { get; set; }
+        int DonutLowQualitySkipFactor { get; set; }
+        int DonutMediumQualitySkipFactor { get; set; }
+        int DonutHighQualitySkipFactor { get; set; }
+        string DonutAsciiChars { get; set; }
+
         void ResetToDefaults();
         event PropertyChangedEventHandler? PropertyChanged;
     }
 
     public class DefaultSettings
     {
-        // Константы для файлов настроек
+        // Application settings constants
         public const string APP_FOLDER = "SpectrumNet";
         public const string SETTINGS_FILE = "settings.json";
 
-        // Существующие настройки рендереров
+        // Particle renderer settings
         public const int MaxParticles = 2500;
         public const float
             SpawnThresholdOverlay = 0.03f,
@@ -83,7 +115,7 @@ namespace SpectrumNet
             MaxZDepth = 1000f,
             MinZDepth = 100f;
 
-        // Настройки для RaindropsRenderer
+        // RaindropsRenderer settings
         public const int MaxRaindrops = 1000;
         public const float
             BaseFallSpeed = 12f,
@@ -96,7 +128,7 @@ namespace SpectrumNet
             MaxTimeStep = 0.1f,
             MinTimeStep = 0.001f;
 
-        // UI настройки по умолчанию
+        // UI default settings
         public const double
             WindowLeft = 100,
             WindowTop = 100,
@@ -113,20 +145,66 @@ namespace SpectrumNet
         public static readonly SpectrumScale SelectedScaleType = SpectrumScale.Linear;
         public static readonly RenderQuality SelectedRenderQuality = RenderQuality.Medium;
 
-
-        // Параметры настроек отображения полос UI
+        // UI bar display settings
         public const int UIBarCount = 60;
 
-
-        // Название палитры по умолчанию
+        // Default palette
         public const string SelectedPalette = "Solid";
 
-
-        // Параметры усиления UI
+        // UI amplification settings
         public const float
             UIMinDbLevel = -130f,
             UIMaxDbLevel = -20f,
             UIAmplificationFactor = 2.0f;
+
+        // AsciiDonutRenderer settings
+        public static class DonutRenderer
+        {
+            // Donut geometry
+            public const int Segments = 40;
+            public const float DonutRadius = 2.2f;
+            public const float TubeRadius = 0.9f;
+            public const float DonutScale = 1.9f;
+
+            // Rendering parameters
+            public const float DepthOffset = 7.5f;
+            public const float DepthScaleFactor = 1.3f;
+            public const float CharOffsetX = 3.8f;
+            public const float CharOffsetY = 3.8f;
+            public const float FontSize = 12f;
+
+            // Rotation and animation
+            public const float BaseRotationIntensity = 0.45f;
+            public const float SpectrumIntensityScale = 1.3f;
+            public const float SmoothingFactorSpectrum = 0.25f;
+            public const float SmoothingFactorRotation = 0.88f;
+            public const float MaxRotationAngleChange = 0.0025f;
+            public const float RotationSpeedX = 0.011f / 4f;
+            public const float RotationSpeedY = 0.019f / 4f;
+            public const float RotationSpeedZ = 0.014f / 4f;
+
+            // Scaling and alpha
+            public const float BarCountScaleFactorDonutScale = 0.12f;
+            public const float BarCountScaleFactorAlpha = 0.22f;
+            public const float BaseAlphaIntensity = 0.55f;
+            public const float MaxSpectrumAlphaScale = 0.45f;
+            public const float MinAlphaValue = 0.22f;
+            public const float AlphaRange = 0.65f;
+
+            // Rotation intensity limits
+            public const float RotationIntensityMin = 0.1f;
+            public const float RotationIntensityMax = 2.0f;
+            public const float RotationIntensitySmoothingFactor = 0.1f;
+
+            // Quality settings
+            public const int LowQualitySkipFactor = 2;
+            public const int MediumQualitySkipFactor = 1;
+            public const int HighQualitySkipFactor = 0;
+
+            // ASCII characters
+            public static readonly string AsciiChars = " .:=*#%@█▓";
+            public static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.6f, 0.6f, -1.0f));
+        }
     }
 
     public class Settings : ISettings, INotifyPropertyChanged
@@ -146,6 +224,42 @@ namespace SpectrumNet
             _spawnProbability,
             _overlayOffsetMultiplier, _overlayHeightMultiplier,
             _maxZDepth, _minZDepth;
+
+        #region Поля для AsciiDonutRenderer
+        private int
+            _donutSegments,
+            _donutLowQualitySkipFactor,
+            _donutMediumQualitySkipFactor,
+            _donutHighQualitySkipFactor;
+        private float
+            _donutRadius,
+            _donutTubeRadius,
+            _donutScale,
+            _donutDepthOffset,
+            _donutDepthScaleFactor,
+            _donutCharOffsetX,
+            _donutCharOffsetY,
+            _donutFontSize,
+            _donutBaseRotationIntensity,
+            _donutSpectrumIntensityScale,
+            _donutSmoothingFactorSpectrum,
+            _donutSmoothingFactorRotation,
+            _donutMaxRotationAngleChange,
+            _donutRotationSpeedX,
+            _donutRotationSpeedY,
+            _donutRotationSpeedZ,
+            _donutBarCountScaleFactorDonutScale,
+            _donutBarCountScaleFactorAlpha,
+            _donutBaseAlphaIntensity,
+            _donutMaxSpectrumAlphaScale,
+            _donutMinAlphaValue,
+            _donutAlphaRange,
+            _donutRotationIntensityMin,
+            _donutRotationIntensityMax,
+            _donutRotationIntensitySmoothingFactor;
+        private string
+            _donutAsciiChars;
+        #endregion
 
         // Поля для RaindropsRenderer
         private int _maxRaindrops;
@@ -370,6 +484,188 @@ namespace SpectrumNet
         }
         #endregion
 
+        #region Свойства для AsciiDonutRenderer
+        public int DonutSegments
+        {
+            get => _donutSegments;
+            set => SetProperty(ref _donutSegments, value);
+        }
+
+        public float DonutRadius
+        {
+            get => _donutRadius;
+            set => SetProperty(ref _donutRadius, value);
+        }
+
+        public float DonutTubeRadius
+        {
+            get => _donutTubeRadius;
+            set => SetProperty(ref _donutTubeRadius, value);
+        }
+
+        public float DonutScale
+        {
+            get => _donutScale;
+            set => SetProperty(ref _donutScale, value);
+        }
+
+        public float DonutDepthOffset
+        {
+            get => _donutDepthOffset;
+            set => SetProperty(ref _donutDepthOffset, value);
+        }
+
+        public float DonutDepthScaleFactor
+        {
+            get => _donutDepthScaleFactor;
+            set => SetProperty(ref _donutDepthScaleFactor, value);
+        }
+
+        public float DonutCharOffsetX
+        {
+            get => _donutCharOffsetX;
+            set => SetProperty(ref _donutCharOffsetX, value);
+        }
+
+        public float DonutCharOffsetY
+        {
+            get => _donutCharOffsetY;
+            set => SetProperty(ref _donutCharOffsetY, value);
+        }
+
+        public float DonutFontSize
+        {
+            get => _donutFontSize;
+            set => SetProperty(ref _donutFontSize, value);
+        }
+
+        public float DonutBaseRotationIntensity
+        {
+            get => _donutBaseRotationIntensity;
+            set => SetProperty(ref _donutBaseRotationIntensity, value);
+        }
+
+        public float DonutSpectrumIntensityScale
+        {
+            get => _donutSpectrumIntensityScale;
+            set => SetProperty(ref _donutSpectrumIntensityScale, value);
+        }
+
+        public float DonutSmoothingFactorSpectrum
+        {
+            get => _donutSmoothingFactorSpectrum;
+            set => SetProperty(ref _donutSmoothingFactorSpectrum, value);
+        }
+
+        public float DonutSmoothingFactorRotation
+        {
+            get => _donutSmoothingFactorRotation;
+            set => SetProperty(ref _donutSmoothingFactorRotation, value);
+        }
+
+        public float DonutMaxRotationAngleChange
+        {
+            get => _donutMaxRotationAngleChange;
+            set => SetProperty(ref _donutMaxRotationAngleChange, value);
+        }
+
+        public float DonutRotationSpeedX
+        {
+            get => _donutRotationSpeedX;
+            set => SetProperty(ref _donutRotationSpeedX, value);
+        }
+
+        public float DonutRotationSpeedY
+        {
+            get => _donutRotationSpeedY;
+            set => SetProperty(ref _donutRotationSpeedY, value);
+        }
+
+        public float DonutRotationSpeedZ
+        {
+            get => _donutRotationSpeedZ;
+            set => SetProperty(ref _donutRotationSpeedZ, value);
+        }
+
+        public float DonutBarCountScaleFactorDonutScale
+        {
+            get => _donutBarCountScaleFactorDonutScale;
+            set => SetProperty(ref _donutBarCountScaleFactorDonutScale, value);
+        }
+
+        public float DonutBarCountScaleFactorAlpha
+        {
+            get => _donutBarCountScaleFactorAlpha;
+            set => SetProperty(ref _donutBarCountScaleFactorAlpha, value);
+        }
+
+        public float DonutBaseAlphaIntensity
+        {
+            get => _donutBaseAlphaIntensity;
+            set => SetProperty(ref _donutBaseAlphaIntensity, value);
+        }
+
+        public float DonutMaxSpectrumAlphaScale
+        {
+            get => _donutMaxSpectrumAlphaScale;
+            set => SetProperty(ref _donutMaxSpectrumAlphaScale, value);
+        }
+
+        public float DonutMinAlphaValue
+        {
+            get => _donutMinAlphaValue;
+            set => SetProperty(ref _donutMinAlphaValue, value);
+        }
+
+        public float DonutAlphaRange
+        {
+            get => _donutAlphaRange;
+            set => SetProperty(ref _donutAlphaRange, value);
+        }
+
+        public float DonutRotationIntensityMin
+        {
+            get => _donutRotationIntensityMin;
+            set => SetProperty(ref _donutRotationIntensityMin, value);
+        }
+
+        public float DonutRotationIntensityMax
+        {
+            get => _donutRotationIntensityMax;
+            set => SetProperty(ref _donutRotationIntensityMax, value);
+        }
+
+        public float DonutRotationIntensitySmoothingFactor
+        {
+            get => _donutRotationIntensitySmoothingFactor;
+            set => SetProperty(ref _donutRotationIntensitySmoothingFactor, value);
+        }
+
+        public int DonutLowQualitySkipFactor
+        {
+            get => _donutLowQualitySkipFactor;
+            set => SetProperty(ref _donutLowQualitySkipFactor, value);
+        }
+
+        public int DonutMediumQualitySkipFactor
+        {
+            get => _donutMediumQualitySkipFactor;
+            set => SetProperty(ref _donutMediumQualitySkipFactor, value);
+        }
+
+        public int DonutHighQualitySkipFactor
+        {
+            get => _donutHighQualitySkipFactor;
+            set => SetProperty(ref _donutHighQualitySkipFactor, value);
+        }
+
+        public string DonutAsciiChars
+        {
+            get => _donutAsciiChars;
+            set => SetProperty(ref _donutAsciiChars, value);
+        }
+        #endregion
+
         #region Свойства для UI настроек
         public double WindowLeft
         {
@@ -487,7 +783,7 @@ namespace SpectrumNet
         /// </summary>
         public void ResetToDefaults()
         {
-            // Существующие настройки рендереров
+            // Particle renderer settings
             MaxParticles = DefaultSettings.MaxParticles;
             SpawnThresholdOverlay = DefaultSettings.SpawnThresholdOverlay;
             SpawnThresholdNormal = DefaultSettings.SpawnThresholdNormal;
@@ -505,7 +801,7 @@ namespace SpectrumNet
             MaxZDepth = DefaultSettings.MaxZDepth;
             MinZDepth = DefaultSettings.MinZDepth;
 
-            // Настройки для RaindropsRenderer
+            // Raindrops renderer settings
             MaxRaindrops = DefaultSettings.MaxRaindrops;
             BaseFallSpeed = DefaultSettings.BaseFallSpeed;
             RaindropSize = DefaultSettings.RaindropSize;
@@ -517,7 +813,39 @@ namespace SpectrumNet
             MaxTimeStep = DefaultSettings.MaxTimeStep;
             MinTimeStep = DefaultSettings.MinTimeStep;
 
-            // UI настройки по умолчанию
+            // ASCII Donut renderer settings
+            DonutSegments = DefaultSettings.DonutRenderer.Segments;
+            DonutRadius = DefaultSettings.DonutRenderer.DonutRadius;
+            DonutTubeRadius = DefaultSettings.DonutRenderer.TubeRadius;
+            DonutScale = DefaultSettings.DonutRenderer.DonutScale;
+            DonutDepthOffset = DefaultSettings.DonutRenderer.DepthOffset;
+            DonutDepthScaleFactor = DefaultSettings.DonutRenderer.DepthScaleFactor;
+            DonutCharOffsetX = DefaultSettings.DonutRenderer.CharOffsetX;
+            DonutCharOffsetY = DefaultSettings.DonutRenderer.CharOffsetY;
+            DonutFontSize = DefaultSettings.DonutRenderer.FontSize;
+            DonutBaseRotationIntensity = DefaultSettings.DonutRenderer.BaseRotationIntensity;
+            DonutSpectrumIntensityScale = DefaultSettings.DonutRenderer.SpectrumIntensityScale;
+            DonutSmoothingFactorSpectrum = DefaultSettings.DonutRenderer.SmoothingFactorSpectrum;
+            DonutSmoothingFactorRotation = DefaultSettings.DonutRenderer.SmoothingFactorRotation;
+            DonutMaxRotationAngleChange = DefaultSettings.DonutRenderer.MaxRotationAngleChange;
+            DonutRotationSpeedX = DefaultSettings.DonutRenderer.RotationSpeedX;
+            DonutRotationSpeedY = DefaultSettings.DonutRenderer.RotationSpeedY;
+            DonutRotationSpeedZ = DefaultSettings.DonutRenderer.RotationSpeedZ;
+            DonutBarCountScaleFactorDonutScale = DefaultSettings.DonutRenderer.BarCountScaleFactorDonutScale;
+            DonutBarCountScaleFactorAlpha = DefaultSettings.DonutRenderer.BarCountScaleFactorAlpha;
+            DonutBaseAlphaIntensity = DefaultSettings.DonutRenderer.BaseAlphaIntensity;
+            DonutMaxSpectrumAlphaScale = DefaultSettings.DonutRenderer.MaxSpectrumAlphaScale;
+            DonutMinAlphaValue = DefaultSettings.DonutRenderer.MinAlphaValue;
+            DonutAlphaRange = DefaultSettings.DonutRenderer.AlphaRange;
+            DonutRotationIntensityMin = DefaultSettings.DonutRenderer.RotationIntensityMin;
+            DonutRotationIntensityMax = DefaultSettings.DonutRenderer.RotationIntensityMax;
+            DonutRotationIntensitySmoothingFactor = DefaultSettings.DonutRenderer.RotationIntensitySmoothingFactor;
+            DonutLowQualitySkipFactor = DefaultSettings.DonutRenderer.LowQualitySkipFactor;
+            DonutMediumQualitySkipFactor = DefaultSettings.DonutRenderer.MediumQualitySkipFactor;
+            DonutHighQualitySkipFactor = DefaultSettings.DonutRenderer.HighQualitySkipFactor;
+            DonutAsciiChars = DefaultSettings.DonutRenderer.AsciiChars;
+
+            // UI settings
             WindowLeft = DefaultSettings.WindowLeft;
             WindowTop = DefaultSettings.WindowTop;
             WindowWidth = DefaultSettings.WindowWidth;
@@ -535,6 +863,7 @@ namespace SpectrumNet
             UIMinDbLevel = DefaultSettings.UIMinDbLevel;
             UIMaxDbLevel = DefaultSettings.UIMaxDbLevel;
             UIAmplificationFactor = DefaultSettings.UIAmplificationFactor;
+            IsDarkTheme = DefaultSettings.IsDarkTheme;
 
             SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
         }
