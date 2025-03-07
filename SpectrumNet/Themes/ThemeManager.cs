@@ -119,6 +119,11 @@ namespace SpectrumNet
             }
         }
 
+        public void SetTheme(bool isDarkTheme)
+        {
+            IsDarkTheme = isDarkTheme;
+        }
+
         /// <summary>
         /// Unregisters a window from the ThemeManager.
         /// </summary>

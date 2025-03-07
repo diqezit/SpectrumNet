@@ -282,7 +282,7 @@ namespace SpectrumNet
 
         public float MinDbLevel
         {
-            get => _gainParameters?.MinDbValue ?? SharedConstants.DefaultMinDb;
+            get => _gainParameters!.MinDbValue;
             set
             {
                 if (_gainParameters == null) return;
@@ -301,7 +301,7 @@ namespace SpectrumNet
 
         public float MaxDbLevel
         {
-            get => _gainParameters?.MaxDbValue ?? SharedConstants.DefaultMaxDb;
+            get => _gainParameters!.MaxDbValue;
             set
             {
                 if (_gainParameters == null) return;
@@ -320,7 +320,7 @@ namespace SpectrumNet
 
         public float AmplificationFactor
         {
-            get => _gainParameters?.AmplificationFactor ?? SharedConstants.DefaultAmplificationFactor;
+            get => _gainParameters!.AmplificationFactor;
             set
             {
                 if (_gainParameters == null) return;
@@ -453,7 +453,10 @@ namespace SpectrumNet
                 _themePropertyChangedHandler = (_, e) =>
                 {
                     if (e?.PropertyName == nameof(ThemeManager.IsDarkTheme))
+                    {
                         OnPropertyChanged(nameof(IsDarkTheme));
+                        Settings.Instance.IsDarkTheme = tm.IsDarkTheme;
+                    }
                 };
                 tm.PropertyChanged += _themePropertyChangedHandler;
             }
@@ -496,6 +499,7 @@ namespace SpectrumNet
                 ScaleType = Settings.Instance.SelectedScaleType;
                 RenderQuality = Settings.Instance.SelectedRenderQuality;
                 SelectedStyle = Settings.Instance.SelectedPalette;
+                ThemeManager.Instance?.SetTheme(Settings.Instance.IsDarkTheme);
             }
             catch (Exception ex)
             {

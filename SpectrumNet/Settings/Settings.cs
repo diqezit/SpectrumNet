@@ -52,6 +52,7 @@ namespace SpectrumNet
         float UIMinDbLevel { get; set; }
         float UIMaxDbLevel { get; set; }
         float UIAmplificationFactor { get; set; }
+        bool IsDarkTheme { get; set; }
 
         void ResetToDefaults();
         event PropertyChangedEventHandler? PropertyChanged;
@@ -65,52 +66,67 @@ namespace SpectrumNet
 
         // Существующие настройки рендереров
         public const int MaxParticles = 2500;
-        public const float SpawnThresholdOverlay = 0.03f;
-        public const float SpawnThresholdNormal = 0.08f;
-        public const float ParticleVelocityMin = 0.5f;
-        public const float ParticleVelocityMax = 2.0f;
-        public const float ParticleSizeOverlay = 2.5f;
-        public const float ParticleSizeNormal = 2.0f;
-        public const float ParticleLife = 3.0f;
-        public const float ParticleLifeDecay = 0.01f;
-        public const float VelocityMultiplier = 0.8f;
-        public const float AlphaDecayExponent = 1.3f;
-        public const float SpawnProbability = 0.08f;
-        public const float OverlayOffsetMultiplier = 1.0f;
-        public const float OverlayHeightMultiplier = 0.7f;
-        public const float MaxZDepth = 1000f;
-        public const float MinZDepth = 100f;
+        public const float
+            SpawnThresholdOverlay = 0.03f,
+            SpawnThresholdNormal = 0.08f,
+            ParticleVelocityMin = 0.5f,
+            ParticleVelocityMax = 2.0f,
+            ParticleSizeOverlay = 2.5f,
+            ParticleSizeNormal = 2.0f,
+            ParticleLife = 3.0f,
+            ParticleLifeDecay = 0.01f,
+            VelocityMultiplier = 0.8f,
+            AlphaDecayExponent = 1.3f,
+            SpawnProbability = 0.08f,
+            OverlayOffsetMultiplier = 1.0f,
+            OverlayHeightMultiplier = 0.7f,
+            MaxZDepth = 1000f,
+            MinZDepth = 100f;
 
         // Настройки для RaindropsRenderer
         public const int MaxRaindrops = 1000;
-        public const float BaseFallSpeed = 12f;
-        public const float RaindropSize = 3f;
-        public const float SplashParticleSize = 2f;
-        public const float SplashUpwardForce = 8f;
-        public const float SpeedVariation = 3f;
-        public const float IntensitySpeedMultiplier = 4f;
-        public const float TimeScaleFactor = 60.0f;
-        public const float MaxTimeStep = 0.1f;
-        public const float MinTimeStep = 0.001f;
+        public const float
+            BaseFallSpeed = 12f,
+            RaindropSize = 3f,
+            SplashParticleSize = 2f,
+            SplashUpwardForce = 8f,
+            SpeedVariation = 3f,
+            IntensitySpeedMultiplier = 4f,
+            TimeScaleFactor = 60.0f,
+            MaxTimeStep = 0.1f,
+            MinTimeStep = 0.001f;
 
         // UI настройки по умолчанию
-        public const double WindowLeft = 100;
-        public const double WindowTop = 100;
-        public const double WindowWidth = 800;
-        public const double WindowHeight = 600;
+        public const double
+            WindowLeft = 100,
+            WindowTop = 100,
+            WindowWidth = 800,
+            WindowHeight = 600,
+            UIBarSpacing = 4;
         public static readonly WindowState WindowState = WindowState.Normal;
-        public const bool IsControlPanelVisible = true;
+        public const bool
+            IsControlPanelVisible = true,
+            IsOverlayTopmost = true,
+            IsDarkTheme = true;
         public static readonly RenderStyle SelectedRenderStyle = RenderStyle.Bars;
         public static readonly FftWindowType SelectedFftWindowType = FftWindowType.Hann;
         public static readonly SpectrumScale SelectedScaleType = SpectrumScale.Linear;
         public static readonly RenderQuality SelectedRenderQuality = RenderQuality.Medium;
+
+
+        // Параметры настроек отображения полос UI
         public const int UIBarCount = 60;
-        public const double UIBarSpacing = 4;
+
+
+        // Название палитры по умолчанию
         public const string SelectedPalette = "Solid";
-        public const bool IsOverlayTopmost = true;
-        public const float UIMinDbLevel = -60f;
-        public const float UIMaxDbLevel = 0f;
-        public const float UIAmplificationFactor = 1.0f;
+
+
+        // Параметры усиления UI
+        public const float
+            UIMinDbLevel = -130f,
+            UIMaxDbLevel = -20f,
+            UIAmplificationFactor = 2.0f;
     }
 
     public class Settings : ISettings, INotifyPropertyChanged
@@ -121,53 +137,43 @@ namespace SpectrumNet
 
         #region Поля для рендереров
         private int _maxParticles;
-        private float _spawnThresholdOverlay;
-        private float _spawnThresholdNormal;
-        private float _particleVelocityMin;
-        private float _particleVelocityMax;
-        private float _particleSizeOverlay;
-        private float _particleSizeNormal;
-        private float _particleLife;
-        private float _particleLifeDecay;
-        private float _velocityMultiplier;
-        private float _alphaDecayExponent;
-        private float _spawnProbability;
-        private float _overlayOffsetMultiplier;
-        private float _overlayHeightMultiplier;
-        private float _maxZDepth;
-        private float _minZDepth;
+        private float
+            _spawnThresholdOverlay, _spawnThresholdNormal,
+            _particleVelocityMin, _particleVelocityMax,
+            _particleSizeOverlay, _particleSizeNormal,
+            _particleLife, _particleLifeDecay,
+            _velocityMultiplier, _alphaDecayExponent,
+            _spawnProbability,
+            _overlayOffsetMultiplier, _overlayHeightMultiplier,
+            _maxZDepth, _minZDepth;
 
         // Поля для RaindropsRenderer
         private int _maxRaindrops;
-        private float _baseFallSpeed;
-        private float _raindropSize;
-        private float _splashParticleSize;
-        private float _splashUpwardForce;
-        private float _speedVariation;
-        private float _intensitySpeedMultiplier;
-        private float _timeScaleFactor;
-        private float _maxTimeStep;
-        private float _minTimeStep;
+        private float
+            _baseFallSpeed,
+            _raindropSize,
+            _splashParticleSize,
+            _splashUpwardForce,
+            _speedVariation,
+            _intensitySpeedMultiplier,
+            _timeScaleFactor,
+            _maxTimeStep, _minTimeStep;
 
         // Поля для UI настроек
-        private double _windowLeft;
-        private double _windowTop;
-        private double _windowWidth;
-        private double _windowHeight;
+        private double
+            _windowLeft, _windowTop, _windowWidth, _windowHeight,
+            _uiBarSpacing;
         private WindowState _windowState;
-        private bool _isControlPanelVisible;
+        private bool
+            _isControlPanelVisible, _isOverlayTopmost, _isDarkTheme;
         private int _uiBarCount;
-        private double _uiBarSpacing;
         private RenderStyle _selectedRenderStyle = DefaultSettings.SelectedRenderStyle;
         private FftWindowType _selectedFftWindowType = DefaultSettings.SelectedFftWindowType;
         private SpectrumScale _selectedScaleType = DefaultSettings.SelectedScaleType;
         private RenderQuality _selectedRenderQuality = DefaultSettings.SelectedRenderQuality;
-        private bool _isOverlayTopmost;
-        private float _uiMinDbLevel;
-        private float _uiMaxDbLevel;
-        private float _uiAmplificationFactor;
+        private float
+            _uiMinDbLevel, _uiMaxDbLevel, _uiAmplificationFactor;
         private string _selectedPalette = DefaultSettings.SelectedPalette;
-
 
         [JsonIgnore]
         private PropertyChangedEventHandler? _propertyChanged;
@@ -466,6 +472,13 @@ namespace SpectrumNet
             get => _uiAmplificationFactor;
             set => SetProperty(ref _uiAmplificationFactor, value);
         }
+
+        public bool IsDarkTheme
+        {
+            get => _isDarkTheme;
+            set => SetProperty(ref _isDarkTheme, value);
+        }
+
         #endregion
 
         #region Базовые методы
