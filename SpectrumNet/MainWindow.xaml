@@ -10,8 +10,8 @@
         MinHeight="600"
         MinWidth="800"
         WindowStartupLocation="CenterScreen"
-        Background="Transparent" 
-        AllowsTransparency="True" 
+        Background="Transparent"
+        AllowsTransparency="True"
         WindowStyle="None"
         ResizeMode="CanResize"
         StateChanged="OnStateChanged"
@@ -19,33 +19,32 @@
 
     <!-- Ресурсы окна -->
     <Window.Resources>
-        <!-- Длительность и easing для анимаций -->
         <Duration x:Key="StandardAnimationDuration">0:0:0.3</Duration>
         <CubicEase x:Key="StandardEaseOut" EasingMode="EaseOut"/>
 
-        <!-- Анимация для показа панели -->
         <Storyboard x:Key="ShowPanelAnimation">
             <ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility">
-                <DiscreteObjectKeyFrame KeyTime="0:0:0" Value="{x:Static Visibility.Visible}"/>
+                <DiscreteObjectKeyFrame KeyTime="0:0:0" 
+                                        Value="{x:Static Visibility.Visible}"/>
             </ObjectAnimationUsingKeyFrames>
             <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                             From="0" To="1"
+                             From="0"
+                             To="1"
                              Duration="{StaticResource StandardAnimationDuration}"
                              EasingFunction="{StaticResource StandardEaseOut}"/>
         </Storyboard>
 
-        <!-- Анимация для скрытия панели -->
         <Storyboard x:Key="HidePanelAnimation">
             <DoubleAnimation Storyboard.TargetProperty="Opacity"
                              To="0"
                              Duration="{StaticResource StandardAnimationDuration}"
                              EasingFunction="{StaticResource StandardEaseOut}"/>
             <ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility">
-                <DiscreteObjectKeyFrame KeyTime="0:0:0.3" Value="{x:Static Visibility.Collapsed}"/>
+                <DiscreteObjectKeyFrame KeyTime="0:0:0.3" 
+                                        Value="{x:Static Visibility.Collapsed}"/>
             </ObjectAnimationUsingKeyFrames>
         </Storyboard>
 
-        <!-- Анимация для поворота иконки при показе панели -->
         <Storyboard x:Key="ShowPanelAndButtonAnimation">
             <DoubleAnimation Storyboard.TargetProperty="(Path.RenderTransform).(RotateTransform.Angle)"
                              To="0"
@@ -53,13 +52,16 @@
                              EasingFunction="{StaticResource StandardEaseOut}"/>
         </Storyboard>
 
-        <!-- Анимация для поворота иконки при скрытии панели -->
         <Storyboard x:Key="HidePanelAndButtonAnimation">
             <DoubleAnimation Storyboard.TargetProperty="(Path.RenderTransform).(RotateTransform.Angle)"
                              To="180"
                              Duration="{StaticResource StandardAnimationDuration}"
                              EasingFunction="{StaticResource StandardEaseOut}"/>
         </Storyboard>
+
+        <!-- Добавляем неявные стили для ScrollBar и Thumb -->
+        <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
+        <Style TargetType="Thumb" BasedOn="{StaticResource ScrollBarThumbStyle}"/>
     </Window.Resources>
 
     <!-- Настройки WindowChrome -->
@@ -71,11 +73,10 @@
     </shell:WindowChrome.WindowChrome>
 
     <!-- Основной контейнер окна -->
-    <Border BorderThickness="1"
+    <Border Background="{DynamicResource WindowBackgroundBrush}"
             BorderBrush="{DynamicResource WindowBorderBrush}"
-            CornerRadius="12"
-            Background="{DynamicResource WindowBackgroundBrush}">
-
+            BorderThickness="1"
+            CornerRadius="12">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -85,40 +86,43 @@
             <!-- Заголовок окна -->
             <Border Grid.Row="0"
                     Style="{DynamicResource TitleBarBorderStyle}"
-                    MouseLeftButtonDown="OnWindowDrag"
                     Height="50"
-                    CornerRadius="12,12,0,0">
+                    CornerRadius="12,12,0,0"
+                    MouseLeftButtonDown="OnWindowDrag">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
+                        <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="Spectrum Analyser"
+
+                    <TextBlock Grid.Column="0"
+                               Text="Spectrum Analyser"
+                               Margin="24,0,0,0"
                                FontSize="20"
                                FontWeight="Bold"
                                Foreground="White"
-                               VerticalAlignment="Center"
-                               Margin="24,0,0,0"/>
+                               VerticalAlignment="Center"/>
+
                     <StackPanel Grid.Column="1"
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Right"
                                 Margin="0,0,12,0">
                         <ToggleButton x:Name="ThemeToggleButton"
-                                      Checked="OnThemeToggleButtonChanged"
-                                      Unchecked="OnThemeToggleButtonChanged"
                                       Style="{DynamicResource ToggleSwitchStyle}"
                                       Width="100"
-                                      Margin="0,0,20,0"/>
+                                      Margin="0,0,20,0"
+                                      Checked="OnThemeToggleButtonChanged"
+                                      Unchecked="OnThemeToggleButtonChanged"/>
                         <Button x:Name="MinimizeButton"
-                                Click="OnButtonClick"
-                                Style="{DynamicResource WindowControlButtonStyle}">
+                                Style="{DynamicResource WindowControlButtonStyle}"
+                                Click="OnButtonClick">
                             <Path Data="M0,10 H20"
                                   Stroke="White"
                                   StrokeThickness="2"/>
                         </Button>
                         <Button x:Name="MaximizeButton"
-                                Click="OnButtonClick"
-                                Style="{DynamicResource WindowControlButtonStyle}">
+                                Style="{DynamicResource WindowControlButtonStyle}"
+                                Click="OnButtonClick">
                             <Path x:Name="MaximizeIcon"
                                   Data="M2,2 H18 V18 H2 Z"
                                   Stroke="White"
@@ -126,8 +130,8 @@
                                   Fill="Transparent"/>
                         </Button>
                         <Button x:Name="CloseButton"
-                                Click="OnButtonClick"
-                                Style="{DynamicResource WindowCloseButtonStyle}">
+                                Style="{DynamicResource WindowCloseButtonStyle}"
+                                Click="OnButtonClick">
                             <Path Data="M4,4 L16,16 M16,4 L4,16"
                                   Stroke="White"
                                   StrokeThickness="2"/>
@@ -146,101 +150,99 @@
                 <!-- Контейнер спектра -->
                 <Border Grid.Row="0"
                         x:Name="SpectrumContainer"
-                        CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
+                        CornerRadius="16"
                         Margin="0,0,0,10">
                     <sk:SKElement x:Name="spectrumCanvas"
-                                 PaintSurface="OnPaintSurface"
-                                 Margin="16"
-                                 Opacity="1"/>
+                                  Margin="16"
+                                  Opacity="1"
+                                  PaintSurface="OnPaintSurface"/>
                 </Border>
 
                 <!-- Разделитель с кнопкой переключения -->
                 <Border x:Name="ToggleButtonContainer"
-        Height="24" 
-        VerticalAlignment="Bottom"
-        Margin="0,0,0,-12"
-        Background="Transparent"
-        Cursor="Hand"
-        MouseDown="ToggleButtonContainer_MouseDown"
-        Panel.ZIndex="10">
+                        Grid.Row="0"
+                        Height="24"
+                        Margin="0,0,0,-12"
+                        VerticalAlignment="Bottom"
+                        Background="Transparent"
+                        Cursor="Hand"
+                        Panel.ZIndex="10"
+                        MouseDown="ToggleButtonContainer_MouseDown">
                     <Border.Effect>
-                        <DropShadowEffect ShadowDepth="1" BlurRadius="3" Opacity="0.2" />
+                        <DropShadowEffect ShadowDepth="1"
+                                          BlurRadius="3"
+                                          Opacity="0.2"/>
                     </Border.Effect>
                     <Grid>
-                        <!-- Фоновая подсветка при наведении -->
-                        <Border x:Name="HoverIndicator" 
-                CornerRadius="8"
-                Height="16"
-                Background="{DynamicResource AccentBrush}"
-                Opacity="0"
-                HorizontalAlignment="Stretch"
-                Margin="0,0,0,0">
+                        <Border x:Name="HoverIndicator"
+                                CornerRadius="8"
+                                Height="16"
+                                Margin="0,0,0,0"
+                                Background="{DynamicResource AccentBrush}"
+                                Opacity="0"
+                                HorizontalAlignment="Stretch">
                             <Border.Triggers>
                                 <EventTrigger RoutedEvent="Border.MouseEnter">
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation 
-                                Storyboard.TargetProperty="Opacity"
-                                To="0.1"
-                                Duration="0:0:0.2" />
+                                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                             To="0.1"
+                                                             Duration="0:0:0.2"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </EventTrigger>
                                 <EventTrigger RoutedEvent="Border.MouseLeave">
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation 
-                                Storyboard.TargetProperty="Opacity"
-                                To="0"
-                                Duration="0:0:0.2" />
+                                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                             To="0"
+                                                             Duration="0:0:0.2"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </EventTrigger>
                             </Border.Triggers>
                         </Border>
 
-                        <!-- Линия-разделитель -->
-                        <Border Height="3" 
-                Background="{DynamicResource BorderBrush}" 
-                HorizontalAlignment="Stretch" 
-                VerticalAlignment="Center"
-                Opacity="0.5"
-                CornerRadius="1.5"
-                Margin="100,0,100,0"/>
+                        <Border Height="3"
+                                Margin="100,0,100,0"
+                                Background="{DynamicResource BorderBrush}"
+                                CornerRadius="1.5"
+                                Opacity="0.5"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Center"/>
 
-                        <!-- Центральная часть разделителя -->
                         <Border Width="200"
-                Height="3"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Background="{DynamicResource AccentBrush}"
-                Opacity="0.6"
-                CornerRadius="1.5"/>
+                                Height="3"
+                                Background="{DynamicResource AccentBrush}"
+                                CornerRadius="1.5"
+                                Opacity="0.6"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"/>
 
-                        <!-- Иконка переключения -->
-                        <Border Background="{DynamicResource SurfaceBrush}" 
-                CornerRadius="12" 
-                BorderBrush="{DynamicResource BorderBrush}" 
-                BorderThickness="1" 
-                Padding="4"
-                Width="48"
-                Height="24"
-                HorizontalAlignment="Center">
-                            <Path x:Name="ToggleButtonIcon" 
-                  Width="28" 
-                  Height="8" 
-                  Fill="{DynamicResource AccentBrush}"
-                  Data="M 0,0 L 14,8 L 28,0 Z" 
-                  HorizontalAlignment="Center" 
-                  VerticalAlignment="Center">
+                        <Border Background="{DynamicResource SurfaceBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="4"
+                                Width="48"
+                                Height="24"
+                                HorizontalAlignment="Center">
+                            <Path x:Name="ToggleButtonIcon"
+                                  Width="28"
+                                  Height="8"
+                                  Fill="{DynamicResource AccentBrush}"
+                                  Data="M 0,0 L 14,8 L 28,0 Z"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center">
                                 <Path.RenderTransform>
                                     <RotateTransform Angle="0" CenterX="14" CenterY="4"/>
                                 </Path.RenderTransform>
                                 <Path.Style>
                                     <Style TargetType="Path">
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsControlPanelVisible, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                            <DataTrigger Binding="{Binding IsControlPanelVisible, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                         Value="True">
                                                 <DataTrigger.EnterActions>
                                                     <BeginStoryboard Storyboard="{StaticResource ShowPanelAndButtonAnimation}"/>
                                                 </DataTrigger.EnterActions>
@@ -259,16 +261,17 @@
                 <!-- Панель управления -->
                 <Border x:Name="ControlPanel"
                         Grid.Row="1"
-                        CornerRadius="16"
                         Background="{DynamicResource SurfaceBrush}"
-                        Visibility="Visible"
+                        CornerRadius="16"
                         Margin="0,10,0,0"
                         Padding="15"
-                        Opacity="1">
+                        Opacity="1"
+                        Visibility="Visible">
                     <Border.Style>
                         <Style TargetType="Border">
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsControlPanelVisible, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                <DataTrigger Binding="{Binding IsControlPanelVisible, RelativeSource={RelativeSource AncestorType=Window}}"
+                                             Value="True">
                                     <DataTrigger.EnterActions>
                                         <BeginStoryboard Storyboard="{StaticResource ShowPanelAnimation}"/>
                                     </DataTrigger.EnterActions>
@@ -286,73 +289,63 @@
                         </Grid.RowDefinitions>
 
                         <!-- Кнопки управления -->
-                        <StackPanel Grid.Row="0" 
-                                    Orientation="Horizontal" 
-                                    HorizontalAlignment="Center" 
+                        <StackPanel Grid.Row="0"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Center"
                                     Margin="0,0,0,20">
                             <Button x:Name="StartCaptureButton"
-                                    Click="OnButtonClick"
-                                    IsEnabled="{Binding CanStartCapture}"
+                                    Style="{DynamicResource ModernButtonStyle}"
                                     Width="130"
                                     Height="40"
                                     Margin="0,0,10,0"
-                                    Style="{DynamicResource ModernButtonStyle}">
+                                    IsEnabled="{Binding CanStartCapture}"
+                                    Click="OnButtonClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="▶"
-                                               FontSize="16"
-                                               Margin="0,0,8,0"/>
+                                    <TextBlock Text="▶" FontSize="16" Margin="0,0,8,0"/>
                                     <TextBlock Text="Start"/>
                                 </StackPanel>
                             </Button>
                             <Button x:Name="StopCaptureButton"
-                                    Click="OnButtonClick"
-                                    IsEnabled="{Binding IsRecording}"
+                                    Style="{DynamicResource ModernButtonStyle}"
                                     Width="130"
                                     Height="40"
                                     Margin="0,0,10,0"
-                                    Style="{DynamicResource ModernButtonStyle}">
+                                    IsEnabled="{Binding IsRecording}"
+                                    Click="OnButtonClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="⏹"
-                                               FontSize="16"
-                                               Margin="0,0,8,0"/>
+                                    <TextBlock Text="⏹" FontSize="16" Margin="0,0,8,0"/>
                                     <TextBlock Text="Stop"/>
                                 </StackPanel>
                             </Button>
                             <Button x:Name="OverlayButton"
-                                    Click="OnButtonClick"
+                                    Style="{DynamicResource ModernButtonStyle}"
                                     Width="130"
                                     Height="40"
                                     Margin="0,0,10,0"
-                                    Style="{DynamicResource ModernButtonStyle}">
+                                    Click="OnButtonClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="⚡"
-                                               FontSize="16"
-                                               Margin="0,0,8,0"/>
+                                    <TextBlock Text="⚡" FontSize="16" Margin="0,0,8,0"/>
                                     <TextBlock Text="Overlay"/>
                                 </StackPanel>
                             </Button>
                             <Button x:Name="OpenSettingsButton"
-                                    Click="OnButtonClick"
+                                    Style="{DynamicResource ModernButtonStyle}"
                                     Width="130"
                                     Height="40"
                                     Margin="0,0,10,0"
-                                    Style="{DynamicResource ModernButtonStyle}">
+                                    Click="OnButtonClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="⚙"
-                                               FontSize="16"
-                                               Margin="0,0,8,0"/>
+                                    <TextBlock Text="⚙" FontSize="16" Margin="0,0,8,0"/>
                                     <TextBlock Text="Settings"/>
                                 </StackPanel>
                             </Button>
                             <Button x:Name="OpenPopupButton"
-                                    Click="OnButtonClick"
+                                    Style="{DynamicResource ModernButtonStyle}"
                                     Width="130"
                                     Height="40"
-                                    Style="{DynamicResource ModernButtonStyle}">
+                                    Click="OnButtonClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="🔧"
-                                               FontSize="16"
-                                               Margin="0,0,8,0"/>
+                                    <TextBlock Text="🔧" FontSize="16" Margin="0,0,8,0"/>
                                     <TextBlock Text="Gain Control"/>
                                 </StackPanel>
                             </Button>
@@ -367,10 +360,10 @@
 
                             <!-- Левая панель настроек -->
                             <Border Grid.Column="0"
-        CornerRadius="8"
-        Background="{DynamicResource ControlsPanelBackgroundBrush}"
-        Padding="15"
-        Margin="0,0,15,0">
+                                    Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                    CornerRadius="8"
+                                    Padding="15"
+                                    Margin="0,0,15,0">
                                 <StackPanel>
                                     <Grid Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
@@ -379,24 +372,25 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                       Text="Interval:"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Right"
-                       Foreground="{DynamicResource TextPrimaryBrush}"
-                       Margin="0,0,10,0"/>
+                                                   Text="Interval:"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   Margin="0,0,10,0"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"/>
                                         <Slider Grid.Column="1"
-                    x:Name="barSpacingSlider"
-                    Minimum="1" Maximum="15"
-                    Value="{Binding BarSpacing, Mode=TwoWay}"
-                    ValueChanged="OnSliderValueChanged"
-                    Style="{DynamicResource ModernSliderStyle}"
-                    VerticalAlignment="Center"
-                    Height="20"/>
+                                                x:Name="barSpacingSlider"
+                                                Style="{DynamicResource ModernSliderStyle}"
+                                                Height="20"
+                                                Minimum="1"
+                                                Maximum="15"
+                                                Value="{Binding BarSpacing, Mode=TwoWay}"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderValueChanged"/>
                                         <TextBlock Grid.Column="2"
-                       Text="{Binding BarSpacing, StringFormat='{}{0:F0}'}"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Center"
-                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                   Text="{Binding BarSpacing, StringFormat='{}{0:F0}'}"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
                                     </Grid>
 
                                     <Grid Margin="0,0,0,12">
@@ -406,26 +400,26 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                       Text="Number of strips:"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Right"
-                       Foreground="{DynamicResource TextPrimaryBrush}"
-                       Margin="0,0,10,0"/>
+                                                   Text="Number of strips:"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   Margin="0,0,10,0"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"/>
                                         <Slider Grid.Column="1"
-                    x:Name="barCountSlider"
-                    Minimum="10" Maximum="500"
-                    Value="{Binding BarCount, Mode=TwoWay}"
-                    Style="{DynamicResource ModernSliderStyle}"
-                    VerticalAlignment="Center"
-                    Height="20"/>
+                                                x:Name="barCountSlider"
+                                                Style="{DynamicResource ModernSliderStyle}"
+                                                Height="20"
+                                                Minimum="10"
+                                                Maximum="500"
+                                                Value="{Binding BarCount, Mode=TwoWay}"
+                                                VerticalAlignment="Center"/>
                                         <TextBlock Grid.Column="2"
-                       Text="{Binding BarCount, StringFormat='{}{0:F0}'}"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Center"
-                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                   Text="{Binding BarCount, StringFormat='{}{0:F0}'}"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
                                     </Grid>
 
-                                    <!-- Выбор качества отрисовки -->
                                     <Grid Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="120"/>
@@ -433,19 +427,19 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                       Text="Render quality:"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Right"
-                       Foreground="{DynamicResource TextPrimaryBrush}"
-                       Margin="0,0,10,0"/>
+                                                   Text="Render quality:"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   Margin="0,0,10,0"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"/>
                                         <ComboBox Grid.Column="1"
-                      x:Name="RenderQualityComboBox"
-                      ItemsSource="{Binding AvailableRenderQualities}"
-                      SelectedItem="{Binding RenderQuality, Mode=TwoWay}"
-                      SelectionChanged="OnComboBoxSelectionChanged"
-                      Style="{StaticResource ModernComboBoxStyle}"
-                      VerticalAlignment="Center"
-                      Height="24"/>
+                                                  x:Name="RenderQualityComboBox"
+                                                  Style="{StaticResource ModernComboBoxStyle}"
+                                                  Height="24"
+                                                  ItemsSource="{Binding AvailableRenderQualities}"
+                                                  SelectedItem="{Binding RenderQuality, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"
+                                                  SelectionChanged="OnComboBoxSelectionChanged"/>
                                         <TextBlock Grid.Column="2" Visibility="Hidden"/>
                                     </Grid>
 
@@ -456,20 +450,19 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                       Text="Overlay mode:"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Right"
-                       Foreground="{DynamicResource TextPrimaryBrush}"
-                       Margin="0,0,10,0"/>
+                                                   Text="Overlay mode:"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   Margin="0,0,10,0"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"/>
                                         <CheckBox Grid.Column="1"
-                      Content="Always on top" 
-                      IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
-                      Style="{StaticResource ModernCheckBoxStyle}"
-                      VerticalAlignment="Center"/>
+                                                  Style="{DynamicResource ModernCheckBoxStyle}"
+                                                  Content="Always on top"
+                                                  IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"/>
                                         <TextBlock Grid.Column="2" Visibility="Hidden"/>
                                     </Grid>
 
-                                    <!-- Чекбокс для отображения производительности -->
                                     <Grid Margin="0,8,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="120"/>
@@ -477,16 +470,16 @@
                                             <ColumnDefinition Width="40"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
-                       Text="Performance Info:"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Right"
-                       Foreground="{DynamicResource TextPrimaryBrush}"
-                       Margin="0,0,10,0"/>
+                                                   Text="Performance Info:"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   Margin="0,0,10,0"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"/>
                                         <CheckBox Grid.Column="1"
-                      Content="Show FPS"
-                      IsChecked="{Binding ShowPerformanceInfo, Mode=TwoWay}"
-                      Style="{StaticResource ModernCheckBoxStyle}"
-                      VerticalAlignment="Center"/>
+                                                  Style="{DynamicResource ModernCheckBoxStyle}"
+                                                  Content="Show FPS"
+                                                  IsChecked="{Binding ShowPerformanceInfo, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"/>
                                         <TextBlock Grid.Column="2" Visibility="Hidden"/>
                                     </Grid>
                                 </StackPanel>
@@ -494,8 +487,8 @@
 
                             <!-- Правая панель настроек -->
                             <Border Grid.Column="1"
-                                    CornerRadius="8"
                                     Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                    CornerRadius="8"
                                     Padding="15">
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -510,6 +503,7 @@
                                     </Grid.ColumnDefinitions>
 
                                     <TextBlock Grid.Row="0"
+                                               Grid.Column="0"
                                                Text="Renderer:"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,10,0"
@@ -518,14 +512,15 @@
                                     <ComboBox Grid.Row="0"
                                               Grid.Column="1"
                                               x:Name="RenderStyleComboBox"
-                                              ItemsSource="{Binding AvailableDrawingTypes}"
-                                              SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"
+                                              Style="{DynamicResource ModernComboBoxStyle}"
                                               Width="200"
                                               HorizontalAlignment="Left"
                                               VerticalAlignment="Center"
-                                              Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              ItemsSource="{Binding AvailableDrawingTypes}"
+                                              SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"/>
 
                                     <TextBlock Grid.Row="1"
+                                               Grid.Column="0"
                                                Text="Paint:"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,10,0"
@@ -534,14 +529,15 @@
                                     <ComboBox Grid.Row="1"
                                               Grid.Column="1"
                                               x:Name="StyleComboBox"
-                                              ItemsSource="{Binding AvailablePalettes.Keys}"
-                                              SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
+                                              Style="{DynamicResource ModernComboBoxStyle}"
                                               Width="200"
                                               HorizontalAlignment="Left"
-                                              VerticalAlignment="Center" 
-                                              Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              VerticalAlignment="Center"
+                                              ItemsSource="{Binding AvailablePalettes.Keys}"
+                                              SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"/>
 
                                     <TextBlock Grid.Row="2"
+                                               Grid.Column="0"
                                                Text="Window FFT:"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,10,0"
@@ -550,14 +546,15 @@
                                     <ComboBox Grid.Row="2"
                                               Grid.Column="1"
                                               x:Name="FftWindowTypeComboBox"
-                                              ItemsSource="{Binding AvailableFftWindowTypes}"
-                                              SelectedItem="{Binding WindowType, Mode=TwoWay}"
+                                              Style="{DynamicResource ModernComboBoxStyle}"
                                               Width="200"
                                               HorizontalAlignment="Left"
                                               VerticalAlignment="Center"
-                                              Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              ItemsSource="{Binding AvailableFftWindowTypes}"
+                                              SelectedItem="{Binding WindowType, Mode=TwoWay}"/>
 
                                     <TextBlock Grid.Row="3"
+                                               Grid.Column="0"
                                                Text="Scale Type:"
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                Margin="0,0,10,0"
@@ -566,12 +563,12 @@
                                     <ComboBox Grid.Row="3"
                                               Grid.Column="1"
                                               x:Name="ScaleTypeComboBox"
-                                              ItemsSource="{Binding AvailableScaleTypes}"
-                                              SelectedItem="{Binding ScaleType, Mode=TwoWay}"
+                                              Style="{DynamicResource ModernComboBoxStyle}"
                                               Width="200"
                                               HorizontalAlignment="Left"
                                               VerticalAlignment="Center"
-                                              Style="{DynamicResource ModernComboBoxStyle}"/>
+                                              ItemsSource="{Binding AvailableScaleTypes}"
+                                              SelectedItem="{Binding ScaleType, Mode=TwoWay}"/>
                                 </Grid>
                             </Border>
                         </Grid>
@@ -585,12 +582,12 @@
                    StaysOpen="False"
                    AllowsTransparency="True"
                    IsOpen="{Binding IsPopupOpen, Mode=TwoWay}">
-                <Border CornerRadius="16"
-                        Background="{DynamicResource DarkSurfaceBrush}"
-                        Padding="24"
-                        Width="400"
+                <Border Background="{DynamicResource DarkSurfaceBrush}"
                         BorderBrush="{DynamicResource DarkPopupBorderBrush}"
                         BorderThickness="1"
+                        CornerRadius="16"
+                        Padding="24"
+                        Width="400"
                         RenderTransformOrigin="0.5,0.5">
                     <Border.RenderTransform>
                         <ScaleTransform ScaleX="0.7" ScaleY="0.7"/>
@@ -599,21 +596,21 @@
                         <EventTrigger RoutedEvent="Loaded">
                             <BeginStoryboard>
                                 <Storyboard>
-                                    <DoubleAnimation 
-                                        Storyboard.TargetProperty="Opacity"
-                                        From="0" To="1"
-                                        Duration="{StaticResource StandardAnimationDuration}"
-                                        EasingFunction="{StaticResource StandardEaseOut}" />
-                                    <DoubleAnimation 
-                                        Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)"
-                                        From="0.7" To="1"
-                                        Duration="{StaticResource StandardAnimationDuration}"
-                                        EasingFunction="{StaticResource StandardEaseOut}" />
-                                    <DoubleAnimation 
-                                        Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)"
-                                        From="0.7" To="1"
-                                        Duration="{StaticResource StandardAnimationDuration}"
-                                        EasingFunction="{StaticResource StandardEaseOut}" />
+                                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                     From="0"
+                                                     To="1"
+                                                     Duration="{StaticResource StandardAnimationDuration}"
+                                                     EasingFunction="{StaticResource StandardEaseOut}"/>
+                                    <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)"
+                                                     From="0.7"
+                                                     To="1"
+                                                     Duration="{StaticResource StandardAnimationDuration}"
+                                                     EasingFunction="{StaticResource StandardEaseOut}"/>
+                                    <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)"
+                                                     From="0.7"
+                                                     To="1"
+                                                     Duration="{StaticResource StandardAnimationDuration}"
+                                                     EasingFunction="{StaticResource StandardEaseOut}"/>
                                 </Storyboard>
                             </BeginStoryboard>
                         </EventTrigger>
@@ -624,6 +621,7 @@
                                    FontWeight="Bold"
                                    Foreground="{DynamicResource LightTextPrimaryBrush}"
                                    Margin="0,0,0,20"/>
+
                         <Grid Margin="0,0,0,16">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="120"/>
@@ -638,17 +636,19 @@
                                        VerticalAlignment="Center"/>
                             <Slider Grid.Column="1"
                                     x:Name="minDbLevelSlider"
-                                    Minimum="-200" Maximum="0"
-                                    Value="{Binding MinDbLevel, Mode=TwoWay}"
                                     Style="{DynamicResource ModernSliderStyle}"
-                                    VerticalAlignment="Center"
-                                    Height="20"/>
+                                    Height="20"
+                                    Minimum="-200"
+                                    Maximum="0"
+                                    Value="{Binding MinDbLevel, Mode=TwoWay}"
+                                    VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="2"
                                        Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
                                        Foreground="{DynamicResource LightTextPrimaryBrush}"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Grid>
+
                         <Grid Margin="0,0,0,16">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="120"/>
@@ -663,17 +663,19 @@
                                        VerticalAlignment="Center"/>
                             <Slider Grid.Column="1"
                                     x:Name="maxDbLevelSlider"
-                                    Minimum="-100" Maximum="0"
-                                    Value="{Binding MaxDbLevel, Mode=TwoWay}"
                                     Style="{DynamicResource ModernSliderStyle}"
-                                    VerticalAlignment="Center"
-                                    Height="20"/>
+                                    Height="20"
+                                    Minimum="-100"
+                                    Maximum="0"
+                                    Value="{Binding MaxDbLevel, Mode=TwoWay}"
+                                    VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="2"
                                        Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
                                        Foreground="{DynamicResource LightTextPrimaryBrush}"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Grid>
+
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="120"/>
@@ -688,11 +690,12 @@
                                        VerticalAlignment="Center"/>
                             <Slider Grid.Column="1"
                                     x:Name="amplificationFactorSlider"
-                                    Minimum="0.01" Maximum="5"
-                                    Value="{Binding AmplificationFactor, Mode=TwoWay}"
                                     Style="{DynamicResource ModernSliderStyle}"
-                                    VerticalAlignment="Center"
-                                    Height="20"/>
+                                    Height="20"
+                                    Minimum="0.01"
+                                    Maximum="5"
+                                    Value="{Binding AmplificationFactor, Mode=TwoWay}"
+                                    VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="2"
                                        Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
                                        Foreground="{DynamicResource LightTextPrimaryBrush}"
