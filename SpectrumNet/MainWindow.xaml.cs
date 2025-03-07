@@ -259,8 +259,10 @@ namespace SpectrumNet
             Enum.GetValues<SpectrumScale>().OrderBy(s => s.ToString());
 
         public IReadOnlyDictionary<string, Palette> AvailablePalettes =>
-            _spectrumStyles?.RegisteredPalettes?.OrderBy(kvp => kvp.Key)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value) ?? new Dictionary<string, Palette>();
+            _spectrumStyles?.RegisteredPalettes
+                .OrderBy(kvp => kvp.Key)
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+            ?? new Dictionary<string, Palette>();
 
         public static IEnumerable<RenderQuality> AvailableRenderQualities =>
             Enum.GetValues<RenderQuality>().OrderBy(q => (int)q);
@@ -280,6 +282,23 @@ namespace SpectrumNet
                 {
                     Settings.Instance.IsOverlayTopmost = value;
                 }
+            }
+        }
+
+        public Palette? SelectedPalette
+        {
+            get
+            {
+                if (AvailablePalettes.TryGetValue(SelectedStyle, out var palette))
+                    return palette;
+                return null;
+            }
+            set
+            {
+                if (value == null)
+                    return;
+                SelectedStyle = value.Name;
+                OnPropertyChanged(nameof(SelectedPalette));
             }
         }
 
@@ -373,12 +392,14 @@ namespace SpectrumNet
                 );
 
                 if (_gainParameters == null)
-                {
                     throw new InvalidOperationException("Failed to create gain parameters");
-                }
 
                 DataContext = this;
                 InitComponents();
+
+                var converter = (PaletteNameToBrushConverter)this.Resources["PaletteNameToBrushConverter"];
+                converter.BrushesProvider = SpectrumStyles;
+
                 InitEventHandlers();
                 ConfigureTheme();
                 UpdateProps();

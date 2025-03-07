@@ -1,5 +1,8 @@
 ﻿#nullable enable 
 
+using System.Globalization;
+using System.Windows.Data;
+
 namespace SpectrumNet
 {
     /// <summary>
@@ -384,5 +387,35 @@ namespace SpectrumNet
             _disposed = true;
             GC.SuppressFinalize(this);
         }
+    }
+
+    public class PaletteNameToBrushConverter : IValueConverter
+    {
+        /// <summary>
+        /// An instance that provides access to registered palettes.  
+        /// It can be set in XAML via binding or programmatically.
+        /// </summary>
+        public SpectrumBrushes? BrushesProvider { get; set; }
+
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is string paletteName && BrushesProvider != null)
+            {
+                try
+                {
+                    var (skColor, _) = BrushesProvider.GetColorAndBrush(paletteName);
+                    return new SolidColorBrush(Color.FromArgb(skColor.Alpha, skColor.Red, skColor.Green, skColor.Blue));
+                }
+                catch (Exception)
+                {
+                    // If the palette is not found, return a transparent brush.
+                    return Brushes.Transparent;
+                }
+            }
+            return Brushes.Transparent;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            => throw new NotImplementedException();
     }
 }
