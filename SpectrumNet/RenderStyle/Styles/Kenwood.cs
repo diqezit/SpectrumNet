@@ -2,45 +2,46 @@
 
 namespace SpectrumNet
 {
-    public class KenwoodRenderer : ISpectrumRenderer, IDisposable
+
+    public sealed class KenwoodRenderer : ISpectrumRenderer, IDisposable
     {
         #region Constants
         private static class KenwoodConstants
         {
             // Quality settings
-            public const RenderQuality DefaultQuality = RenderQuality.Medium; // Default render quality
+            public const RenderQuality DefaultQuality = RenderQuality.Medium; // Default rendering quality level
 
             // Animation and smoothing factors
-            public const float AnimationSpeed = 0.85f;  // Animation speed factor
-            public const float SegmentRoundness = 4.5f;   // Rounded corner radius for segments
-            public const float ReflectionOpacity = 0.4f;   // Reflection opacity factor
-            public const float ReflectionHeight = 0.6f;   // Reflection height factor
-            public const float PeakFallSpeed = 0.007f; // Peak fall speed factor
-            public const float ScaleFactor = 0.9f;   // Scale factor for segments
-            public const float DesiredSegmentHeight = 10f;    // Desired segment height
+            public const float AnimationSpeed = 0.85f;      // Speed of animation transitions
+            public const float ReflectionOpacity = 0.4f;    // Opacity of reflection effect
+            public const float ReflectionHeight = 0.6f;     // Height factor for reflection effect
+            public const float PeakFallSpeed = 0.007f;      // Speed at which peaks fall
+            public const float ScaleFactor = 0.9f;          // Scaling factor for segment sizes
+            public const float DesiredSegmentHeight = 10f;  // Desired height of each segment
+            public const float SegmentRoundness = 4f; // Roundness factor for segments
 
             // Smoothing and transition defaults
-            public const float DefaultSmoothingFactor = 1.5f;   // Default smoothing factor
-            public const float DefaultTransitionSmoothness = 1f;     // Default transition smoothness
+            public const float DefaultSmoothingFactor = 1.5f;   // Default factor for smoothing spectrum data
+            public const float DefaultTransitionSmoothness = 1f; // Default smoothness for transitions
 
             // Buffer and pool settings
-            public const int MaxBufferPoolSize = 16;     // Maximum buffer pool size
-            public const int InitialBufferSize = 1024;   // Initial buffer size for float and DateTime arrays
+            public const int MaxBufferPoolSize = 16;     // Maximum size of buffer pools
+            public const int InitialBufferSize = 1024;   // Initial size for float and DateTime arrays
 
             // Rendering geometry
             public const float SegmentGap = 2f;     // Gap between segments
-            public const int PeakHoldTimeMs = 500;    // Peak hold time in milliseconds
+            public const int PeakHoldTimeMs = 500;  // Time in milliseconds to hold peak values
 
             // Gradient and shadow
-            public const float OutlineStrokeWidth = 1.2f;   // Stroke width for outline
-            public const float ShadowBlurRadius = 3f;     // Blur radius for shadow
+            public const float OutlineStrokeWidth = 1.2f;   // Width of segment outlines
+            public const float ShadowBlurRadius = 3f;       // Blur radius for shadow effect
 
             // Spectrum processing factors
-            public const float SpectrumWeight = 0.3f;   // Weight factor for peak in spectrum scaling
-            public const float BoostFactor = 0.3f;   // Boost factor for spectrum scaling after midpoint
+            public const float SpectrumWeight = 0.3f;   // Weight of peak values in spectrum scaling
+            public const float BoostFactor = 0.3f;      // Boost factor for higher frequencies
 
             // Logging
-            public const string LogPrefix = "[KenwoodRenderer] "; // Logging prefix
+            public const string LogPrefix = "[KenwoodRenderer] "; // Prefix for log messages
         }
         #endregion
 
@@ -48,18 +49,24 @@ namespace SpectrumNet
         // Singleton instance
         private static KenwoodRenderer? _instance;
 
-        // Initialization flags
-        private bool _isInitialized, _disposed, _initialDataReceived;
-        private bool _enableReflection = true;
+        // Initialization and disposal flags
+        private bool _isInitialized, _disposed;
+
+        // Quality settings fields
+        private RenderQuality _quality = KenwoodConstants.DefaultQuality;
+        private bool _useAntiAlias = true;
+        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        private bool _enableShadows = true;
+        private bool _enableReflections = true;
+        private float _segmentRoundness = KenwoodConstants.SegmentRoundness;
+        private bool _useSegmentedBars = true;
 
         // Smoothing and transition factors
         private float _smoothingFactor = KenwoodConstants.DefaultSmoothingFactor;
-        private float _pendingCanvasHeight;
         private float _transitionSmoothness = KenwoodConstants.DefaultTransitionSmoothness;
 
-        // Readonly configuration values (magic numbers converted to constants)
+        // Configuration values
         private readonly float _animationSpeed = KenwoodConstants.AnimationSpeed;
-        private readonly float _segmentRoundness = KenwoodConstants.SegmentRoundness;
         private readonly float _reflectionOpacity = KenwoodConstants.ReflectionOpacity;
         private readonly float _reflectionHeight = KenwoodConstants.ReflectionHeight;
         private readonly float _peakFallSpeed = KenwoodConstants.PeakFallSpeed;
@@ -67,9 +74,10 @@ namespace SpectrumNet
         private readonly float _desiredSegmentHeight = KenwoodConstants.DesiredSegmentHeight;
 
         // Bar and segment counters
-        private int _currentSegmentCount, _currentBarCount, _pendingBarCount;
+        private int _currentSegmentCount, _currentBarCount, _lastRenderCount;
         private float _lastTotalBarWidth, _lastBarWidth, _lastBarSpacing, _lastSegmentHeight;
-        private int _lastRenderCount;
+        private int _pendingBarCount;
+        private float _pendingCanvasHeight;
 
         // Spectrum and processing buffers
         private float[]? _previousSpectrum, _peaks, _renderBarValues, _renderPeaks;
@@ -77,37 +85,31 @@ namespace SpectrumNet
         private DateTime[]? _peakHoldTimes;
 
         // Cached SKPath objects
-        private SKPath? _cachedGreenSegmentsPath, _cachedYellowSegmentsPath, _cachedRedSegmentsPath;
+        private SKPath? _cachedBarPath, _cachedGreenSegmentsPath, _cachedYellowSegmentsPath, _cachedRedSegmentsPath;
         private SKPath? _cachedOutlinePath, _cachedPeakPath, _cachedShadowPath, _cachedReflectionPath;
         private bool _pathsNeedRebuild = true;
         private SKMatrix _lastTransform = SKMatrix.Identity;
 
-        // Buffer pools and synchronization primitives
+        // Buffer pools
         private readonly ConcurrentQueue<float[]> _floatBufferPool = new();
         private readonly ConcurrentQueue<DateTime[]> _dateTimeBufferPool = new();
+
+        // Synchronization primitives
         private readonly SemaphoreSlim _dataSemaphore = new(1, 1);
         private readonly AutoResetEvent _dataAvailableEvent = new(false);
 
-        // Segment paints collection
-        private readonly Dictionary<int, SKPaint> _segmentPaints = new();
-
-        // Calculation thread objects
-        private Task? _calculationTask;
-        private CancellationTokenSource? _calculationCts;
-        private SKRect _lastCanvasRect = SKRect.Empty;
-
         // Gradient shaders
-        private SKShader? _greenGradient, _yellowGradient, _redGradient, _reflectionGradient;
+        private SKShader? _barGradient, _greenGradient, _yellowGradient, _redGradient, _reflectionGradient;
 
         // Pre-configured SKPaint objects
-        private readonly SKPaint _peakPaint = new SKPaint
+        private readonly SKPaint _peakPaint = new()
         {
             IsAntialias = true,
             Style = SKPaintStyle.Fill,
-            Color = new SKColor(255, 255, 255) // White for peak indicators
+            Color = SKColors.White // White for peak indicators
         };
 
-        private readonly SKPaint _segmentShadowPaint = new SKPaint
+        private readonly SKPaint _segmentShadowPaint = new()
         {
             IsAntialias = true,
             Style = SKPaintStyle.Fill,
@@ -115,7 +117,7 @@ namespace SpectrumNet
             MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, KenwoodConstants.ShadowBlurRadius)
         };
 
-        private readonly SKPaint _outlinePaint = new SKPaint
+        private readonly SKPaint _outlinePaint = new()
         {
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
@@ -123,7 +125,7 @@ namespace SpectrumNet
             StrokeWidth = KenwoodConstants.OutlineStrokeWidth
         };
 
-        private readonly SKPaint _reflectionPaint = new SKPaint
+        private readonly SKPaint _reflectionPaint = new()
         {
             IsAntialias = true,
             Style = SKPaintStyle.Fill,
@@ -131,18 +133,17 @@ namespace SpectrumNet
         };
 
         // Color definitions for gradients
-        private static readonly SKColor GreenStartColor = new SKColor(0, 230, 120, 255); // Start for green gradient
-        private static readonly SKColor GreenEndColor = new SKColor(0, 255, 0, 255);     // End for green gradient
-        private static readonly SKColor YellowStartColor = new SKColor(255, 230, 0, 255);   // Start for yellow gradient
-        private static readonly SKColor YellowEndColor = new SKColor(255, 180, 0, 255);   // End for yellow gradient
-        private static readonly SKColor RedStartColor = new SKColor(255, 80, 0, 255);    // Start for red gradient
-        private static readonly SKColor RedEndColor = new SKColor(255, 30, 0, 255);    // End for red gradient
+        private static readonly SKColor GreenStartColor = new(0, 230, 120, 255); // Bottom of green gradient
+        private static readonly SKColor GreenEndColor = new(0, 255, 0, 255);     // Top of green gradient
+        private static readonly SKColor YellowStartColor = new(255, 230, 0, 255); // Bottom of yellow gradient
+        private static readonly SKColor YellowEndColor = new(255, 180, 0, 255);   // Top of yellow gradient
+        private static readonly SKColor RedStartColor = new(255, 80, 0, 255);     // Bottom of red gradient
+        private static readonly SKColor RedEndColor = new(255, 30, 0, 255);       // Top of red gradient
 
-        // Quality settings fields
-        private RenderQuality _quality = KenwoodConstants.DefaultQuality;
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
+        // Calculation thread objects
+        private Task? _calculationTask;
+        private CancellationTokenSource? _calculationCts;
+        private SKRect _lastCanvasRect = SKRect.Empty;
         #endregion
 
         #region Singleton & Initialization
@@ -165,6 +166,7 @@ namespace SpectrumNet
             }
 
             // Initialize cached SKPath objects
+            _cachedBarPath = new SKPath();
             _cachedGreenSegmentsPath = new SKPath();
             _cachedYellowSegmentsPath = new SKPath();
             _cachedRedSegmentsPath = new SKPath();
@@ -173,6 +175,7 @@ namespace SpectrumNet
             _cachedShadowPath = new SKPath();
             _cachedReflectionPath = new SKPath();
 
+            ApplyQualitySettings();
             StartCalculationThread();
         }
 
@@ -194,6 +197,8 @@ namespace SpectrumNet
                 {
                     _quality = value;
                     ApplyQualitySettings();
+                    _pathsNeedRebuild = true; // Invalidate paths when quality changes
+                    SmartLogger.Log(LogLevel.Debug, KenwoodConstants.LogPrefix, $"Quality changed to {_quality}");
                 }
             }
         }
@@ -205,33 +210,41 @@ namespace SpectrumNet
                 case RenderQuality.Low:
                     _useAntiAlias = false;
                     _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
+                    _enableShadows = false;
+                    _enableReflections = false;
+                    _segmentRoundness = 0f; // No rounding for faster rendering
+                    _useSegmentedBars = false; // Single gradient rectangle per bar
                     break;
                 case RenderQuality.Medium:
                     _useAntiAlias = true;
                     _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
+                    _enableShadows = true;
+                    _enableReflections = false;
+                    _segmentRoundness = 2f; // Moderate rounding
+                    _useSegmentedBars = true; // Segmented bars
                     break;
                 case RenderQuality.High:
                     _useAntiAlias = true;
                     _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
+                    _enableShadows = true;
+                    _enableReflections = true;
+                    _segmentRoundness = KenwoodConstants.SegmentRoundness; // Full rounding
+                    _useSegmentedBars = true; // Segmented bars with all effects
                     break;
             }
 
-            // Update pre-configured SKPaint objects if necessary
+            // Update paint properties
             _peakPaint.IsAntialias = _useAntiAlias;
-            _outlinePaint.StrokeWidth = KenwoodConstants.OutlineStrokeWidth;
+            _segmentShadowPaint.IsAntialias = _useAntiAlias;
+            _outlinePaint.IsAntialias = _useAntiAlias;
+            _reflectionPaint.IsAntialias = _useAntiAlias;
         }
         #endregion
 
         #region Configuration
-        // Реализация метода Configure, удовлетворяющего интерфейсу ISpectrumRenderer
         public void Configure(bool isOverlayActive, RenderQuality quality = KenwoodConstants.DefaultQuality)
         {
-            // Set quality settings via property (calls ApplyQualitySettings)
             Quality = quality;
-            // Adjust smoothing factor and transition based on overlay state
             _smoothingFactor = isOverlayActive ? 0.6f : KenwoodConstants.DefaultSmoothingFactor * 0.2f;
             _transitionSmoothness = isOverlayActive ? 0.7f : 0.5f;
             _pathsNeedRebuild = true;
@@ -280,7 +293,7 @@ namespace SpectrumNet
 
                     float[]? spectrumData = null;
                     int barCount = 0;
-                    float canvasHeight = 0;
+                    int canvasHeight = 0;
 
                     _dataSemaphore.Wait(ct);
                     try
@@ -289,7 +302,7 @@ namespace SpectrumNet
                         {
                             spectrumData = _pendingSpectrum;
                             barCount = _pendingBarCount;
-                            canvasHeight = _pendingCanvasHeight;
+                            canvasHeight = (int)_pendingCanvasHeight; 
                             _pendingSpectrum = null;
                         }
                     }
@@ -308,7 +321,7 @@ namespace SpectrumNet
                 catch (Exception ex)
                 {
                     SmartLogger.Log(LogLevel.Error, KenwoodConstants.LogPrefix, $"Calculation error: {ex.Message}");
-                    Thread.Sleep(100); // Prevent CPU spinning in case of errors
+                    Thread.Sleep(100);
                 }
             }
         }
@@ -342,7 +355,7 @@ namespace SpectrumNet
             DateTime currentTime = DateTime.Now;
 
             float smoothFactor = _smoothingFactor * _animationSpeed;
-            float peakFallRate = _peakFallSpeed * canvasHeight * _animationSpeed;
+            float peakFallRate = _peakFallSpeed * (float)canvasHeight * _animationSpeed;
             double peakHoldTimeMs = KenwoodConstants.PeakHoldTimeMs;
 
             float maxChangeThreshold = canvasHeight * 0.3f;
@@ -416,16 +429,16 @@ namespace SpectrumNet
                 Buffer.BlockCopy(computedPeaks, 0, _processingPeaks!, 0, actualBarCount * sizeof(float));
                 _currentBarCount = actualBarCount;
 
-                if (!_initialDataReceived)
+                if (_renderBarValues == null || _renderBarValues.Length != actualBarCount)
                 {
+                    ReturnBufferToPool(_renderBarValues);
+                    ReturnBufferToPool(_renderPeaks);
+
                     _renderBarValues = GetFloatBuffer(actualBarCount);
                     _renderPeaks = GetFloatBuffer(actualBarCount);
                     Buffer.BlockCopy(_processingBarValues!, 0, _renderBarValues!, 0, actualBarCount * sizeof(float));
                     Buffer.BlockCopy(_processingPeaks!, 0, _renderPeaks!, 0, actualBarCount * sizeof(float));
-                    _initialDataReceived = true;
                 }
-
-                _pathsNeedRebuild = true;
             }
             finally
             {
@@ -435,6 +448,7 @@ namespace SpectrumNet
             ReturnBufferToPool(scaledSpectrum);
             ReturnBufferToPool(computedBarValues);
             ReturnBufferToPool(computedPeaks);
+            _pathsNeedRebuild = true;
         }
         #endregion
 
@@ -449,8 +463,10 @@ namespace SpectrumNet
             SKPaint? paint,
             Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            // Validate render parameters before drawing
             if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                return;
+
+            if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
                 return;
 
             float totalWidth = info.Width;
@@ -458,31 +474,17 @@ namespace SpectrumNet
             barWidth = totalBarWidth * 0.7f;
             barSpacing = totalBarWidth * 0.3f;
 
-            // Check if canvas size has changed
-            bool canvasSizeChanged = Math.Abs(_lastCanvasRect.Height - info.Rect.Height) > 0.5f ||
-                                     Math.Abs(_lastCanvasRect.Width - info.Rect.Width) > 0.5f;
+            bool canvasSizeChanged = Math.Abs(_lastCanvasRect.Height - info.Height) > 0.5f ||
+                                     Math.Abs(_lastCanvasRect.Width - info.Width) > 0.5f;
 
-            bool transformChanged = false;
-            if (canvas!.TotalMatrix != _lastTransform)
-            {
+            bool transformChanged = canvas.TotalMatrix != _lastTransform;
+            if (transformChanged)
                 _lastTransform = canvas.TotalMatrix;
-                transformChanged = true;
-            }
 
             if (canvasSizeChanged)
             {
                 _currentSegmentCount = Math.Max(1, (int)(info.Height / (_desiredSegmentHeight + KenwoodConstants.SegmentGap)));
-
-                foreach (var p in _segmentPaints.Values)
-                    p.Dispose();
-                _segmentPaints.Clear();
-
-                _greenGradient?.Dispose();
-                _yellowGradient?.Dispose();
-                _redGradient?.Dispose();
-                _reflectionGradient?.Dispose();
                 CreateGradients(info.Height);
-
                 _lastCanvasRect = info.Rect;
                 _pathsNeedRebuild = true;
             }
@@ -513,7 +515,7 @@ namespace SpectrumNet
                 _dataAvailableEvent.Set();
             }
 
-            if (!_initialDataReceived || _renderBarValues == null || _renderPeaks == null)
+            if (_renderBarValues == null || _renderPeaks == null || _currentBarCount == 0)
                 return;
 
             int renderCount = Math.Min(_currentBarCount, _renderBarValues.Length);
@@ -532,7 +534,6 @@ namespace SpectrumNet
             if (_pathsNeedRebuild || dimensionsChanged || transformChanged || canvasSizeChanged)
             {
                 RebuildPaths(info, barWidth, barSpacing, totalBarWidth, segmentHeight, renderCount);
-
                 _lastTotalBarWidth = totalBarWidth;
                 _lastBarWidth = barWidth;
                 _lastBarSpacing = barSpacing;
@@ -541,7 +542,39 @@ namespace SpectrumNet
                 _pathsNeedRebuild = false;
             }
 
-            if (_enableReflection && info.Height > 200 && _cachedReflectionPath != null)
+            if (_useSegmentedBars)
+            {
+                if (_enableShadows && _cachedShadowPath != null)
+                    canvas.DrawPath(_cachedShadowPath, _segmentShadowPaint);
+
+                if (_cachedGreenSegmentsPath != null)
+                    canvas.DrawPath(_cachedGreenSegmentsPath, EnsureSegmentPaint(0, _greenGradient));
+                if (_cachedYellowSegmentsPath != null)
+                    canvas.DrawPath(_cachedYellowSegmentsPath, EnsureSegmentPaint(1, _yellowGradient));
+                if (_cachedRedSegmentsPath != null)
+                    canvas.DrawPath(_cachedRedSegmentsPath, EnsureSegmentPaint(2, _redGradient));
+                if (_cachedOutlinePath != null)
+                    canvas.DrawPath(_cachedOutlinePath, _outlinePaint);
+            }
+            else
+            {
+                if (_cachedBarPath != null)
+                {
+                    using var barPaint = new SKPaint
+                    {
+                        IsAntialias = _useAntiAlias,
+                        Style = SKPaintStyle.Fill,
+                        Shader = _barGradient,
+                        FilterQuality = _filterQuality
+                    };
+                    canvas.DrawPath(_cachedBarPath, barPaint);
+                }
+            }
+
+            if (_cachedPeakPath != null)
+                canvas.DrawPath(_cachedPeakPath, _peakPaint);
+
+            if (_enableReflections && info.Height > 200 && _cachedReflectionPath != null)
             {
                 canvas.Save();
                 canvas.Scale(1, -1);
@@ -549,29 +582,12 @@ namespace SpectrumNet
 
                 if (_reflectionPaint.Color.Alpha == 0)
                     _reflectionPaint.Color = new SKColor(255, 255, 255, (byte)(_reflectionOpacity * 255));
-
                 if (_reflectionGradient != null)
                     _reflectionPaint.Shader = _reflectionGradient;
 
                 canvas.DrawPath(_cachedReflectionPath, _reflectionPaint);
                 canvas.Restore();
             }
-
-            if (_cachedShadowPath != null)
-                canvas.DrawPath(_cachedShadowPath, _segmentShadowPaint);
-
-            EnsureSegmentPaints();
-
-            if (_cachedGreenSegmentsPath != null)
-                canvas.DrawPath(_cachedGreenSegmentsPath, _segmentPaints[0]);
-            if (_cachedYellowSegmentsPath != null)
-                canvas.DrawPath(_cachedYellowSegmentsPath, _segmentPaints[1]);
-            if (_cachedRedSegmentsPath != null)
-                canvas.DrawPath(_cachedRedSegmentsPath, _segmentPaints[2]);
-            if (_cachedOutlinePath != null)
-                canvas.DrawPath(_cachedOutlinePath, _outlinePaint);
-            if (_cachedPeakPath != null)
-                canvas.DrawPath(_cachedPeakPath, _peakPaint);
 
             drawPerformanceInfo?.Invoke(canvas, info);
         }
@@ -587,6 +603,7 @@ namespace SpectrumNet
             _yellowGradient?.Dispose();
             _redGradient?.Dispose();
             _reflectionGradient?.Dispose();
+            _barGradient?.Dispose();
 
             _greenGradient = SKShader.CreateLinearGradient(
                 new SKPoint(0, 0),
@@ -612,126 +629,123 @@ namespace SpectrumNet
             _reflectionGradient = SKShader.CreateLinearGradient(
                 new SKPoint(0, 0),
                 new SKPoint(0, height * _reflectionHeight),
-                new[] {
-                    new SKColor(255, 255, 255, (byte)(_reflectionOpacity * 255)),
-                    new SKColor(255, 255, 255, 0)
-                },
+                new[] { new SKColor(255, 255, 255, (byte)(_reflectionOpacity * 255)), SKColors.Transparent },
                 null,
+                SKShaderTileMode.Clamp);
+
+            _barGradient = SKShader.CreateLinearGradient(
+                new SKPoint(0, height), // Bottom
+                new SKPoint(0, 0),      // Top
+                new[] { GreenStartColor, GreenEndColor, YellowStartColor, YellowEndColor, RedStartColor, RedEndColor },
+                new float[] { 0f, 0.6f, 0.6f, 0.85f, 0.85f, 1f },
                 SKShaderTileMode.Clamp);
         }
 
-        private void EnsureSegmentPaints()
+        private readonly Dictionary<int, SKPaint> _segmentPaints = new();
+
+        private SKPaint EnsureSegmentPaint(int index, SKShader? shader)
         {
-            if (!_segmentPaints.TryGetValue(0, out SKPaint? greenPaint) || greenPaint == null)
+            if (!_segmentPaints.TryGetValue(index, out var paint) || paint == null)
             {
-                _segmentPaints[0] = new SKPaint
+                paint = new SKPaint
                 {
-                    IsAntialias = true,
+                    IsAntialias = _useAntiAlias,
                     Style = SKPaintStyle.Fill,
-                    Color = GreenStartColor,
-                    Shader = _greenGradient
+                    FilterQuality = _filterQuality,
+                    Shader = shader
                 };
+                _segmentPaints[index] = paint;
             }
-
-            if (!_segmentPaints.TryGetValue(1, out SKPaint? yellowPaint) || yellowPaint == null)
-            {
-                _segmentPaints[1] = new SKPaint
-                {
-                    IsAntialias = true,
-                    Style = SKPaintStyle.Fill,
-                    Color = YellowStartColor,
-                    Shader = _yellowGradient
-                };
-            }
-
-            if (!_segmentPaints.TryGetValue(2, out SKPaint? redPaint) || redPaint == null)
-            {
-                _segmentPaints[2] = new SKPaint
-                {
-                    IsAntialias = true,
-                    Style = SKPaintStyle.Fill,
-                    Color = RedStartColor,
-                    Shader = _redGradient
-                };
-            }
+            return paint;
         }
 
-        private void RebuildPaths(SKImageInfo info, float barWidth, float barSpacing,
-                                   float totalBarWidth, float segmentHeight, int renderCount)
+        private void RebuildPaths(SKImageInfo info, float barWidth, float barSpacing, float totalBarWidth, float segmentHeight, int renderCount)
         {
-            if (_cachedGreenSegmentsPath == null || _cachedYellowSegmentsPath == null ||
-                _cachedRedSegmentsPath == null || _cachedOutlinePath == null ||
-                _cachedPeakPath == null || _cachedShadowPath == null || _cachedReflectionPath == null)
-                return;
-
-            _cachedGreenSegmentsPath.Reset();
-            _cachedYellowSegmentsPath.Reset();
-            _cachedRedSegmentsPath.Reset();
-            _cachedOutlinePath.Reset();
-            _cachedPeakPath.Reset();
-            _cachedShadowPath.Reset();
-            _cachedReflectionPath.Reset();
+            _cachedBarPath?.Reset();
+            _cachedGreenSegmentsPath?.Reset();
+            _cachedYellowSegmentsPath?.Reset();
+            _cachedRedSegmentsPath?.Reset();
+            _cachedOutlinePath?.Reset();
+            _cachedPeakPath?.Reset();
+            _cachedShadowPath?.Reset();
+            _cachedReflectionPath?.Reset();
 
             float minVisibleValue = segmentHeight * 0.5f;
-            int greenCount = (int)(_currentSegmentCount * 0.6);
-            int yellowCount = (int)(_currentSegmentCount * 0.25);
 
-            if (_enableReflection && info.Height > 200)
-                BuildReflectionPath(info, barWidth, barSpacing, totalBarWidth, segmentHeight, renderCount, minVisibleValue);
-
-            for (int i = 0; i < renderCount; i++)
+            if (!_useSegmentedBars)
             {
-                float x = i * totalBarWidth + barSpacing / 2;
-                float barValue = _renderBarValues![i];
-
-                if (barValue > minVisibleValue)
+                for (int i = 0; i < renderCount; i++)
                 {
-                    int segmentsToRender = (int)Math.Ceiling(barValue / (segmentHeight + KenwoodConstants.SegmentGap));
-                    segmentsToRender = Math.Min(segmentsToRender, _currentSegmentCount);
-                    bool needShadow = barValue > info.Height * 0.5f;
+                    float x = i * totalBarWidth + barSpacing / 2;
+                    float barValue = _renderBarValues![i];
 
-                    if (needShadow)
+                    if (barValue > minVisibleValue)
                     {
+                        float barTop = info.Height - barValue;
+                        _cachedBarPath!.AddRect(SKRect.Create(x, barTop, barWidth, barValue));
+                    }
+
+                    if (_renderPeaks![i] > minVisibleValue)
+                    {
+                        float peakY = info.Height - _renderPeaks[i];
+                        float peakHeight = 3f;
+                        _cachedPeakPath!.AddRect(SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight));
+                    }
+                }
+            }
+            else
+            {
+                int greenCount = (int)(_currentSegmentCount * 0.6);
+                int yellowCount = (int)(_currentSegmentCount * 0.25);
+
+                if (_enableReflections && info.Height > 200)
+                    BuildReflectionPath(info, barWidth, barSpacing, totalBarWidth, segmentHeight, renderCount, minVisibleValue);
+
+                for (int i = 0; i < renderCount; i++)
+                {
+                    float x = i * totalBarWidth + barSpacing / 2;
+                    float barValue = _renderBarValues![i];
+
+                    if (barValue > minVisibleValue)
+                    {
+                        int segmentsToRender = Math.Min((int)Math.Ceiling(barValue / (segmentHeight + KenwoodConstants.SegmentGap)), _currentSegmentCount);
+                        bool needShadow = _enableShadows && barValue > info.Height * 0.5f;
+
+                        if (needShadow)
+                        {
+                            for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
+                            {
+                                float segmentBottom = info.Height - segIndex * (segmentHeight + KenwoodConstants.SegmentGap);
+                                float segmentTop = segmentBottom - segmentHeight;
+                                AddRoundRectToPath(_cachedShadowPath!, x + 2, segmentTop + 2, barWidth, segmentHeight);
+                            }
+                        }
+
                         for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
                         {
                             float segmentBottom = info.Height - segIndex * (segmentHeight + KenwoodConstants.SegmentGap);
                             float segmentTop = segmentBottom - segmentHeight;
-                            AddRoundRectToPath(_cachedShadowPath, x + 2, segmentTop + 2, barWidth, segmentHeight);
+
+                            SKPath targetPath = segIndex < greenCount ? _cachedGreenSegmentsPath!
+                                : segIndex < greenCount + yellowCount ? _cachedYellowSegmentsPath! : _cachedRedSegmentsPath!;
+
+                            AddRoundRectToPath(targetPath, x, segmentTop, barWidth, segmentHeight);
+                            AddRoundRectToPath(_cachedOutlinePath!, x, segmentTop, barWidth, segmentHeight);
                         }
                     }
 
-                    for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
+                    if (_renderPeaks![i] > minVisibleValue)
                     {
-                        float segmentBottom = info.Height - segIndex * (segmentHeight + KenwoodConstants.SegmentGap);
-                        float segmentTop = segmentBottom - segmentHeight;
-
-                        SKPath targetPath = segIndex < greenCount
-                            ? _cachedGreenSegmentsPath
-                            : segIndex < greenCount + yellowCount
-                                ? _cachedYellowSegmentsPath
-                                : _cachedRedSegmentsPath;
-
-                        AddRoundRectToPath(targetPath, x, segmentTop, barWidth, segmentHeight);
-                        AddRoundRectToPath(_cachedOutlinePath, x, segmentTop, barWidth, segmentHeight);
+                        float peakY = info.Height - _renderPeaks[i];
+                        float peakHeight = 3f;
+                        _cachedPeakPath!.AddRect(SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight));
                     }
-                }
-
-                if (_renderPeaks![i] > minVisibleValue)
-                {
-                    float peakY = info.Height - _renderPeaks[i];
-                    float peakHeight = 3f;
-                    _cachedPeakPath.AddRect(SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight));
                 }
             }
         }
 
-        private void BuildReflectionPath(SKImageInfo info, float barWidth, float barSpacing,
-                                         float totalBarWidth, float segmentHeight, int renderCount,
-                                         float minVisibleValue)
+        private void BuildReflectionPath(SKImageInfo info, float barWidth, float barSpacing, float totalBarWidth, float segmentHeight, int renderCount, float minVisibleValue)
         {
-            if (_cachedReflectionPath == null)
-                return;
-
             int reflectionBarStep = Math.Max(1, renderCount / 60);
 
             for (int i = 0; i < renderCount; i += reflectionBarStep)
@@ -742,37 +756,31 @@ namespace SpectrumNet
                 if (barValue > minVisibleValue)
                 {
                     int maxReflectionSegments = Math.Min(3, _currentSegmentCount);
-                    int segmentsToRender = (int)Math.Ceiling(barValue / (segmentHeight + KenwoodConstants.SegmentGap));
-                    segmentsToRender = Math.Min(segmentsToRender, maxReflectionSegments);
+                    int segmentsToRender = Math.Min((int)Math.Ceiling(barValue / (segmentHeight + KenwoodConstants.SegmentGap)), maxReflectionSegments);
 
                     for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
                     {
                         float segmentBottom = info.Height - segIndex * (segmentHeight + KenwoodConstants.SegmentGap);
                         float segmentTop = segmentBottom - segmentHeight;
                         var rect = SKRect.Create(x, segmentTop, barWidth, segmentHeight * _reflectionHeight);
-
                         if (_segmentRoundness > 0)
-                            _cachedReflectionPath.AddRoundRect(rect, _segmentRoundness, _segmentRoundness);
+                            _cachedReflectionPath!.AddRoundRect(rect, _segmentRoundness, _segmentRoundness);
                         else
-                            _cachedReflectionPath.AddRect(rect);
+                            _cachedReflectionPath!.AddRect(rect);
                     }
                 }
 
-                if (_renderPeaks![i] > info.Height * 0.5f)
+                if (_renderPeaks![i] > minVisibleValue)
                 {
                     float peakY = info.Height - _renderPeaks[i];
                     float peakHeight = 3f;
-                    var peakRect = SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight * _reflectionHeight);
-                    _cachedReflectionPath.AddRect(peakRect);
+                    _cachedReflectionPath!.AddRect(SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight * _reflectionHeight));
                 }
             }
         }
 
         private void AddRoundRectToPath(SKPath path, float x, float y, float width, float height)
         {
-            if (path == null)
-                return;
-
             var rect = SKRect.Create(x, y, width, height);
             if (_segmentRoundness > 0.5f)
                 path.AddRoundRect(rect, _segmentRoundness, _segmentRoundness);
@@ -785,7 +793,7 @@ namespace SpectrumNet
         private void ScaleSpectrum(float[] spectrum, float[] scaledSpectrum, int barCount, int spectrumLength)
         {
             float blockSize = spectrumLength / (float)barCount;
-            int maxThreads = Math.Max(2, Environment.ProcessorCount / 2); // Use half of available cores
+            int maxThreads = Math.Max(2, Environment.ProcessorCount / 2);
 
             Parallel.For(0, barCount, new ParallelOptions { MaxDegreeOfParallelism = maxThreads }, i =>
             {
@@ -843,65 +851,64 @@ namespace SpectrumNet
         #endregion
 
         #region Disposal
-        protected virtual void Dispose(bool disposing)
+        public void Dispose()
         {
             if (_disposed)
                 return;
 
-            if (disposing)
+            _calculationCts?.Cancel();
+            _dataAvailableEvent.Set();
+
+            try
             {
-                _calculationCts?.Cancel();
-                _dataAvailableEvent.Set();
-
-                try
-                {
-                    _calculationTask?.Wait(500);
-                }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, KenwoodConstants.LogPrefix, $"Dispose wait error: {ex.Message}");
-                }
-
-                _calculationCts?.Dispose();
-                _dataAvailableEvent.Dispose();
-                _dataSemaphore.Dispose();
-
-                _previousSpectrum = null;
-                _peaks = null;
-                _peakHoldTimes = null;
-                _renderBarValues = null;
-                _renderPeaks = null;
-                _processingBarValues = null;
-                _processingPeaks = null;
-                _velocities = null;
-
-                while (_floatBufferPool.TryDequeue(out _)) { }
-                while (_dateTimeBufferPool.TryDequeue(out _)) { }
-
-                foreach (var paint in _segmentPaints.Values)
-                    paint.Dispose();
-                _segmentPaints.Clear();
-
-                _cachedGreenSegmentsPath?.Dispose();
-                _cachedYellowSegmentsPath?.Dispose();
-                _cachedRedSegmentsPath?.Dispose();
-                _cachedOutlinePath?.Dispose();
-                _cachedPeakPath?.Dispose();
-                _cachedShadowPath?.Dispose();
-                _cachedReflectionPath?.Dispose();
-
-                _greenGradient?.Dispose();
-                _yellowGradient?.Dispose();
-                _redGradient?.Dispose();
-                _reflectionGradient?.Dispose();
+                _calculationTask?.Wait(500);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, KenwoodConstants.LogPrefix, $"Dispose wait error: {ex.Message}");
             }
 
-            _disposed = true;
-        }
+            _calculationCts?.Dispose();
+            _dataAvailableEvent.Dispose();
+            _dataSemaphore.Dispose();
 
-        public void Dispose()
-        {
-            Dispose(true);
+            ReturnBufferToPool(_previousSpectrum);
+            ReturnBufferToPool(_peaks);
+            ReturnBufferToPool(_peakHoldTimes);
+            ReturnBufferToPool(_renderBarValues);
+            ReturnBufferToPool(_renderPeaks);
+            ReturnBufferToPool(_processingBarValues);
+            ReturnBufferToPool(_processingPeaks);
+            ReturnBufferToPool(_velocities);
+
+            while (_floatBufferPool.TryDequeue(out _)) { }
+            while (_dateTimeBufferPool.TryDequeue(out _)) { }
+
+            foreach (var paint in _segmentPaints.Values)
+                paint.Dispose();
+            _segmentPaints.Clear();
+
+            _cachedBarPath?.Dispose();
+            _cachedGreenSegmentsPath?.Dispose();
+            _cachedYellowSegmentsPath?.Dispose();
+            _cachedRedSegmentsPath?.Dispose();
+            _cachedOutlinePath?.Dispose();
+            _cachedPeakPath?.Dispose();
+            _cachedShadowPath?.Dispose();
+            _cachedReflectionPath?.Dispose();
+
+            _greenGradient?.Dispose();
+            _yellowGradient?.Dispose();
+            _redGradient?.Dispose();
+            _reflectionGradient?.Dispose();
+            _barGradient?.Dispose();
+
+            _peakPaint.Dispose();
+            _segmentShadowPaint.Dispose();
+            _outlinePaint.Dispose();
+            _reflectionPaint.Dispose();
+
+            _disposed = true;
             GC.SuppressFinalize(this);
         }
         #endregion
