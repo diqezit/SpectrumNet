@@ -2,33 +2,12 @@
 
 namespace SpectrumNet
 {
-    public static class MwConstants
-    {
-        public const int RenderIntervalMs = 16,
-                         MonitorDelay = 16,
-                         BarCount = 60;
-        public const double BarSpacing = 4;
-
-        public const string DefaultStyle = "Solid",
-                            ReadyStatus = "Ready",
-                            RecordingStatus = "Recording...";
-    }
-
     public partial class MainWindow : Window, IAudioVisualizationController
     {
         private const string LogPrefix = "[MainWindow] ";
 
-        private record MainWindowSettings(
-            string Style = "Solid",
-            double BarSpacing = 4,
-            int BarCount = 60,
-            string StatusText = "Ready",
-            RenderQuality Quality = RenderQuality.Medium
-        );
-
         private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
         private readonly CancellationTokenSource _cleanupCts = new();
-        private MainWindowSettings _state = new();
         private bool _isOverlayActive, _isPopupOpen,
                      _isOverlayTopmost = true,
                      _isControlPanelVisible = true,
@@ -46,6 +25,7 @@ namespace SpectrumNet
         private GainParameters? _gainParameters;
         private SKElement? _renderElement;
         private PropertyChangedEventHandler? _themePropertyChangedHandler;
+        private string _statusText = "Ready";
 
         #region IAudioVisualizationController Properties
 
@@ -57,29 +37,31 @@ namespace SpectrumNet
 
         public int BarCount
         {
-            get => _state.BarCount;
+            get => Settings.Instance.UIBarCount;
             set
             {
                 if (value <= 0)
                 {
                     SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set invalid bar count: {value}");
-                    value = MwConstants.BarCount;
+                    value = DefaultSettings.UIBarCount;
                 }
-                UpdateState(s => s with { BarCount = value }, nameof(BarCount));
+                Settings.Instance.UIBarCount = value;
+                OnPropertyChanged(nameof(BarCount));
             }
         }
 
         public double BarSpacing
         {
-            get => _state.BarSpacing;
+            get => Settings.Instance.UIBarSpacing;
             set
             {
                 if (value < 0)
                 {
                     SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set negative spacing: {value}");
-                    value = MwConstants.BarSpacing;
+                    value = DefaultSettings.UIBarSpacing;
                 }
-                UpdateState(s => s with { BarSpacing = value }, nameof(BarSpacing));
+                Settings.Instance.UIBarSpacing = value;
+                OnPropertyChanged(nameof(BarSpacing));
             }
         }
 
@@ -146,6 +128,7 @@ namespace SpectrumNet
                     _analyzer?.SetScaleType(value);
                     _renderer?.RequestRender();
                     _renderElement?.InvalidateVisual();
+                    Settings.Instance.SelectedScaleType = value;
                 }
                 catch (Exception ex)
                 {
@@ -162,16 +145,18 @@ namespace SpectrumNet
                 if (_selectedDrawingType == value) return;
                 _selectedDrawingType = value;
                 OnPropertyChanged(nameof(SelectedDrawingType));
+                Settings.Instance.SelectedRenderStyle = value;
             }
         }
 
         public RenderQuality RenderQuality
         {
-            get => _state.Quality;
+            get => Settings.Instance.SelectedRenderQuality;
             set
             {
-                if (_state.Quality == value) return;
-                UpdateState(s => s with { Quality = value }, nameof(RenderQuality));
+                if (Settings.Instance.SelectedRenderQuality == value) return;
+                Settings.Instance.SelectedRenderQuality = value;
+                OnPropertyChanged(nameof(RenderQuality));
 
                 try
                 {
@@ -190,15 +175,18 @@ namespace SpectrumNet
 
         public string SelectedStyle
         {
-            get => _state.Style;
+            get => Settings.Instance.SelectedPalette;
             set
             {
                 if (string.IsNullOrEmpty(value))
                 {
                     SmartLogger.Log(LogLevel.Warning, LogPrefix, "Attempt to set empty style name");
-                    value = MwConstants.DefaultStyle;
+                    value = DefaultSettings.SelectedPalette;
                 }
-                UpdateState(s => s with { Style = value }, nameof(SelectedStyle));
+
+                if (Settings.Instance.SelectedPalette == value) return;
+                Settings.Instance.SelectedPalette = value;
+                OnPropertyChanged(nameof(SelectedStyle));
             }
         }
 
@@ -208,8 +196,13 @@ namespace SpectrumNet
 
         public string StatusText
         {
-            get => _state.StatusText;
-            set => UpdateState(s => s with { StatusText = value ?? string.Empty }, nameof(StatusText));
+            get => _statusText;
+            set
+            {
+                if (_statusText == value) return;
+                _statusText = value ?? string.Empty;
+                OnPropertyChanged(nameof(StatusText));
+            }
         }
 
         public FftWindowType WindowType
@@ -226,6 +219,7 @@ namespace SpectrumNet
                     _analyzer?.SetWindowType(value);
                     _renderer?.RequestRender();
                     _renderElement?.InvalidateVisual();
+                    Settings.Instance.SelectedFftWindowType = value;
                 }
                 catch (Exception ex)
                 {
@@ -265,7 +259,13 @@ namespace SpectrumNet
         public bool IsOverlayTopmost
         {
             get => _isOverlayTopmost;
-            set => SetField(ref _isOverlayTopmost, value, UpdateOverlayTopmostState);
+            set
+            {
+                if (SetField(ref _isOverlayTopmost, value, UpdateOverlayTopmostState))
+                {
+                    Settings.Instance.IsOverlayTopmost = value;
+                }
+            }
         }
 
         public bool IsControlPanelVisible
@@ -274,7 +274,10 @@ namespace SpectrumNet
             set
             {
                 if (SetField(ref _isControlPanelVisible, value))
+                {
                     UpdateToggleButtonContent();
+                    Settings.Instance.IsControlPanelVisible = value;
+                }
             }
         }
 
@@ -293,6 +296,7 @@ namespace SpectrumNet
                 }
 
                 UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel));
+                Settings.Instance.UIMinDbLevel = value;
             }
         }
 
@@ -311,6 +315,7 @@ namespace SpectrumNet
                 }
 
                 UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
+                Settings.Instance.UIMaxDbLevel = value;
             }
         }
 
@@ -328,6 +333,7 @@ namespace SpectrumNet
                 }
 
                 UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
+                Settings.Instance.UIAmplificationFactor = value;
             }
         }
 
@@ -343,11 +349,13 @@ namespace SpectrumNet
                 var syncContext = SynchronizationContext.Current ??
                     throw new InvalidOperationException("No synchronization context. Window must be created in UI thread.");
 
+                LoadAndApplySettings();
+
                 _gainParameters = new GainParameters(
                     syncContext,
-                    SharedConstants.DefaultMinDb,
-                    SharedConstants.DefaultMaxDb,
-                    SharedConstants.DefaultAmplificationFactor
+                    Settings.Instance.UIMinDbLevel,
+                    Settings.Instance.UIMaxDbLevel,
+                    Settings.Instance.UIAmplificationFactor
                 );
 
                 if (_gainParameters == null)
@@ -406,7 +414,7 @@ namespace SpectrumNet
 
                 _disposables.Add(_captureManager);
 
-                SpectrumRendererFactory.GlobalQuality = _state.Quality;
+                SpectrumRendererFactory.GlobalQuality = Settings.Instance.SelectedRenderQuality;
 
                 _renderer = new Renderer(_spectrumStyles, this, _analyzer, _renderElement);
                 if (_renderer == null)
@@ -414,8 +422,8 @@ namespace SpectrumNet
 
                 _disposables.Add(_renderer);
 
-                SelectedDrawingType = RenderStyle.Bars;
-                UpdateState(s => s with { Style = MwConstants.DefaultStyle }, nameof(SelectedStyle));
+                SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
+                SelectedStyle = Settings.Instance.SelectedPalette;
             }
             catch (Exception ex)
             {
@@ -433,12 +441,13 @@ namespace SpectrumNet
             StateChanged += OnStateChanged;
             MouseDoubleClick += OnWindowMouseDoubleClick;
             Closed += OnWindowClosed;
-            KeyDown += MainWindow_KeyDown; 
+            KeyDown += MainWindow_KeyDown;
+            LocationChanged += OnWindowLocationChanged;
 
             PropertyChanged += (_, args) =>
             {
                 if (args?.PropertyName == nameof(IsRecording))
-                    StatusText = IsRecording ? MwConstants.RecordingStatus : MwConstants.ReadyStatus;
+                    StatusText = IsRecording ? "Recording..." : "Ready";
             };
         }
 
@@ -454,6 +463,109 @@ namespace SpectrumNet
                         OnPropertyChanged(nameof(IsDarkTheme));
                 };
                 tm.PropertyChanged += _themePropertyChangedHandler;
+            }
+        }
+
+        #endregion
+
+        #region Settings Management
+
+        private void LoadAndApplySettings()
+        {
+            try
+            {
+                SettingsWindow.Instance.LoadSettings();
+                ApplyWindowSettings();
+                EnsureWindowIsVisible();
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings loaded and applied successfully");
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error loading and applying settings: {ex.Message}");
+            }
+        }
+
+        private void ApplyWindowSettings()
+        {
+            try
+            {
+                // Применяем настройки положения и размера окна
+                Left = Settings.Instance.WindowLeft;
+                Top = Settings.Instance.WindowTop;
+                Width = Settings.Instance.WindowWidth;
+                Height = Settings.Instance.WindowHeight;
+                WindowState = Settings.Instance.WindowState;
+
+                // Применяем настройки UI
+                _isControlPanelVisible = Settings.Instance.IsControlPanelVisible;
+                _isOverlayTopmost = Settings.Instance.IsOverlayTopmost;
+
+                // Устанавливаем исходные значения для других свойств
+                _selectedDrawingType = Settings.Instance.SelectedRenderStyle;
+                _selectedFftWindowType = Settings.Instance.SelectedFftWindowType;
+                _selectedScaleType = Settings.Instance.SelectedScaleType;
+
+                // Обновляем UI
+                UpdateToggleButtonContent();
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error applying window settings: {ex.Message}");
+            }
+        }
+
+        private void EnsureWindowIsVisible()
+        {
+            try
+            {
+                bool isVisible = false;
+                foreach (var screen in System.Windows.Forms.Screen.AllScreens)
+                {
+                    var screenBounds = new System.Drawing.Rectangle(
+                        screen.WorkingArea.X,
+                        screen.WorkingArea.Y,
+                        screen.WorkingArea.Width,
+                        screen.WorkingArea.Height);
+
+                    var windowRect = new System.Drawing.Rectangle(
+                        (int)Left,
+                        (int)Top,
+                        (int)Width,
+                        (int)Height);
+
+                    if (screenBounds.IntersectsWith(windowRect))
+                    {
+                        isVisible = true;
+                        break;
+                    }
+                }
+
+                if (!isVisible)
+                {
+                    WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center (was outside visible area)");
+                }
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error ensuring window visibility: {ex.Message}");
+            }
+        }
+
+        private void OnWindowLocationChanged(object? sender, EventArgs e)
+        {
+            try
+            {
+                if (WindowState == WindowState.Normal)
+                {
+                    Settings.Instance.WindowLeft = Left;
+                    Settings.Instance.WindowTop = Top;
+                }
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating window location: {ex.Message}");
             }
         }
 
@@ -517,7 +629,7 @@ namespace SpectrumNet
                     _overlayWindow = new OverlayWindow(
                         this,
                         new OverlayConfiguration(
-                            RenderInterval: MwConstants.RenderIntervalMs,
+                            RenderInterval: 16,
                             IsTopmost: IsOverlayTopmost,
                             ShowInTaskbar: false,
                             EnableHardwareAcceleration: true
@@ -654,6 +766,8 @@ namespace SpectrumNet
                 MaximizeIcon.Data = Geometry.Parse(WindowState == WindowState.Maximized
                     ? "M0,0 L20,0 L20,20 L0,20 Z"
                     : "M2,2 H18 V18 H2 Z");
+
+                Settings.Instance.WindowState = WindowState;
             }
             catch (Exception ex)
             {
@@ -680,6 +794,12 @@ namespace SpectrumNet
             try
             {
                 _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+
+                if (WindowState == WindowState.Normal)
+                {
+                    Settings.Instance.WindowWidth = Width;
+                    Settings.Instance.WindowHeight = Height;
+                }
             }
             catch (Exception ex)
             {
@@ -719,6 +839,8 @@ namespace SpectrumNet
         {
             try
             {
+                SettingsWindow.Instance.SaveSettings();
+
                 _cleanupCts.Cancel();
 
                 CompositionTarget.Rendering -= OnRendering;
@@ -730,6 +852,7 @@ namespace SpectrumNet
                 StateChanged -= OnStateChanged;
                 MouseDoubleClick -= OnWindowMouseDoubleClick;
                 Closed -= OnWindowClosed;
+                LocationChanged -= OnWindowLocationChanged;
 
                 if (_captureManager != null)
                 {
@@ -771,7 +894,16 @@ namespace SpectrumNet
         {
             if (e?.ChangedButton == System.Windows.Input.MouseButton.Left)
             {
-                try { DragMove(); }
+                try
+                {
+                    DragMove();
+
+                    if (WindowState == WindowState.Normal)
+                    {
+                        Settings.Instance.WindowLeft = Left;
+                        Settings.Instance.WindowTop = Top;
+                    }
+                }
                 catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error moving window: {ex}"); }
             }
         }
@@ -1022,25 +1154,6 @@ namespace SpectrumNet
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating gain parameter: {ex}");
-            }
-        }
-
-        private void UpdateState(Func<MainWindowSettings, MainWindowSettings> updater, string propertyName)
-        {
-            if (updater == null)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Null delegate passed for state update");
-                return;
-            }
-
-            try
-            {
-                _state = updater(_state);
-                OnPropertyChanged(propertyName);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating state: {ex}");
             }
         }
 

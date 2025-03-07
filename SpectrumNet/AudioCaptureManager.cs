@@ -4,6 +4,9 @@ namespace SpectrumNet
     public sealed class AudioCaptureManager : IDisposable
     {
         private const string LogPrefix = "[AudioCaptureManager] ";
+        private const string _readyStatus = "Ready";
+        private const string _recordingStatus = "Recording...";
+
         private readonly IAudioVisualizationController _controller;
         private readonly object _lock = new();
         private readonly MMDeviceEnumerator _deviceEnumerator;
@@ -317,7 +320,7 @@ namespace SpectrumNet
             {
                 IsRecording = isRecording;
                 _controller.IsRecording = isRecording;
-                _controller.StatusText = customStatus ?? (isRecording ? MwConstants.RecordingStatus : MwConstants.ReadyStatus);
+                _controller.StatusText = customStatus ?? (isRecording ? _recordingStatus : _readyStatus);
                 _controller.OnPropertyChanged(
                     nameof(_controller.IsRecording),
                     nameof(_controller.CanStartCapture),

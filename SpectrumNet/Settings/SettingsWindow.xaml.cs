@@ -1,5 +1,9 @@
 ﻿#nullable enable
 
+using System.Windows.Forms;
+using Newtonsoft.Json.Serialization;
+using MessageBox = System.Windows.MessageBox;
+
 namespace SpectrumNet
 {
     /// <summary>
@@ -13,7 +17,16 @@ namespace SpectrumNet
     /// </remarks>
     public partial class SettingsWindow : Window
     {
-        #region Fields
+        #region Константы
+        private const string LogPrefix = "[SettingsWindow] ";
+        #endregion
+
+        #region Singleton
+        private static readonly Lazy<SettingsWindow> _instance = new(() => new SettingsWindow());
+        public static SettingsWindow Instance => _instance.Value;
+        #endregion
+
+        #region Поля
         /// <summary>
         /// The application settings instance.
         /// </summary>
@@ -25,19 +38,17 @@ namespace SpectrumNet
         private Dictionary<string, object?>? _originalValues;
         #endregion
 
-        #region Constructor
-        /// <summary>
-        /// Initializes a new instance of the <see cref="SettingsWindow"/> class.
-        /// </summary>
+        #region Конструктор
+
         public SettingsWindow()
         {
-            Log.Debug($"[{nameof(SettingsWindow)}] Initializing resources window");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Initializing resources window");
             InitialiseResources();
 
-            Log.Debug($"[{nameof(SettingsWindow)}] Initializing window");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Initializing window");
             InitializeComponent();
 
-            Log.Debug($"[{nameof(SettingsWindow)}] Initializing theme");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Initializing theme");
             ThemeManager.Instance.RegisterWindow(this);
 
             _settings = Settings.Instance;
@@ -46,16 +57,199 @@ namespace SpectrumNet
         }
         #endregion
 
-        #region Private Methods
-        /// <summary>
-        /// Initializes the window resources.
-        /// </summary>
+        #region Settings
+
+        public void EnsureWindowVisible()
+        {
+            try
+            {
+                bool isVisible = false;
+
+                // Проверяем видимость хотя бы на одном из экранов
+                foreach (var screen in Screen.AllScreens)
+                {
+                    var screenBounds = new System.Drawing.Rectangle(
+                        screen.Bounds.X,
+                        screen.Bounds.Y,
+                        screen.Bounds.Width,
+                        screen.Bounds.Height
+                    );
+
+                    var windowRect = new System.Drawing.Rectangle(
+                        (int)Left,
+                        (int)Top,
+                        (int)Width,
+                        (int)Height
+                    );
+
+                    if (screenBounds.IntersectsWith(windowRect))
+                    {
+                        isVisible = true;
+                        break;
+                    }
+                }
+
+                if (!isVisible)
+                {
+                    // Центрируем окно на экране
+                    WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center (was outside visible area)");
+                }
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error ensuring window visibility: {ex.Message}");
+            }
+        }
+
+        private void CopyPropertiesFrom(object source)
+        {
+            try
+            {
+                // Получаем все свойства, которые можно скопировать
+                var properties = source.GetType().GetProperties()
+                    .Where(p => p.CanRead &&
+                           !p.GetCustomAttributes(typeof(JsonIgnoreAttribute), true).Any());
+
+                foreach (var prop in properties)
+                {
+                    try
+                    {
+                        // Находим свойство с таким же именем в _settings
+                        var targetProp = _settings.GetType().GetProperty(prop.Name);
+                        if (targetProp != null && targetProp.CanWrite)
+                        {
+                            var value = prop.GetValue(source);
+                            targetProp.SetValue(_settings, value);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Failed to copy property {prop.Name}: {ex.Message}");
+                    }
+                }
+
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Settings copied successfully");
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error copying properties: {ex.Message}");
+            }
+        }
+
+        public void LoadSettings()
+        {
+            try
+            {
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string settingsPath = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER, DefaultSettings.SETTINGS_FILE);
+
+                // Если файла нет в AppData, проверяем текущую директорию (для обратной совместимости)
+                if (!File.Exists(settingsPath) && File.Exists("settings.json"))
+                {
+                    settingsPath = "settings.json";
+                    SmartLogger.Log(LogLevel.Information, LogPrefix, "Using settings from current directory");
+                }
+
+                if (!File.Exists(settingsPath))
+                {
+                    SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings file not found, using defaults");
+                    return;
+                }
+
+                string json = File.ReadAllText(settingsPath);
+                var loadedSettings = JsonConvert.DeserializeObject<Settings>(json);
+
+                if (loadedSettings == null)
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings, using defaults");
+                    return;
+                }
+
+                CopyPropertiesFrom(loadedSettings);
+                SaveOriginalSettings();
+                UpdateAllRenderers();
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, $"Settings loaded from {settingsPath}");
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}");
+            }
+        }
+
+        public void SaveSettings()
+        {
+            try
+            {
+                UpdateRenderers();
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appFolder = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER);
+
+                if (!Directory.Exists(appFolder))
+                    Directory.CreateDirectory(appFolder);
+
+                string settingsPath = Path.Combine(appFolder, DefaultSettings.SETTINGS_FILE);
+
+                var jsonSettings = new JsonSerializerSettings
+                {
+                    Formatting = Formatting.Indented,
+                    ContractResolver = new DefaultContractResolver
+                    {
+                        NamingStrategy = new CamelCaseNamingStrategy()
+                    }
+                };
+
+                string json = JsonConvert.SerializeObject(_settings, jsonSettings);
+                File.WriteAllText(settingsPath, json);
+                File.WriteAllText("settings.json", json);
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, $"Settings saved successfully to {settingsPath}");
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error saving settings: {ex.Message}");
+            }
+        }
+
+        public void ResetToDefaults()
+        {
+            try
+            {
+                var result = MessageBox.Show(
+                    "Are you sure you want to reset all settings to defaults?",
+                    "Reset Settings",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question
+                );
+
+                if (result != MessageBoxResult.Yes)
+                    return;
+
+                _settings.ResetToDefaults();
+                UpdateAllRenderers();
+                SaveSettings();
+                SaveOriginalSettings();
+
+                MessageBox.Show("Settings have been reset to defaults.", "Settings Reset",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings reset to defaults");
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error resetting settings: {ex.Message}");
+                MessageBox.Show($"Error resetting settings: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        #endregion
+
+        #region Приватные методы
+
         private static void InitialiseResources() =>
             CommonResources.InitialiseResources();
 
-        /// <summary>
-        /// Saves the current settings to use as original values.
-        /// </summary>
         private void SaveOriginalSettings()
         {
             _originalValues = _settings.GetType().GetProperties()
@@ -63,29 +257,23 @@ namespace SpectrumNet
                 .ToDictionary(p => p.Name, p => p.GetValue(_settings));
         }
 
-        /// <summary>
-        /// Restores the settings to their original values.
-        /// </summary>
         private void RestoreOriginalSettings()
         {
             if (_originalValues == null)
             {
-                Log.Warning($"[{nameof(SettingsWindow)}] Original settings not found");
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Original settings not found");
                 return;
             }
 
             foreach (var (key, value) in _originalValues)
                 _settings.GetType().GetProperty(key)?.SetValue(_settings, value);
 
-            Log.Debug($"[{nameof(SettingsWindow)}] Settings restored from original");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Settings restored from original");
         }
 
-        /// <summary>
-        /// Saves the current settings.
-        /// </summary>
-        private void SaveSettings()
+        private void UpdateRenderers()
         {
-            Log.Information($"[{nameof(SettingsWindow)}] Settings saved successfully");
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "Applying settings to renderers");
 
             try
             {
@@ -106,127 +294,104 @@ namespace SpectrumNet
                     }
 
                     renderer.Configure(isOverlayActive);
-                    Log.Debug($"[{nameof(SettingsWindow)}] Renderer updated successfully");
+                    SmartLogger.Log(LogLevel.Debug, LogPrefix, "Renderer updated successfully");
                 }
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error updating renderer");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating renderer: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Persists the current settings to a file.
-        /// </summary>
-        private void PersistSettings()
+        private void UpdateAllRenderers()
         {
             try
             {
-                File.WriteAllText("settings.json", JsonConvert.SerializeObject(_settings, Formatting.Indented));
-                Log.Information($"[{nameof(SettingsWindow)}] Settings saved successfully");
+                foreach (var renderer in SpectrumRendererFactory.GetAllRenderers())
+                {
+                    try
+                    {
+                        bool isOverlayActive = false;
+                        var field = renderer.GetType().GetField("_isOverlayActive",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+                        if (field != null)
+                        {
+                            object? value = field.GetValue(renderer);
+                            if (value is bool boolValue)
+                                isOverlayActive = boolValue;
+                        }
+
+                        renderer.Configure(isOverlayActive, _settings.SelectedRenderQuality);
+                    }
+                    catch (Exception ex)
+                    {
+                        SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Failed to update renderer {renderer.GetType().Name}: {ex.Message}");
+                    }
+                }
+
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "All renderers updated successfully");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error saving settings to file");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating renderers: {ex.Message}");
             }
         }
         #endregion
 
-        #region Event Handlers
-        /// <summary>
-        /// Handles the window drag event.
-        /// </summary>
-        /// <param name="sender">The source of the event.</param>
-        /// <param name="e">The event arguments.</param>
+        #region Обработчики событий
         private void OnWindowDrag(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton == MouseButton.Left)
                 DragMove();
         }
 
-        /// <summary>
-        /// Handles the window closing event.
-        /// </summary>
-        /// <param name="sender">The source of the event.</param>
-        /// <param name="e">The event arguments.</param>
         private void Window_Closing(object sender, CancelEventArgs e)
         {
             try
             {
-                Log.Information($"[{nameof(SettingsWindow)}] Closing settings window");
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Closing settings window");
                 SaveSettings();
-                PersistSettings();
                 ThemeManager.Instance.UnregisterWindow(this);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error closing window");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error closing window: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Handles the close button click event.
-        /// </summary>
-        /// <param name="sender">The source of the event.</param>
-        /// <param name="e">The event arguments.</param>
         private void OnCloseButton_Click(object sender, RoutedEventArgs e)
         {
-            Log.Debug($"[{nameof(SettingsWindow)}] Close button clicked");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Close button clicked");
             RestoreOriginalSettings();
             ThemeManager.Instance.UnregisterWindow(this);
             Close();
         }
 
-        /// <summary>
-        /// Handles the apply button click event.
-        /// </summary>
-        /// <param name="sender">The source of the event.</param>
-        /// <param name="e">The event arguments.</param>
         private void OnApplyButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                Log.Debug($"[{nameof(SettingsWindow)}] Applying settings");
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Applying settings");
                 SaveSettings();
-                PersistSettings();
                 SaveOriginalSettings();
 
                 MessageBox.Show("Settings applied successfully!", "Settings",
                     MessageBoxButton.OK, MessageBoxImage.Information);
 
-                Log.Information($"[{nameof(SettingsWindow)}] Settings applied successfully");
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings applied successfully");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error applying settings");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error applying settings: {ex.Message}");
                 MessageBox.Show($"Error applying settings: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        /// <summary>
-        /// Handles the reset button click event.
-        /// </summary>
-        /// <param name="sender">The source of the event.</param>
-        /// <param name="e">The event arguments.</param>
         private void OnResetButton_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                _settings.ResetToDefaults();
-                SaveSettings();
-
-                MessageBox.Show("Settings have been reset to defaults.", "Settings Reset",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-
-                Log.Debug($"[{nameof(SettingsWindow)}] Settings reset to defaults");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"[{nameof(SettingsWindow)}] Error resetting settings");
-                MessageBox.Show($"Error resetting settings: {ex.Message}", "Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            ResetToDefaults();
         }
         #endregion
     }
