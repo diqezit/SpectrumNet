@@ -2,8 +2,6 @@
 
 namespace SpectrumNet
 {
-
-    #region Enums
     /// <summary>
     /// Enumeration of spectrum rendering styles.
     /// </summary>
@@ -44,9 +42,7 @@ namespace SpectrumNet
         Medium,
         High
     }
-    #endregion
 
-    #region Interfaces
     /// <summary>
     /// Interface for classes that perform spectrum rendering.
     /// </summary>
@@ -76,22 +72,18 @@ namespace SpectrumNet
         /// <summary>Gets or sets the current rendering quality.</summary>
         RenderQuality Quality { get; set; }
     }
-    #endregion
 
-    #region Factory Classes
     /// <summary>
     /// Factory for creating spectrum renderer instances.
     /// </summary>
     public static class SpectrumRendererFactory
     {
-        #region Private Fields
+        private const string LogPrefix = "[SpectrumRendererFactory] ";
         private static readonly object _lock = new();
         private static readonly Dictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
         private static readonly HashSet<RenderStyle> _initializedRenderers = new();
         private static RenderQuality _globalQuality = RenderQuality.Medium;
-        #endregion
 
-        #region Public Properties
         /// <summary>
         /// Gets or sets the global rendering quality for all renderers.
         /// </summary>
@@ -104,12 +96,11 @@ namespace SpectrumNet
                 {
                     _globalQuality = value;
                     ConfigureAllRenderers(isOverlayActive: null, _globalQuality);
+                    SmartLogger.Log(LogLevel.Information, LogPrefix, $"Global quality changed to {value}", forceLog: true);
                 }
             }
         }
-        #endregion
 
-        #region Public Methods
         /// <summary>
         /// Creates or retrieves a spectrum renderer instance of the specified style.
         /// </summary>
@@ -146,7 +137,7 @@ namespace SpectrumNet
                     }
                     catch (Exception ex)
                     {
-                        Log.Error($"Failed to initialize renderer {style}: {ex.Message}");
+                        SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to initialize renderer {style}: {ex.Message}", forceLog: true);
                         throw;
                     }
                 }
@@ -187,18 +178,25 @@ namespace SpectrumNet
             {
                 foreach (var renderer in _rendererCache.Values)
                 {
-                    if (isOverlayActive.HasValue && quality.HasValue)
+                    try
                     {
-                        renderer.Configure(isOverlayActive.Value, quality.Value);
+                        if (isOverlayActive.HasValue && quality.HasValue)
+                        {
+                            renderer.Configure(isOverlayActive.Value, quality.Value);
+                        }
+                        else if (isOverlayActive.HasValue)
+                        {
+                            renderer.Configure(isOverlayActive.Value, renderer.Quality);
+                        }
+                        else if (quality.HasValue)
+                        {
+                            renderer.Configure(isOverlayActive: false, quality.Value);
+                            renderer.Quality = quality.Value;
+                        }
                     }
-                    else if (isOverlayActive.HasValue)
+                    catch (Exception ex)
                     {
-                        renderer.Configure(isOverlayActive.Value, renderer.Quality);
-                    }
-                    else if (quality.HasValue)
-                    {
-                        renderer.Configure(isOverlayActive: false, quality.Value);
-                        renderer.Quality = quality.Value;
+                        SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error configuring renderer: {ex.Message}", forceLog: true);
                     }
                 }
             }
@@ -219,9 +217,7 @@ namespace SpectrumNet
                 }
             }
         }
-        #endregion
 
-        #region Private Methods
         /// <summary>
         /// Creates a renderer instance for the specified style.
         /// </summary>
@@ -253,7 +249,5 @@ namespace SpectrumNet
             RenderStyle.Waveform => WaveformRenderer.GetInstance(),
             _ => throw new ArgumentException($"Unknown render style: {style}")
         };
-        #endregion
     }
-    #endregion
 }

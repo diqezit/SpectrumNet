@@ -81,7 +81,6 @@ namespace SpectrumNet
             {
                 InvalidateCachedResources();
             }
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Configured: Overlay={isOverlayActive}, Quality={quality}");
         }
 
         public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)

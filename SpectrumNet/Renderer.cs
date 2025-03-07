@@ -2,7 +2,6 @@
 
 namespace SpectrumNet
 {
-    public readonly record struct PerformanceMetrics(double FrameTime, double Fps);
 
     public sealed class Renderer : IDisposable
     {
@@ -18,7 +17,6 @@ namespace SpectrumNet
         readonly IAudioVisualizationController _controller;
         readonly SpectrumAnalyzer _analyzer;
         readonly CancellationTokenSource _disposalTokenSource = new();
-        readonly Stopwatch _performanceMonitor = new();
 
         SKElement? _skElement;
         DispatcherTimer? _renderTimer;
@@ -49,11 +47,12 @@ namespace SpectrumNet
             _shouldShowPlaceholder = !_controller.IsRecording;
             InitializeRenderer();
             SmartLogger.Log(LogLevel.Information, LogPrefix, "Successfully initialized.", forceLog: true);
+
+            PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
         }
 
         void InitializeRenderer()
         {
-            // Get the default palette from the new system.
             var (color, brush) = _spectrumStyles.GetColorAndBrush(DEFAULT_STYLE);
             _currentState = new RenderState(
                 brush.Clone() ?? throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style"),
@@ -72,9 +71,13 @@ namespace SpectrumNet
                 _skElement.Unloaded += OnElementUnloaded;
             }
 
-            _performanceMonitor.Start();
             _controller.PropertyChanged += OnControllerPropertyChanged;
             SynchronizeWithController();
+        }
+
+        private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics)
+        {
+            PerformanceUpdate?.Invoke(this, metrics);
         }
 
         void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -126,7 +129,6 @@ namespace SpectrumNet
         void OnElementUnloaded(object? sender, RoutedEventArgs e)
         {
             _renderTimer?.Stop();
-            _performanceMonitor.Stop();
         }
 
         public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
@@ -145,7 +147,6 @@ namespace SpectrumNet
             try
             {
                 RenderFrameInternal(e.Surface.Canvas, e.Info);
-                EmitPerformanceMetrics();
             }
             catch (ObjectDisposedException)
             {
@@ -154,7 +155,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering frame: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering frame: {ex}", forceLog: true);
                 RenderPlaceholder(e.Surface.Canvas);
             }
             finally
@@ -217,7 +218,15 @@ namespace SpectrumNet
                 _controller.IsOverlayActive,
                 _currentState.Quality);
 
-            renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint, PerfomanceMetrics.DrawPerformanceInfo);
+            renderer.Render(
+                canvas,
+                spectrum.Spectrum,
+                info,
+                barWidth,
+                barSpacing,
+                barCount,
+                _currentState.Paint,
+                PerformanceMetricsManager.DrawPerformanceInfo);
         }
 
         bool TryCalcRenderParams(SKImageInfo info, out float barWidth, out float barSpacing, out int barCount)
@@ -326,13 +335,6 @@ namespace SpectrumNet
                 RequestRender();
         }
 
-        void EmitPerformanceMetrics()
-        {
-            var elapsed = _performanceMonitor.Elapsed;
-            _performanceMonitor.Restart();
-            PerformanceUpdate?.Invoke(this, new PerformanceMetrics(elapsed.TotalMilliseconds, 1000.0 / elapsed.TotalMilliseconds));
-        }
-
         void EnsureNotDisposed()
         {
             if (_isDisposed)
@@ -346,7 +348,8 @@ namespace SpectrumNet
             _isDisposed = _isAnalyzerDisposed = true;
             _disposalTokenSource.Cancel();
             _renderTimer?.Stop();
-            _performanceMonitor.Stop();
+
+            PerformanceMetricsManager.PerformanceUpdated -= OnPerformanceMetricsUpdated;
 
             if (_controller is INotifyPropertyChanged notifier)
                 notifier.PropertyChanged -= OnControllerPropertyChanged;

@@ -144,8 +144,6 @@ namespace SpectrumNet
             {
                 InvalidateCachedResources();
             }
-
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Configured: Overlay={isOverlayActive}, Quality={quality}");
         }
 
         public void Configure(bool isOverlayActive) => Configure(isOverlayActive, _quality);

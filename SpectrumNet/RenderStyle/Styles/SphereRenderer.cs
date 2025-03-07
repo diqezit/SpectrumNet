@@ -98,9 +98,6 @@ namespace SpectrumNet
             {
                 // Больше не требуется InvalidateCachedResources, так как кэширование удалено
             }
-
-            SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                $"Configured: Overlay={isOverlayActive}, Quality={quality}");
         }
 
         public void Render(
