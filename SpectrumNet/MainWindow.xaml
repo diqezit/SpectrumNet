@@ -17,51 +17,52 @@
         StateChanged="OnStateChanged"
         MouseDoubleClick="OnWindowMouseDoubleClick">
 
+    <!-- Ресурсы окна -->
     <Window.Resources>
+        <!-- Длительность и easing для анимаций -->
         <Duration x:Key="StandardAnimationDuration">0:0:0.3</Duration>
         <CubicEase x:Key="StandardEaseOut" EasingMode="EaseOut"/>
-        <CubicEase x:Key="StandardEaseIn" EasingMode="EaseIn"/>
 
+        <!-- Анимация для показа панели -->
         <Storyboard x:Key="ShowPanelAnimation">
-            <DoubleAnimation Storyboard.TargetName="ControlPanel"
-                         Storyboard.TargetProperty="Opacity"
-                         From="0"
-                         To="1"
-                         Duration="0:0:0.3"/>
+            <ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility">
+                <DiscreteObjectKeyFrame KeyTime="0:0:0" Value="{x:Static Visibility.Visible}"/>
+            </ObjectAnimationUsingKeyFrames>
+            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                             From="0" To="1"
+                             Duration="{StaticResource StandardAnimationDuration}"
+                             EasingFunction="{StaticResource StandardEaseOut}"/>
         </Storyboard>
 
-        <!-- Анимация для скрытия панели и уменьшения кнопки -->
-        <Storyboard x:Key="HidePanelAndButtonAnimation">
-            <DoubleAnimation Storyboard.TargetName="ToggleButtonIcon"
-                     Storyboard.TargetProperty="(Path.RenderTransform).(RotateTransform.Angle)"
-                     To="180"
-                     Duration="0:0:0.3">
-                <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseOut"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
-        </Storyboard>
-
-        <!-- Анимация для показа панели и восстановления кнопки -->
-        <Storyboard x:Key="ShowPanelAndButtonAnimation">
-            <DoubleAnimation Storyboard.TargetName="ToggleButtonIcon"
-                     Storyboard.TargetProperty="(Path.RenderTransform).(RotateTransform.Angle)"
-                     To="0"
-                     Duration="0:0:0.3">
-                <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseOut"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
-        </Storyboard>
-
+        <!-- Анимация для скрытия панели -->
         <Storyboard x:Key="HidePanelAnimation">
-            <DoubleAnimation Storyboard.TargetName="ControlPanel"
-                         Storyboard.TargetProperty="Opacity"
-                         To="0"
-                         Duration="0:0:0.3"/>
+            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                             To="0"
+                             Duration="{StaticResource StandardAnimationDuration}"
+                             EasingFunction="{StaticResource StandardEaseOut}"/>
+            <ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility">
+                <DiscreteObjectKeyFrame KeyTime="0:0:0.3" Value="{x:Static Visibility.Collapsed}"/>
+            </ObjectAnimationUsingKeyFrames>
+        </Storyboard>
+
+        <!-- Анимация для поворота иконки при показе панели -->
+        <Storyboard x:Key="ShowPanelAndButtonAnimation">
+            <DoubleAnimation Storyboard.TargetProperty="(Path.RenderTransform).(RotateTransform.Angle)"
+                             To="0"
+                             Duration="{StaticResource StandardAnimationDuration}"
+                             EasingFunction="{StaticResource StandardEaseOut}"/>
+        </Storyboard>
+
+        <!-- Анимация для поворота иконки при скрытии панели -->
+        <Storyboard x:Key="HidePanelAndButtonAnimation">
+            <DoubleAnimation Storyboard.TargetProperty="(Path.RenderTransform).(RotateTransform.Angle)"
+                             To="180"
+                             Duration="{StaticResource StandardAnimationDuration}"
+                             EasingFunction="{StaticResource StandardEaseOut}"/>
         </Storyboard>
     </Window.Resources>
 
+    <!-- Настройки WindowChrome -->
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0"
                             CornerRadius="0"
@@ -69,6 +70,7 @@
                             ResizeBorderThickness="6"/>
     </shell:WindowChrome.WindowChrome>
 
+    <!-- Основной контейнер окна -->
     <Border BorderThickness="1"
             BorderBrush="{DynamicResource WindowBorderBrush}"
             CornerRadius="12"
@@ -153,35 +155,35 @@
                                  Opacity="1"/>
                 </Border>
 
-                <!-- Разделитель с кнопкой переключения (улучшенный) -->
+                <!-- Разделитель с кнопкой переключения -->
                 <Border x:Name="ToggleButtonContainer"
-                        Height="24" 
-                        VerticalAlignment="Bottom"
-                        Margin="0,0,0,-12"
-                        Background="Transparent"
-                        Cursor="Hand"
-                        MouseDown="ToggleButtonContainer_MouseDown"
-                        Panel.ZIndex="10">
+        Height="24" 
+        VerticalAlignment="Bottom"
+        Margin="0,0,0,-12"
+        Background="Transparent"
+        Cursor="Hand"
+        MouseDown="ToggleButtonContainer_MouseDown"
+        Panel.ZIndex="10">
                     <Border.Effect>
                         <DropShadowEffect ShadowDepth="1" BlurRadius="3" Opacity="0.2" />
                     </Border.Effect>
                     <Grid>
                         <!-- Фоновая подсветка при наведении -->
                         <Border x:Name="HoverIndicator" 
-                                CornerRadius="8"
-                                Height="16"
-                                Background="{DynamicResource AccentBrush}"
-                                Opacity="0"
-                                HorizontalAlignment="Stretch"
-                                Margin="0,0,0,0">
+                CornerRadius="8"
+                Height="16"
+                Background="{DynamicResource AccentBrush}"
+                Opacity="0"
+                HorizontalAlignment="Stretch"
+                Margin="0,0,0,0">
                             <Border.Triggers>
                                 <EventTrigger RoutedEvent="Border.MouseEnter">
                                     <BeginStoryboard>
                                         <Storyboard>
                                             <DoubleAnimation 
-                                                Storyboard.TargetProperty="Opacity"
-                                                To="0.1"
-                                                Duration="0:0:0.2" />
+                                Storyboard.TargetProperty="Opacity"
+                                To="0.1"
+                                Duration="0:0:0.2" />
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </EventTrigger>
@@ -189,69 +191,68 @@
                                     <BeginStoryboard>
                                         <Storyboard>
                                             <DoubleAnimation 
-                                                Storyboard.TargetProperty="Opacity"
-                                                To="0"
-                                                Duration="0:0:0.2" />
+                                Storyboard.TargetProperty="Opacity"
+                                To="0"
+                                Duration="0:0:0.2" />
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </EventTrigger>
                             </Border.Triggers>
                         </Border>
 
-                        <!-- Улучшенная линия-разделитель -->
+                        <!-- Линия-разделитель -->
                         <Border Height="3" 
-                                Background="{DynamicResource BorderBrush}" 
-                                HorizontalAlignment="Stretch" 
-                                VerticalAlignment="Center"
-                                Opacity="0.5"
-                                CornerRadius="1.5"
-                                Margin="100,0,100,0"/>
+                Background="{DynamicResource BorderBrush}" 
+                HorizontalAlignment="Stretch" 
+                VerticalAlignment="Center"
+                Opacity="0.5"
+                CornerRadius="1.5"
+                Margin="100,0,100,0"/>
 
-                        <!-- Центральная часть разделителя с акцентом -->
+                        <!-- Центральная часть разделителя -->
                         <Border Width="200"
-                                Height="3"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Background="{DynamicResource AccentBrush}"
-                                Opacity="0.6"
-                                CornerRadius="1.5"/>
+                Height="3"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{DynamicResource AccentBrush}"
+                Opacity="0.6"
+                CornerRadius="1.5"/>
 
-                        <!-- Кнопка с индикатором -->
-                        <Button x:Name="ToggleControlPanelButton"
-                                Click="ToggleControlPanelButton_Click"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                Cursor="Hand"
-                                Width="48"
-                                Height="24"
-                                HorizontalAlignment="Center">
-                            <Border Background="{DynamicResource SurfaceBrush}" 
-                                    CornerRadius="12" 
-                                    BorderBrush="{DynamicResource BorderBrush}" 
-                                    BorderThickness="1" 
-                                    Padding="4">
-                                <Path x:Name="ToggleButtonIcon" 
-                                      Width="28" 
-                                      Height="8" 
-                                      Fill="{DynamicResource AccentBrush}"
-                                      Data="M 0,0 L 14,8 L 28,0 Z" 
-                                      HorizontalAlignment="Center" 
-                                      VerticalAlignment="Center">
-                                    <Path.RenderTransform>
-                                        <RotateTransform Angle="0" CenterX="14" CenterY="4"/>
-                                    </Path.RenderTransform>
-                                </Path>
-                            </Border>
-                        </Button>
-
-                        <!-- Подсказка -->
-                        <TextBlock Text="Toggle Panel" 
-                                   Foreground="{DynamicResource TextSecondaryBrush}" 
-                                   Opacity="0.5"
-                                   FontSize="8"
-                                   VerticalAlignment="Bottom"
-                                   HorizontalAlignment="Center"
-                                   Margin="0,0,0,0"/>
+                        <!-- Иконка переключения -->
+                        <Border Background="{DynamicResource SurfaceBrush}" 
+                CornerRadius="12" 
+                BorderBrush="{DynamicResource BorderBrush}" 
+                BorderThickness="1" 
+                Padding="4"
+                Width="48"
+                Height="24"
+                HorizontalAlignment="Center">
+                            <Path x:Name="ToggleButtonIcon" 
+                  Width="28" 
+                  Height="8" 
+                  Fill="{DynamicResource AccentBrush}"
+                  Data="M 0,0 L 14,8 L 28,0 Z" 
+                  HorizontalAlignment="Center" 
+                  VerticalAlignment="Center">
+                                <Path.RenderTransform>
+                                    <RotateTransform Angle="0" CenterX="14" CenterY="4"/>
+                                </Path.RenderTransform>
+                                <Path.Style>
+                                    <Style TargetType="Path">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsControlPanelVisible, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard Storyboard="{StaticResource ShowPanelAndButtonAnimation}"/>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <BeginStoryboard Storyboard="{StaticResource HidePanelAndButtonAnimation}"/>
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Path.Style>
+                            </Path>
+                        </Border>
                     </Grid>
                 </Border>
 
@@ -264,9 +265,20 @@
                         Margin="0,10,0,0"
                         Padding="15"
                         Opacity="1">
-                    <Border.RenderTransform>
-                        <TranslateTransform x:Name="ControlPanelTransform" Y="0"/>
-                    </Border.RenderTransform>
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsControlPanelVisible, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                    <DataTrigger.EnterActions>
+                                        <BeginStoryboard Storyboard="{StaticResource ShowPanelAnimation}"/>
+                                    </DataTrigger.EnterActions>
+                                    <DataTrigger.ExitActions>
+                                        <BeginStoryboard Storyboard="{StaticResource HidePanelAnimation}"/>
+                                    </DataTrigger.ExitActions>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -386,7 +398,7 @@
                                                    HorizontalAlignment="Center"
                                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     </Grid>
-                                    
+
                                     <Grid Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="120"/>

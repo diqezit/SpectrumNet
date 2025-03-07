@@ -275,7 +275,6 @@ namespace SpectrumNet
             {
                 if (SetField(ref _isControlPanelVisible, value))
                 {
-                    UpdateToggleButtonContent();
                     Settings.Instance.IsControlPanelVisible = value;
                 }
             }
@@ -369,7 +368,6 @@ namespace SpectrumNet
                 ConfigureTheme();
                 UpdateProps();
                 CompositionTarget.Rendering += OnRendering;
-                UpdateToggleButtonContent();
             }
             catch (Exception ex)
             {
@@ -414,16 +412,11 @@ namespace SpectrumNet
 
                 _disposables.Add(_captureManager);
 
-                SpectrumRendererFactory.GlobalQuality = Settings.Instance.SelectedRenderQuality;
-
                 _renderer = new Renderer(_spectrumStyles, this, _analyzer, _renderElement);
                 if (_renderer == null)
                     throw new InvalidOperationException("Failed to create Renderer");
 
                 _disposables.Add(_renderer);
-
-                SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
-                SelectedStyle = Settings.Instance.SelectedPalette;
             }
             catch (Exception ex)
             {
@@ -490,24 +483,19 @@ namespace SpectrumNet
         {
             try
             {
-                // Применяем настройки положения и размера окна
                 Left = Settings.Instance.WindowLeft;
                 Top = Settings.Instance.WindowTop;
                 Width = Settings.Instance.WindowWidth;
                 Height = Settings.Instance.WindowHeight;
                 WindowState = Settings.Instance.WindowState;
 
-                // Применяем настройки UI
-                _isControlPanelVisible = Settings.Instance.IsControlPanelVisible;
-                _isOverlayTopmost = Settings.Instance.IsOverlayTopmost;
-
-                // Устанавливаем исходные значения для других свойств
-                _selectedDrawingType = Settings.Instance.SelectedRenderStyle;
-                _selectedFftWindowType = Settings.Instance.SelectedFftWindowType;
-                _selectedScaleType = Settings.Instance.SelectedScaleType;
-
-                // Обновляем UI
-                UpdateToggleButtonContent();
+                IsControlPanelVisible = Settings.Instance.IsControlPanelVisible;
+                IsOverlayTopmost = Settings.Instance.IsOverlayTopmost;
+                SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
+                WindowType = Settings.Instance.SelectedFftWindowType;
+                ScaleType = Settings.Instance.SelectedScaleType;
+                RenderQuality = Settings.Instance.SelectedRenderQuality;
+                SelectedStyle = Settings.Instance.SelectedPalette;
             }
             catch (Exception ex)
             {
@@ -1022,73 +1010,9 @@ namespace SpectrumNet
 
         private void ToggleButtonContainer_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
-                ToggleControlPanelButton_Click(ToggleControlPanelButton, new RoutedEventArgs());
-        }
-
-        private void ToggleControlPanelButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
+            if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
             {
-                if (ControlPanel == null || ToggleControlPanelButton == null)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, "UI elements not found");
-                    return;
-                }
-
-                if (IsControlPanelVisible)
-                {
-                    if (FindResource("HidePanelAnimation") is Storyboard hidePanelSB)
-                    {
-                        hidePanelSB.Completed += (s, ev) =>
-                        {
-                            try
-                            {
-                                ControlPanel.Visibility = Visibility.Collapsed;
-                                IsControlPanelVisible = false;
-                                if (FindResource("HidePanelAndButtonAnimation") is Storyboard hidePanelAndButtonSB)
-                                    hidePanelAndButtonSB.Begin(this);
-                            }
-                            catch (Exception ex)
-                            {
-                                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in hide panel animation: {ex}");
-                            }
-                        };
-                        hidePanelSB.Begin(ControlPanel);
-                    }
-                }
-                else
-                {
-                    ControlPanel.Visibility = Visibility.Visible;
-                    if (FindResource("ShowPanelAndButtonAnimation") is Storyboard showPanelAndButtonSB)
-                        showPanelAndButtonSB.Begin(this);
-                    if (FindResource("ShowPanelAnimation") is Storyboard showPanelSB)
-                        showPanelSB.Begin(ControlPanel);
-                    IsControlPanelVisible = true;
-                }
-
-                var pulseTransform = new ScaleTransform(1.0, 1.0);
-                var originalTransform = ToggleControlPanelButton.RenderTransform;
-                ToggleControlPanelButton.RenderTransform = pulseTransform;
-
-                var pulseAnimation = new DoubleAnimation
-                {
-                    From = 1.0,
-                    To = 1.1,
-                    Duration = TimeSpan.FromSeconds(0.15),
-                    AutoReverse = true,
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                };
-
-                pulseTransform.BeginAnimation(ScaleTransform.ScaleXProperty, pulseAnimation);
-                pulseTransform.BeginAnimation(ScaleTransform.ScaleYProperty, pulseAnimation);
-
-                pulseAnimation.Completed += (s, args) =>
-                    ToggleControlPanelButton.RenderTransform = originalTransform;
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error toggling control panel: {ex}");
+                IsControlPanelVisible = !IsControlPanelVisible;
             }
         }
 
@@ -1154,29 +1078,6 @@ namespace SpectrumNet
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating gain parameter: {ex}");
-            }
-        }
-
-        private void UpdateToggleButtonContent()
-        {
-            try
-            {
-                if (ToggleButtonIcon?.RenderTransform is RotateTransform rt)
-                {
-                    rt.BeginAnimation(
-                        RotateTransform.AngleProperty,
-                        new DoubleAnimation
-                        {
-                            To = IsControlPanelVisible ? 0 : 180,
-                            Duration = TimeSpan.FromSeconds(0.3),
-                            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                        }
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating toggle button: {ex}");
             }
         }
 
