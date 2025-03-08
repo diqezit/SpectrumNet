@@ -44,6 +44,22 @@ namespace SpectrumNet
     }
 
     /// <summary>
+    /// Represents a viewport for rendering.
+    /// </summary>
+    public readonly struct Viewport
+    {
+        public readonly int X, Y, Width, Height;
+
+        public Viewport(int x, int y, int width, int height)
+        {
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
+        }
+    }
+
+    /// <summary>
     /// Interface for classes that perform spectrum rendering.
     /// </summary>
     public interface ISpectrumRenderer : IDisposable
@@ -51,18 +67,17 @@ namespace SpectrumNet
         /// <summary>Initializes the renderer.</summary>
         void Initialize();
 
-        /// <summary>Renders the spectrum on the given canvas.</summary>
-        /// <param name="canvas">Canvas for drawing.</param>
+        /// <summary>Renders the spectrum using OpenGL.</summary>
         /// <param name="spectrum">Array of spectrum values.</param>
-        /// <param name="info">Image information.</param>
+        /// <param name="viewport">Rendering viewport.</param>
         /// <param name="barWidth">Width of bars.</param>
         /// <param name="barSpacing">Spacing between bars.</param>
         /// <param name="barCount">Number of bars.</param>
-        /// <param name="paint">Object for styling the rendering.</param>
+        /// <param name="shader">Shader program for styling the rendering.</param>
         /// <param name="drawPerformanceInfo">Method for drawing performance information.</param>
-        void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
-                    float barSpacing, int barCount, SKPaint? paint,
-                    Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
+        void Render(float[]? spectrum, Viewport viewport, float barWidth,
+                    float barSpacing, int barCount, ShaderProgram? shader,
+                    Action<Viewport> drawPerformanceInfo);
 
         /// <summary>Configures the renderer for overlay mode and quality settings.</summary>
         /// <param name="isOverlayActive">Whether overlay mode is active.</param>
@@ -223,30 +238,30 @@ namespace SpectrumNet
         /// </summary>
         private static ISpectrumRenderer GetRendererInstance(RenderStyle style) => style switch
         {
-            RenderStyle.AsciiDonut => AsciiDonutRenderer.GetInstance(),
+            //RenderStyle.AsciiDonut => AsciiDonutRenderer.GetInstance(),
             RenderStyle.Bars => BarsRenderer.GetInstance(),
-            RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
-            RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
-            RenderStyle.Constellation => ConstellationRenderer.GetInstance(),
-            RenderStyle.Cube => CubeRenderer.GetInstance(),
-            RenderStyle.Cubes => CubesRenderer.GetInstance(),
-            RenderStyle.Fire => FireRenderer.GetInstance(),
-            RenderStyle.Gauge => GaugeRenderer.GetInstance(),
-            RenderStyle.Glitch => GlitchRenderer.GetInstance(),
-            RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
-            RenderStyle.Heartbeat => HeartbeatRenderer.GetInstance(),
-            RenderStyle.Kenwood => KenwoodRenderer.GetInstance(),
-            RenderStyle.LedMeter => LedMeterRenderer.GetInstance(),
-            RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
-            RenderStyle.Particles => ParticlesRenderer.GetInstance(),
-            RenderStyle.Polar => PolarRenderer.GetInstance(),
+            //RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
+            //RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
+            //RenderStyle.Constellation => ConstellationRenderer.GetInstance(),
+            //RenderStyle.Cube => CubeRenderer.GetInstance(),
+            //RenderStyle.Cubes => CubesRenderer.GetInstance(),
+            //RenderStyle.Fire => FireRenderer.GetInstance(),
+            //RenderStyle.Gauge => GaugeRenderer.GetInstance(),
+            //RenderStyle.Glitch => GlitchRenderer.GetInstance(),
+            //RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
+            //RenderStyle.Heartbeat => HeartbeatRenderer.GetInstance(),
+            //RenderStyle.Kenwood => KenwoodRenderer.GetInstance(),
+            //RenderStyle.LedMeter => LedMeterRenderer.GetInstance(),
+            //RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
+            //RenderStyle.Particles => ParticlesRenderer.GetInstance(),
+            //RenderStyle.Polar => PolarRenderer.GetInstance(),
             RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
-            RenderStyle.Rainbow => RainbowRenderer.GetInstance(),
-            RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
-            RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
-            RenderStyle.Voronoi => VoronoiRenderer.GetInstance(),
-            RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
-            RenderStyle.Waveform => WaveformRenderer.GetInstance(),
+            //RenderStyle.Rainbow => RainbowRenderer.GetInstance(),
+            //RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
+            //RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
+            //RenderStyle.Voronoi => VoronoiRenderer.GetInstance(),
+            //RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
+            //RenderStyle.Waveform => WaveformRenderer.GetInstance(),
             _ => throw new ArgumentException($"Unknown render style: {style}")
         };
     }

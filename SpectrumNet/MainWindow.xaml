@@ -1,9 +1,11 @@
 ﻿<Window x:Class="SpectrumNet.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:local="clr-namespace:SpectrumNet"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"
+        xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
+        xmlns:opentk="clr-namespace:OpenTK.Wpf;assembly=GLWpfControl"
         Title="Spectrum Analyser"
         Height="600"
         Width="800"
@@ -151,14 +153,14 @@
 
                 <!-- Контейнер спектра -->
                 <Border Grid.Row="0"
-                        x:Name="SpectrumContainer"
-                        Background="{DynamicResource SurfaceBrush}"
-                        CornerRadius="16"
-                        Margin="0,0,0,10">
-                    <sk:SKElement x:Name="spectrumCanvas"
-                                  Margin="16"
-                                  Opacity="1"
-                                  PaintSurface="OnPaintSurface"/>
+            x:Name="SpectrumContainer"
+            Background="{DynamicResource SurfaceBrush}"
+            CornerRadius="16"
+            Margin="0,0,0,10">
+                    <opentk:GLWpfControl x:Name="openGLControl" 
+                            Margin="16"
+                            Render="OnRender"
+                            Ready="OnOpenGLControlReady"/>
                 </Border>
 
                 <!-- Разделитель с кнопкой переключения -->

@@ -133,7 +133,7 @@ public static class SmartLogger
     }
 }
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     const string LogDirectoryPath = "logs";
     const string LatestLogFileName = "latest.log";

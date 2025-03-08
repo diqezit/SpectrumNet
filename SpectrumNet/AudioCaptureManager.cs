@@ -120,7 +120,7 @@ namespace SpectrumNet
                         SynchronizationContext.Current);
                     _controller.Analyzer.ScaleType = _controller.ScaleType;
 
-                    if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 })
+                    if (_controller.SpectrumCanvas is { Width: > 0, Height: > 0 })
                     {
                         _controller.Renderer = new Renderer(
                             _controller.SpectrumStyles ?? new SpectrumBrushes(),
@@ -254,7 +254,7 @@ namespace SpectrumNet
                     SynchronizationContext.Current);
                 analyzer.UpdateSettings(_controller.WindowType, _controller.ScaleType);
 
-                if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 })
+                if (_controller.SpectrumCanvas is { Width: > 0, Height: > 0 })
                 {
                     _controller.Renderer?.Dispose();
                     _controller.Renderer = new Renderer(

@@ -1,28 +1,39 @@
 ﻿#nullable enable
 
+using System;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
+using OpenTK.Wpf;
+using WpfWindow = System.Windows.Window;
+using WpfWindowState = System.Windows.WindowState;
+using WpfWindowStyle = System.Windows.WindowStyle;
+using WpfHorizontalAlignment = System.Windows.HorizontalAlignment;
+using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
+using WpfDpiChangedEventArgs = System.Windows.DpiChangedEventArgs;
+
 namespace SpectrumNet
 {
     public sealed record OverlayConfiguration(
         int RenderInterval = 16,
         bool IsTopmost = true,
         bool ShowInTaskbar = false,
-        WindowStyle Style = WindowStyle.None,
-        WindowState State = WindowState.Maximized,
+        WpfWindowStyle Style = WpfWindowStyle.None,
+        WpfWindowState State = WpfWindowState.Maximized,
         bool EnableEscapeToClose = true,
         bool EnableHardwareAcceleration = true
     );
 
-    public sealed class OverlayWindow : Window, IDisposable
+    public sealed class OverlayWindow : WpfWindow, IDisposable
     {
-        private readonly record struct RenderContext(MainWindow MainWindow, SKElement SkElement, DispatcherTimer RenderTimer);
+        private readonly record struct RenderContext(MainWindow MainWindow, GLWpfControl GlControl, DispatcherTimer RenderTimer);
 
         private readonly OverlayConfiguration _configuration;
         private readonly CancellationTokenSource _disposalTokenSource = new();
         private RenderContext? _renderContext;
         private bool _isDisposed;
-        private SKBitmap? _cacheBitmap;
-        private readonly SemaphoreSlim _renderLock = new(1, 1);
-        private readonly Stopwatch _frameTimeWatch = new();
 
         public new bool IsInitialized => _renderContext != null && !_isDisposed;
 
@@ -36,11 +47,10 @@ namespace SpectrumNet
                 if (_configuration.EnableHardwareAcceleration)
                 {
                     RenderOptions.ProcessRenderMode = RenderMode.Default;
-                    SetValue(RenderOptions.BitmapScalingModeProperty, BitmapScalingMode.NearestNeighbor);
+                    this.SetValue(RenderOptions.BitmapScalingModeProperty, BitmapScalingMode.NearestNeighbor);
                 }
 
                 InitializeOverlay(mainWindow);
-                _frameTimeWatch.Start();
             }
             catch (Exception ex)
             {
@@ -51,10 +61,9 @@ namespace SpectrumNet
 
         public void ForceRedraw()
         {
-            if (!_isDisposed && _renderContext != null && _renderLock.Wait(0))
+            if (!_isDisposed && _renderContext != null)
             {
-                try { _renderContext.Value.SkElement.InvalidateVisual(); }
-                finally { _renderLock.Release(); }
+                _renderContext.Value.GlControl.InvalidateVisual();
             }
         }
 
@@ -62,10 +71,10 @@ namespace SpectrumNet
         {
             ConfigureWindowProperties();
 
-            var skElement = new SKElement
+            var glControl = new GLWpfControl
             {
                 VerticalAlignment = VerticalAlignment.Stretch,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalAlignment = WpfHorizontalAlignment.Stretch,
                 SnapsToDevicePixels = true,
                 UseLayoutRounding = true
             };
@@ -75,21 +84,24 @@ namespace SpectrumNet
                 Interval = TimeSpan.FromMilliseconds(_configuration.RenderInterval)
             };
 
-            _renderContext = new(mainWindow, skElement, renderTimer);
-            Content = skElement;
+            _renderContext = new(mainWindow, glControl, renderTimer);
+            this.Content = glControl;
 
             SubscribeToEvents();
+
+            glControl.Start(mainWindow.GlSettings);
+            glControl.Render += (delta) => _renderContext?.MainWindow.Renderer?.RenderFrame(delta);
         }
 
         private void ConfigureWindowProperties()
         {
-            WindowStyle = _configuration.Style;
-            AllowsTransparency = true;
-            Background = null;
-            Topmost = _configuration.IsTopmost;
-            WindowState = _configuration.State;
-            ShowInTaskbar = _configuration.ShowInTaskbar;
-            ResizeMode = ResizeMode.NoResize;
+            this.WindowStyle = _configuration.Style;
+            this.AllowsTransparency = true;
+            this.Background = System.Windows.Media.Brushes.Transparent;
+            this.Topmost = _configuration.IsTopmost;
+            this.WindowState = _configuration.State;
+            this.ShowInTaskbar = _configuration.ShowInTaskbar;
+            this.ResizeMode = ResizeMode.NoResize;
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 new SystemBackdrop().SetTransparentBackground(this);
@@ -99,20 +111,19 @@ namespace SpectrumNet
         {
             if (_renderContext is null) return;
 
-            _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
             _renderContext.Value.RenderTimer.Tick += RenderTimerTick;
 
-            Closing += OnClosing;
-            SourceInitialized += OnSourceInitialized;
+            this.Closing += OnClosing;
+            this.SourceInitialized += OnSourceInitialized;
 
             if (_configuration.EnableEscapeToClose)
             {
-                KeyDown += OnKeyDown;
+                this.KeyDown += OnKeyDown;
             }
 
-            DpiChanged += OnDpiChanged;
-            IsVisibleChanged += OnIsVisibleChanged;
-            SizeChanged += OnSizeChanged;
+            this.DpiChanged += OnDpiChanged;
+            this.IsVisibleChanged += OnIsVisibleChanged;
+            this.SizeChanged += OnSizeChanged;
         }
 
         private void RenderTimerTick(object? sender, EventArgs e) => ForceRedraw();
@@ -129,70 +140,33 @@ namespace SpectrumNet
             _renderContext?.RenderTimer.Start();
         }
 
-        private void OnKeyDown(object sender, KeyEventArgs e)
+        private void OnKeyDown(object sender, WpfKeyEventArgs e)
         {
             if (e.Key == Key.Escape)
             {
                 e.Handled = true;
-                Close();
+                this.Close();
             }
         }
 
-        private void OnDpiChanged(object? sender, DpiChangedEventArgs e)
+        private void OnDpiChanged(object? sender, WpfDpiChangedEventArgs e)
         {
-            _cacheBitmap?.Dispose();
-            _cacheBitmap = null;
-            ForceRedraw();
+            _renderContext?.GlControl.InvalidateVisual();
         }
 
         private void OnIsVisibleChanged(object? sender, DependencyPropertyChangedEventArgs e)
         {
-            if (IsVisible) _renderContext?.RenderTimer.Start();
+            if (this.IsVisible) _renderContext?.RenderTimer.Start();
             else _renderContext?.RenderTimer.Stop();
         }
 
         private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
         {
-            _cacheBitmap?.Dispose();
-            _cacheBitmap = null;
-        }
-
-        private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args)
-        {
-            if (_isDisposed || _renderContext is null || !_renderLock.Wait(0)) return;
-
-            try
+            if (_renderContext != null)
             {
-                _frameTimeWatch.Restart();
-
-                var info = args.Info;
-                var canvas = args.Surface.Canvas;
-                canvas.Clear(SKColors.Transparent);
-
-                if (_frameTimeWatch.ElapsedMilliseconds > _configuration.RenderInterval * 2)
-                {
-                    // Skip complex rendering if we're falling behind
-                    _renderContext.Value.MainWindow.OnPaintSurface(sender, args);
-                    return;
-                }
-
-                if (_cacheBitmap == null || _cacheBitmap.Width != info.Width || _cacheBitmap.Height != info.Height)
-                {
-                    _cacheBitmap?.Dispose();
-                    _cacheBitmap = new SKBitmap(info.Width, info.Height, info.ColorType, info.AlphaType);
-                }
-
-                using (var tempSurface = SKSurface.Create(info, _cacheBitmap.GetPixels(), _cacheBitmap.RowBytes))
-                {
-                    tempSurface.Canvas.Clear(SKColors.Transparent);
-                    var tempArgs = new SKPaintSurfaceEventArgs(tempSurface, info);
-                    _renderContext.Value.MainWindow.OnPaintSurface(sender, tempArgs);
-                }
-
-                canvas.DrawBitmap(_cacheBitmap, 0, 0);
+                _renderContext.Value.MainWindow.Renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+                _renderContext.Value.GlControl.InvalidateVisual();
             }
-            catch (Exception ex) { Log.Error(ex, "Error during paint surface handling"); }
-            finally { _renderLock.Release(); }
         }
 
         private void ConfigureWindowStyleEx()
@@ -213,34 +187,31 @@ namespace SpectrumNet
 
             if (_renderContext != null)
             {
-                _renderContext.Value.SkElement.PaintSurface -= HandlePaintSurface;
                 _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
                 _renderContext.Value.RenderTimer.Stop();
 
-                Closing -= OnClosing;
-                SourceInitialized -= OnSourceInitialized;
+                this.Closing -= OnClosing;
+                this.SourceInitialized -= OnSourceInitialized;
 
                 if (_configuration.EnableEscapeToClose)
                 {
-                    KeyDown -= OnKeyDown;
+                    this.KeyDown -= OnKeyDown;
                 }
 
-                DpiChanged -= OnDpiChanged;
-                IsVisibleChanged -= OnIsVisibleChanged;
-                SizeChanged -= OnSizeChanged;
+                this.DpiChanged -= OnDpiChanged;
+                this.IsVisibleChanged -= OnIsVisibleChanged;
+                this.SizeChanged -= OnSizeChanged;
             }
 
             _disposalTokenSource.Cancel();
             _disposalTokenSource.Dispose();
-            _cacheBitmap?.Dispose();
-            _renderLock.Dispose();
             _renderContext = null;
         }
     }
 
     internal sealed class SystemBackdrop
     {
-        public void SetTransparentBackground(Window window)
+        public void SetTransparentBackground(WpfWindow window)
         {
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
 

@@ -1,11 +1,15 @@
 ﻿#nullable enable
 
+using OpenTK.Windowing.Common;
+using System.Runtime;
+
 namespace SpectrumNet
 {
-    public partial class MainWindow : Window, IAudioVisualizationController
+    public partial class MainWindow : System.Windows.Window, IAudioVisualizationController
     {
         private const string LogPrefix = "[MainWindow] ";
 
+        private GLWpfControl? _renderElement;
         private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
         private readonly CancellationTokenSource _cleanupCts = new();
         private bool _isOverlayActive, _isPopupOpen,
@@ -24,9 +28,11 @@ namespace SpectrumNet
         private AudioCaptureManager? _captureManager;
         private CompositeDisposable? _disposables;
         private GainParameters? _gainParameters;
-        private SKElement? _renderElement;
         private PropertyChangedEventHandler? _themePropertyChangedHandler;
         private string _statusText = "Ready";
+
+        private GLWpfControlSettings _glSettings = new GLWpfControlSettings();
+        public GLWpfControlSettings GlSettings => _glSettings;
 
         #region IAudioVisualizationController Properties
 
@@ -68,7 +74,7 @@ namespace SpectrumNet
 
         public bool CanStartCapture => _captureManager != null && !IsRecording;
 
-        public new Dispatcher Dispatcher => Application.Current?.Dispatcher ?? throw new InvalidOperationException("Application.Current is null");
+        public new Dispatcher Dispatcher => System.Windows.Application.Current?.Dispatcher ?? throw new InvalidOperationException("Application.Current is null");
 
         public GainParameters GainParameters => _gainParameters ?? throw new InvalidOperationException("Gain parameters not initialized");
 
@@ -116,7 +122,7 @@ namespace SpectrumNet
                 {
                     _showPerformanceInfo = value;
                     OnPropertyChanged(nameof(ShowPerformanceInfo));
-                    _renderer?.RequestRender(); 
+                    _renderer?.RequestRender();
                 }
             }
         }
@@ -205,7 +211,8 @@ namespace SpectrumNet
             }
         }
 
-        public SKElement SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
+        // Изменено для работы с GLWpfControl
+        public GLWpfControl SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
 
         public SpectrumBrushes SpectrumStyles => _spectrumStyles ?? throw new InvalidOperationException("Spectrum styles not initialized");
 
@@ -389,12 +396,12 @@ namespace SpectrumNet
                     Settings.Instance.UIMinDbLevel,
                     Settings.Instance.UIMaxDbLevel,
                     Settings.Instance.UIAmplificationFactor
-                );
-
-                if (_gainParameters == null)
-                    throw new InvalidOperationException("Failed to create gain parameters");
+                ) ?? throw new InvalidOperationException("Failed to create gain parameters");
 
                 DataContext = this;
+
+                InitializeOpenGL();
+
                 InitComponents();
 
                 var converter = (PaletteNameToBrushConverter)this.Resources["PaletteNameToBrushConverter"];
@@ -414,12 +421,43 @@ namespace SpectrumNet
 
         #region Initialization
 
+        private void InitializeOpenGL()
+        {
+            try
+            {
+                _renderElement = openGLControl;
+                if (_renderElement == null)
+                {
+                    throw new InvalidOperationException("OpenGL control not found in XAML");
+                }
+
+                _renderElement.Start(_glSettings);
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "OpenGL initialized successfully", forceLog: true);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to initialize OpenGL: {ex}");
+                throw;
+            }
+        }
+
+        private void OnOpenGLControlReady()
+        {
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "OpenGL context ready", forceLog: true);
+        }
+
+        private void OnRender(TimeSpan delta)
+        {
+            _renderer?.RenderFrame(delta);
+        }
+
         private void InitComponents()
         {
             try
             {
-                _renderElement = spectrumCanvas ??
-                    throw new InvalidOperationException("Canvas not found in window template");
+                if (_renderElement == null)
+                    throw new InvalidOperationException("OpenGL control not initialized");
 
                 _spectrumStyles = new SpectrumBrushes();
                 if (_spectrumStyles == null)
@@ -463,9 +501,6 @@ namespace SpectrumNet
 
         private void InitEventHandlers()
         {
-            if (_renderElement != null)
-                _renderElement.PaintSurface += OnPaintSurface;
-
             SizeChanged += OnWindowSizeChanged;
             StateChanged += OnStateChanged;
             MouseDoubleClick += OnWindowMouseDoubleClick;
@@ -585,7 +620,7 @@ namespace SpectrumNet
         {
             try
             {
-                if (WindowState == WindowState.Normal)
+                if (WindowState == System.Windows.WindowState.Normal)
                 {
                     Settings.Instance.WindowLeft = Left;
                     Settings.Instance.WindowTop = Top;
@@ -725,7 +760,7 @@ namespace SpectrumNet
             }
         }
 
-        private void OnOverlayButtonClick(object sender, RoutedEventArgs e)
+        private void OnOverlayButtonClick(object? sender, RoutedEventArgs e)
         {
             try
             {
@@ -747,32 +782,6 @@ namespace SpectrumNet
 
         #region Event Handlers
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
-        {
-            if (e == null)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "PaintSurface called with null arguments");
-                return;
-            }
-
-            if (IsOverlayActive && sender == _renderElement)
-            {
-                e.Surface.Canvas.Clear(SKColors.Transparent);
-                return;
-            }
-
-            try
-            {
-                _renderer?.RenderFrame(sender, e);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering frame: {ex}");
-                try { e.Surface.Canvas.Clear(SKColors.Transparent); }
-                catch { /* ignore cleanup errors */ }
-            }
-        }
-
         private void OnRendering(object? sender, EventArgs? e)
         {
             try
@@ -791,7 +800,7 @@ namespace SpectrumNet
 
             try
             {
-                MaximizeIcon.Data = Geometry.Parse(WindowState == WindowState.Maximized
+                MaximizeIcon.Data = Geometry.Parse(WindowState == System.Windows.WindowState.Maximized
                     ? "M0,0 L20,0 L20,20 L0,20 Z"
                     : "M2,2 H18 V18 H2 Z");
 
@@ -821,9 +830,13 @@ namespace SpectrumNet
 
             try
             {
-                _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+                if (_renderElement != null)
+                {
+                    // Уведомляем рендерер об изменении размеров
+                    _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+                }
 
-                if (WindowState == WindowState.Normal)
+                if (WindowState == System.Windows.WindowState.Normal)
                 {
                     Settings.Instance.WindowWidth = Width;
                     Settings.Instance.WindowHeight = Height;
@@ -837,7 +850,7 @@ namespace SpectrumNet
 
         private void OnComboBoxSelectionChanged(object? sender, SelectionChangedEventArgs? e)
         {
-            if (sender is not ComboBox cb || e == null) return;
+            if (sender is not System.Windows.Controls.ComboBox cb || e == null) return;
 
             try
             {
@@ -873,9 +886,6 @@ namespace SpectrumNet
 
                 CompositionTarget.Rendering -= OnRendering;
 
-                if (_renderElement != null)
-                    _renderElement.PaintSurface -= OnPaintSurface;
-
                 SizeChanged -= OnWindowSizeChanged;
                 StateChanged -= OnStateChanged;
                 MouseDoubleClick -= OnWindowMouseDoubleClick;
@@ -910,7 +920,7 @@ namespace SpectrumNet
                 }
 
                 _isDisposed = true;
-                Application.Current?.Shutdown();
+                System.Windows.Application.Current?.Shutdown();
             }
             catch (Exception ex)
             {
@@ -926,7 +936,7 @@ namespace SpectrumNet
                 {
                     DragMove();
 
-                    if (WindowState == WindowState.Normal)
+                    if (WindowState == System.Windows.WindowState.Normal)
                     {
                         Settings.Instance.WindowLeft = Left;
                         Settings.Instance.WindowTop = Top;
@@ -947,7 +957,7 @@ namespace SpectrumNet
                     DependencyObject? element = originalElement;
                     while (element != null)
                     {
-                        if (element is CheckBox)
+                        if (element is System.Windows.Controls.CheckBox)
                         {
                             e.Handled = true;
                             return;
@@ -994,7 +1004,7 @@ namespace SpectrumNet
 
         private void OnButtonClick(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button btn) return;
+            if (sender is not System.Windows.Controls.Button btn) return;
 
             try
             {
@@ -1033,23 +1043,23 @@ namespace SpectrumNet
             }
         }
 
-        private void MainWindow_KeyDown(object sender, KeyEventArgs e)
+        private void MainWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
             try
             {
                 switch (e.Key)
                 {
-                    case Key.F10:
+                    case System.Windows.Input.Key.F10:
                         RenderQuality = RenderQuality.Low;
                         e.Handled = true;
                         SmartLogger.Log(LogLevel.Information, LogPrefix, "Quality set to Low via hotkey");
                         break;
-                    case Key.F11:
+                    case System.Windows.Input.Key.F11:
                         RenderQuality = RenderQuality.Medium;
                         e.Handled = true;
                         SmartLogger.Log(LogLevel.Information, LogPrefix, "Quality set to Medium via hotkey");
                         break;
-                    case Key.F12:
+                    case System.Windows.Input.Key.F12:
                         RenderQuality = RenderQuality.High;
                         e.Handled = true;
                         SmartLogger.Log(LogLevel.Information, LogPrefix, "Quality set to High via hotkey");
@@ -1107,10 +1117,12 @@ namespace SpectrumNet
 
         private void CloseWindow() => Close();
 
-        private void MinimizeWindow() => WindowState = WindowState.Minimized;
+        private void MinimizeWindow() => WindowState = System.Windows.WindowState.Minimized;
 
         private void MaximizeWindow() =>
-            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+            WindowState = WindowState == System.Windows.WindowState.Maximized
+                ? System.Windows.WindowState.Normal
+                : System.Windows.WindowState.Maximized;
 
         private void UpdateProps() =>
             OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture), nameof(StatusText));

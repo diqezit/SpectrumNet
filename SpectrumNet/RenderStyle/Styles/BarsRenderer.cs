@@ -6,141 +6,22 @@
     /// **BarsRenderer** - реализация рендерера спектра в виде вертикальных столбцов (баров).
     /// <br/>
     /// **BarsRenderer** - spectrum renderer visualizing audio spectrum as vertical bars.
-    /// <para>
-    /// **Основные характеристики / Key Features:**
-    /// </para>
-    /// <list type="bullet">
-    ///     <item> **Столбчатая диаграмма / Bar Chart:**
-    ///          Отображает интенсивность частот в виде вертикальных полос.
-    ///          Высота столбца = амплитуде спектра.
-    ///          <br/>
-    ///          **Bar Chart:**
-    ///          Displays frequency intensity via vertical bars.
-    ///          Bar height = spectrum amplitude.
-    ///     </item>
-    ///     <item> **Сглаживание / Smoothing:**
-    ///          Уменьшает резкие скачки для плавной визуализации.
-    ///          Настройка сглаживания: <see cref="Configure(bool)"/>.
-    ///          <br/>
-    ///          **Smoothing:**
-    ///          Reduces abrupt changes for smooth visuals.
-    ///          Smoothing config: <see cref="Configure(bool)"/>.
-    ///     </item>
-    ///     <item> **Стилизация / Stylization:**
-    ///          Настройка: цвет, альфа, радиус углов.
-    ///          Эффект белого "блика" на вершинах.
-    ///          <br/>
-    ///          **Stylization:**
-    ///          Configurable: color, alpha, corner radius.
-    ///          White "highlight" effect on bar tops.
-    ///     </item>
-    ///     <item> **Производительность / Performance:**
-    ///          Оптимизирован для реального времени.
-    ///          <br/>
-    ///          **Performance:**
-    ///          Optimized for real-time use.
-    ///     </item>
-    ///     <item> **Singleton:**
-    ///          Единственный экземпляр в приложении для оптимизации ресурсов.
-    ///           <br/>
-    ///          **Singleton:**
-    ///          Single instance per app for resource optimization.
-    ///     </item>
-    /// </list>
-    /// <para>
-    /// **Создание своих рендереров / Custom Renderer Creation:**
-    /// </para>
-    /// <para>
-    /// Для новых стилей `SpectrumNet`: интерфейс <see cref="ISpectrumRenderer"/> и подходы из:
-    /// <see cref="BarsRenderer"/>, <see cref="FireRenderer"/>, <see cref="DotsRenderer"/>, <see cref="CubesRenderer"/>.
-    /// <br/>
-    /// For new `SpectrumNet` styles: follow <see cref="ISpectrumRenderer"/> and patterns from:
-    /// <see cref="BarsRenderer"/>, <see cref="FireRenderer"/>, <see cref="DotsRenderer"/>, <see cref="CubesRenderer"/>.
-    /// </para>
-    /// <para>
-    /// **Основные шаги и рекомендации / Key Steps and Recommendations:**
-    /// </para>
-    /// <list type="number">
-    ///     <item> **Реализация ISpectrumRenderer / Implement ISpectrumRenderer:**
-    ///         Реализуйте интерфейс <see cref="ISpectrumRenderer"/> и методы:
-    ///         <br/>
-    ///         Implement <see cref="ISpectrumRenderer"/> interface and methods:
-    ///         <list type="bullet">
-    ///             <item> <see cref="Initialize"/>: Инициализация ресурсов (<see cref="SKPaint"/>, <see cref="SKPath"/>, буферы). Однократно при создании.
-    ///                  <br/>
-    ///                  <see cref="Initialize"/>: Resource init (<see cref="SKPaint"/>, <see cref="SKPath"/>, buffers). Once on creation.</item>
-    ///             <item> <see cref="Configure(bool)"/>: Настройка параметров (сглаживание, цвет) в зависимости от overlay. Многократно.
-    ///                   <br/>
-    ///                   <see cref="Configure(bool)"/>: Parameter config (smoothing, color) based on overlay. Multiple calls.</item>
-    ///             <item> <see cref="Render(SKCanvas, float[], SKImageInfo, float, float, int, SKPaint, Action{SKCanvas, SKImageInfo})"/>:
-    ///                   **Основной метод**. Визуализация спектра на <see cref="SKCanvas"/>.
-    ///                   Параметры: спектр. данные, инфо канваса, параметры отрисовки, базовая кисть, делегат производительности.
-    ///                   <br/>
-    ///                   <see cref="Render(SKCanvas, float[], SKImageInfo, float, float, int, SKPaint, Action{SKCanvas, SKImageInfo})"/>:
-    ///                   **Main method**. Spectrum visualization on <see cref="SKCanvas"/>.
-    ///                   Params: spectrum data, canvas info, render params, base paint, performance delegate.</item>
-    ///             <item> <see cref="Dispose"/>: Освобождение ресурсов (<see cref="SKPaint"/>, <see cref="SKPath"/>). Dispose pattern.
-    ///                  <br/>
-    ///                  <see cref="Dispose"/>: Release resources (<see cref="SKPaint"/>, <see cref="SKPath"/>). Dispose pattern.</item>
-    ///         </list>
-    ///     </item>
-    ///     <item> **Singleton Pattern (Рекомендовано) / Singleton Pattern (Recommended):**
-    ///         Рендереры как Singleton для оптимизации (как в <see cref="BarsRenderer"/>, <see cref="FireRenderer"/>).
-    ///         <br/>
-    ///         Singleton renderers for optimization (like <see cref="BarsRenderer"/>, <see cref="FireRenderer"/>).
-    ///     </item>
-    ///     <item> **Кэширование и Переиспользование / Caching and Reuse:**
-    ///         <see cref="SpectrumRendererFactory"/> кэширует рендереры. Обновление состояния при переиспользовании (<see cref="Configure(bool)"/>).
-    ///         <br/>
-    ///         <see cref="SpectrumRendererFactory"/> caches renderers. Update state on reuse (<see cref="Configure(bool)"/>).
-    ///     </item>
-    ///     <item> **Параметры Render / Render Parameters:**
-    ///         Параметры <see cref="Render(SKCanvas, float[], SKImageInfo, float, float, int, SKPaint, Action{SKCanvas, SKImageInfo})"/>: `spectrum`, `info`, `barWidth`, `barSpacing`, `barCount`, `paint`.
-    ///         <br/>
-    ///         <see cref="Render(SKCanvas, float[], SKImageInfo, float, float, int, SKPaint, Action{SKCanvas, SKImageInfo})"/> parameters: `spectrum`, `info`, `barWidth`, `barSpacing`, `barCount`, `paint`.
-    ///         <list type="bullet">
-    ///             <item> `spectrum`: Спектральные данные (амплитуды частот). / Spectral data (frequency amplitudes).</item>
-    ///             <item> `info`: Инфо канваса (ширина, высота). / Canvas info (width, height).</item>
-    ///             <item> `barWidth`, `barSpacing`, `barCount`: Размер и кол-во элементов. / Size and count of elements.</item>
-    ///             <item> `paint`: Базовая кисть для стилизации. / Base paint for styling.</item>
-    ///         </list>
-    ///     </item>
-    ///     <item> **Сглаживание спектра / Spectrum Smoothing:**
-    ///         Применение сглаживания для плавности. Пример: экспоненциальное сглаживание.
-    ///         <br/>
-    ///         Apply smoothing for visual smoothness. Example: exponential smoothing.
-    ///     </item>
-    ///     <item> **Оптимизация / Optimization:**
-    ///         Производительность рендеринга важна. Эффективные методы SkiaSharp, избегать лишних объектов, параллелизм (как в <see cref="FireRenderer"/>).
-    ///         <br/>
-    ///         Rendering performance is key. Efficient SkiaSharp, avoid extra objects, parallelism (like <see cref="FireRenderer"/>).</item>
-    ///     <item> **Визуальные эффекты / Visual Effects:**
-    ///         Эксперименты: градиенты, прозрачность, анимации.
-    ///         <br/>
-    ///         Experiment: gradients, transparency, animations.</item>
-    ///     <item> **Конфигурация / Configuration:**
-    ///         Настройка через <see cref="Configure(bool)"/> для адаптации пользователем.
-    ///         <br/>
-    ///         Configuration via <see cref="Configure(bool)"/> for user adaptation.</item>
-    ///     <item> **Валидация / Validation:**
-    ///         Проверка параметров в начале <see cref="Render(SKCanvas, float[], SKImageInfo, float, float, int, SKPaint, Action{SKCanvas, SKImageInfo})"/> для избежания ошибок.
-    ///         <br/>
-    ///         Parameter validation at <see cref="Render(SKCanvas, float[], SKImageInfo, float, float, int, SKPaint, Action{SKCanvas, SKImageInfo})"/> start to prevent errors.</item>
-    /// </list>
-    /// <para>
-    /// Изучение <see cref="BarsRenderer"/>, <see cref="FireRenderer"/>, <see cref="DotsRenderer"/>, <see cref="CubesRenderer"/> - лучший способ понять реализацию и лучшие практики.
-    /// <br/>
-    /// Studying <see cref="BarsRenderer"/>, <see cref="FireRenderer"/>, <see cref="DotsRenderer"/>, <see cref="CubesRenderer"/> is best way to learn implementation and best practices.
-    /// </para>
     /// </summary>
     public class BarsRenderer : ISpectrumRenderer, IDisposable
     {
         #region Fields
         private static BarsRenderer? _instance;
         private bool _isInitialized;
-        private readonly SKPath _path = new();
         private volatile bool _disposed;
         private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
+
+        // OpenGL resources
+        private int _vertexArrayObject;
+        private int _vertexBufferObject;
+        private int _indexBufferObject;
+        private ShaderProgram? _barShader;
+        private ShaderProgram? _highlightShader;
+        private ShaderProgram? _glowShader;
 
         private const float MaxCornerRadius = 10f;
         private const float HighlightWidthProportion = 0.6f;
@@ -155,9 +36,7 @@
         private float[]? _previousSpectrum;
         private float[]? _processedSpectrum;
         private float _smoothingFactor = 0.3f;
-        private SKPaint? _glowPaint;
         private RenderQuality _quality = RenderQuality.Medium;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
         private bool _useGlowEffect = true;
         private bool _useAntiAlias = true;
         #endregion
@@ -195,14 +74,139 @@
             if (!_isInitialized)
             {
                 _isInitialized = true;
-                _glowPaint = new SKPaint
-                {
-                    IsAntialias = _useAntiAlias,
-                    Style = SKPaintStyle.Fill,
-                    ImageFilter = SKImageFilter.CreateBlur(5f, 5f)
-                };
-                Log.Debug("BarsRenderer initialized");
+
+                // Создание VAO и буферов
+                _vertexArrayObject = GL.GenVertexArray();
+                _vertexBufferObject = GL.GenBuffer();
+                _indexBufferObject = GL.GenBuffer();
+
+                // Инициализация шейдеров
+                InitializeShaders();
+
+                // Применение настроек качества
+                ApplyQualitySettings();
+
+                Log.Debug("BarsRenderer initialized with OpenGL");
             }
+        }
+
+        private void InitializeShaders()
+        {
+            // Базовый шейдер для баров
+            string barVertexShader = @"
+                #version 330 core
+                layout(location = 0) in vec3 aPosition;
+                
+                uniform mat4 uProjection;
+                uniform mat4 uModelView;
+                
+                void main()
+                {
+                    gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
+                }";
+
+            string barFragmentShader = @"
+                #version 330 core
+                out vec4 FragColor;
+                
+                uniform vec4 uColor;
+                
+                void main()
+                {
+                    FragColor = uColor;
+                }";
+
+            // Шейдер для подсветки
+            string highlightVertexShader = @"
+                #version 330 core
+                layout(location = 0) in vec3 aPosition;
+                
+                uniform mat4 uProjection;
+                uniform mat4 uModelView;
+                
+                void main()
+                {
+                    gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
+                }";
+
+            string highlightFragmentShader = @"
+                #version 330 core
+                out vec4 FragColor;
+                
+                uniform vec4 uColor;
+                
+                void main()
+                {
+                    FragColor = uColor;
+                }";
+
+            // Шейдер для свечения
+            string glowVertexShader = @"
+                #version 330 core
+                layout(location = 0) in vec3 aPosition;
+                
+                uniform mat4 uProjection;
+                uniform mat4 uModelView;
+                
+                void main()
+                {
+                    gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
+                }";
+
+            string glowFragmentShader = @"
+                #version 330 core
+                out vec4 FragColor;
+                
+                uniform vec4 uColor;
+                uniform float uBlurRadius;
+                
+                void main()
+                {
+                    FragColor = uColor;
+                }";
+
+            // Компиляция шейдеров
+            try
+            {
+                _barShader = CompileShaderProgram(barVertexShader, barFragmentShader);
+                _highlightShader = CompileShaderProgram(highlightVertexShader, highlightFragmentShader);
+                _glowShader = CompileShaderProgram(glowVertexShader, glowFragmentShader);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error initializing shaders: {ex.Message}");
+            }
+        }
+
+        private ShaderProgram CompileShaderProgram(string vertexSource, string fragmentSource)
+        {
+            int vertexShader = GL.CreateShader(ShaderType.VertexShader);
+            GL.ShaderSource(vertexShader, vertexSource);
+            GL.CompileShader(vertexShader);
+
+            string vertexInfoLog = GL.GetShaderInfoLog(vertexShader);
+            if (!string.IsNullOrWhiteSpace(vertexInfoLog))
+                Log.Debug($"Vertex shader compile log: {vertexInfoLog}");
+
+            int fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
+            GL.ShaderSource(fragmentShader, fragmentSource);
+            GL.CompileShader(fragmentShader);
+
+            string fragmentInfoLog = GL.GetShaderInfoLog(fragmentShader);
+            if (!string.IsNullOrWhiteSpace(fragmentInfoLog))
+                Log.Debug($"Fragment shader compile log: {fragmentInfoLog}");
+
+            int program = GL.CreateProgram();
+            GL.AttachShader(program, vertexShader);
+            GL.AttachShader(program, fragmentShader);
+            GL.LinkProgram(program);
+
+            GL.DetachShader(program, vertexShader);
+            GL.DetachShader(program, fragmentShader);
+            GL.DeleteShader(vertexShader);
+            GL.DeleteShader(fragmentShader);
+
+            return new ShaderProgram(program, Color.White);
         }
 
         /// <summary>
@@ -214,25 +218,24 @@
             {
                 case RenderQuality.Low:
                     _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
                     _useGlowEffect = false;
+                    // Отключаем сглаживание в OpenGL
+                    GL.Disable(EnableCap.Multisample);
                     break;
                 case RenderQuality.Medium:
                     _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
                     _useGlowEffect = true;
+                    // Включаем базовое сглаживание
+                    GL.Enable(EnableCap.Multisample);
                     break;
                 case RenderQuality.High:
                     _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
                     _useGlowEffect = true;
+                    // Включаем расширенное сглаживание
+                    GL.Enable(EnableCap.Multisample);
+                    GL.Enable(EnableCap.LineSmooth);
+                    GL.Hint(HintTarget.LineSmoothHint, HintMode.Nicest);
                     break;
-            }
-
-            // Update glow paint if it exists
-            if (_glowPaint != null)
-            {
-                _glowPaint.IsAntialias = _useAntiAlias;
             }
 
             Log.Debug($"BarsRenderer quality set to {_quality}");
@@ -251,16 +254,15 @@
         #region Rendering
         /// <inheritdoc />
         public void Render(
-            SKCanvas? canvas,
             float[]? spectrum,
-            SKImageInfo info,
+            Viewport viewport,
             float barWidth,
             float barSpacing,
             int barCount,
-            SKPaint? paint,
-            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+            ShaderProgram? shader,
+            Action<Viewport> drawPerformanceInfo)
         {
-            if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+            if (!ValidateRenderParameters(spectrum, viewport, shader))
             {
                 return;
             }
@@ -275,9 +277,8 @@
 
                 if (semaphoreAcquired)
                 {
-                    // Спектр уже содержит только нужные частоты, не нужно делить на 2
+                    // Обработка спектра
                     int targetBarCount = Math.Min(spectrum!.Length, barCount);
-
                     float[] scaledSpectrum = ScaleSpectrum(spectrum!, targetBarCount, spectrum!.Length);
                     _processedSpectrum = SmoothSpectrum(scaledSpectrum, targetBarCount);
                 }
@@ -300,15 +301,29 @@
                 }
             }
 
-            RenderBars(canvas!, renderSpectrum, info, barWidth, barSpacing, paint!);
-            drawPerformanceInfo?.Invoke(canvas!, info);
+            // Настройка проекционной матрицы
+            Matrix4 projectionMatrix = Matrix4.CreateOrthographicOffCenter(
+                0, viewport.Width, viewport.Height, 0, -1, 1);
+
+            // Настройка модельно-видовой матрицы
+            Matrix4 modelViewMatrix = Matrix4.Identity;
+
+            // Включение прозрачности
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
+            // Рендеринг баров
+            RenderBars(renderSpectrum, viewport, barWidth, barSpacing, shader,
+                      projectionMatrix, modelViewMatrix);
+
+            // Отображение информации о производительности
+            drawPerformanceInfo?.Invoke(viewport);
         }
 
         private bool ValidateRenderParameters(
-            SKCanvas? canvas,
             float[]? spectrum,
-            SKImageInfo info,
-            SKPaint? paint)
+            Viewport viewport,
+            ShaderProgram? shader)
         {
             if (!_isInitialized)
             {
@@ -316,10 +331,9 @@
                 return false;
             }
 
-            if (canvas == null ||
-                spectrum == null || spectrum.Length < 2 ||
-                paint == null ||
-                info.Width <= 0 || info.Height <= 0)
+            if (spectrum == null || spectrum.Length < 2 ||
+                shader == null ||
+                viewport.Width <= 0 || viewport.Height <= 0)
             {
                 Log.Error("Invalid render parameters for BarsRenderer");
                 return false;
@@ -330,32 +344,24 @@
 
         private float[] ProcessSynchronously(float[] spectrum, int targetCount)
         {
-            // Спектр уже содержит только нужные частоты, не нужно делить на 2
             var scaledSpectrum = ScaleSpectrum(spectrum, targetCount, spectrum.Length);
             return SmoothSpectrum(scaledSpectrum, targetCount);
         }
 
         private void RenderBars(
-             SKCanvas canvas,
              float[] spectrum,
-             SKImageInfo info,
+             Viewport viewport,
              float barWidth,
              float barSpacing,
-             SKPaint basePaint)
+             ShaderProgram baseShader,
+             Matrix4 projectionMatrix,
+             Matrix4 modelViewMatrix)
         {
             float totalBarWidth = barWidth + barSpacing;
-            float canvasHeight = info.Height;
+            float canvasHeight = viewport.Height;
 
-            using var barPaint = basePaint.Clone();
-            barPaint.IsAntialias = _useAntiAlias;
-            barPaint.FilterQuality = _filterQuality;
-
-            using var highlightPaint = new SKPaint
-            {
-                IsAntialias = _useAntiAlias,
-                Style = SKPaintStyle.Fill,
-                Color = SKColors.White
-            };
+            // Привязка VAO
+            GL.BindVertexArray(_vertexArrayObject);
 
             float cornerRadius = MathF.Min(barWidth * DefaultCornerRadiusFactor, MaxCornerRadius);
 
@@ -364,68 +370,218 @@
                 float magnitude = spectrum[i];
                 float barHeight = MathF.Max(magnitude * canvasHeight, MinBarHeight);
                 byte alpha = (byte)MathF.Min(magnitude * AlphaMultiplier * 255f, 255f);
-                barPaint.Color = basePaint.Color.WithAlpha(alpha);
+                Color barColor = Color.FromArgb(alpha, baseShader.Color);
 
                 float x = i * totalBarWidth;
 
-                if (_useGlowEffect && _glowPaint != null && magnitude > 0.6f)
+                // Эффект свечения для высоких значений
+                if (_useGlowEffect && _glowShader != null && magnitude > 0.6f)
                 {
-                    _glowPaint.Color = barPaint.Color.WithAlpha((byte)(magnitude * 255f * GlowEffectAlpha));
-                    _path.Reset();
-                    _path.AddRoundRect(new SKRoundRect(
-                        new SKRect(x, canvasHeight - barHeight, x + barWidth, canvasHeight),
-                        cornerRadius, cornerRadius));
-                    canvas.DrawPath(_path, _glowPaint);
+                    Color glowColor = Color.FromArgb((byte)(magnitude * 255f * GlowEffectAlpha), barColor);
+                    RenderGlowEffect(x, barWidth, barHeight, canvasHeight, cornerRadius, glowColor,
+                                    projectionMatrix, modelViewMatrix);
                 }
 
-                RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
+                // Отрисовка бара
+                RenderBar(x, barWidth, barHeight, canvasHeight, cornerRadius, barColor,
+                         projectionMatrix, modelViewMatrix);
 
+                // Отрисовка белой подсветки сверху бара
                 if (barHeight > cornerRadius * 2 && _quality != RenderQuality.Low)
                 {
                     float highlightWidth = barWidth * HighlightWidthProportion;
                     float highlightHeight = MathF.Min(barHeight * HighlightHeightProportion, MaxHighlightHeight);
                     byte highlightAlpha = (byte)(alpha / HighlightAlphaDivisor);
-                    highlightPaint.Color = highlightPaint.Color.WithAlpha(highlightAlpha);
+                    Color highlightColor = Color.FromArgb(highlightAlpha, Color.White);
 
-                    RenderHighlight(canvas, x, barWidth, barHeight, canvasHeight,
-                                    highlightWidth, highlightHeight, highlightPaint);
+                    RenderHighlight(x, barWidth, barHeight, canvasHeight, highlightWidth, highlightHeight,
+                                   highlightColor, projectionMatrix, modelViewMatrix);
                 }
             }
+
+            // Отвязка VAO
+            GL.BindVertexArray(0);
+
+            // Восстановление состояния OpenGL
+            GL.Disable(EnableCap.Blend);
         }
 
         private void RenderBar(
-            SKCanvas canvas,
             float x,
             float barWidth,
             float barHeight,
             float canvasHeight,
             float cornerRadius,
-            SKPaint barPaint)
+            Color barColor,
+            Matrix4 projectionMatrix,
+            Matrix4 modelViewMatrix)
         {
-            _path.Reset();
-            _path.AddRoundRect(new SKRoundRect(
-                new SKRect(x, canvasHeight - barHeight, x + barWidth, canvasHeight),
-                cornerRadius, cornerRadius));
-            canvas.DrawPath(_path, barPaint);
+            if (_barShader == null) return;
+
+            // Активация шейдера
+            GL.UseProgram(_barShader.ProgramId);
+
+            // Установка параметров шейдера
+            int locationProjection = GL.GetUniformLocation(_barShader.ProgramId, "uProjection");
+            int locationModelView = GL.GetUniformLocation(_barShader.ProgramId, "uModelView");
+            int locationColor = GL.GetUniformLocation(_barShader.ProgramId, "uColor");
+
+            GL.UniformMatrix4(locationProjection, false, ref projectionMatrix);
+            GL.UniformMatrix4(locationModelView, false, ref modelViewMatrix);
+            GL.Uniform4(locationColor, barColor.R / 255f, barColor.G / 255f, barColor.B / 255f, barColor.A / 255f);
+
+            // Создание вершин бара
+            float[] vertices = {
+                x, canvasHeight - barHeight, 0.0f,            // Верхний левый
+                x + barWidth, canvasHeight - barHeight, 0.0f, // Верхний правый
+                x + barWidth, canvasHeight, 0.0f,             // Нижний правый
+                x, canvasHeight, 0.0f                         // Нижний левый
+            };
+
+            // Индексы для двух треугольников
+            int[] indices = {
+                0, 1, 2,  // Первый треугольник
+                0, 2, 3   // Второй треугольник
+            };
+
+            // Загрузка вершин и индексов в буферы
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _vertexBufferObject);
+            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
+
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBufferObject);
+            GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(int), indices, BufferUsageHint.StreamDraw);
+
+            // Настройка формата вершин
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
+
+            // Рендеринг
+            GL.DrawElements(PrimitiveType.Triangles, indices.Length, DrawElementsType.UnsignedInt, 0);
+
+            // Отключение атрибутов
+            GL.DisableVertexAttribArray(0);
         }
 
-        private static void RenderHighlight(
-            SKCanvas canvas,
+        private void RenderHighlight(
             float x,
             float barWidth,
             float barHeight,
             float canvasHeight,
             float highlightWidth,
             float highlightHeight,
-            SKPaint highlightPaint)
+            Color highlightColor,
+            Matrix4 projectionMatrix,
+            Matrix4 modelViewMatrix)
         {
+            if (_highlightShader == null) return;
+
+            // Активация шейдера подсветки
+            GL.UseProgram(_highlightShader.ProgramId);
+
+            // Установка параметров шейдера
+            int locationProjection = GL.GetUniformLocation(_highlightShader.ProgramId, "uProjection");
+            int locationModelView = GL.GetUniformLocation(_highlightShader.ProgramId, "uModelView");
+            int locationColor = GL.GetUniformLocation(_highlightShader.ProgramId, "uColor");
+
+            GL.UniformMatrix4(locationProjection, false, ref projectionMatrix);
+            GL.UniformMatrix4(locationModelView, false, ref modelViewMatrix);
+            GL.Uniform4(locationColor, highlightColor.R / 255f, highlightColor.G / 255f,
+                       highlightColor.B / 255f, highlightColor.A / 255f);
+
+            // Расчет позиции подсветки
             float highlightX = x + (barWidth - highlightWidth) / 2;
-            canvas.DrawRect(
-                highlightX,
-                canvasHeight - barHeight,
-                highlightWidth,
-                highlightHeight,
-                highlightPaint);
+
+            // Создание вершин подсветки
+            float[] vertices = {
+                highlightX, canvasHeight - barHeight, 0.0f,                           // Верхний левый
+                highlightX + highlightWidth, canvasHeight - barHeight, 0.0f,          // Верхний правый
+                highlightX + highlightWidth, canvasHeight - barHeight + highlightHeight, 0.0f, // Нижний правый
+                highlightX, canvasHeight - barHeight + highlightHeight, 0.0f          // Нижний левый
+            };
+
+            // Индексы для двух треугольников
+            int[] indices = {
+                0, 1, 2,  // Первый треугольник
+                0, 2, 3   // Второй треугольник
+            };
+
+            // Загрузка вершин и индексов в буферы
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _vertexBufferObject);
+            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
+
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBufferObject);
+            GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(int), indices, BufferUsageHint.StreamDraw);
+
+            // Настройка формата вершин
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
+
+            // Рендеринг
+            GL.DrawElements(PrimitiveType.Triangles, indices.Length, DrawElementsType.UnsignedInt, 0);
+
+            // Отключение атрибутов
+            GL.DisableVertexAttribArray(0);
+        }
+
+        private void RenderGlowEffect(
+            float x,
+            float barWidth,
+            float barHeight,
+            float canvasHeight,
+            float cornerRadius,
+            Color glowColor,
+            Matrix4 projectionMatrix,
+            Matrix4 modelViewMatrix)
+        {
+            if (_glowShader == null) return;
+
+            // Активация шейдера свечения
+            GL.UseProgram(_glowShader.ProgramId);
+
+            // Установка параметров шейдера
+            int locationProjection = GL.GetUniformLocation(_glowShader.ProgramId, "uProjection");
+            int locationModelView = GL.GetUniformLocation(_glowShader.ProgramId, "uModelView");
+            int locationColor = GL.GetUniformLocation(_glowShader.ProgramId, "uColor");
+            int locationBlurRadius = GL.GetUniformLocation(_glowShader.ProgramId, "uBlurRadius");
+
+            GL.UniformMatrix4(locationProjection, false, ref projectionMatrix);
+            GL.UniformMatrix4(locationModelView, false, ref modelViewMatrix);
+            GL.Uniform4(locationColor, glowColor.R / 255f, glowColor.G / 255f, glowColor.B / 255f, glowColor.A / 255f);
+            GL.Uniform1(locationBlurRadius, 5.0f);  // Размер свечения
+
+            // Расширение для эффекта свечения
+            float glowExtraSize = 5.0f;
+
+            // Создание вершин свечения (увеличенного прямоугольника)
+            float[] vertices = {
+                x - glowExtraSize, canvasHeight - barHeight - glowExtraSize, 0.0f,  // Верхний левый
+                x + barWidth + glowExtraSize, canvasHeight - barHeight - glowExtraSize, 0.0f,  // Верхний правый
+                x + barWidth + glowExtraSize, canvasHeight + glowExtraSize, 0.0f,  // Нижний правый
+                x - glowExtraSize, canvasHeight + glowExtraSize, 0.0f   // Нижний левый
+            };
+
+            // Индексы для двух треугольников
+            int[] indices = {
+                0, 1, 2,  // Первый треугольник
+                0, 2, 3   // Второй треугольник
+            };
+
+            // Загрузка вершин и индексов в буферы
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _vertexBufferObject);
+            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
+
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBufferObject);
+            GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(int), indices, BufferUsageHint.StreamDraw);
+
+            // Настройка формата вершин
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
+
+            // Рендеринг
+            GL.DrawElements(PrimitiveType.Triangles, indices.Length, DrawElementsType.UnsignedInt, 0);
+
+            // Отключение атрибутов
+            GL.DisableVertexAttribArray(0);
         }
         #endregion
 
@@ -482,8 +638,35 @@
                 if (disposing)
                 {
                     _spectrumSemaphore?.Dispose();
-                    _path?.Dispose();
-                    _glowPaint?.Dispose();
+
+                    // Освобождение ресурсов OpenGL
+                    if (_vertexArrayObject != 0)
+                    {
+                        GL.DeleteVertexArray(_vertexArrayObject);
+                        _vertexArrayObject = 0;
+                    }
+
+                    if (_vertexBufferObject != 0)
+                    {
+                        GL.DeleteBuffer(_vertexBufferObject);
+                        _vertexBufferObject = 0;
+                    }
+
+                    if (_indexBufferObject != 0)
+                    {
+                        GL.DeleteBuffer(_indexBufferObject);
+                        _indexBufferObject = 0;
+                    }
+
+                    _barShader?.Dispose();
+                    _barShader = null;
+
+                    _highlightShader?.Dispose();
+                    _highlightShader = null;
+
+                    _glowShader?.Dispose();
+                    _glowShader = null;
+
                     _previousSpectrum = null;
                     _processedSpectrum = null;
                 }

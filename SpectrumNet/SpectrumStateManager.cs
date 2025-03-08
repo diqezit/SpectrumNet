@@ -120,16 +120,16 @@ public interface IAudioVisualizationController : INotifyPropertyChanged
     string SelectedStyle { get; set; }
 
     /// <summary>
-    /// Gets the SkiaSharp canvas element on which the spectrum is rendered.
+    /// Gets the OpenGL control element on which the spectrum is rendered.
     /// <br/>
-    /// Получает SkiaSharp элемент холста, на котором отрисовывается спектр.
+    /// Получает элемент управления OpenGL, на котором отрисовывается спектр.
     /// </summary>
-    SKElement SpectrumCanvas { get; }
+    GLWpfControl SpectrumCanvas { get; }
 
     /// <summary>
     /// Gets the collection of brushes and styles available for spectrum visualization.
     /// <br/>
-    /// Получает коллекцию кистей и стилей, доступных для визуализации спектра.
+    /// Получает коллекцию шейдеров и стилей, доступных для визуализации спектра.
     /// </summary>
     SpectrumBrushes SpectrumStyles { get; }
 

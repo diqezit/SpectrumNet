@@ -15,7 +15,7 @@ namespace SpectrumNet
     /// manages the application's theme, and provides functionality to
     /// save, apply, reset, and restore settings.
     /// </remarks>
-    public partial class SettingsWindow : Window
+    public partial class SettingsWindow : System.Windows.Window
     {
         #region Константы
         private const string LogPrefix = "[SettingsWindow] ";
@@ -340,9 +340,9 @@ namespace SpectrumNet
         #endregion
 
         #region Обработчики событий
-        private void OnWindowDrag(object sender, MouseButtonEventArgs e)
+        private void OnWindowDrag(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left)
+            if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
                 DragMove();
         }
 

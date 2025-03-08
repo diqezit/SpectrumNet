@@ -56,6 +56,9 @@ public static class PerformanceMetricsManager
     private static readonly TimeSpan _snapshotInterval = TimeSpan.FromSeconds(1);
     private static bool _isInitialized;
 
+    // Текстурный шрифт для OpenGL
+    private static TextRenderer _textRenderer;
+
     public static event EventHandler<PerformanceMetrics>? PerformanceUpdated;
     public static event EventHandler<PerformanceLevel>? PerformanceLevelChanged;
 
@@ -79,6 +82,9 @@ public static class PerformanceMetricsManager
 
             _isInitialized = true;
             _timer.Start();
+
+            // Инициализация рендерера текста
+            _textRenderer = new TextRenderer();
 
             AppDomain.CurrentDomain.ProcessExit += (_, _) => Cleanup();
 
@@ -104,9 +110,9 @@ public static class PerformanceMetricsManager
         return metrics;
     }
 
-    public static void DrawPerformanceInfo(SKCanvas? canvas, SKImageInfo info, bool showPerformanceInfo)
+    public static void DrawPerformanceInfo(Viewport viewport, bool showPerformanceInfo)
     {
-        if (canvas == null || info.Width <= 0 || info.Height <= 0)
+        if (viewport.Width <= 0 || viewport.Height <= 0)
             return;
 
         if (!showPerformanceInfo)
@@ -120,20 +126,23 @@ public static class PerformanceMetricsManager
 
             if (fps <= 0) fps = _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
 
-            SKColor textColor = GetPerformanceColor(_currentLevel);
+            Color textColor = GetPerformanceColor(_currentLevel);
 
-            using var paint = new SKPaint
-            {
-                TextSize = 12,
-                IsAntialias = true,
-                Color = textColor,
-                SubpixelText = true
-            };
+            // Настройка проекции для текста
+            Matrix4 projection = Matrix4.CreateOrthographicOffCenter(
+                0, viewport.Width, viewport.Height, 0, -1, 1);
+
+            GL.MatrixMode(MatrixMode.Projection);
+            GL.LoadMatrix(ref projection);
+
+            GL.MatrixMode(MatrixMode.Modelview);
+            GL.LoadIdentity();
 
             string infoText = FormattableString.Invariant(
                 $"RAM: {ramUsage:F1} MB | CPU: {_cpuUsage:F1}% | FPS: {fps:F0} | {_currentLevel}");
 
-            canvas.DrawText(infoText, 10, 20, paint);
+            // Отрисовка текста с использованием TextRenderer
+            _textRenderer.RenderText(infoText, 10, 20, textColor);
 
             if (_frameIndex % 60 == 0)
             {
@@ -287,28 +296,28 @@ public static class PerformanceMetricsManager
         }
     }
 
-    private static SKColor GetTextColor()
+    private static Color GetTextColor()
     {
         try
         {
             bool isDarkTheme = ThemeManager.Instance?.IsDarkTheme ?? false;
-            return isDarkTheme ? SKColors.White : SKColors.Black;
+            return isDarkTheme ? Color.White : Color.Black;
         }
         catch (Exception ex)
         {
             SmartLogger.Log(LogLevel.Error, Constants.LogPrefix, $"Error determining text color: {ex.Message}", forceLog: true);
-            return SKColors.White;
+            return Color.White;
         }
     }
 
-    private static SKColor GetPerformanceColor(PerformanceLevel level)
+    private static Color GetPerformanceColor(PerformanceLevel level)
     {
         return level switch
         {
-            PerformanceLevel.Excellent => SKColors.LimeGreen,
-            PerformanceLevel.Good => SKColors.DodgerBlue,
-            PerformanceLevel.Fair => SKColors.Orange,
-            PerformanceLevel.Poor => SKColors.Red,
+            PerformanceLevel.Excellent => Color.LimeGreen,
+            PerformanceLevel.Good => Color.DodgerBlue,
+            PerformanceLevel.Fair => Color.Orange,
+            PerformanceLevel.Poor => Color.Red,
             _ => GetTextColor()
         };
     }
@@ -379,6 +388,9 @@ public static class PerformanceMetricsManager
             {
                 _performanceHistory.Clear();
             }
+
+            // Освобождение ресурсов текстового рендерера
+            _textRenderer?.Dispose();
 
             SmartLogger.Log(LogLevel.Information, Constants.LogPrefix, "Performance monitoring resources cleaned up", forceLog: true);
         }

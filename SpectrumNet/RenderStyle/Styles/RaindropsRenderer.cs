@@ -1,53 +1,59 @@
 ﻿#nullable enable
 
+using PrimitiveType = OpenTK.Graphics.OpenGL.PrimitiveType;
+using BufferTarget = OpenTK.Graphics.OpenGL.BufferTarget;
+using BufferUsageHint = OpenTK.Graphics.OpenGL.BufferUsageHint;
+using VertexAttribPointerType = OpenTK.Graphics.OpenGL.VertexAttribPointerType;
+
 namespace SpectrumNet
 {
-    public sealed class RaindropsRenderer : ISpectrumRenderer, IDisposable
+    public sealed unsafe class RaindropsRenderer : ISpectrumRenderer, IDisposable
     {
         #region Constants
         private static class Constants
         {
             // Render Settings
-            public const float TARGET_DELTA_TIME = 0.016f;   // Target frame time (seconds)
-            public const float SMOOTH_FACTOR = 0.2f;     // Smoothing factor for spectrum data
-            public const float TRAIL_LENGTH_MULTIPLIER = 0.15f;    // Multiplier for drop speed to compute trail length
-            public const float TRAIL_LENGTH_SIZE_FACTOR = 5f;       // Factor for maximum trail length relative to drop size
-            public const float TRAIL_STROKE_MULTIPLIER = 0.6f;     // Multiplier for trail stroke width
-            public const float TRAIL_OPACITY_MULTIPLIER = 150f;     // Multiplier for trail opacity
-            public const float TRAIL_INTENSITY_THRESHOLD = 0.3f;     // Minimum intensity required for trail rendering
+            public const float TARGET_DELTA_TIME = 0.016f;   // Целевое время кадра (сек)
+            public const float SMOOTH_FACTOR = 0.2f;           // Коэффициент сглаживания спектра
+            public const float TRAIL_LENGTH_MULTIPLIER = 0.15f;  // Множитель для расчёта длины следа
+            public const float TRAIL_LENGTH_SIZE_FACTOR = 5f;    // Фактор максимальной длины следа относительно размера капли
+            public const float TRAIL_STROKE_MULTIPLIER = 0.6f;   // Множитель для ширины линии следа
+            public const float TRAIL_OPACITY_MULTIPLIER = 150f;  // Множитель для прозрачности следа
+            public const float TRAIL_INTENSITY_THRESHOLD = 0.3f; // Порог интенсивности для отрисовки следа
 
             // Simulation Settings
-            public const int INITIAL_DROP_COUNT = 30;       // Initial number of raindrops
-            public const float GRAVITY = 9.8f;     // Gravity constant for particles
-            public const float LIFETIME_DECAY = 0.4f;     // Particle lifetime decay factor
-            public const float SPLASH_REBOUND = 0.5f;     // Rebound multiplier for splash particles
-            public const float SPLASH_VELOCITY_THRESHOLD = 1.0f;     // Minimum velocity threshold for splash particles
-            public const float SPAWN_INTERVAL = 0.05f;    // Time between spawns (seconds)
-            public const float FALLSPEED_THRESHOLD_MULTIPLIER = 1.5f;  // Multiplier for base fall speed threshold for trails
-            public const float RAINDROP_SIZE_THRESHOLD_MULTIPLIER = 0.9f; // Minimum size multiplier for trail rendering
-            public const float RAINDROP_SIZE_HIGHLIGHT_THRESHOLD = 0.8f;  // Minimum size multiplier for highlights
-            public const float INTENSITY_HIGHLIGHT_THRESHOLD = 0.4f;    // Intensity threshold for highlight rendering
-            public const float HIGHLIGHT_SIZE_MULTIPLIER = 0.4f;    // Multiplier for highlight circle size
-            public const float HIGHLIGHT_OFFSET_MULTIPLIER = 0.2f;    // Multiplier for highlight offset
+            public const int INITIAL_DROP_COUNT = 30;
+            public const float GRAVITY = 9.8f;
+            public const float LIFETIME_DECAY = 0.4f;
+            public const float SPLASH_REBOUND = 0.5f;
+            public const float SPLASH_VELOCITY_THRESHOLD = 1.0f;
+            public const float SPAWN_INTERVAL = 0.05f;
+            public const float FALLSPEED_THRESHOLD_MULTIPLIER = 1.5f;
+            public const float RAINDROP_SIZE_THRESHOLD_MULTIPLIER = 0.9f;
+            public const float RAINDROP_SIZE_HIGHLIGHT_THRESHOLD = 0.8f;
+            public const float INTENSITY_HIGHLIGHT_THRESHOLD = 0.4f;
+            public const float HIGHLIGHT_SIZE_MULTIPLIER = 0.4f;
+            public const float HIGHLIGHT_OFFSET_MULTIPLIER = 0.2f;
 
             // Particle Creation Settings
-            public const int SPLASH_PARTICLE_COUNT_MIN = 3;        // Minimum number of splash particles
-            public const int SPLASH_PARTICLE_COUNT_MAX = 8;        // Maximum splash particles (exclusive upper bound)
-            public const float PARTICLE_VELOCITY_BASE_MULTIPLIER = 0.7f;  // Base multiplier for particle velocity
-            public const float PARTICLE_VELOCITY_INTENSITY_MULTIPLIER = 0.3f; // Intensity multiplier for particle velocity
-            public const float SPLASH_UPWARD_BASE_MULTIPLIER = 0.8f;  // Base multiplier for upward force in splash
-            public const float SPLASH_UPWARD_INTENSITY_MULTIPLIER = 0.2f;  // Intensity multiplier for upward force in splash
-            public const float SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER = 0.7f;  // Base multiplier for splash particle size
-            public const float SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER = 0.6f; // Random variation multiplier for splash particle size
-            public const float SPLASH_PARTICLE_INTENSITY_MULTIPLIER = 0.5f;  // Intensity multiplier for splash particle size
-            public const float SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET = 0.8f;  // Offset for splash particle size based on intensity
+            public const int SPLASH_PARTICLE_COUNT_MIN = 3;
+            public const int SPLASH_PARTICLE_COUNT_MAX = 8;
+            public const float PARTICLE_VELOCITY_BASE_MULTIPLIER = 0.7f;
+            public const float PARTICLE_VELOCITY_INTENSITY_MULTIPLIER = 0.3f;
+            public const float SPLASH_UPWARD_BASE_MULTIPLIER = 0.8f;
+            public const float SPLASH_UPWARD_INTENSITY_MULTIPLIER = 0.2f;
+            public const float SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER = 0.7f;
+            public const float SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER = 0.6f;
+            public const float SPLASH_PARTICLE_INTENSITY_MULTIPLIER = 0.5f;
+            public const float SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET = 0.8f;
 
             // Logger Settings
-            public const string LOGGER_PREFIX = "[RaindropsRenderer] "; // Prefix for logging messages
+            public const string LOGGER_PREFIX = "[RaindropsRenderer] ";
         }
         #endregion
 
         #region Nested Types
+
         private readonly struct RenderCache
         {
             public readonly float Width, Height, LowerBound, UpperBound, StepSize;
@@ -68,7 +74,7 @@ namespace SpectrumNet
             public readonly int SpectrumIndex;
             public Raindrop(float x, float y, float fallSpeed, float size, float intensity, int spectrumIndex) =>
                 (X, Y, FallSpeed, Size, Intensity, SpectrumIndex) = (x, y, fallSpeed, size, intensity, spectrumIndex);
-            public Raindrop WithNewY(float newY) => new(X, newY, FallSpeed, Size, Intensity, SpectrumIndex);
+            public Raindrop WithNewY(float newY) => new Raindrop(X, newY, FallSpeed, Size, Intensity, SpectrumIndex);
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -143,28 +149,24 @@ namespace SpectrumNet
                 }
                 _count = writeIndex;
             }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void RenderParticles(SKCanvas canvas, SKPaint basePaint)
+            public void RenderParticles(Color4 baseColor, Action<float, float, float, Color4> drawCircle)
             {
-                if (_count == 0) return;
-                using var splashPaint = basePaint.Clone();
-                splashPaint.Style = SKPaintStyle.Fill;
-                splashPaint.IsAntialias = true;
                 for (int i = 0; i < _count; i++)
                 {
-                    ref Particle p = ref _particles[i];
+                    Particle p = _particles[i];
                     float clampedLifetime = Math.Clamp(p.Lifetime, 0f, 1f);
                     float alphaMultiplier = clampedLifetime * clampedLifetime;
-                    byte alpha = (byte)(255 * alphaMultiplier);
-                    splashPaint.Color = basePaint.Color.WithAlpha(alpha);
+                    float alpha = 255 * alphaMultiplier;
+                    alpha = Math.Clamp(alpha, 0, 255);
+                    // Конвертируем компоненты в диапазон 0..1
+                    Color4 particleColor = new Color4(baseColor.R, baseColor.G, baseColor.B, alpha / 255f);
                     float sizeMultiplier = 0.8f + 0.2f * clampedLifetime;
-                    canvas.DrawCircle(p.X, p.Y, p.Size * sizeMultiplier, splashPaint);
+                    drawCircle(p.X, p.Y, p.Size * sizeMultiplier, particleColor);
                 }
             }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void CreateSplashParticles(float x, float y, float intensity, Random random)
+            public void CreateSplashParticles(float x, float y, float intensity)
             {
-                int count = Math.Min(random.Next(Constants.SPLASH_PARTICLE_COUNT_MIN, Constants.SPLASH_PARTICLE_COUNT_MAX),
+                int count = Math.Min(_random.Next(Constants.SPLASH_PARTICLE_COUNT_MIN, Constants.SPLASH_PARTICLE_COUNT_MAX),
                                      Settings.Instance.MaxParticles - _count);
                 if (count <= 0) return;
                 float particleVelocityMax = Settings.Instance.ParticleVelocityMax *
@@ -173,10 +175,10 @@ namespace SpectrumNet
                     (Constants.SPLASH_UPWARD_BASE_MULTIPLIER + intensity * Constants.SPLASH_UPWARD_INTENSITY_MULTIPLIER);
                 for (int i = 0; i < count; i++)
                 {
-                    float angle = (float)(random.NextDouble() * Math.PI * 2);
-                    float speed = (float)(random.NextDouble() * particleVelocityMax);
+                    float angle = (float)(_random.NextDouble() * Math.PI * 2);
+                    float speed = (float)(_random.NextDouble() * particleVelocityMax);
                     float size = Settings.Instance.SplashParticleSize *
-                        (Constants.SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER + (float)random.NextDouble() * Constants.SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER) *
+                        (Constants.SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER + (float)_random.NextDouble() * Constants.SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER) *
                         (intensity * Constants.SPLASH_PARTICLE_INTENSITY_MULTIPLIER + Constants.SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET);
                     AddParticle(new Particle(
                         x, y,
@@ -203,21 +205,28 @@ namespace SpectrumNet
         private readonly Stopwatch _frameTimer = new();
         private float _actualDeltaTime = Constants.TARGET_DELTA_TIME;
         private float _averageLoudness = 0f;
-        private readonly SKPath _trailPath = new();
-        private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
         private readonly object _spectrumLock = new();
         private float[]? _processedSpectrum;
         private int _frameCounter = 0;
         private int _particleUpdateSkip = 1;
-        private int _effectsThreshold = 3;  // May be updated based on quality settings
+        private int _effectsThreshold = 3;
+
+        // Шейдерные программы и буферы
+        private int _circleVAO;
+        private int _circleVBO;
+        private int _lineVAO;
+        private int _lineVBO;
+        private ShaderProgram? _shaderProgram;
 
         // Quality settings fields
         private RenderQuality _quality = RenderQuality.Medium;
         private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
         private bool _useAdvancedEffects = true;
 
         private const string LogPrefix = Constants.LOGGER_PREFIX;
+
+        // Цвет отрисовки по умолчанию
+        private Color4 _baseColor = Color4.CornflowerBlue;
         #endregion
 
         #region Constructor and Instance Management
@@ -229,7 +238,19 @@ namespace SpectrumNet
             _renderCache = new RenderCache(1, 1, false);
             _frameTimer.Start();
             Settings.Instance.PropertyChanged += OnSettingsChanged;
+            InitializeOpenGLResources();
             SmartLogger.Log(LogLevel.Debug, LogPrefix, "RaindropsRenderer initialized");
+        }
+
+        private void InitializeOpenGLResources()
+        {
+            // Инициализация VAO и VBO для кругов
+            _circleVAO = GL.GenVertexArray();
+            _circleVBO = GL.GenBuffer();
+
+            // Инициализация VAO и VBO для линий
+            _lineVAO = GL.GenVertexArray();
+            _lineVBO = GL.GenBuffer();
         }
 
         private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
@@ -293,83 +314,66 @@ namespace SpectrumNet
                 _raindropCount = 0;
                 _particleBuffer.Clear();
                 _disposed = false;
+                InitializeOpenGLResources();
             }
             _isInitialized = true;
             _firstRender = true;
             SmartLogger.Log(LogLevel.Debug, LogPrefix, "RaindropsRenderer initialized");
         }
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount,
-                           SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        // Отрисовка с использованием OpenTK. Параметры viewport задают область рендеринга,
+        public void Render(float[]? spectrum, Viewport viewport, float barWidth,
+                           float barSpacing, int barCount, ShaderProgram? shader,
+                           Action<Viewport> drawPerformanceInfo)
         {
-            if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+            if (!ValidateRenderParameters(spectrum, viewport))
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, "Invalid render parameters for RaindropsRenderer");
                 return;
             }
 
+            // Сохраняем шейдер для использования в методах рисования
+            _shaderProgram = shader;
+
+            if (shader != null)
+            {
+                shader.Use();
+            }
+
             float[] renderSpectrum;
-            bool semaphoreAcquired = false;
             int spectrumLength = spectrum!.Length;
             int actualBarCount = Math.Min(spectrumLength, barCount);
 
-            try
+            lock (_spectrumLock)
             {
-                semaphoreAcquired = _spectrumSemaphore.Wait(0);
-                if (semaphoreAcquired)
-                {
-                    ProcessSpectrum(spectrum, actualBarCount);
-                }
-                lock (_spectrumLock)
-                {
-                    renderSpectrum = _processedSpectrum ??
-                                     ProcessSpectrumSynchronously(spectrum, actualBarCount);
-                }
-
-                float targetDeltaTime = Constants.TARGET_DELTA_TIME;
-                float elapsed = (float)_frameTimer.Elapsed.TotalSeconds;
-                _frameTimer.Restart();
-                float speedMultiplier = elapsed / targetDeltaTime;
-                _actualDeltaTime = Math.Clamp(
-                    targetDeltaTime * speedMultiplier,
-                    Settings.Instance.MinTimeStep,
-                    Settings.Instance.MaxTimeStep
-                );
-
-                _frameCounter = (_frameCounter + 1) % (_particleUpdateSkip + 1);
-
-                using var paintClone = paint!.Clone();
-                // Apply quality settings to paint
-                paintClone.IsAntialias = _useAntiAlias;
-                paintClone.FilterQuality = _filterQuality;
-
-                UpdateAndRenderScene(canvas!, renderSpectrum, info, actualBarCount, paintClone);
-                drawPerformanceInfo?.Invoke(canvas!, info);
+                _processedSpectrum = ProcessSpectrumSynchronously(spectrum, actualBarCount);
+                renderSpectrum = _processedSpectrum;
             }
-            catch (Exception ex)
+
+            float targetDeltaTime = Constants.TARGET_DELTA_TIME;
+            float elapsed = (float)_frameTimer.Elapsed.TotalSeconds;
+            _frameTimer.Restart();
+            float speedMultiplier = elapsed / targetDeltaTime;
+            _actualDeltaTime = Math.Clamp(
+                targetDeltaTime * speedMultiplier,
+                Settings.Instance.MinTimeStep,
+                Settings.Instance.MaxTimeStep
+            );
+
+            _frameCounter = (_frameCounter + 1) % (_particleUpdateSkip + 1);
+
+            UpdateAndRenderScene(renderSpectrum, viewport, actualBarCount);
+
+            drawPerformanceInfo?.Invoke(viewport);
+
+            if (shader != null)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"RaindropsRenderer: {ex.Message}");
-            }
-            finally
-            {
-                if (semaphoreAcquired)
-                {
-                    _spectrumSemaphore.Release();
-                }
+                GL.UseProgram(0);
             }
         }
         #endregion
 
         #region Spectrum Processing
-        private void ProcessSpectrum(float[] spectrum, int barCount)
-        {
-            if (barCount <= 0) return;
-            ProcessSpectrumData(spectrum.AsSpan(0, Math.Min(spectrum.Length, barCount)),
-                                  _smoothedSpectrumCache.AsSpan(0, barCount));
-            _processedSpectrum = _smoothedSpectrumCache;
-        }
-
         private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
         {
             if (barCount <= 0) return Array.Empty<float>();
@@ -405,7 +409,9 @@ namespace SpectrumNet
                     Vector<float> vSum = Vector<float>.Zero;
                     for (int j = 0; j < simdLength; j += Vector<float>.Count)
                     {
-                        vSum += MemoryMarshal.Read<Vector<float>>(MemoryMarshal.AsBytes(src.Slice(start + j, Vector<float>.Count)));
+                        // Для простоты создаём временный массив из span
+                        float[] temp = src.Slice(start + j, Vector<float>.Count).ToArray();
+                        vSum += new Vector<float>(temp);
                     }
                     for (int k = 0; k < Vector<float>.Count; k++)
                     {
@@ -432,19 +438,16 @@ namespace SpectrumNet
         #endregion
 
         #region Simulation Methods
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint) =>
+        private bool ValidateRenderParameters(float[]? spectrum, Viewport viewport) =>
             _isInitialized && !_disposed &&
-            canvas != null &&
             spectrum != null && spectrum.Length > 0 &&
-            paint != null &&
-            info.Width > 0 && info.Height > 0;
+            viewport.Width > 0 && viewport.Height > 0;
 
-        private void UpdateAndRenderScene(SKCanvas canvas, float[] spectrum, SKImageInfo info, int barCount, SKPaint basePaint)
+        private void UpdateAndRenderScene(float[] spectrum, Viewport viewport, int barCount)
         {
-            if (_cacheNeedsUpdate || _renderCache.Width != info.Width || _renderCache.Height != info.Height)
+            if (_cacheNeedsUpdate || _renderCache.Width != viewport.Width || _renderCache.Height != viewport.Height)
             {
-                _renderCache = new RenderCache(info.Width, info.Height, _isOverlayActive);
+                _renderCache = new RenderCache(viewport.Width, viewport.Height, _isOverlayActive);
                 _particleBuffer.UpdateLowerBound(_renderCache.LowerBound);
                 _cacheNeedsUpdate = false;
             }
@@ -456,10 +459,14 @@ namespace SpectrumNet
             _timeSinceLastSpawn += _actualDeltaTime;
             UpdateSimulation(spectrum, barCount);
 
-            // Render particles (background)
-            _particleBuffer.RenderParticles(canvas, basePaint);
-            // Render raindrop trails and raindrops (foreground)
-            RenderScene(canvas, basePaint, spectrum);
+            // Отрисовка частиц (фон)
+            _particleBuffer.RenderParticles(_baseColor, DrawCircle);
+
+            // Отрисовка следов капель (передний план)
+            RenderRaindropTrails(spectrum);
+
+            // Отрисовка самих капель (передний план)
+            RenderRaindrops(spectrum);
         }
 
         private void InitializeInitialDrops(int barCount)
@@ -496,7 +503,6 @@ namespace SpectrumNet
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateRaindrops(float[] spectrum)
         {
             int writeIdx = 0;
@@ -513,14 +519,13 @@ namespace SpectrumNet
                     float intensity = drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
                     if (intensity > 0.2f)
                     {
-                        _particleBuffer.CreateSplashParticles(drop.X, _renderCache.LowerBound, intensity, _random);
+                        _particleBuffer.CreateSplashParticles(drop.X, _renderCache.LowerBound, intensity);
                     }
                 }
             }
             _raindropCount = writeIdx;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void SpawnNewDrops(float[] spectrum, int barCount)
         {
             if (barCount <= 0 || spectrum.Length == 0) return;
@@ -552,31 +557,8 @@ namespace SpectrumNet
         #endregion
 
         #region Rendering Methods
-        private void RenderScene(SKCanvas canvas, SKPaint paint, float[] spectrum)
+        private void RenderRaindropTrails(float[] spectrum)
         {
-            bool hasHighPerformance = _effectsThreshold < 3;
-            if (hasHighPerformance && _averageLoudness > 0.3f)
-            {
-                RenderRaindropTrails(canvas, spectrum, paint);
-            }
-            RenderRaindrops(canvas, spectrum, paint);
-        }
-
-        private void RenderRaindropTrails(SKCanvas canvas, float[] spectrum, SKPaint basePaint)
-        {
-            using var trailPaint = basePaint.Clone();
-            trailPaint.Style = SKPaintStyle.Stroke;
-            trailPaint.StrokeCap = SKStrokeCap.Round;
-            if (_useAdvancedEffects)
-            {
-                // Apply gradient shader for advanced trail effects
-                trailPaint.Shader = SKShader.CreateLinearGradient(
-                    new SKPoint(0, 0),
-                    new SKPoint(0, 10),
-                    new SKColor[] { basePaint.Color, basePaint.Color.WithAlpha(0) },
-                    new float[] { 0, 1 },
-                    SKShaderTileMode.Clamp);
-            }
             for (int i = 0; i < _raindropCount; i++)
             {
                 Raindrop drop = _raindrops[i];
@@ -592,39 +574,24 @@ namespace SpectrumNet
                 );
                 if (trailLength < Constants.TRAIL_INTENSITY_THRESHOLD)
                     continue;
-                trailPaint.Color = basePaint.Color.WithAlpha((byte)(Constants.TRAIL_OPACITY_MULTIPLIER * intensity));
-                trailPaint.StrokeWidth = drop.Size * Constants.TRAIL_STROKE_MULTIPLIER;
-                _trailPath.Reset();
-                _trailPath.MoveTo(drop.X, drop.Y);
-                _trailPath.LineTo(drop.X, drop.Y - trailLength);
-                // Quick reject to avoid drawing invisible paths
-                if (canvas.QuickReject(_trailPath.Bounds))
-                    continue;
-                canvas.DrawPath(_trailPath, trailPaint);
+                float alpha = Constants.TRAIL_OPACITY_MULTIPLIER * intensity;
+                alpha = Math.Clamp(alpha, 0, 255);
+                Color4 trailColor = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha / 255f);
+                DrawLine(drop.X, drop.Y, drop.X, drop.Y - trailLength, drop.Size * Constants.TRAIL_STROKE_MULTIPLIER, trailColor);
             }
         }
 
-        private void RenderRaindrops(SKCanvas canvas, float[] spectrum, SKPaint basePaint)
+        private void RenderRaindrops(float[] spectrum)
         {
-            using var dropPaint = basePaint.Clone();
-            dropPaint.Style = SKPaintStyle.Fill;
-            dropPaint.IsAntialias = true;
-            using var highlightPaint = basePaint.Clone();
-            highlightPaint.Style = SKPaintStyle.Fill;
-            highlightPaint.IsAntialias = true;
             for (int i = 0; i < _raindropCount; i++)
             {
                 Raindrop drop = _raindrops[i];
                 float intensity = drop.SpectrumIndex < spectrum.Length
                     ? spectrum[drop.SpectrumIndex] * 0.7f + drop.Intensity * 0.3f
                     : drop.Intensity;
-                byte alpha = (byte)(255 * Math.Min(0.7f + intensity * 0.3f, 1.0f));
-                dropPaint.Color = basePaint.Color.WithAlpha(alpha);
-                // Quick rejection for raindrop circle
-                SKRect dropRect = new SKRect(drop.X - drop.Size, drop.Y - drop.Size, drop.X + drop.Size, drop.Y + drop.Size);
-                if (canvas.QuickReject(dropRect))
-                    continue;
-                canvas.DrawCircle(drop.X, drop.Y, drop.Size, dropPaint);
+                float alpha = Math.Min(0.7f + intensity * 0.3f, 1.0f);
+                Color4 dropColor = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha);
+                DrawCircle(drop.X, drop.Y, drop.Size, dropColor);
                 if (_effectsThreshold < 2 &&
                     drop.Size > Settings.Instance.RaindropSize * Constants.RAINDROP_SIZE_HIGHLIGHT_THRESHOLD &&
                     intensity > Constants.INTENSITY_HIGHLIGHT_THRESHOLD)
@@ -632,8 +599,10 @@ namespace SpectrumNet
                     float highlightSize = drop.Size * Constants.HIGHLIGHT_SIZE_MULTIPLIER;
                     float highlightX = drop.X - drop.Size * Constants.HIGHLIGHT_OFFSET_MULTIPLIER;
                     float highlightY = drop.Y - drop.Size * Constants.HIGHLIGHT_OFFSET_MULTIPLIER;
-                    highlightPaint.Color = SKColors.White.WithAlpha((byte)(150 * intensity));
-                    canvas.DrawCircle(highlightX, highlightY, highlightSize, highlightPaint);
+                    float hAlpha = 150 * intensity;
+                    hAlpha = Math.Clamp(hAlpha, 0, 255);
+                    Color4 highlightColor = new Color4(1f, 1f, 1f, hAlpha / 255f);
+                    DrawCircle(highlightX, highlightY, highlightSize, highlightColor);
                 }
             }
         }
@@ -646,24 +615,77 @@ namespace SpectrumNet
             {
                 case RenderQuality.Low:
                     _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
                     _useAdvancedEffects = false;
                     _effectsThreshold = 4;
                     break;
                 case RenderQuality.Medium:
                     _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
                     _useAdvancedEffects = true;
                     _effectsThreshold = 3;
                     break;
                 case RenderQuality.High:
                     _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
                     _useAdvancedEffects = true;
                     _effectsThreshold = 2;
                     break;
             }
-            // Update any cached SKPaint objects if necessary
+        }
+        #endregion
+
+        #region OpenTK Drawing Helpers
+
+        private void DrawCircle(float centerX, float centerY, float radius, Color4 color)
+        {
+            DrawCircle(centerX, centerY, radius, color, 32);
+        }
+
+        private void DrawCircle(float centerX, float centerY, float radius, Color4 color, int segments)
+        {
+            if (_shaderProgram != null)
+            {
+                _shaderProgram.Use();
+                // Предполагаем, что у вас есть uniform-переменная "uColor" в шейдере
+                int colorLocation = GL.GetUniformLocation(_shaderProgram.ProgramId, "uColor");
+                if (colorLocation != -1)
+                {
+                    GL.Uniform4(colorLocation, color);
+                }
+            }
+
+            // Используем традиционный метод рисования для совместимости
+            GL.Color4(color);
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex2(centerX, centerY);
+            for (int i = 0; i <= segments; i++)
+            {
+                float angle = i * MathF.PI * 2 / segments;
+                float x = centerX + MathF.Cos(angle) * radius;
+                float y = centerY + MathF.Sin(angle) * radius;
+                GL.Vertex2(x, y);
+            }
+            GL.End();
+        }
+
+        private void DrawLine(float x1, float y1, float x2, float y2, float lineWidth, Color4 color)
+        {
+            if (_shaderProgram != null)
+            {
+                _shaderProgram.Use();
+                // Предполагаем, что у вас есть uniform-переменная "uColor" в шейдере
+                int colorLocation = GL.GetUniformLocation(_shaderProgram.ProgramId, "uColor");
+                if (colorLocation != -1)
+                {
+                    GL.Uniform4(colorLocation, color);
+                }
+            }
+
+            // Используем традиционный метод рисования для совместимости
+            GL.LineWidth(lineWidth);
+            GL.Color4(color);
+            GL.Begin(PrimitiveType.Lines);
+            GL.Vertex2(x1, y1);
+            GL.Vertex2(x2, y2);
+            GL.End();
         }
         #endregion
 
@@ -671,9 +693,14 @@ namespace SpectrumNet
         public void Dispose()
         {
             if (_disposed) return;
+
+            // Освобождаем ресурсы OpenGL
+            GL.DeleteVertexArray(_circleVAO);
+            GL.DeleteBuffer(_circleVBO);
+            GL.DeleteVertexArray(_lineVAO);
+            GL.DeleteBuffer(_lineVBO);
+
             Settings.Instance.PropertyChanged -= OnSettingsChanged;
-            _spectrumSemaphore?.Dispose();
-            _trailPath?.Dispose();
             _processedSpectrum = null;
             _isInitialized = false;
             _disposed = true;

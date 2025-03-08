@@ -2,32 +2,37 @@
 
 namespace SpectrumNet
 {
+    // Добавляем псевдонимы для устранения неоднозначностей
+    using WpfApplication = System.Windows.Application;
+    using WpfWindow = System.Windows.Window;
+    using WpfMouseWheelEventArgs = System.Windows.Input.MouseWheelEventArgs;
+
     #region CommonResources
     /// <summary>
-    /// Provides common resources and utility methods for the application.
+    /// Предоставляет общие ресурсы и утилитные методы для приложения.
     /// </summary>
     public partial class CommonResources
     {
         /// <summary>
-        /// Initializes the application resources by loading and merging resource dictionaries.
+        /// Инициализирует ресурсы приложения, загружая и объединяя словари ресурсов.
         /// </summary>
         public static void InitialiseResources()
         {
-            Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
+            WpfApplication.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
             {
                 Source = new Uri("pack://application:,,,/SpectrumNet;component/Themes/CommonResources.xaml",
                                 UriKind.Absolute)
             });
 
-            ThemeManager.Instance.ApplyThemeToWindow(Application.Current.MainWindow);
+            ThemeManager.Instance.ApplyThemeToWindow(WpfApplication.Current.MainWindow);
         }
 
         /// <summary>
-        /// Handles mouse wheel scrolling for sliders.
+        /// Обрабатывает прокрутку колесика мыши для ползунков.
         /// </summary>
-        /// <param name="sender">The object that raised the event.</param>
-        /// <param name="e">The mouse wheel event arguments.</param>
-        public void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e)
+        /// <param name="sender">Объект, вызвавший событие.</param>
+        /// <param name="e">Аргументы события колесика мыши.</param>
+        public void Slider_MouseWheelScroll(object sender, WpfMouseWheelEventArgs e)
         {
             if (sender is Slider slider)
             {
@@ -41,7 +46,7 @@ namespace SpectrumNet
 
     #region ThemeManager
     /// <summary>
-    /// Manages the application's theme, allowing switching between light and dark themes.
+    /// Управляет темой приложения, позволяя переключаться между светлой и темной темами.
     /// </summary>
     public class ThemeManager : INotifyPropertyChanged
     {
@@ -49,17 +54,17 @@ namespace SpectrumNet
         private static ThemeManager? _instance;
         private bool _isDarkTheme = true;
         private readonly Dictionary<bool, ResourceDictionary> _themeDictionaries;
-        private readonly List<WeakReference<Window>> _registeredWindows = new();
+        private readonly List<WeakReference<WpfWindow>> _registeredWindows = new();
         #endregion
 
         #region Properties
         /// <summary>
-        /// Gets the singleton instance of the ThemeManager.
+        /// Получает единственный экземпляр ThemeManager.
         /// </summary>
         public static ThemeManager Instance => _instance ??= new ThemeManager();
 
         /// <summary>
-        /// Gets or sets a value indicating whether the dark theme is currently active.
+        /// Получает или устанавливает значение, указывающее, активна ли темная тема.
         /// </summary>
         public bool IsDarkTheme
         {
@@ -78,19 +83,19 @@ namespace SpectrumNet
 
         #region Events
         /// <summary>
-        /// Occurs when a property value changes.
+        /// Происходит при изменении значения свойства.
         /// </summary>
         public event PropertyChangedEventHandler? PropertyChanged;
 
         /// <summary>
-        /// Occurs when the theme changes.
+        /// Происходит при смене темы.
         /// </summary>
         public event EventHandler<ThemeChangedEventArgs>? ThemeChanged;
         #endregion
 
         #region Constructor
         /// <summary>
-        /// Initializes a new instance of the ThemeManager class.
+        /// Инициализирует новый экземпляр класса ThemeManager.
         /// </summary>
         private ThemeManager()
         {
@@ -104,16 +109,16 @@ namespace SpectrumNet
 
         #region Public Methods
         /// <summary>
-        /// Registers a window with the ThemeManager.
+        /// Регистрирует окно в ThemeManager.
         /// </summary>
-        /// <param name="window">The window to register.</param>
-        public void RegisterWindow(Window window)
+        /// <param name="window">Окно для регистрации.</param>
+        public void RegisterWindow(WpfWindow window)
         {
             CleanupUnusedReferences();
 
             if (!_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
             {
-                _registeredWindows.Add(new WeakReference<Window>(window));
+                _registeredWindows.Add(new WeakReference<WpfWindow>(window));
                 window.Closed += OnWindowClosed;
                 ApplyThemeToWindow(window);
             }
@@ -125,10 +130,10 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Unregisters a window from the ThemeManager.
+        /// Снимает регистрацию окна из ThemeManager.
         /// </summary>
-        /// <param name="window">The window to unregister.</param>
-        public void UnregisterWindow(Window window)
+        /// <param name="window">Окно для снятия регистрации.</param>
+        public void UnregisterWindow(WpfWindow window)
         {
             CleanupUnusedReferences();
 
@@ -137,7 +142,7 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Toggles between light and dark themes.
+        /// Переключает между светлой и темной темами.
         /// </summary>
         public void ToggleTheme()
         {
@@ -148,29 +153,29 @@ namespace SpectrumNet
 
         #region Private Methods
         /// <summary>
-        /// Loads a theme resource dictionary from the specified path.
+        /// Загружает словарь ресурсов темы по указанному пути.
         /// </summary>
-        /// <param name="path">The path to the theme resource.</param>
-        /// <returns>The loaded ResourceDictionary.</returns>
+        /// <param name="path">Путь к ресурсу темы.</param>
+        /// <returns>Загруженный ResourceDictionary.</returns>
         private static ResourceDictionary LoadThemeResource(string path) => new()
         {
             Source = new Uri($"pack://application:,,,/SpectrumNet;component/{path}", UriKind.Absolute)
         };
 
         /// <summary>
-        /// Removes references to closed windows from the registered windows list.
+        /// Удаляет ссылки на закрытые окна из списка зарегистрированных окон.
         /// </summary>
         private void CleanupUnusedReferences() =>
             _registeredWindows.RemoveAll(wr => !wr.TryGetTarget(out _));
 
         /// <summary>
-        /// Handles the window closed event.
+        /// Обрабатывает событие закрытия окна.
         /// </summary>
-        /// <param name="sender">The object that raised the event.</param>
-        /// <param name="e">The event arguments.</param>
+        /// <param name="sender">Объект, вызвавший событие.</param>
+        /// <param name="e">Аргументы события.</param>
         private void OnWindowClosed(object? sender, EventArgs e)
         {
-            if (sender is Window window)
+            if (sender is WpfWindow window)
             {
                 _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
                 window.Closed -= OnWindowClosed;
@@ -178,7 +183,7 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Updates the theme for all registered windows.
+        /// Обновляет тему для всех зарегистрированных окон.
         /// </summary>
         private void UpdateAllWindows()
         {
@@ -192,19 +197,19 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Applies the current theme to the specified window.
+        /// Применяет текущую тему к указанному окну.
         /// </summary>
-        /// <param name="window">The window to apply the theme to.</param>
-        public void ApplyThemeToWindow(Window window)
+        /// <param name="window">Окно, к которому применяется тема.</param>
+        public void ApplyThemeToWindow(WpfWindow window)
         {
             if (window == null) return;
 
             var themeDict = _themeDictionaries[IsDarkTheme];
-            Application.Current.Dispatcher.Invoke(() =>
+            WpfApplication.Current.Dispatcher.Invoke(() =>
             {
                 foreach (var key in themeDict.Keys)
                 {
-                    Application.Current.Resources[key] = themeDict[key]; 
+                    WpfApplication.Current.Resources[key] = themeDict[key];
                 }
             });
         }
@@ -212,16 +217,16 @@ namespace SpectrumNet
 
         #region Event Triggers
         /// <summary>
-        /// Raises the PropertyChanged event.
+        /// Вызывает событие PropertyChanged.
         /// </summary>
-        /// <param name="propertyName">The name of the property that changed.</param>
+        /// <param name="propertyName">Имя измененного свойства.</param>
         protected virtual void OnPropertyChanged(string propertyName) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
         /// <summary>
-        /// Raises the ThemeChanged event.
+        /// Вызывает событие ThemeChanged.
         /// </summary>
-        /// <param name="isDarkTheme">A value indicating whether the dark theme is active.</param>
+        /// <param name="isDarkTheme">Значение, указывающее, активна ли темная тема.</param>
         protected virtual void OnThemeChanged(bool isDarkTheme) =>
             ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(isDarkTheme));
         #endregion
@@ -230,19 +235,19 @@ namespace SpectrumNet
 
     #region ThemeChangedEventArgs
     /// <summary>
-    /// Provides data for the ThemeChanged event.
+    /// Предоставляет данные для события ThemeChanged.
     /// </summary>
     public class ThemeChangedEventArgs : EventArgs
     {
         /// <summary>
-        /// Gets a value indicating whether the dark theme is active.
+        /// Получает значение, указывающее, активна ли темная тема.
         /// </summary>
         public bool IsDarkTheme { get; }
 
         /// <summary>
-        /// Initializes a new instance of the ThemeChangedEventArgs class.
+        /// Инициализирует новый экземпляр класса ThemeChangedEventArgs.
         /// </summary>
-        /// <param name="isDarkTheme">A value indicating whether the dark theme is active.</param>
+        /// <param name="isDarkTheme">Значение, указывающее, активна ли темная тема.</param>
         public ThemeChangedEventArgs(bool isDarkTheme) => IsDarkTheme = isDarkTheme;
     }
     #endregion
