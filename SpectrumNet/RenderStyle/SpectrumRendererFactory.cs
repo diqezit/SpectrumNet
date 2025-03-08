@@ -2,40 +2,37 @@
 
 namespace SpectrumNet
 {
-    /// <summary>
-    /// Enumeration of spectrum rendering styles.
-    /// </summary>
     public enum RenderStyle
     {
-        AsciiDonut,
         Bars,
-        CircularBars,
-        CircularWave,
-        Constellation,
-        Cube,
-        Cubes,
-        Fire,
-        Gauge,
-        Glitch,
-        GradientWave,
-        Heartbeat,
-        Kenwood,
-        LedMeter,
-        Loudness,
-        Particles,
-        Polar,
         Raindrops,
-        Rainbow,
-        SphereRenderer,
-        TextParticles,
-        Voronoi,
-        Waterfall,
-        Waveform
+
+        // Implementation for others renders temporary disabled to fix all issues and compabilites im main logic
+
+        //AsciiDonut,
+        //CircularBars,
+        //CircularWave,
+        //Constellation,
+        //Cube,
+        //Cubes,
+        //Fire,
+        //Gauge,
+        //Glitch,
+        //GradientWave,
+        //Heartbeat,
+        //Kenwood,
+        //LedMeter,
+        //Loudness,
+        //Particles,
+        //Polar,
+        //Rainbow,
+        //SphereRenderer,
+        //TextParticles,
+        //Voronoi,
+        //Waterfall,
+        //Waveform
     }
 
-    /// <summary>
-    /// Enumeration of rendering quality levels.
-    /// </summary>
     public enum RenderQuality
     {
         Low,
@@ -43,9 +40,6 @@ namespace SpectrumNet
         High
     }
 
-    /// <summary>
-    /// Represents a viewport for rendering.
-    /// </summary>
     public readonly struct Viewport
     {
         public readonly int X, Y, Width, Height;
@@ -59,38 +53,19 @@ namespace SpectrumNet
         }
     }
 
-    /// <summary>
-    /// Interface for classes that perform spectrum rendering.
-    /// </summary>
     public interface ISpectrumRenderer : IDisposable
     {
-        /// <summary>Initializes the renderer.</summary>
         void Initialize();
 
-        /// <summary>Renders the spectrum using OpenGL.</summary>
-        /// <param name="spectrum">Array of spectrum values.</param>
-        /// <param name="viewport">Rendering viewport.</param>
-        /// <param name="barWidth">Width of bars.</param>
-        /// <param name="barSpacing">Spacing between bars.</param>
-        /// <param name="barCount">Number of bars.</param>
-        /// <param name="shader">Shader program for styling the rendering.</param>
-        /// <param name="drawPerformanceInfo">Method for drawing performance information.</param>
         void Render(float[]? spectrum, Viewport viewport, float barWidth,
                     float barSpacing, int barCount, ShaderProgram? shader,
                     Action<Viewport> drawPerformanceInfo);
 
-        /// <summary>Configures the renderer for overlay mode and quality settings.</summary>
-        /// <param name="isOverlayActive">Whether overlay mode is active.</param>
-        /// <param name="quality">Rendering quality level.</param>
         void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
 
-        /// <summary>Gets or sets the current rendering quality.</summary>
         RenderQuality Quality { get; set; }
     }
 
-    /// <summary>
-    /// Factory for creating spectrum renderer instances.
-    /// </summary>
     public static class SpectrumRendererFactory
     {
         private const string LogPrefix = "[SpectrumRendererFactory] ";
@@ -99,9 +74,6 @@ namespace SpectrumNet
         private static readonly HashSet<RenderStyle> _initializedRenderers = new();
         private static RenderQuality _globalQuality = RenderQuality.Medium;
 
-        /// <summary>
-        /// Gets or sets the global rendering quality for all renderers.
-        /// </summary>
         public static RenderQuality GlobalQuality
         {
             get => _globalQuality;
@@ -116,16 +88,11 @@ namespace SpectrumNet
             }
         }
 
-        /// <summary>
-        /// Creates or retrieves a spectrum renderer instance of the specified style.
-        /// </summary>
-        /// <param name="style">Rendering style.</param>
-        /// <param name="isOverlayActive">Whether overlay mode is active.</param>
-        /// <param name="quality">Rendering quality level.</param>
-        /// <returns>Renderer instance.</returns>
         public static ISpectrumRenderer CreateRenderer(RenderStyle style, bool isOverlayActive, RenderQuality? quality = null)
         {
             RenderQuality actualQuality = quality ?? _globalQuality;
+
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Creating renderer for style {style}, overlay: {isOverlayActive}, quality: {actualQuality}");
 
             if (_rendererCache.TryGetValue(style, out var cachedRenderer))
             {
@@ -142,6 +109,7 @@ namespace SpectrumNet
                 }
 
                 var renderer = GetRendererInstance(style);
+                SmartLogger.Log(LogLevel.Information, LogPrefix, $"Created new renderer instance for {style}");
 
                 if (!_initializedRenderers.Contains(style))
                 {
@@ -149,6 +117,7 @@ namespace SpectrumNet
                     {
                         renderer.Initialize();
                         _initializedRenderers.Add(style);
+                        SmartLogger.Log(LogLevel.Information, LogPrefix, $"Initialized renderer for {style}");
                     }
                     catch (Exception ex)
                     {
@@ -163,34 +132,48 @@ namespace SpectrumNet
             }
         }
 
-        /// <summary>
-        /// Returns a collection of all cached renderers.
-        /// </summary>
-        /// <returns>Collection of renderers.</returns>
         public static IEnumerable<ISpectrumRenderer> GetAllRenderers()
         {
             lock (_lock) return _rendererCache.Values.ToList();
         }
 
-        /// <summary>
-        /// Returns a cached renderer for the specified style.
-        /// </summary>
-        /// <param name="style">Rendering style.</param>
-        /// <returns>Renderer or null.</returns>
         public static ISpectrumRenderer? GetCachedRenderer(RenderStyle style)
         {
-            lock (_lock) return _rendererCache.TryGetValue(style, out var renderer) ? renderer : null;
+            lock (_lock)
+            {
+                bool exists = _rendererCache.TryGetValue(style, out var renderer);
+                if (!exists)
+                {
+                    SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Renderer for style {style} not found in cache");
+                }
+                return exists ? renderer : null;
+            }
         }
 
-        /// <summary>
-        /// Configures all cached renderers for overlay mode and quality.
-        /// </summary>
-        /// <param name="isOverlayActive">Whether overlay mode is active (null to keep current).</param>
-        /// <param name="quality">Rendering quality level (null to keep current).</param>
         public static void ConfigureAllRenderers(bool? isOverlayActive, RenderQuality? quality = null)
         {
             lock (_lock)
             {
+                SmartLogger.Log(LogLevel.Debug, LogPrefix,
+                    $"Configuring all renderers - Overlay: {(isOverlayActive.HasValue ? isOverlayActive.Value.ToString() : "unchanged")}, " +
+                    $"Quality: {(quality.HasValue ? quality.Value.ToString() : "unchanged")}");
+
+                if (_rendererCache.Count == 0)
+                {
+                    foreach (RenderStyle style in Enum.GetValues(typeof(RenderStyle)))
+                    {
+                        try
+                        {
+                            CreateRenderer(style, isOverlayActive ?? false, quality ?? _globalQuality);
+                            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Pre-initialized renderer for {style}");
+                        }
+                        catch (Exception ex)
+                        {
+                            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to pre-initialize renderer {style}: {ex.Message}", forceLog: true);
+                        }
+                    }
+                }
+
                 foreach (var renderer in _rendererCache.Values)
                 {
                     try
@@ -217,29 +200,14 @@ namespace SpectrumNet
             }
         }
 
-        /// <summary>
-        /// Sets the quality for a specific renderer style.
-        /// </summary>
-        /// <param name="style">Rendering style.</param>
-        /// <param name="quality">Rendering quality level.</param>
-        public static void SetRendererQuality(RenderStyle style, RenderQuality quality)
-        {
-            lock (_lock)
-            {
-                if (_rendererCache.TryGetValue(style, out var renderer))
-                {
-                    renderer.Quality = quality;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Creates a renderer instance for the specified style.
-        /// </summary>
         private static ISpectrumRenderer GetRendererInstance(RenderStyle style) => style switch
         {
-            //RenderStyle.AsciiDonut => AsciiDonutRenderer.GetInstance(),
             RenderStyle.Bars => BarsRenderer.GetInstance(),
+            RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
+
+            // Implementation for others renders temporary disabled due to fix issues and compabilities 
+
+            //RenderStyle.AsciiDonut => AsciiDonutRenderer.GetInstance(),
             //RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
             //RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
             //RenderStyle.Constellation => ConstellationRenderer.GetInstance(),
@@ -255,13 +223,13 @@ namespace SpectrumNet
             //RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
             //RenderStyle.Particles => ParticlesRenderer.GetInstance(),
             //RenderStyle.Polar => PolarRenderer.GetInstance(),
-            RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
             //RenderStyle.Rainbow => RainbowRenderer.GetInstance(),
             //RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
             //RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
             //RenderStyle.Voronoi => VoronoiRenderer.GetInstance(),
             //RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
             //RenderStyle.Waveform => WaveformRenderer.GetInstance(),
+
             _ => throw new ArgumentException($"Unknown render style: {style}")
         };
     }

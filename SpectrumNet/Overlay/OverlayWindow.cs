@@ -90,7 +90,7 @@ namespace SpectrumNet
             SubscribeToEvents();
 
             glControl.Start(mainWindow.GlSettings);
-            glControl.Render += (delta) => _renderContext?.MainWindow.Renderer?.RenderFrame(delta);
+            glControl.Render += (delta) => _renderContext?.MainWindow.Renderer?.OnGlControlRender(delta);
         }
 
         private void ConfigureWindowProperties()

@@ -1,46 +1,57 @@
 ﻿#nullable enable
 
-using OpenTK.Windowing.Common;
-using System.Runtime;
-
 namespace SpectrumNet
 {
     public partial class MainWindow : System.Windows.Window, IAudioVisualizationController
     {
         private const string LogPrefix = "[MainWindow] ";
 
+        // Core components
         private GLWpfControl? _renderElement;
-        private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
-        private readonly CancellationTokenSource _cleanupCts = new();
-        private bool _isOverlayActive, _isPopupOpen,
-                     _isOverlayTopmost = true,
-                     _isControlPanelVisible = true,
-                     _isTransitioning,
-                     _isDisposed,
-                     _showPerformanceInfo = true;
+        private SpectrumAnalyzer? _analyzer;
+        private Renderer? _renderer;
+        private SpectrumBrushes? _spectrumStyles;
+        private AudioCaptureManager? _captureManager;
+        private GainParameters? _gainParameters;
+
+        // State flags
+        private bool _isOverlayActive, _isPopupOpen, _isOverlayTopmost = true,
+                    _isControlPanelVisible = true, _isTransitioning, _isDisposed,
+                    _showPerformanceInfo = true;
+
+        // Configuration state
         private RenderStyle _selectedDrawingType = RenderStyle.Bars;
         private FftWindowType _selectedFftWindowType = FftWindowType.Hann;
         private SpectrumScale _selectedScaleType = SpectrumScale.Linear;
-        private OverlayWindow? _overlayWindow;
-        private Renderer? _renderer;
-        private SpectrumBrushes? _spectrumStyles;
-        private SpectrumAnalyzer? _analyzer;
-        private AudioCaptureManager? _captureManager;
-        private CompositeDisposable? _disposables;
-        private GainParameters? _gainParameters;
-        private PropertyChangedEventHandler? _themePropertyChangedHandler;
         private string _statusText = "Ready";
+        private GLWpfControlSettings _glSettings = new();
 
-        private GLWpfControlSettings _glSettings = new GLWpfControlSettings();
+        // Synchronization
+        private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
+        private readonly CancellationTokenSource _cleanupCts = new();
+        private CompositeDisposable? _disposables;
+        private PropertyChangedEventHandler? _themePropertyChangedHandler;
+        private OverlayWindow? _overlayWindow;
+
+        // Core properties
         public GLWpfControlSettings GlSettings => _glSettings;
+        public GLWpfControl SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
+        public Renderer? Renderer { get => _renderer; set => _renderer = value; }
+        public bool IsTransitioning => _isTransitioning;
+        public new Dispatcher Dispatcher => System.Windows.Application.Current?.Dispatcher ?? throw new InvalidOperationException("Application.Current is null");
 
         #region IAudioVisualizationController Properties
 
+        // Property implementations with validation and error handling
         public SpectrumAnalyzer Analyzer
         {
             get => _analyzer ?? throw new InvalidOperationException("Analyzer not initialized");
             set => _analyzer = value ?? throw new ArgumentNullException(nameof(Analyzer));
         }
+
+        public SpectrumBrushes SpectrumStyles => _spectrumStyles ?? throw new InvalidOperationException("Spectrum styles not initialized");
+        public GainParameters GainParameters => _gainParameters ?? throw new InvalidOperationException("Gain parameters not initialized");
+        public bool CanStartCapture => _captureManager != null && !IsRecording;
 
         public int BarCount
         {
@@ -72,12 +83,6 @@ namespace SpectrumNet
             }
         }
 
-        public bool CanStartCapture => _captureManager != null && !IsRecording;
-
-        public new Dispatcher Dispatcher => System.Windows.Application.Current?.Dispatcher ?? throw new InvalidOperationException("Application.Current is null");
-
-        public GainParameters GainParameters => _gainParameters ?? throw new InvalidOperationException("Gain parameters not initialized");
-
         public bool IsOverlayActive
         {
             get => _isOverlayActive;
@@ -88,14 +93,8 @@ namespace SpectrumNet
                 OnPropertyChanged(nameof(IsOverlayActive));
                 SpectrumRendererFactory.ConfigureAllRenderers(value);
 
-                try
-                {
-                    _renderElement?.InvalidateVisual();
-                }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating visualization: {ex}");
-                }
+                try { _renderElement?.InvalidateVisual(); }
+                catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating visualization: {ex}"); }
             }
         }
 
@@ -105,10 +104,8 @@ namespace SpectrumNet
             set
             {
                 if (_captureManager?.IsRecording == value) return;
-                if (value)
-                    _ = StartCaptureAsync();
-                else
-                    _ = StopCaptureAsync();
+                if (value) _ = StartCaptureAsync();
+                else _ = StopCaptureAsync();
                 OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
             }
         }
@@ -127,14 +124,6 @@ namespace SpectrumNet
             }
         }
 
-        public bool IsTransitioning => _isTransitioning;
-
-        public Renderer? Renderer
-        {
-            get => _renderer;
-            set => _renderer = value;
-        }
-
         public SpectrumScale ScaleType
         {
             get => _selectedScaleType;
@@ -151,10 +140,7 @@ namespace SpectrumNet
                     _renderElement?.InvalidateVisual();
                     Settings.Instance.SelectedScaleType = value;
                 }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error changing scale type: {ex}");
-                }
+                catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error changing scale type: {ex}"); }
             }
         }
 
@@ -184,13 +170,9 @@ namespace SpectrumNet
                     SpectrumRendererFactory.GlobalQuality = value;
                     _renderer?.RequestRender();
                     _renderElement?.InvalidateVisual();
-
                     SmartLogger.Log(LogLevel.Information, LogPrefix, $"Render quality set to {value}");
                 }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating render quality: {ex}");
-                }
+                catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating render quality: {ex}"); }
             }
         }
 
@@ -210,11 +192,6 @@ namespace SpectrumNet
                 OnPropertyChanged(nameof(SelectedStyle));
             }
         }
-
-        // Изменено для работы с GLWpfControl
-        public GLWpfControl SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
-
-        public SpectrumBrushes SpectrumStyles => _spectrumStyles ?? throw new InvalidOperationException("Spectrum styles not initialized");
 
         public string StatusText
         {
@@ -243,17 +220,12 @@ namespace SpectrumNet
                     _renderElement?.InvalidateVisual();
                     Settings.Instance.SelectedFftWindowType = value;
                 }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error changing FFT window type: {ex}");
-                }
+                catch (Exception ex) { SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error changing FFT window type: {ex}"); }
             }
         }
-
         #endregion
 
         #region Additional Public Properties
-
         public static bool IsDarkTheme => ThemeManager.Instance?.IsDarkTheme ?? false;
 
         public static IEnumerable<RenderStyle> AvailableDrawingTypes =>
@@ -265,14 +237,12 @@ namespace SpectrumNet
         public static IEnumerable<SpectrumScale> AvailableScaleTypes =>
             Enum.GetValues<SpectrumScale>().OrderBy(s => s.ToString());
 
-        public IReadOnlyDictionary<string, Palette> AvailablePalettes =>
-            _spectrumStyles?.RegisteredPalettes
-                .OrderBy(kvp => kvp.Key)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
-            ?? new Dictionary<string, Palette>();
-
         public static IEnumerable<RenderQuality> AvailableRenderQualities =>
             Enum.GetValues<RenderQuality>().OrderBy(q => (int)q);
+
+        public IReadOnlyDictionary<string, Color4> AvailablePalettes =>
+            _spectrumStyles?.RegisteredPalettes.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+            ?? new Dictionary<string, Color4>();
 
         public bool IsPopupOpen
         {
@@ -286,26 +256,22 @@ namespace SpectrumNet
             set
             {
                 if (SetField(ref _isOverlayTopmost, value, UpdateOverlayTopmostState))
-                {
                     Settings.Instance.IsOverlayTopmost = value;
-                }
             }
         }
 
-        public Palette? SelectedPalette
+        public Color4? SelectedPalette
         {
-            get
-            {
-                if (AvailablePalettes.TryGetValue(SelectedStyle, out var palette))
-                    return palette;
-                return null;
-            }
+            get => AvailablePalettes.TryGetValue(SelectedStyle, out var color) ? color : null;
             set
             {
-                if (value == null)
-                    return;
-                SelectedStyle = value.Name;
-                OnPropertyChanged(nameof(SelectedPalette));
+                if (value == null) return;
+                var paletteName = AvailablePalettes.FirstOrDefault(p => p.Value.Equals(value)).Key;
+                if (!string.IsNullOrEmpty(paletteName))
+                {
+                    SelectedStyle = paletteName;
+                    OnPropertyChanged(nameof(SelectedPalette));
+                }
             }
         }
 
@@ -315,9 +281,7 @@ namespace SpectrumNet
             set
             {
                 if (SetField(ref _isControlPanelVisible, value))
-                {
                     Settings.Instance.IsControlPanelVisible = value;
-                }
             }
         }
 
@@ -327,14 +291,12 @@ namespace SpectrumNet
             set
             {
                 if (_gainParameters == null) return;
-
                 if (value >= _gainParameters.MaxDbValue)
                 {
                     SmartLogger.Log(LogLevel.Warning, LogPrefix,
                         $"Min dB level ({value}) must be less than max ({_gainParameters.MaxDbValue})");
                     value = _gainParameters.MaxDbValue - 1;
                 }
-
                 UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel));
                 Settings.Instance.UIMinDbLevel = value;
             }
@@ -346,14 +308,12 @@ namespace SpectrumNet
             set
             {
                 if (_gainParameters == null) return;
-
                 if (value <= _gainParameters.MinDbValue)
                 {
                     SmartLogger.Log(LogLevel.Warning, LogPrefix,
                         $"Max dB level ({value}) must be greater than min ({_gainParameters.MinDbValue})");
                     value = _gainParameters.MinDbValue + 1;
                 }
-
                 UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
                 Settings.Instance.UIMaxDbLevel = value;
             }
@@ -365,18 +325,15 @@ namespace SpectrumNet
             set
             {
                 if (_gainParameters == null) return;
-
                 if (value < 0)
                 {
                     SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Amplification factor cannot be negative: {value}");
                     value = 0;
                 }
-
                 UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
                 Settings.Instance.UIAmplificationFactor = value;
             }
         }
-
         #endregion
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -386,27 +343,24 @@ namespace SpectrumNet
             try
             {
                 InitializeComponent();
+
+                _renderElement = FindName("OpenTkControl") as GLWpfControl
+                    ?? throw new InvalidOperationException("Failed to find GLWpfControl in XAML");
+
+                Loaded += OnWindowLoaded;
+
                 var syncContext = SynchronizationContext.Current ??
                     throw new InvalidOperationException("No synchronization context. Window must be created in UI thread.");
 
                 LoadAndApplySettings();
-
                 _gainParameters = new GainParameters(
                     syncContext,
                     Settings.Instance.UIMinDbLevel,
                     Settings.Instance.UIMaxDbLevel,
                     Settings.Instance.UIAmplificationFactor
-                ) ?? throw new InvalidOperationException("Failed to create gain parameters");
+                );
 
                 DataContext = this;
-
-                InitializeOpenGL();
-
-                InitComponents();
-
-                var converter = (PaletteNameToBrushConverter)this.Resources["PaletteNameToBrushConverter"];
-                converter.BrushesProvider = SpectrumStyles;
-
                 InitEventHandlers();
                 ConfigureTheme();
                 UpdateProps();
@@ -420,36 +374,42 @@ namespace SpectrumNet
         }
 
         #region Initialization
-
-        private void InitializeOpenGL()
+        private void OnWindowLoaded(object sender, RoutedEventArgs e)
         {
             try
             {
-                _renderElement = openGLControl;
-                if (_renderElement == null)
-                {
-                    throw new InvalidOperationException("OpenGL control not found in XAML");
-                }
+                InitializeOpenGL();
+                InitComponents();
+                OnPropertyChanged(nameof(AvailablePalettes));
 
-                _renderElement.Start(_glSettings);
-
-                SmartLogger.Log(LogLevel.Information, LogPrefix, "OpenGL initialized successfully", forceLog: true);
+                ((PaletteNameToBrushConverter)Resources["PaletteNameToBrushConverter"]).BrushesProvider = SpectrumStyles;
+                SmartLogger.Log(LogLevel.Information, "Main", "Window loaded and palettes updated");
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to initialize OpenGL: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to initialize: {ex}");
                 throw;
             }
         }
 
-        private void OnOpenGLControlReady()
+        private void InitializeOpenGL()
         {
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "OpenGL context ready", forceLog: true);
+            _glSettings = new GLWpfControlSettings
+            {
+                MajorVersion = 4,
+                MinorVersion = 0
+            };
+
+            _renderElement!.Start(_glSettings);
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "OpenGL initialized successfully", forceLog: true);
         }
 
-        private void OnRender(TimeSpan delta)
+        private void OpenTkControl_OnRender(TimeSpan delta)
         {
-            _renderer?.RenderFrame(delta);
+            if (_renderElement != null && _renderElement.IsInitialized)
+            {
+                _renderer?.OnGlControlRender(delta);
+            }
         }
 
         private void InitComponents()
@@ -459,43 +419,30 @@ namespace SpectrumNet
                 if (_renderElement == null)
                     throw new InvalidOperationException("OpenGL control not initialized");
 
-                _spectrumStyles = new SpectrumBrushes();
-                if (_spectrumStyles == null)
-                    throw new InvalidOperationException("Failed to create SpectrumBrushes");
-
-                _disposables = new CompositeDisposable();
-                if (_disposables == null)
-                    throw new InvalidOperationException("Failed to create CompositeDisposable");
-
                 var syncContext = SynchronizationContext.Current ??
                     throw new InvalidOperationException("SynchronizationContext.Current is null");
 
+                _spectrumStyles = new SpectrumBrushes();
+                _disposables = new CompositeDisposable();
                 _analyzer = new SpectrumAnalyzer(
-                    new FftProcessor { WindowType = WindowType },
+                    new FftProcessor { WindowType = _selectedFftWindowType },
                     new SpectrumConverter(_gainParameters),
                     syncContext
                 );
-                if (_analyzer == null)
-                    throw new InvalidOperationException("Failed to create SpectrumAnalyzer");
-
                 _disposables.Add(_analyzer);
-
                 _captureManager = new AudioCaptureManager(this);
-                if (_captureManager == null)
-                    throw new InvalidOperationException("Failed to create AudioCaptureManager");
-
                 _disposables.Add(_captureManager);
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Capture manager initialized: {_captureManager.GetHashCode()}");
 
                 _renderer = new Renderer(_spectrumStyles, this, _analyzer, _renderElement);
-                if (_renderer == null)
-                    throw new InvalidOperationException("Failed to create Renderer");
-
                 _disposables.Add(_renderer);
+                _renderer.RequestRender();
+                OnPropertyChanged(nameof(CanStartCapture), nameof(IsRecording));
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Critical error initializing components: {ex}");
-                throw new InvalidOperationException("Failed to initialize components", ex);
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Component initialization failed: {ex}");
+                throw;
             }
         }
 
@@ -508,11 +455,32 @@ namespace SpectrumNet
             KeyDown += MainWindow_KeyDown;
             LocationChanged += OnWindowLocationChanged;
 
+            if (_renderElement != null)
+            {
+                _renderElement.SizeChanged += OnRenderElementSizeChanged;
+            }
+            else
+            {
+                throw new InvalidOperationException("_renderElement не инициализирован перед подпиской на событие");
+            }
+
             PropertyChanged += (_, args) =>
             {
                 if (args?.PropertyName == nameof(IsRecording))
                     StatusText = IsRecording ? "Recording..." : "Ready";
             };
+        }
+
+        private void OnRenderElementSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            try
+            {
+                _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating render dimensions: {ex}");
+            }
         }
 
         private void ConfigureTheme()
@@ -532,11 +500,9 @@ namespace SpectrumNet
                 tm.PropertyChanged += _themePropertyChangedHandler;
             }
         }
-
         #endregion
 
         #region Settings Management
-
         private void LoadAndApplySettings()
         {
             try
@@ -544,12 +510,11 @@ namespace SpectrumNet
                 SettingsWindow.Instance.LoadSettings();
                 ApplyWindowSettings();
                 EnsureWindowIsVisible();
-
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings loaded and applied successfully");
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error loading and applying settings: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}");
             }
         }
 
@@ -557,12 +522,14 @@ namespace SpectrumNet
         {
             try
             {
+                // Window positioning
                 Left = Settings.Instance.WindowLeft;
                 Top = Settings.Instance.WindowTop;
                 Width = Settings.Instance.WindowWidth;
                 Height = Settings.Instance.WindowHeight;
                 WindowState = Settings.Instance.WindowState;
 
+                // Application settings
                 IsControlPanelVisible = Settings.Instance.IsControlPanelVisible;
                 IsOverlayTopmost = Settings.Instance.IsOverlayTopmost;
                 SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
@@ -574,7 +541,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error applying window settings: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error applying settings: {ex.Message}");
             }
         }
 
@@ -582,32 +549,14 @@ namespace SpectrumNet
         {
             try
             {
-                bool isVisible = false;
-                foreach (var screen in System.Windows.Forms.Screen.AllScreens)
+                var screenRect = new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+                var windowRect = new Rect(Left, Top, Width, Height);
+
+                if (!screenRect.IntersectsWith(windowRect))
                 {
-                    var screenBounds = new System.Drawing.Rectangle(
-                        screen.WorkingArea.X,
-                        screen.WorkingArea.Y,
-                        screen.WorkingArea.Width,
-                        screen.WorkingArea.Height);
-
-                    var windowRect = new System.Drawing.Rectangle(
-                        (int)Left,
-                        (int)Top,
-                        (int)Width,
-                        (int)Height);
-
-                    if (screenBounds.IntersectsWith(windowRect))
-                    {
-                        isVisible = true;
-                        break;
-                    }
-                }
-
-                if (!isVisible)
-                {
-                    WindowStartupLocation = WindowStartupLocation.CenterScreen;
-                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center (was outside visible area)");
+                    Left = (screenRect.Width - Width) / 2;
+                    Top = (screenRect.Height - Height) / 2;
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center");
                 }
             }
             catch (Exception ex)
@@ -618,40 +567,35 @@ namespace SpectrumNet
 
         private void OnWindowLocationChanged(object? sender, EventArgs e)
         {
-            try
+            if (WindowState == WindowState.Normal)
             {
-                if (WindowState == System.Windows.WindowState.Normal)
-                {
-                    Settings.Instance.WindowLeft = Left;
-                    Settings.Instance.WindowTop = Top;
-                }
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating window location: {ex.Message}");
+                Settings.Instance.WindowLeft = Left;
+                Settings.Instance.WindowTop = Top;
             }
         }
-
         #endregion
 
         #region Capture Management
-
         public async Task StartCaptureAsync()
         {
             if (_captureManager == null)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Attempt to start capture with no CaptureManager");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Capture manager not initialized");
                 return;
             }
 
             try
             {
                 await _captureManager.StartCaptureAsync();
+                _renderer?.RequestRender();
                 UpdateProps();
+                _renderElement?.InvalidateVisual();
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error starting audio capture: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error starting capture: {ex}");
+                StatusText = $"Error: {ex.Message.Substring(0, 50)}...";
+                OnPropertyChanged(nameof(CanStartCapture));
             }
         }
 
@@ -659,7 +603,7 @@ namespace SpectrumNet
         {
             if (_captureManager == null)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Attempt to stop capture with no CaptureManager");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Capture manager not initialized");
                 return;
             }
 
@@ -667,13 +611,15 @@ namespace SpectrumNet
             {
                 await _captureManager.StopCaptureAsync();
                 UpdateProps();
+                _renderElement?.InvalidateVisual();
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping audio capture: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error stopping capture: {ex}");
+                StatusText = $"Error: {ex.Message.Substring(0, 50)}...";
+                OnPropertyChanged(nameof(CanStartCapture));
             }
         }
-
         #endregion
 
         #region Overlay Management
@@ -713,7 +659,7 @@ namespace SpectrumNet
                 SpectrumRendererFactory.ConfigureAllRenderers(true);
                 _renderElement?.InvalidateVisual();
                 UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth,
-                                         (int)SystemParameters.PrimaryScreenHeight);
+                                        (int)SystemParameters.PrimaryScreenHeight);
             }
             catch (Exception ex)
             {
@@ -723,10 +669,7 @@ namespace SpectrumNet
 
         private void CloseOverlay()
         {
-            try
-            {
-                _overlayWindow?.Close();
-            }
+            try { _overlayWindow?.Close(); }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error closing overlay: {ex}");
@@ -764,11 +707,7 @@ namespace SpectrumNet
         {
             try
             {
-                if (IsOverlayActive)
-                    CloseOverlay();
-                else
-                    OpenOverlay();
-
+                if (IsOverlayActive) CloseOverlay(); else OpenOverlay();
                 SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
                 _renderElement?.InvalidateVisual();
             }
@@ -784,10 +723,7 @@ namespace SpectrumNet
 
         private void OnRendering(object? sender, EventArgs? e)
         {
-            try
-            {
-                _renderElement?.InvalidateVisual();
-            }
+            try { _renderElement?.InvalidateVisual(); }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating visualization: {ex}");
@@ -814,10 +750,7 @@ namespace SpectrumNet
 
         private void OnThemeToggleButtonChanged(object? sender, RoutedEventArgs? e)
         {
-            try
-            {
-                ThemeManager.Instance?.ToggleTheme();
-            }
+            try { ThemeManager.Instance?.ToggleTheme(); }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error toggling theme: {ex}");
@@ -830,12 +763,6 @@ namespace SpectrumNet
 
             try
             {
-                if (_renderElement != null)
-                {
-                    // Уведомляем рендерер об изменении размеров
-                    _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
-                }
-
                 if (WindowState == System.Windows.WindowState.Normal)
                 {
                     Settings.Instance.WindowWidth = Width;
@@ -844,7 +771,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating dimensions: {ex}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating window size settings: {ex}");
             }
         }
 
@@ -881,9 +808,7 @@ namespace SpectrumNet
             try
             {
                 SettingsWindow.Instance.SaveSettings();
-
                 _cleanupCts.Cancel();
-
                 CompositionTarget.Rendering -= OnRendering;
 
                 SizeChanged -= OnWindowSizeChanged;
@@ -935,7 +860,6 @@ namespace SpectrumNet
                 try
                 {
                     DragMove();
-
                     if (WindowState == System.Windows.WindowState.Normal)
                     {
                         Settings.Instance.WindowLeft = Left;
@@ -1018,14 +942,8 @@ namespace SpectrumNet
                         if (this.OpenSettingsButton != null)
                         {
                             this.OpenSettingsButton.IsEnabled = false;
-                            try
-                            {
-                                new SettingsWindow().ShowDialog();
-                            }
-                            finally
-                            {
-                                this.OpenSettingsButton.IsEnabled = true;
-                            }
+                            try { new SettingsWindow().ShowDialog(); }
+                            finally { this.OpenSettingsButton.IsEnabled = true; }
                         }
                     },
                     ["OpenPopupButton"] = () => IsPopupOpen = !IsPopupOpen,
@@ -1155,10 +1073,7 @@ namespace SpectrumNet
             field = value;
             OnPropertyChanged(propertyName ?? string.Empty);
 
-            try
-            {
-                callback?.Invoke();
-            }
+            try { callback?.Invoke(); }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error executing callback in SetField: {ex}");
@@ -1169,25 +1084,15 @@ namespace SpectrumNet
 
         public void OnPropertyChanged(params string[] propertyNames)
         {
-            try
-            {
-                foreach (var name in propertyNames)
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error notifying property change: {ex}");
-            }
+            foreach (var name in propertyNames)
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
         private void DisposeSafe(IDisposable? disposable, string name)
         {
             if (disposable == null) return;
 
-            try
-            {
-                disposable.Dispose();
-            }
+            try { disposable.Dispose(); }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error disposing resource {name}: {ex}");

@@ -1,9 +1,14 @@
 ﻿#nullable enable
 
-using PrimitiveType = OpenTK.Graphics.OpenGL.PrimitiveType;
-using BufferTarget = OpenTK.Graphics.OpenGL.BufferTarget;
-using BufferUsageHint = OpenTK.Graphics.OpenGL.BufferUsageHint;
-using VertexAttribPointerType = OpenTK.Graphics.OpenGL.VertexAttribPointerType;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Numerics; // для Vector<T>, если используется
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using OpenTK.Graphics.OpenGL4;
+using OpenTK.Mathematics;
 
 namespace SpectrumNet
 {
@@ -13,13 +18,13 @@ namespace SpectrumNet
         private static class Constants
         {
             // Render Settings
-            public const float TARGET_DELTA_TIME = 0.016f;   // Целевое время кадра (сек)
-            public const float SMOOTH_FACTOR = 0.2f;           // Коэффициент сглаживания спектра
-            public const float TRAIL_LENGTH_MULTIPLIER = 0.15f;  // Множитель для расчёта длины следа
-            public const float TRAIL_LENGTH_SIZE_FACTOR = 5f;    // Фактор максимальной длины следа относительно размера капли
-            public const float TRAIL_STROKE_MULTIPLIER = 0.6f;   // Множитель для ширины линии следа
-            public const float TRAIL_OPACITY_MULTIPLIER = 150f;  // Множитель для прозрачности следа
-            public const float TRAIL_INTENSITY_THRESHOLD = 0.3f; // Порог интенсивности для отрисовки следа
+            public const float TARGET_DELTA_TIME = 0.016f;
+            public const float SMOOTH_FACTOR = 0.2f;
+            public const float TRAIL_LENGTH_MULTIPLIER = 0.15f;
+            public const float TRAIL_LENGTH_SIZE_FACTOR = 5f;
+            public const float TRAIL_STROKE_MULTIPLIER = 0.6f;
+            public const float TRAIL_OPACITY_MULTIPLIER = 150f;
+            public const float TRAIL_INTENSITY_THRESHOLD = 0.3f;
 
             // Simulation Settings
             public const int INITIAL_DROP_COUNT = 30;
@@ -53,7 +58,6 @@ namespace SpectrumNet
         #endregion
 
         #region Nested Types
-
         private readonly struct RenderCache
         {
             public readonly float Width, Height, LowerBound, UpperBound, StepSize;
@@ -149,8 +153,9 @@ namespace SpectrumNet
                 }
                 _count = writeIndex;
             }
-            public void RenderParticles(Color4 baseColor, Action<float, float, float, Color4> drawCircle)
+            public List<float> CollectParticleInstances(Color4 baseColor)
             {
+                var instances = new List<float>();
                 for (int i = 0; i < _count; i++)
                 {
                     Particle p = _particles[i];
@@ -158,11 +163,14 @@ namespace SpectrumNet
                     float alphaMultiplier = clampedLifetime * clampedLifetime;
                     float alpha = 255 * alphaMultiplier;
                     alpha = Math.Clamp(alpha, 0, 255);
-                    // Конвертируем компоненты в диапазон 0..1
-                    Color4 particleColor = new Color4(baseColor.R, baseColor.G, baseColor.B, alpha / 255f);
+                    Color4 color = new Color4(baseColor.R, baseColor.G, baseColor.B, alpha / 255f);
                     float sizeMultiplier = 0.8f + 0.2f * clampedLifetime;
-                    drawCircle(p.X, p.Y, p.Size * sizeMultiplier, particleColor);
+                    float radius = p.Size * sizeMultiplier;
+                    instances.Add(p.X); instances.Add(p.Y); // Центр
+                    instances.Add(radius);                  // Радиус
+                    instances.Add(color.R); instances.Add(color.G); instances.Add(color.B); instances.Add(color.A); // Цвет
                 }
+                return instances;
             }
             public void CreateSplashParticles(float x, float y, float intensity)
             {
@@ -210,23 +218,52 @@ namespace SpectrumNet
         private int _frameCounter = 0;
         private int _particleUpdateSkip = 1;
         private int _effectsThreshold = 3;
-
-        // Шейдерные программы и буферы
-        private int _circleVAO;
-        private int _circleVBO;
-        private int _lineVAO;
-        private int _lineVBO;
-        private ShaderProgram? _shaderProgram;
-
-        // Quality settings fields
         private RenderQuality _quality = RenderQuality.Medium;
         private bool _useAntiAlias = true;
         private bool _useAdvancedEffects = true;
-
-        private const string LogPrefix = Constants.LOGGER_PREFIX;
-
-        // Цвет отрисовки по умолчанию
         private Color4 _baseColor = Color4.CornflowerBlue;
+
+        // OpenGL ресурсы
+        private ShaderProgram _circleShader;
+        private ShaderProgram _lineShader;
+        private int _circleVAO, _circleTemplateVBO, _circleInstanceVBO;
+        private int _lineVAO, _lineVBO;
+        private Matrix4 _projection;
+        #endregion
+
+        #region Shader Sources
+        private const string CircleVertexShader = @"
+            #version 330 core
+            layout (location = 0) in vec2 aPosition;
+            layout (location = 1) in vec2 aCenter;
+            layout (location = 2) in float aRadius;
+            layout (location = 3) in vec4 aColor;
+            out vec4 vColor;
+            uniform mat4 uProjection;
+            void main() {
+                vec2 pos = aCenter + aPosition * aRadius;
+                gl_Position = uProjection * vec4(pos, 0.0, 1.0);
+                vColor = aColor;
+            }";
+
+        private const string LineVertexShader = @"
+            #version 330 core
+            layout (location = 0) in vec2 aPosition;
+            layout (location = 1) in vec4 aColor;
+            out vec4 vColor;
+            uniform mat4 uProjection;
+            void main() {
+                gl_Position = uProjection * vec4(aPosition, 0.0, 1.0);
+                vColor = aColor;
+            }";
+
+        private const string FragmentShader = @"
+            #version 330 core
+            in vec4 vColor;
+            out vec4 FragColor;
+            void main() {
+                FragColor = vColor;
+            }";
         #endregion
 
         #region Constructor and Instance Management
@@ -239,19 +276,90 @@ namespace SpectrumNet
             _frameTimer.Start();
             Settings.Instance.PropertyChanged += OnSettingsChanged;
             InitializeOpenGLResources();
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, "RaindropsRenderer initialized");
+            SmartLogger.Log(LogLevel.Debug, Constants.LOGGER_PREFIX, "RaindropsRenderer инициализирован");
         }
 
         private void InitializeOpenGLResources()
         {
-            // Инициализация VAO и VBO для кругов
-            _circleVAO = GL.GenVertexArray();
-            _circleVBO = GL.GenBuffer();
+            // Компилируем шейдеры: преобразуем идентификаторы в строки и передаем строковое имя шейдера
+            int circleVertexShaderId = CompileShader(ShaderType.VertexShader, CircleVertexShader);
+            int fragmentShaderId = CompileShader(ShaderType.FragmentShader, FragmentShader);
+            _circleShader = new ShaderProgram(circleVertexShaderId.ToString(), "CircleShader");
 
-            // Инициализация VAO и VBO для линий
-            _lineVAO = GL.GenVertexArray();
-            _lineVBO = GL.GenBuffer();
+            int lineVertexShaderId = CompileShader(ShaderType.VertexShader, LineVertexShader);
+            _lineShader = new ShaderProgram(lineVertexShaderId.ToString(), "LineShader");
+
+            SetupCircleTemplate();
+            SetupVAOs();
         }
+
+        private int CompileShader(ShaderType type, string source)
+        {
+            int shader = GL.CreateShader(type);
+            GL.ShaderSource(shader, source);
+            GL.CompileShader(shader);
+            GL.GetShader(shader, ShaderParameter.CompileStatus, out int status);
+            if (status == 0)
+            {
+                string log = GL.GetShaderInfoLog(shader);
+                throw new Exception($"Ошибка компиляции шейдера: {log}");
+            }
+            return shader;
+        }
+
+        private void SetupCircleTemplate()
+        {
+            _circleTemplateVBO = GL.GenBuffer();
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _circleTemplateVBO);
+            var vertices = new float[34 * 2]; // 34 вершины (центр + 32 точки + повтор первой)
+            vertices[0] = 0f; vertices[1] = 0f;
+            for (int i = 0; i <= 32; i++)
+            {
+                float angle = i * MathF.PI * 2 / 32;
+                int idx = (i + 1) * 2;
+                vertices[idx] = MathF.Cos(angle);
+                vertices[idx + 1] = MathF.Sin(angle);
+            }
+            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StaticDraw);
+        }
+
+        private void SetupVAOs()
+        {
+            // VAO для кругов
+            _circleVAO = GL.GenVertexArray();
+            GL.BindVertexArray(_circleVAO);
+
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _circleTemplateVBO);
+            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 0, 0);
+            GL.EnableVertexAttribArray(0);
+
+            _circleInstanceVBO = GL.GenBuffer();
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _circleInstanceVBO);
+            // Шаг: vec2 (8 байт) + float (4 байта) + vec4 (16 байт) = 28 байт
+            GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 28, 0);
+            GL.VertexAttribDivisor(1, 1);
+            GL.EnableVertexAttribArray(1);
+            GL.VertexAttribPointer(2, 1, VertexAttribPointerType.Float, false, 28, 8);
+            GL.VertexAttribDivisor(2, 1);
+            GL.EnableVertexAttribArray(2);
+            GL.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, 28, 12);
+            GL.VertexAttribDivisor(3, 1);
+            GL.EnableVertexAttribArray(3);
+
+            // VAO для линий
+            _lineVAO = GL.GenVertexArray();
+            GL.BindVertexArray(_lineVAO);
+
+            _lineVBO = GL.GenBuffer();
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _lineVBO);
+            // Шаг: vec2 (8 байт) + vec4 (16 байт) = 24 байта
+            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 24, 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 24, 8);
+            GL.EnableVertexAttribArray(1);
+        }
+
+        public static RaindropsRenderer GetInstance() => _instance ??= new RaindropsRenderer();
 
         private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
         {
@@ -276,8 +384,6 @@ namespace SpectrumNet
                 _cacheNeedsUpdate = true;
             }
         }
-
-        public static RaindropsRenderer GetInstance() => _instance ??= new RaindropsRenderer();
         #endregion
 
         #region ISpectrumRenderer Implementation
@@ -318,27 +424,20 @@ namespace SpectrumNet
             }
             _isInitialized = true;
             _firstRender = true;
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, "RaindropsRenderer initialized");
+            SmartLogger.Log(LogLevel.Debug, Constants.LOGGER_PREFIX, "RaindropsRenderer инициализирован");
         }
 
-        // Отрисовка с использованием OpenTK. Параметры viewport задают область рендеринга,
         public void Render(float[]? spectrum, Viewport viewport, float barWidth,
                            float barSpacing, int barCount, ShaderProgram? shader,
                            Action<Viewport> drawPerformanceInfo)
         {
             if (!ValidateRenderParameters(spectrum, viewport))
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Invalid render parameters for RaindropsRenderer");
+                SmartLogger.Log(LogLevel.Error, Constants.LOGGER_PREFIX, "Недопустимые параметры рендеринга для RaindropsRenderer");
                 return;
             }
 
-            // Сохраняем шейдер для использования в методах рисования
-            _shaderProgram = shader;
-
-            if (shader != null)
-            {
-                shader.Use();
-            }
+            _projection = Matrix4.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, -1, 1);
 
             float[] renderSpectrum;
             int spectrumLength = spectrum!.Length;
@@ -365,11 +464,6 @@ namespace SpectrumNet
             UpdateAndRenderScene(renderSpectrum, viewport, actualBarCount);
 
             drawPerformanceInfo?.Invoke(viewport);
-
-            if (shader != null)
-            {
-                GL.UseProgram(0);
-            }
         }
         #endregion
 
@@ -409,7 +503,6 @@ namespace SpectrumNet
                     Vector<float> vSum = Vector<float>.Zero;
                     for (int j = 0; j < simdLength; j += Vector<float>.Count)
                     {
-                        // Для простоты создаём временный массив из span
                         float[] temp = src.Slice(start + j, Vector<float>.Count).ToArray();
                         vSum += new Vector<float>(temp);
                     }
@@ -459,14 +552,39 @@ namespace SpectrumNet
             _timeSinceLastSpawn += _actualDeltaTime;
             UpdateSimulation(spectrum, barCount);
 
-            // Отрисовка частиц (фон)
-            _particleBuffer.RenderParticles(_baseColor, DrawCircle);
+            var particleInstances = _particleBuffer.CollectParticleInstances(_baseColor);
+            var trailVertices = CollectTrailVertices(spectrum);
+            var raindropInstances = CollectRaindropInstances(spectrum);
 
-            // Отрисовка следов капель (передний план)
-            RenderRaindropTrails(spectrum);
+            if (particleInstances.Count > 0)
+            {
+                GL.BindBuffer(BufferTarget.ArrayBuffer, _circleInstanceVBO);
+                GL.BufferData(BufferTarget.ArrayBuffer, particleInstances.Count * sizeof(float), particleInstances.ToArray(), BufferUsageHint.DynamicDraw);
+                _circleShader.Use();
+                GL.UniformMatrix4(GL.GetUniformLocation(_circleShader.ProgramId, "uProjection"), false, ref _projection);
+                GL.BindVertexArray(_circleVAO);
+                GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 34, particleInstances.Count / 7);
+            }
 
-            // Отрисовка самих капель (передний план)
-            RenderRaindrops(spectrum);
+            if (trailVertices.Count > 0)
+            {
+                GL.BindBuffer(BufferTarget.ArrayBuffer, _lineVBO);
+                GL.BufferData(BufferTarget.ArrayBuffer, trailVertices.Count * sizeof(float), trailVertices.ToArray(), BufferUsageHint.DynamicDraw);
+                _lineShader.Use();
+                GL.UniformMatrix4(GL.GetUniformLocation(_lineShader.ProgramId, "uProjection"), false, ref _projection);
+                GL.BindVertexArray(_lineVAO);
+                GL.DrawArrays(PrimitiveType.Triangles, 0, trailVertices.Count / 6);
+            }
+
+            if (raindropInstances.Count > 0)
+            {
+                GL.BindBuffer(BufferTarget.ArrayBuffer, _circleInstanceVBO);
+                GL.BufferData(BufferTarget.ArrayBuffer, raindropInstances.Count * sizeof(float), raindropInstances.ToArray(), BufferUsageHint.DynamicDraw);
+                _circleShader.Use();
+                GL.UniformMatrix4(GL.GetUniformLocation(_circleShader.ProgramId, "uProjection"), false, ref _projection);
+                GL.BindVertexArray(_circleVAO);
+                GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 34, raindropInstances.Count / 7);
+            }
         }
 
         private void InitializeInitialDrops(int barCount)
@@ -557,8 +675,9 @@ namespace SpectrumNet
         #endregion
 
         #region Rendering Methods
-        private void RenderRaindropTrails(float[] spectrum)
+        private List<float> CollectTrailVertices(float[] spectrum)
         {
+            var vertices = new List<float>();
             for (int i = 0; i < _raindropCount; i++)
             {
                 Raindrop drop = _raindrops[i];
@@ -566,23 +685,50 @@ namespace SpectrumNet
                     drop.Size < Settings.Instance.RaindropSize * Constants.RAINDROP_SIZE_THRESHOLD_MULTIPLIER)
                     continue;
                 float intensity = drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
-                if (intensity < Constants.TRAIL_INTENSITY_THRESHOLD)
-                    continue;
+                if (intensity < Constants.TRAIL_INTENSITY_THRESHOLD) continue;
                 float trailLength = Math.Min(
                     drop.FallSpeed * Constants.TRAIL_LENGTH_MULTIPLIER * intensity,
                     drop.Size * Constants.TRAIL_LENGTH_SIZE_FACTOR
                 );
-                if (trailLength < Constants.TRAIL_INTENSITY_THRESHOLD)
-                    continue;
+                if (trailLength < Constants.TRAIL_INTENSITY_THRESHOLD) continue;
                 float alpha = Constants.TRAIL_OPACITY_MULTIPLIER * intensity;
                 alpha = Math.Clamp(alpha, 0, 255);
-                Color4 trailColor = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha / 255f);
-                DrawLine(drop.X, drop.Y, drop.X, drop.Y - trailLength, drop.Size * Constants.TRAIL_STROKE_MULTIPLIER, trailColor);
+                Color4 color = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha / 255f);
+                float width = drop.Size * Constants.TRAIL_STROKE_MULTIPLIER;
+
+                float x1 = drop.X, y1 = drop.Y;
+                float x2 = drop.X, y2 = drop.Y - trailLength;
+                float dx = x2 - x1, dy = y2 - y1;
+                float len = MathF.Sqrt(dx * dx + dy * dy);
+                if (len > 0)
+                {
+                    dx /= len; dy /= len;
+                    float perpX = -dy, perpY = dx;
+                    float offsetX = perpX * (width / 2), offsetY = perpY * (width / 2);
+
+                    float[] quad = new float[]
+                    {
+                        x1 - offsetX, y1 - offsetY,
+                        x2 - offsetX, y2 - offsetY,
+                        x1 + offsetX, y1 + offsetY,
+                        x2 - offsetX, y2 - offsetY,
+                        x2 + offsetX, y2 + offsetY,
+                        x1 + offsetX, y1 + offsetY
+                    };
+
+                    for (int j = 0; j < 6; j++)
+                    {
+                        vertices.Add(quad[j * 2]); vertices.Add(quad[j * 2 + 1]);
+                        vertices.Add(color.R); vertices.Add(color.G); vertices.Add(color.B); vertices.Add(color.A);
+                    }
+                }
             }
+            return vertices;
         }
 
-        private void RenderRaindrops(float[] spectrum)
+        private List<float> CollectRaindropInstances(float[] spectrum)
         {
+            var instances = new List<float>();
             for (int i = 0; i < _raindropCount; i++)
             {
                 Raindrop drop = _raindrops[i];
@@ -590,8 +736,11 @@ namespace SpectrumNet
                     ? spectrum[drop.SpectrumIndex] * 0.7f + drop.Intensity * 0.3f
                     : drop.Intensity;
                 float alpha = Math.Min(0.7f + intensity * 0.3f, 1.0f);
-                Color4 dropColor = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha);
-                DrawCircle(drop.X, drop.Y, drop.Size, dropColor);
+                Color4 color = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha);
+                instances.Add(drop.X); instances.Add(drop.Y);
+                instances.Add(drop.Size);
+                instances.Add(color.R); instances.Add(color.G); instances.Add(color.B); instances.Add(color.A);
+
                 if (_effectsThreshold < 2 &&
                     drop.Size > Settings.Instance.RaindropSize * Constants.RAINDROP_SIZE_HIGHLIGHT_THRESHOLD &&
                     intensity > Constants.INTENSITY_HIGHLIGHT_THRESHOLD)
@@ -602,9 +751,12 @@ namespace SpectrumNet
                     float hAlpha = 150 * intensity;
                     hAlpha = Math.Clamp(hAlpha, 0, 255);
                     Color4 highlightColor = new Color4(1f, 1f, 1f, hAlpha / 255f);
-                    DrawCircle(highlightX, highlightY, highlightSize, highlightColor);
+                    instances.Add(highlightX); instances.Add(highlightY);
+                    instances.Add(highlightSize);
+                    instances.Add(highlightColor.R); instances.Add(highlightColor.G); instances.Add(highlightColor.B); instances.Add(highlightColor.A);
                 }
             }
+            return instances;
         }
         #endregion
 
@@ -632,71 +784,16 @@ namespace SpectrumNet
         }
         #endregion
 
-        #region OpenTK Drawing Helpers
-
-        private void DrawCircle(float centerX, float centerY, float radius, Color4 color)
-        {
-            DrawCircle(centerX, centerY, radius, color, 32);
-        }
-
-        private void DrawCircle(float centerX, float centerY, float radius, Color4 color, int segments)
-        {
-            if (_shaderProgram != null)
-            {
-                _shaderProgram.Use();
-                // Предполагаем, что у вас есть uniform-переменная "uColor" в шейдере
-                int colorLocation = GL.GetUniformLocation(_shaderProgram.ProgramId, "uColor");
-                if (colorLocation != -1)
-                {
-                    GL.Uniform4(colorLocation, color);
-                }
-            }
-
-            // Используем традиционный метод рисования для совместимости
-            GL.Color4(color);
-            GL.Begin(PrimitiveType.TriangleFan);
-            GL.Vertex2(centerX, centerY);
-            for (int i = 0; i <= segments; i++)
-            {
-                float angle = i * MathF.PI * 2 / segments;
-                float x = centerX + MathF.Cos(angle) * radius;
-                float y = centerY + MathF.Sin(angle) * radius;
-                GL.Vertex2(x, y);
-            }
-            GL.End();
-        }
-
-        private void DrawLine(float x1, float y1, float x2, float y2, float lineWidth, Color4 color)
-        {
-            if (_shaderProgram != null)
-            {
-                _shaderProgram.Use();
-                // Предполагаем, что у вас есть uniform-переменная "uColor" в шейдере
-                int colorLocation = GL.GetUniformLocation(_shaderProgram.ProgramId, "uColor");
-                if (colorLocation != -1)
-                {
-                    GL.Uniform4(colorLocation, color);
-                }
-            }
-
-            // Используем традиционный метод рисования для совместимости
-            GL.LineWidth(lineWidth);
-            GL.Color4(color);
-            GL.Begin(PrimitiveType.Lines);
-            GL.Vertex2(x1, y1);
-            GL.Vertex2(x2, y2);
-            GL.End();
-        }
-        #endregion
-
         #region IDisposable Implementation
         public void Dispose()
         {
             if (_disposed) return;
 
-            // Освобождаем ресурсы OpenGL
+            _circleShader?.Dispose();
+            _lineShader?.Dispose();
             GL.DeleteVertexArray(_circleVAO);
-            GL.DeleteBuffer(_circleVBO);
+            GL.DeleteBuffer(_circleTemplateVBO);
+            GL.DeleteBuffer(_circleInstanceVBO);
             GL.DeleteVertexArray(_lineVAO);
             GL.DeleteBuffer(_lineVBO);
 
@@ -704,7 +801,7 @@ namespace SpectrumNet
             _processedSpectrum = null;
             _isInitialized = false;
             _disposed = true;
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, "RaindropsRenderer disposed");
+            SmartLogger.Log(LogLevel.Debug, Constants.LOGGER_PREFIX, "RaindropsRenderer освобождён");
             GC.SuppressFinalize(this);
         }
         #endregion

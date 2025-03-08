@@ -19,6 +19,7 @@ namespace SpectrumNet
     {
         #region Константы
         private const string LogPrefix = "[SettingsWindow] ";
+
         #endregion
 
         #region Singleton
@@ -143,8 +144,9 @@ namespace SpectrumNet
             {
                 string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                 string settingsPath = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER, DefaultSettings.SETTINGS_FILE);
+                bool needsCorrection = false;
 
-                // Если файла нет в AppData, проверяем текущую директорию (для обратной совместимости)
+                // Проверка существования файла настроек
                 if (!File.Exists(settingsPath) && File.Exists("settings.json"))
                 {
                     settingsPath = "settings.json";
@@ -154,27 +156,48 @@ namespace SpectrumNet
                 if (!File.Exists(settingsPath))
                 {
                     SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings file not found, using defaults");
+                    ResetToDefaults();
                     return;
                 }
 
+                // Десериализация настроек
                 string json = File.ReadAllText(settingsPath);
                 var loadedSettings = JsonConvert.DeserializeObject<Settings>(json);
 
                 if (loadedSettings == null)
                 {
-                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings, using defaults");
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings, resetting to defaults");
+                    ResetToDefaults();
                     return;
                 }
 
+                // Валидация SelectedPalette
+                if (IsInvalidPalette(loadedSettings.SelectedPalette))
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix,
+                        $"Invalid palette '{loadedSettings.SelectedPalette}' detected. Resetting to default.");
+                    loadedSettings.SelectedPalette = DefaultSettings.SelectedPalette;
+                    needsCorrection = true;
+                }
+
+                // Применение настроек
                 CopyPropertiesFrom(loadedSettings);
                 SaveOriginalSettings();
                 UpdateAllRenderers();
+
+                // Принудительное сохранение исправленных настроек
+                if (needsCorrection)
+                {
+                    SaveSettings();
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Corrected settings were saved");
+                }
 
                 SmartLogger.Log(LogLevel.Information, LogPrefix, $"Settings loaded from {settingsPath}");
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Critical error loading settings: {ex.Message}");
+                RecoverFromCorruptedSettings();
             }
         }
 
@@ -182,33 +205,86 @@ namespace SpectrumNet
         {
             try
             {
+                // Предварительная валидация перед сохранением
+                if (IsInvalidPalette(_settings.SelectedPalette))
+                {
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix,
+                        "Attempt to save invalid palette detected. Resetting to default.");
+                    _settings.SelectedPalette = DefaultSettings.SelectedPalette;
+                }
+
                 UpdateRenderers();
+
                 string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                 string appFolder = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER);
 
-                if (!Directory.Exists(appFolder))
-                    Directory.CreateDirectory(appFolder);
+                Directory.CreateDirectory(appFolder); // Гарантированное создание папки
 
                 string settingsPath = Path.Combine(appFolder, DefaultSettings.SETTINGS_FILE);
 
                 var jsonSettings = new JsonSerializerSettings
                 {
                     Formatting = Formatting.Indented,
-                    ContractResolver = new DefaultContractResolver
-                    {
-                        NamingStrategy = new CamelCaseNamingStrategy()
-                    }
+                    ContractResolver = new DefaultContractResolver { NamingStrategy = new CamelCaseNamingStrategy() },
+                    DefaultValueHandling = DefaultValueHandling.Ignore // Игнорировать значения по умолчанию
                 };
 
                 string json = JsonConvert.SerializeObject(_settings, jsonSettings);
-                File.WriteAllText(settingsPath, json);
-                File.WriteAllText("settings.json", json);
+
+                // Атомарная запись с временным файлом
+                string tempPath = Path.Combine(appFolder, "temp_settings.json");
+                File.WriteAllText(tempPath, json);
+                File.Replace(tempPath, settingsPath, null);
 
                 SmartLogger.Log(LogLevel.Information, LogPrefix, $"Settings saved successfully to {settingsPath}");
             }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error saving settings: {ex.Message}");
+                throw new ArgumentException("Failed to save settings", ex);
+            }
+        }
+
+        private bool IsInvalidPalette(string paletteName)
+        {
+            return string.IsNullOrWhiteSpace(paletteName)
+                   || int.TryParse(paletteName, out _)
+                   || !SpectrumBrushes.Instance.RegisteredPalettes.ContainsKey(paletteName);
+        }
+
+
+        public void RecoverFromCorruptedSettings()
+        {
+            try
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Initiating settings recovery...");
+
+                string corruptPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    DefaultSettings.APP_FOLDER,
+                    "corrupt_settings_backup.json"
+                );
+
+                if (File.Exists(DefaultSettings.SETTINGS_FILE))
+                {
+                    File.Copy(DefaultSettings.SETTINGS_FILE, corruptPath, true);
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Corrupted settings backed up to {corruptPath}");
+                }
+
+                _settings.ResetToDefaults();
+                SaveSettings();
+
+                // ThemeManager.Instance.ReloadTheme(); // Удалено до реализации метода
+
+                UpdateAllRenderers();
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings recovery completed successfully");
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix,
+                    $"Fatal error during settings recovery: {ex.Message}");
+                throw new ArgumentException("Unrecoverable settings corruption", ex);
             }
         }
 

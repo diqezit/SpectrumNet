@@ -1,21 +1,19 @@
-﻿namespace SpectrumNet
-{
-    #region Renderers Implementations
+﻿#nullable enable
 
+namespace SpectrumNet
+{
     /// <summary>
-    /// **BarsRenderer** - реализация рендерера спектра в виде вертикальных столбцов (баров).
-    /// <br/>
-    /// **BarsRenderer** - spectrum renderer visualizing audio spectrum as vertical bars.
+    /// BarsRenderer – реализация рендерера спектра в виде вертикальных столбцов (баров).
     /// </summary>
     public class BarsRenderer : ISpectrumRenderer, IDisposable
     {
-        #region Fields
         private static BarsRenderer? _instance;
         private bool _isInitialized;
         private volatile bool _disposed;
         private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
+        const string LogPrefix = "[BarsRenderer] ";
 
-        // OpenGL resources
+        // OpenGL-ресурсы
         private int _vertexArrayObject;
         private int _vertexBufferObject;
         private int _indexBufferObject;
@@ -39,10 +37,7 @@
         private RenderQuality _quality = RenderQuality.Medium;
         private bool _useGlowEffect = true;
         private bool _useAntiAlias = true;
-        #endregion
 
-        #region Properties
-        /// <inheritdoc />
         public RenderQuality Quality
         {
             get => _quality;
@@ -55,117 +50,52 @@
                 }
             }
         }
-        #endregion
 
-        #region Constructor and Initialization
+        public static BarsRenderer GetInstance() => _instance ??= new BarsRenderer();
         private BarsRenderer() { }
 
-        /// <summary>
-        /// Возвращает единственный экземпляр BarsRenderer (Singleton).
-        /// <br/>
-        /// Returns the singleton instance of BarsRenderer.
-        /// </summary>
-        /// <returns>Экземпляр BarsRenderer. / BarsRenderer instance.</returns>
-        public static BarsRenderer GetInstance() => _instance ??= new BarsRenderer();
-
-        /// <inheritdoc />
         public void Initialize()
         {
             if (!_isInitialized)
             {
                 _isInitialized = true;
-
-                // Создание VAO и буферов
                 _vertexArrayObject = GL.GenVertexArray();
                 _vertexBufferObject = GL.GenBuffer();
                 _indexBufferObject = GL.GenBuffer();
-
-                // Инициализация шейдеров
                 InitializeShaders();
-
-                // Применение настроек качества
                 ApplyQualitySettings();
-
                 Log.Debug("BarsRenderer initialized with OpenGL");
             }
         }
 
         private void InitializeShaders()
         {
-            // Базовый шейдер для баров
+            // Шейдер для баров
             string barVertexShader = @"
                 #version 330 core
                 layout(location = 0) in vec3 aPosition;
-                
                 uniform mat4 uProjection;
                 uniform mat4 uModelView;
-                
-                void main()
-                {
-                    gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
-                }";
-
+                void main() { gl_Position = uProjection * uModelView * vec4(aPosition, 1.0); }";
             string barFragmentShader = @"
                 #version 330 core
                 out vec4 FragColor;
-                
                 uniform vec4 uColor;
-                
-                void main()
-                {
-                    FragColor = uColor;
-                }";
+                void main() { FragColor = uColor; }";
 
-            // Шейдер для подсветки
-            string highlightVertexShader = @"
-                #version 330 core
-                layout(location = 0) in vec3 aPosition;
-                
-                uniform mat4 uProjection;
-                uniform mat4 uModelView;
-                
-                void main()
-                {
-                    gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
-                }";
-
-            string highlightFragmentShader = @"
-                #version 330 core
-                out vec4 FragColor;
-                
-                uniform vec4 uColor;
-                
-                void main()
-                {
-                    FragColor = uColor;
-                }";
+            // Шейдер для подсветки (использует тот же код, что и базовый)
+            string highlightVertexShader = barVertexShader;
+            string highlightFragmentShader = barFragmentShader;
 
             // Шейдер для свечения
-            string glowVertexShader = @"
-                #version 330 core
-                layout(location = 0) in vec3 aPosition;
-                
-                uniform mat4 uProjection;
-                uniform mat4 uModelView;
-                
-                void main()
-                {
-                    gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
-                }";
-
+            string glowVertexShader = barVertexShader;
             string glowFragmentShader = @"
                 #version 330 core
                 out vec4 FragColor;
-                
                 uniform vec4 uColor;
                 uniform float uBlurRadius;
-                
-                void main()
-                {
-                    FragColor = uColor;
-                }";
+                void main() { FragColor = uColor; }";
 
-            // Компиляция шейдеров
             try
             {
                 _barShader = CompileShaderProgram(barVertexShader, barFragmentShader);
@@ -183,35 +113,50 @@
             int vertexShader = GL.CreateShader(ShaderType.VertexShader);
             GL.ShaderSource(vertexShader, vertexSource);
             GL.CompileShader(vertexShader);
-
-            string vertexInfoLog = GL.GetShaderInfoLog(vertexShader);
-            if (!string.IsNullOrWhiteSpace(vertexInfoLog))
-                Log.Debug($"Vertex shader compile log: {vertexInfoLog}");
+            GL.GetShader(vertexShader, ShaderParameter.CompileStatus, out int compileStatus);
+            if (compileStatus == 0)
+            {
+                string infoLog = GL.GetShaderInfoLog(vertexShader);
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Vertex shader compilation failed: {infoLog}");
+                GL.DeleteShader(vertexShader);
+                throw new InvalidOperationException("Vertex shader compilation failed");
+            }
 
             int fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
             GL.ShaderSource(fragmentShader, fragmentSource);
             GL.CompileShader(fragmentShader);
-
-            string fragmentInfoLog = GL.GetShaderInfoLog(fragmentShader);
-            if (!string.IsNullOrWhiteSpace(fragmentInfoLog))
-                Log.Debug($"Fragment shader compile log: {fragmentInfoLog}");
+            GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out compileStatus);
+            if (compileStatus == 0)
+            {
+                string infoLog = GL.GetShaderInfoLog(fragmentShader);
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Fragment shader compilation failed: {infoLog}");
+                GL.DeleteShader(vertexShader);
+                GL.DeleteShader(fragmentShader);
+                throw new InvalidOperationException("Fragment shader compilation failed");
+            }
 
             int program = GL.CreateProgram();
             GL.AttachShader(program, vertexShader);
             GL.AttachShader(program, fragmentShader);
             GL.LinkProgram(program);
-
+            GL.GetProgram(program, GetProgramParameterName.LinkStatus, out int linkStatus);
+            if (linkStatus == 0)
+            {
+                string infoLog = GL.GetProgramInfoLog(program);
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Shader program linking failed: {infoLog}");
+                GL.DeleteShader(vertexShader);
+                GL.DeleteShader(fragmentShader);
+                GL.DeleteProgram(program);
+                throw new InvalidOperationException("Shader program linking failed");
+            }
             GL.DetachShader(program, vertexShader);
             GL.DetachShader(program, fragmentShader);
             GL.DeleteShader(vertexShader);
             GL.DeleteShader(fragmentShader);
 
-            return new ShaderProgram(program, Color.White);
+            return new ShaderProgram(vertexSource, fragmentSource);
         }
 
-        /// <summary>
-        /// Applies quality settings based on current quality level
-        /// </summary>
         private void ApplyQualitySettings()
         {
             switch (_quality)
@@ -219,40 +164,30 @@
                 case RenderQuality.Low:
                     _useAntiAlias = false;
                     _useGlowEffect = false;
-                    // Отключаем сглаживание в OpenGL
                     GL.Disable(EnableCap.Multisample);
                     break;
                 case RenderQuality.Medium:
                     _useAntiAlias = true;
                     _useGlowEffect = true;
-                    // Включаем базовое сглаживание
                     GL.Enable(EnableCap.Multisample);
                     break;
                 case RenderQuality.High:
                     _useAntiAlias = true;
                     _useGlowEffect = true;
-                    // Включаем расширенное сглаживание
                     GL.Enable(EnableCap.Multisample);
                     GL.Enable(EnableCap.LineSmooth);
                     GL.Hint(HintTarget.LineSmoothHint, HintMode.Nicest);
                     break;
             }
-
             Log.Debug($"BarsRenderer quality set to {_quality}");
         }
-        #endregion
 
-        #region Configuration
-        /// <inheritdoc />
         public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
             _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
             Quality = quality;
         }
-        #endregion
 
-        #region Rendering
-        /// <inheritdoc />
         public void Render(
             float[]? spectrum,
             Viewport viewport,
@@ -263,30 +198,20 @@
             Action<Viewport> drawPerformanceInfo)
         {
             if (!ValidateRenderParameters(spectrum, viewport, shader))
-            {
                 return;
-            }
 
             float[] renderSpectrum;
             bool semaphoreAcquired = false;
-            int renderedBarCount;
-
             try
             {
                 semaphoreAcquired = _spectrumSemaphore.Wait(0);
-
                 if (semaphoreAcquired)
                 {
-                    // Обработка спектра
                     int targetBarCount = Math.Min(spectrum!.Length, barCount);
                     float[] scaledSpectrum = ScaleSpectrum(spectrum!, targetBarCount, spectrum!.Length);
                     _processedSpectrum = SmoothSpectrum(scaledSpectrum, targetBarCount);
                 }
-
-                renderSpectrum = _processedSpectrum ??
-                                 ProcessSynchronously(spectrum!, Math.Min(spectrum!.Length, barCount));
-
-                renderedBarCount = renderSpectrum.Length;
+                renderSpectrum = _processedSpectrum ?? ProcessSynchronously(spectrum!, Math.Min(spectrum!.Length, barCount));
             }
             catch (Exception ex)
             {
@@ -296,49 +221,29 @@
             finally
             {
                 if (semaphoreAcquired)
-                {
                     _spectrumSemaphore.Release();
-                }
             }
 
-            // Настройка проекционной матрицы
-            Matrix4 projectionMatrix = Matrix4.CreateOrthographicOffCenter(
-                0, viewport.Width, viewport.Height, 0, -1, 1);
-
-            // Настройка модельно-видовой матрицы
+            Matrix4 projectionMatrix = Matrix4.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, -1, 1);
             Matrix4 modelViewMatrix = Matrix4.Identity;
-
-            // Включение прозрачности
             GL.Enable(EnableCap.Blend);
             GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-
-            // Рендеринг баров
-            RenderBars(renderSpectrum, viewport, barWidth, barSpacing, shader,
-                      projectionMatrix, modelViewMatrix);
-
-            // Отображение информации о производительности
+            RenderBars(renderSpectrum, viewport, barWidth, barSpacing, shader!, projectionMatrix, modelViewMatrix);
             drawPerformanceInfo?.Invoke(viewport);
         }
 
-        private bool ValidateRenderParameters(
-            float[]? spectrum,
-            Viewport viewport,
-            ShaderProgram? shader)
+        private bool ValidateRenderParameters(float[]? spectrum, Viewport viewport, ShaderProgram? shader)
         {
             if (!_isInitialized)
             {
                 Log.Error("BarsRenderer not initialized before rendering");
                 return false;
             }
-
-            if (spectrum == null || spectrum.Length < 2 ||
-                shader == null ||
-                viewport.Width <= 0 || viewport.Height <= 0)
+            if (spectrum == null || spectrum.Length < 2 || shader == null || viewport.Width <= 0 || viewport.Height <= 0)
             {
                 Log.Error("Invalid render parameters for BarsRenderer");
                 return false;
             }
-
             return true;
         }
 
@@ -349,20 +254,17 @@
         }
 
         private void RenderBars(
-             float[] spectrum,
-             Viewport viewport,
-             float barWidth,
-             float barSpacing,
-             ShaderProgram baseShader,
-             Matrix4 projectionMatrix,
-             Matrix4 modelViewMatrix)
+            float[] spectrum,
+            Viewport viewport,
+            float barWidth,
+            float barSpacing,
+            ShaderProgram baseShader,
+            Matrix4 projectionMatrix,
+            Matrix4 modelViewMatrix)
         {
             float totalBarWidth = barWidth + barSpacing;
             float canvasHeight = viewport.Height;
-
-            // Привязка VAO
             GL.BindVertexArray(_vertexArrayObject);
-
             float cornerRadius = MathF.Min(barWidth * DefaultCornerRadiusFactor, MaxCornerRadius);
 
             for (int i = 0; i < spectrum.Length; i++)
@@ -370,39 +272,30 @@
                 float magnitude = spectrum[i];
                 float barHeight = MathF.Max(magnitude * canvasHeight, MinBarHeight);
                 byte alpha = (byte)MathF.Min(magnitude * AlphaMultiplier * 255f, 255f);
-                Color barColor = Color.FromArgb(alpha, baseShader.Color);
-
+                Color4 baseColor = baseShader.Color;
+                // Создаём цвет бара с учетом вычисленного альфа-канала (в диапазоне 0..1)
+                Color4 barColor = new Color4(baseColor.R, baseColor.G, baseColor.B, alpha / 255f);
                 float x = i * totalBarWidth;
 
-                // Эффект свечения для высоких значений
                 if (_useGlowEffect && _glowShader != null && magnitude > 0.6f)
                 {
-                    Color glowColor = Color.FromArgb((byte)(magnitude * 255f * GlowEffectAlpha), barColor);
-                    RenderGlowEffect(x, barWidth, barHeight, canvasHeight, cornerRadius, glowColor,
-                                    projectionMatrix, modelViewMatrix);
+                    // Для свечения используем базовый цвет с уменьшенной прозрачностью
+                    Color4 glowColor = new Color4(baseColor.R, baseColor.G, baseColor.B, magnitude * GlowEffectAlpha);
+                    RenderGlowEffect(x, barWidth, barHeight, canvasHeight, cornerRadius, glowColor, projectionMatrix, modelViewMatrix);
                 }
 
-                // Отрисовка бара
-                RenderBar(x, barWidth, barHeight, canvasHeight, cornerRadius, barColor,
-                         projectionMatrix, modelViewMatrix);
+                RenderBar(x, barWidth, barHeight, canvasHeight, cornerRadius, barColor, projectionMatrix, modelViewMatrix);
 
-                // Отрисовка белой подсветки сверху бара
                 if (barHeight > cornerRadius * 2 && _quality != RenderQuality.Low)
                 {
                     float highlightWidth = barWidth * HighlightWidthProportion;
                     float highlightHeight = MathF.Min(barHeight * HighlightHeightProportion, MaxHighlightHeight);
                     byte highlightAlpha = (byte)(alpha / HighlightAlphaDivisor);
-                    Color highlightColor = Color.FromArgb(highlightAlpha, Color.White);
-
-                    RenderHighlight(x, barWidth, barHeight, canvasHeight, highlightWidth, highlightHeight,
-                                   highlightColor, projectionMatrix, modelViewMatrix);
+                    Color4 highlightColor = new Color4(Color4.White.R, Color4.White.G, Color4.White.B, highlightAlpha / 255f);
+                    RenderHighlight(x, barWidth, barHeight, canvasHeight, highlightWidth, highlightHeight, highlightColor, projectionMatrix, modelViewMatrix);
                 }
             }
-
-            // Отвязка VAO
             GL.BindVertexArray(0);
-
-            // Восстановление состояния OpenGL
             GL.Disable(EnableCap.Blend);
         }
 
@@ -412,53 +305,34 @@
             float barHeight,
             float canvasHeight,
             float cornerRadius,
-            Color barColor,
+            Color4 barColor,
             Matrix4 projectionMatrix,
             Matrix4 modelViewMatrix)
         {
             if (_barShader == null) return;
-
-            // Активация шейдера
             GL.UseProgram(_barShader.ProgramId);
+            int locProj = GL.GetUniformLocation(_barShader.ProgramId, "uProjection");
+            int locModelView = GL.GetUniformLocation(_barShader.ProgramId, "uModelView");
+            int locColor = GL.GetUniformLocation(_barShader.ProgramId, "uColor");
+            GL.UniformMatrix4(locProj, false, ref projectionMatrix);
+            GL.UniformMatrix4(locModelView, false, ref modelViewMatrix);
+            GL.Uniform4(locColor, barColor);
 
-            // Установка параметров шейдера
-            int locationProjection = GL.GetUniformLocation(_barShader.ProgramId, "uProjection");
-            int locationModelView = GL.GetUniformLocation(_barShader.ProgramId, "uModelView");
-            int locationColor = GL.GetUniformLocation(_barShader.ProgramId, "uColor");
-
-            GL.UniformMatrix4(locationProjection, false, ref projectionMatrix);
-            GL.UniformMatrix4(locationModelView, false, ref modelViewMatrix);
-            GL.Uniform4(locationColor, barColor.R / 255f, barColor.G / 255f, barColor.B / 255f, barColor.A / 255f);
-
-            // Создание вершин бара
             float[] vertices = {
-                x, canvasHeight - barHeight, 0.0f,            // Верхний левый
-                x + barWidth, canvasHeight - barHeight, 0.0f, // Верхний правый
-                x + barWidth, canvasHeight, 0.0f,             // Нижний правый
-                x, canvasHeight, 0.0f                         // Нижний левый
+                x, canvasHeight - barHeight, 0.0f,
+                x + barWidth, canvasHeight - barHeight, 0.0f,
+                x + barWidth, canvasHeight, 0.0f,
+                x, canvasHeight, 0.0f
             };
+            int[] indices = { 0, 1, 2, 0, 2, 3 };
 
-            // Индексы для двух треугольников
-            int[] indices = {
-                0, 1, 2,  // Первый треугольник
-                0, 2, 3   // Второй треугольник
-            };
-
-            // Загрузка вершин и индексов в буферы
             GL.BindBuffer(BufferTarget.ArrayBuffer, _vertexBufferObject);
             GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
-
             GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBufferObject);
             GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(int), indices, BufferUsageHint.StreamDraw);
-
-            // Настройка формата вершин
             GL.EnableVertexAttribArray(0);
             GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
-
-            // Рендеринг
             GL.DrawElements(PrimitiveType.Triangles, indices.Length, DrawElementsType.UnsignedInt, 0);
-
-            // Отключение атрибутов
             GL.DisableVertexAttribArray(0);
         }
 
@@ -469,57 +343,35 @@
             float canvasHeight,
             float highlightWidth,
             float highlightHeight,
-            Color highlightColor,
+            Color4 highlightColor,
             Matrix4 projectionMatrix,
             Matrix4 modelViewMatrix)
         {
             if (_highlightShader == null) return;
-
-            // Активация шейдера подсветки
             GL.UseProgram(_highlightShader.ProgramId);
+            int locProj = GL.GetUniformLocation(_highlightShader.ProgramId, "uProjection");
+            int locModelView = GL.GetUniformLocation(_highlightShader.ProgramId, "uModelView");
+            int locColor = GL.GetUniformLocation(_highlightShader.ProgramId, "uColor");
+            GL.UniformMatrix4(locProj, false, ref projectionMatrix);
+            GL.UniformMatrix4(locModelView, false, ref modelViewMatrix);
+            GL.Uniform4(locColor, highlightColor);
 
-            // Установка параметров шейдера
-            int locationProjection = GL.GetUniformLocation(_highlightShader.ProgramId, "uProjection");
-            int locationModelView = GL.GetUniformLocation(_highlightShader.ProgramId, "uModelView");
-            int locationColor = GL.GetUniformLocation(_highlightShader.ProgramId, "uColor");
-
-            GL.UniformMatrix4(locationProjection, false, ref projectionMatrix);
-            GL.UniformMatrix4(locationModelView, false, ref modelViewMatrix);
-            GL.Uniform4(locationColor, highlightColor.R / 255f, highlightColor.G / 255f,
-                       highlightColor.B / 255f, highlightColor.A / 255f);
-
-            // Расчет позиции подсветки
             float highlightX = x + (barWidth - highlightWidth) / 2;
-
-            // Создание вершин подсветки
             float[] vertices = {
-                highlightX, canvasHeight - barHeight, 0.0f,                           // Верхний левый
-                highlightX + highlightWidth, canvasHeight - barHeight, 0.0f,          // Верхний правый
-                highlightX + highlightWidth, canvasHeight - barHeight + highlightHeight, 0.0f, // Нижний правый
-                highlightX, canvasHeight - barHeight + highlightHeight, 0.0f          // Нижний левый
+                highlightX, canvasHeight - barHeight, 0.0f,
+                highlightX + highlightWidth, canvasHeight - barHeight, 0.0f,
+                highlightX + highlightWidth, canvasHeight - barHeight + highlightHeight, 0.0f,
+                highlightX, canvasHeight - barHeight + highlightHeight, 0.0f
             };
+            int[] indices = { 0, 1, 2, 0, 2, 3 };
 
-            // Индексы для двух треугольников
-            int[] indices = {
-                0, 1, 2,  // Первый треугольник
-                0, 2, 3   // Второй треугольник
-            };
-
-            // Загрузка вершин и индексов в буферы
             GL.BindBuffer(BufferTarget.ArrayBuffer, _vertexBufferObject);
             GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
-
             GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBufferObject);
             GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(int), indices, BufferUsageHint.StreamDraw);
-
-            // Настройка формата вершин
             GL.EnableVertexAttribArray(0);
             GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
-
-            // Рендеринг
             GL.DrawElements(PrimitiveType.Triangles, indices.Length, DrawElementsType.UnsignedInt, 0);
-
-            // Отключение атрибутов
             GL.DisableVertexAttribArray(0);
         }
 
@@ -529,161 +381,109 @@
             float barHeight,
             float canvasHeight,
             float cornerRadius,
-            Color glowColor,
+            Color4 glowColor,
             Matrix4 projectionMatrix,
             Matrix4 modelViewMatrix)
         {
             if (_glowShader == null) return;
-
-            // Активация шейдера свечения
             GL.UseProgram(_glowShader.ProgramId);
+            int locProj = GL.GetUniformLocation(_glowShader.ProgramId, "uProjection");
+            int locModelView = GL.GetUniformLocation(_glowShader.ProgramId, "uModelView");
+            int locColor = GL.GetUniformLocation(_glowShader.ProgramId, "uColor");
+            int locBlurRadius = GL.GetUniformLocation(_glowShader.ProgramId, "uBlurRadius");
+            GL.UniformMatrix4(locProj, false, ref projectionMatrix);
+            GL.UniformMatrix4(locModelView, false, ref modelViewMatrix);
+            GL.Uniform4(locColor, glowColor);
+            GL.Uniform1(locBlurRadius, 5.0f);
 
-            // Установка параметров шейдера
-            int locationProjection = GL.GetUniformLocation(_glowShader.ProgramId, "uProjection");
-            int locationModelView = GL.GetUniformLocation(_glowShader.ProgramId, "uModelView");
-            int locationColor = GL.GetUniformLocation(_glowShader.ProgramId, "uColor");
-            int locationBlurRadius = GL.GetUniformLocation(_glowShader.ProgramId, "uBlurRadius");
-
-            GL.UniformMatrix4(locationProjection, false, ref projectionMatrix);
-            GL.UniformMatrix4(locationModelView, false, ref modelViewMatrix);
-            GL.Uniform4(locationColor, glowColor.R / 255f, glowColor.G / 255f, glowColor.B / 255f, glowColor.A / 255f);
-            GL.Uniform1(locationBlurRadius, 5.0f);  // Размер свечения
-
-            // Расширение для эффекта свечения
             float glowExtraSize = 5.0f;
-
-            // Создание вершин свечения (увеличенного прямоугольника)
             float[] vertices = {
-                x - glowExtraSize, canvasHeight - barHeight - glowExtraSize, 0.0f,  // Верхний левый
-                x + barWidth + glowExtraSize, canvasHeight - barHeight - glowExtraSize, 0.0f,  // Верхний правый
-                x + barWidth + glowExtraSize, canvasHeight + glowExtraSize, 0.0f,  // Нижний правый
-                x - glowExtraSize, canvasHeight + glowExtraSize, 0.0f   // Нижний левый
+                x - glowExtraSize, canvasHeight - barHeight - glowExtraSize, 0.0f,
+                x + barWidth + glowExtraSize, canvasHeight - barHeight - glowExtraSize, 0.0f,
+                x + barWidth + glowExtraSize, canvasHeight + glowExtraSize, 0.0f,
+                x - glowExtraSize, canvasHeight + glowExtraSize, 0.0f
             };
+            int[] indices = { 0, 1, 2, 0, 2, 3 };
 
-            // Индексы для двух треугольников
-            int[] indices = {
-                0, 1, 2,  // Первый треугольник
-                0, 2, 3   // Второй треугольник
-            };
-
-            // Загрузка вершин и индексов в буферы
             GL.BindBuffer(BufferTarget.ArrayBuffer, _vertexBufferObject);
             GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
-
             GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBufferObject);
             GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(int), indices, BufferUsageHint.StreamDraw);
-
-            // Настройка формата вершин
             GL.EnableVertexAttribArray(0);
             GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
-
-            // Рендеринг
             GL.DrawElements(PrimitiveType.Triangles, indices.Length, DrawElementsType.UnsignedInt, 0);
-
-            // Отключение атрибутов
             GL.DisableVertexAttribArray(0);
         }
-        #endregion
 
-        #region Spectrum Processing
         private static float[] ScaleSpectrum(float[] spectrum, int barCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[barCount];
             float blockSize = (float)spectrumLength / barCount;
-
             for (int i = 0; i < barCount; i++)
             {
                 float sum = 0;
                 int start = (int)(i * blockSize);
-                int end = (int)((i + 1) * blockSize);
-                end = Math.Min(end, spectrumLength);
-
+                int end = Math.Min((int)((i + 1) * blockSize), spectrumLength);
                 for (int j = start; j < end; j++)
-                {
                     sum += spectrum[j];
-                }
-
                 scaledSpectrum[i] = sum / (end - start);
             }
-
             return scaledSpectrum;
         }
 
         private float[] SmoothSpectrum(float[] scaledSpectrum, int actualBarCount)
         {
             if (_previousSpectrum == null || _previousSpectrum.Length != actualBarCount)
-            {
                 _previousSpectrum = new float[actualBarCount];
-            }
-
             float[] smoothedSpectrum = new float[actualBarCount];
-
             for (int i = 0; i < actualBarCount; i++)
             {
-                smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) +
-                                      scaledSpectrum[i] * _smoothingFactor;
+                smoothedSpectrum[i] = _previousSpectrum[i] * (1 - _smoothingFactor) + scaledSpectrum[i] * _smoothingFactor;
                 _previousSpectrum[i] = smoothedSpectrum[i];
             }
-
             return smoothedSpectrum;
         }
-        #endregion
 
-        #region Disposal
-        /// <inheritdoc />
         protected virtual void Dispose(bool disposing)
         {
             if (!_disposed)
             {
                 if (disposing)
                 {
-                    _spectrumSemaphore?.Dispose();
-
-                    // Освобождение ресурсов OpenGL
+                    _spectrumSemaphore.Dispose();
                     if (_vertexArrayObject != 0)
                     {
                         GL.DeleteVertexArray(_vertexArrayObject);
                         _vertexArrayObject = 0;
                     }
-
                     if (_vertexBufferObject != 0)
                     {
                         GL.DeleteBuffer(_vertexBufferObject);
                         _vertexBufferObject = 0;
                     }
-
                     if (_indexBufferObject != 0)
                     {
                         GL.DeleteBuffer(_indexBufferObject);
                         _indexBufferObject = 0;
                     }
-
                     _barShader?.Dispose();
                     _barShader = null;
-
                     _highlightShader?.Dispose();
                     _highlightShader = null;
-
                     _glowShader?.Dispose();
                     _glowShader = null;
-
                     _previousSpectrum = null;
                     _processedSpectrum = null;
                 }
-
                 _disposed = true;
                 Log.Debug("BarsRenderer disposed");
             }
         }
 
-        /// <inheritdoc />
         public void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-        #endregion
     }
-
-    #endregion
 }

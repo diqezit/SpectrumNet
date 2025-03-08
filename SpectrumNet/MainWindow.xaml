@@ -157,10 +157,10 @@
             Background="{DynamicResource SurfaceBrush}"
             CornerRadius="16"
             Margin="0,0,0,10">
-                    <opentk:GLWpfControl x:Name="openGLControl" 
-                            Margin="16"
-                            Render="OnRender"
-                            Ready="OnOpenGLControlReady"/>
+                    <opentk:GLWpfControl 
+                        x:Name="OpenTkControl" 
+                        Margin="8"
+                        Render="OpenTkControl_OnRender" />
                 </Border>
 
                 <!-- Разделитель с кнопкой переключения -->
