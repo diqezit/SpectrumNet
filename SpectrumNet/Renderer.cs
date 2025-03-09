@@ -3,41 +3,42 @@ namespace SpectrumNet;
 
 public sealed class Renderer : IDisposable
 {
-    #region Constants
-    private const int RENDER_TIMEOUT_MS = 16;
-    private const string DEFAULT_STYLE = "Solid";
-    private const string LogPrefix = "[Renderer] ";
+    #region Константы
+    private const int RENDER_TIMEOUT_MS = 16; 
+    private const string DEFAULT_STYLE = "Solid"; 
+    private const string LogPrefix = "[Renderer] "; 
     #endregion
 
-    #region Types
+    #region Типы
     private readonly record struct RenderState(ShaderProgram? Paint, RenderStyle Style, string StyleName, RenderQuality Quality);
     #endregion
 
-    #region Fields
-    private readonly SemaphoreSlim _renderLock = new(1, 1);
-    private readonly SpectrumBrushes _spectrumStyles;
-    private readonly IAudioVisualizationController _controller;
-    private readonly SpectrumAnalyzer _analyzer;
-    private readonly CancellationTokenSource _disposalTokenSource = new();
+    #region Поля
+    private readonly SemaphoreSlim _renderLock = new(1, 1); 
+    private readonly SpectrumBrushes _spectrumStyles; 
+    private readonly IAudioVisualizationController _controller; 
+    private readonly ISpectrumAnalyzer _analyzer;
+    private readonly CancellationTokenSource _disposalTokenSource = new(); 
 
-    private string? _pendingStyleName;
-    private Color4 _pendingColor;
+    private string? _pendingStyleName; 
+    private Color4 _pendingColor; 
     private ShaderProgram? _pendingShader;
     private GLWpfControl? _glControl;
-    private DispatcherTimer? _renderTimer;
-    private Matrix4 _projectionMatrix;
+    private DispatcherTimer? _renderTimer; 
+    private Matrix4 _projectionMatrix; 
     private RenderState _currentState;
 
-    private volatile bool _isDisposed, _isAnalyzerDisposed;
-    private volatile bool _shouldShowPlaceholder = true;
+    private volatile bool _isDisposed;
+    private volatile bool _isAnalyzerDisposed; 
+    private volatile bool _shouldShowPlaceholder = true; 
     private bool _isInitialized;
-    private bool _isGpuInfoLogged;
+    private bool _isGpuInfoLogged; 
     #endregion
 
-    #region Properties
+    #region Свойства
     public string CurrentStyleName => _currentState.StyleName;
-    public RenderQuality CurrentQuality => _currentState.Quality;
-    public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
+    public RenderQuality CurrentQuality => _currentState.Quality; 
+    public event EventHandler<PerformanceMetrics>? PerformanceUpdate; 
 
     public bool ShouldShowPlaceholder
     {
@@ -46,9 +47,9 @@ public sealed class Renderer : IDisposable
     }
     #endregion
 
-    #region Constructor
+    #region Конструктор
     public Renderer(SpectrumBrushes styles, IAudioVisualizationController controller,
-                   SpectrumAnalyzer analyzer, GLWpfControl glControl)
+                   ISpectrumAnalyzer analyzer, GLWpfControl glControl)
     {
         ArgumentNullException.ThrowIfNull(styles, nameof(styles));
         ArgumentNullException.ThrowIfNull(controller, nameof(controller));
@@ -61,7 +62,7 @@ public sealed class Renderer : IDisposable
         _glControl = glControl;
 
         SmartLogger.Log(LogLevel.Debug, LogPrefix,
-            $"Renderer created with analyzer HashCode: {analyzer.GetHashCode():X8}");
+            $"Renderer создан с анализатором HashCode: {analyzer.GetHashCode():X8}");
 
         if (_analyzer is IComponent comp)
             comp.Disposed += (_, _) => _isAnalyzerDisposed = true;
@@ -70,12 +71,12 @@ public sealed class Renderer : IDisposable
         _glControl.Render += OnGlControlRender;
 
         SmartLogger.Log(LogLevel.Information, LogPrefix,
-            "Renderer constructed, awaiting render for full initialization.");
+            "Renderer сконструирован, ожидает рендеринга для полной инициализации.");
         PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
     }
     #endregion
 
-    #region Initialization
+    #region Инициализация
     private void InitializeRenderer()
     {
         var (color, shader) = _spectrumStyles.GetColorAndShader(DEFAULT_STYLE);
@@ -83,7 +84,7 @@ public sealed class Renderer : IDisposable
 
         if (clonedShader is null)
             throw new InvalidOperationException(
-                $"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style: Shader clone failed.");
+                $"{LogPrefix}Не удалось инициализировать стиль {DEFAULT_STYLE}: клонирование шейдера не удалось.");
 
         _currentState = new RenderState(clonedShader, RenderStyle.Bars, DEFAULT_STYLE, RenderQuality.Medium);
 
@@ -95,7 +96,7 @@ public sealed class Renderer : IDisposable
         {
             _glControl.SizeChanged += UpdateRenderDimensions;
             SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                $"GL control initialized: {_glControl.ActualWidth}x{_glControl.ActualHeight}");
+                $"GL-контрол инициализирован: {_glControl.ActualWidth}x{_glControl.ActualHeight}");
         }
 
         _controller.PropertyChanged += OnControllerPropertyChanged;
@@ -103,7 +104,7 @@ public sealed class Renderer : IDisposable
         RequestRender();
 
         SmartLogger.Log(LogLevel.Information, LogPrefix,
-            $"Renderer initialized with style: {_currentState.StyleName}, RenderStyle: {_currentState.Style}");
+            $"Renderer инициализирован со стилем: {_currentState.StyleName}, RenderStyle: {_currentState.Style}");
     }
 
     private void InitializeOpenGLResources()
@@ -118,19 +119,19 @@ public sealed class Renderer : IDisposable
 
             if (clonedShader is null)
                 throw new InvalidOperationException(
-                    "Shader cloning failed during OpenGL resource initialization.");
+                    "Клонирование шейдера не удалось при инициализации ресурсов OpenGL.");
 
             _currentState = _currentState with { Paint = clonedShader };
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, "OpenGL resources initialized");
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Ресурсы OpenGL инициализированы");
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"OpenGL resource initialization failed: {ex}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка инициализации ресурсов OpenGL: {ex}");
         }
     }
     #endregion
 
-    #region Event Handlers
+    #region Обработчики событий
     private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics) =>
         PerformanceUpdate?.Invoke(this, metrics);
 
@@ -142,9 +143,6 @@ public sealed class Renderer : IDisposable
         {
             case nameof(IAudioVisualizationController.IsRecording):
                 _shouldShowPlaceholder = !_controller.IsRecording;
-                SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                    $"Recording state changed. IsRecording={_controller.IsRecording}, " +
-                    $"ShouldShowPlaceholder={_shouldShowPlaceholder}");
                 RequestRender();
                 break;
 
@@ -155,7 +153,7 @@ public sealed class Renderer : IDisposable
 
             case nameof(IAudioVisualizationController.SelectedDrawingType):
                 SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                    $"DrawingType changing to: {_controller.SelectedDrawingType}");
+                    $"Тип рисования изменен на: {_controller.SelectedDrawingType}");
                 UpdateRenderStyle(_controller.SelectedDrawingType);
                 break;
 
@@ -203,12 +201,12 @@ public sealed class Renderer : IDisposable
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Dimension update failed: {ex.Message}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка обновления размеров: {ex.Message}");
         }
     }
     #endregion
 
-    #region Rendering
+    #region Рендеринг
     public void OnGlControlRender(TimeSpan delta)
     {
         if (_isDisposed || !_renderLock.Wait(0))
@@ -232,7 +230,7 @@ public sealed class Renderer : IDisposable
                 {
                     var clonedShader = _pendingShader.Clone()
                         ?? throw new ArgumentException(
-                            $"Failed to clone shader for style: {_pendingStyleName}");
+                            $"Не удалось клонировать шейдер для стиля: {_pendingStyleName}");
 
                     _currentState = _currentState with
                     {
@@ -242,11 +240,11 @@ public sealed class Renderer : IDisposable
 
                     oldShader?.Dispose();
 
-                    SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Style applied: {_pendingStyleName}");
+                    SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Стиль применен: {_pendingStyleName}");
                 }
                 catch (Exception ex)
                 {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Style change failed: {ex.Message}");
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка смены стиля: {ex.Message}");
                 }
                 finally
                 {
@@ -259,7 +257,7 @@ public sealed class Renderer : IDisposable
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Rendering failed: {ex.Message}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка рендеринга: {ex.Message}");
         }
         finally
         {
@@ -275,7 +273,7 @@ public sealed class Renderer : IDisposable
                 _glControl.ActualWidth <= 0 || _glControl.ActualHeight <= 0)
             {
                 SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                    $"Skip rendering: control invalid or zero dimensions " +
+                    $"Пропуск рендеринга: контрол недействителен или нулевые размеры " +
                     $"({(_glControl?.ActualWidth ?? 0)}x{(_glControl?.ActualHeight ?? 0)})");
                 _isInitialized = false;
                 return;
@@ -294,7 +292,7 @@ public sealed class Renderer : IDisposable
             }
 
             GL.Viewport(0, 0, (int)_glControl.ActualWidth, (int)_glControl.ActualHeight);
-            GL.ClearColor(0.0f, 0.0f, 0.0f, 0.7f);
+            GL.ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             if (_projectionMatrix == default)
@@ -314,14 +312,14 @@ public sealed class Renderer : IDisposable
             var spectrum = GetSpectrumData();
             if (spectrum is null || spectrum.Spectrum.Length == 0)
             {
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "No spectrum data available");
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Данные спектра отсутствуют");
                 RenderPlaceholder();
                 return;
             }
 
             if (!TryCalcRenderParams(out float barWidth, out float barSpacing, out int barCount))
             {
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Failed to calculate render parameters");
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Не удалось вычислить параметры рендеринга");
                 RenderPlaceholder();
                 return;
             }
@@ -337,7 +335,7 @@ public sealed class Renderer : IDisposable
                 if (renderer is null)
                 {
                     SmartLogger.Log(LogLevel.Error, LogPrefix,
-                        $"Failed to create renderer for style: {_currentState.Style}");
+                        $"Не удалось создать рендерер для стиля: {_currentState.Style}");
                     RenderPlaceholder();
                     return;
                 }
@@ -369,7 +367,7 @@ public sealed class Renderer : IDisposable
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Rendering failed: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка рендеринга: {ex.Message}");
                 RenderPlaceholder();
             }
             finally
@@ -379,10 +377,10 @@ public sealed class Renderer : IDisposable
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Critical render error: {ex}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Критическая ошибка рендеринга: {ex}");
             _controller.Dispatcher.Invoke(() =>
             {
-                _controller.StatusText = "Fatal rendering error!";
+                _controller.StatusText = "Фатальная ошибка рендеринга!";
                 _controller.IsRecording = false;
             });
         }
@@ -395,7 +393,7 @@ public sealed class Renderer : IDisposable
     }
     #endregion
 
-    #region Data Access
+    #region Доступ к данным
     private SpectralData? GetSpectrumData()
     {
         try
@@ -403,17 +401,14 @@ public sealed class Renderer : IDisposable
             if (_analyzer is null)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix,
-                    "Analyzer reference is null in GetSpectrumData");
+                    "Ссылка на анализатор null в GetSpectrumData");
                 return null;
             }
-
-            SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                $"Getting spectrum data from analyzer: {_analyzer.GetHashCode():X8}");
 
             var spectrum = _analyzer.GetCurrentSpectrum();
 
             if (spectrum is null)
-                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Spectrum data is null");
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Данные спектра null");
 
             return spectrum;
         }
@@ -422,12 +417,12 @@ public sealed class Renderer : IDisposable
             _isAnalyzerDisposed = true;
             _shouldShowPlaceholder = true;
             SmartLogger.Log(LogLevel.Error, LogPrefix,
-                "Analyzer was disposed when attempting to get spectrum");
+                "Анализатор был утилизирован при попытке получить спектр");
             return null;
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error getting spectrum data: {ex.Message}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка получения данных спектра: {ex.Message}");
             return null;
         }
     }
@@ -456,7 +451,7 @@ public sealed class Renderer : IDisposable
     }
     #endregion
 
-    #region Configuration
+    #region Конфигурация
     public void SynchronizeWithController()
     {
         EnsureNotDisposed();
@@ -488,12 +483,12 @@ public sealed class Renderer : IDisposable
             if (needsUpdate)
             {
                 RequestRender();
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Visual parameters synchronized");
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Визуальные параметры синхронизированы");
             }
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Synchronization error: {ex.Message}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка синхронизации: {ex.Message}");
         }
     }
 
@@ -503,7 +498,7 @@ public sealed class Renderer : IDisposable
         if (_currentState.Style == style) return;
 
         SmartLogger.Log(LogLevel.Information, LogPrefix,
-            $"Updating render style from {_currentState.Style} to {style}");
+            $"Обновление стиля рендеринга с {_currentState.Style} на {style}");
         _currentState = _currentState with { Style = style };
 
         try
@@ -511,12 +506,12 @@ public sealed class Renderer : IDisposable
             var renderer = SpectrumRendererFactory.CreateRenderer(
                 style, _controller.IsOverlayActive, _currentState.Quality);
             SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                $"Renderer for style {style} created successfully");
+                $"Рендерер для стиля {style} успешно создан");
         }
         catch (Exception ex)
         {
             SmartLogger.Log(LogLevel.Error, LogPrefix,
-                $"Failed to create renderer for style {style}: {ex.Message}");
+                $"Не удалось создать рендерер для стиля {style}: {ex.Message}");
         }
 
         RequestRender();
@@ -526,12 +521,12 @@ public sealed class Renderer : IDisposable
     {
         EnsureNotDisposed();
         if (string.IsNullOrEmpty(styleName))
-            throw new ArgumentException("Style name cannot be null or empty", nameof(styleName));
+            throw new ArgumentException("Имя стиля не может быть null или пустым", nameof(styleName));
 
         if (styleName == _currentState.StyleName) return;
 
         SmartLogger.Log(LogLevel.Information, LogPrefix,
-            $"Updating spectrum style from {_currentState.StyleName} to {styleName}");
+            $"Обновление стиля спектра с {_currentState.StyleName} на {styleName}");
         _pendingStyleName = styleName;
         _pendingColor = color;
         _pendingShader = shader;
@@ -544,7 +539,7 @@ public sealed class Renderer : IDisposable
         if (_currentState.Quality == quality) return;
 
         SmartLogger.Log(LogLevel.Information, LogPrefix,
-            $"Updating render quality from {_currentState.Quality} to {quality}");
+            $"Обновление качества рендеринга с {_currentState.Quality} на {quality}");
         _currentState = _currentState with { Quality = quality };
         SpectrumRendererFactory.GlobalQuality = quality;
         RequestRender();
@@ -569,19 +564,19 @@ public sealed class Renderer : IDisposable
         if (width <= 0 || height <= 0)
             throw new ArgumentOutOfRangeException(
                 width <= 0 ? nameof(width) : nameof(height),
-                "Dimensions must be greater than zero");
+                "Размеры должны быть больше нуля");
 
         _projectionMatrix = Matrix4.CreateOrthographicOffCenter(0, width, height, 0, -1, 1);
         RequestRender();
     }
     #endregion
 
-    #region Utility Methods
+    #region Утилитарные методы
     private void EnsureNotDisposed()
     {
         if (_isDisposed)
             throw new ObjectDisposedException(
-                nameof(Renderer), "Cannot perform operation on a disposed renderer");
+                nameof(Renderer), "Нельзя выполнить операцию на утилизированном рендерере");
     }
 
     private void LogGpuInfo()
@@ -595,19 +590,19 @@ public sealed class Renderer : IDisposable
             if (string.IsNullOrEmpty(openGlVersion) ||
                 string.IsNullOrEmpty(vendor) ||
                 string.IsNullOrEmpty(renderer))
-                throw new InvalidOperationException("One or more GPU info strings are null or empty");
+                throw new InvalidOperationException("Одна или более строк информации о GPU null или пустые");
 
             SmartLogger.Log(LogLevel.Debug, LogPrefix,
                 $"OpenGL: {openGlVersion}, Vendor: {vendor}, Renderer: {renderer}");
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Error getting GPU info: {ex.Message}");
+            SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Ошибка получения информации о GPU: {ex.Message}");
         }
     }
     #endregion
 
-    #region IDisposable Implementation
+    #region Реализация IDisposable
     public void Dispose()
     {
         if (_isDisposed) return;
@@ -633,12 +628,12 @@ public sealed class Renderer : IDisposable
         }
         catch (Exception ex)
         {
-            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error during disposal: {ex.Message}");
+            SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка при утилизации: {ex.Message}");
         }
 
         _renderLock.Dispose();
         _disposalTokenSource.Dispose();
-        SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed");
+        SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer утилизирован");
     }
     #endregion
 }

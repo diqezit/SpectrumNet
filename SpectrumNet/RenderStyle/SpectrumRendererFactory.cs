@@ -92,8 +92,6 @@ namespace SpectrumNet
         {
             RenderQuality actualQuality = quality ?? _globalQuality;
 
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Creating renderer for style {style}, overlay: {isOverlayActive}, quality: {actualQuality}");
-
             if (_rendererCache.TryGetValue(style, out var cachedRenderer))
             {
                 cachedRenderer.Configure(isOverlayActive, actualQuality);

@@ -22,7 +22,11 @@ public enum SpectrumScale { Linear, Logarithmic, Mel, Bark, ERB }
 #endregion
 
 #region Interfaces
-
+public interface ISpectrumAnalyzer
+{
+    SpectralData? GetCurrentSpectrum();
+    void UpdateSettings(FftWindowType windowType, SpectrumScale scaleType);
+}
 public interface IFftProcessor
 {
     event EventHandler<FftEventArgs>? FftCalculated;
@@ -154,7 +158,7 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
     }
 }
 
-public sealed class SpectrumAnalyzer : ISpectralDataProvider, IDisposable, IComponent
+public sealed class SpectrumAnalyzer : ISpectralDataProvider, ISpectrumAnalyzer, IDisposable, IComponent
 {
     #region Fields
     private readonly IFftProcessor _fftProcessor;
