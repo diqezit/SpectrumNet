@@ -17,7 +17,10 @@
         WindowStyle="None"
         ResizeMode="CanResize"
         StateChanged="OnStateChanged"
-        MouseDoubleClick="OnWindowMouseDoubleClick">
+        MouseDoubleClick="OnWindowMouseDoubleClick"
+        KeyDown="MainWindow_KeyDown"
+        KeyUp="MainWindow_KeyUp"
+        MouseMove="Window_MouseMove">
 
     <!-- Ресурсы окна -->
     <Window.Resources>

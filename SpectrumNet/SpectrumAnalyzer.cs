@@ -21,42 +21,6 @@ public enum SpectrumScale { Linear, Logarithmic, Mel, Bark, ERB }
 
 #endregion
 
-#region Interfaces
-public interface ISpectrumAnalyzer
-{
-    SpectralData? GetCurrentSpectrum();
-    void UpdateSettings(FftWindowType windowType, SpectrumScale scaleType);
-}
-public interface IFftProcessor
-{
-    event EventHandler<FftEventArgs>? FftCalculated;
-    ValueTask AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate);
-    ValueTask DisposeAsync();
-    FftWindowType WindowType { get; set; }
-    void ResetFftState();
-}
-
-public interface IGainParametersProvider
-{
-    float AmplificationFactor { get; }
-    float MaxDbValue { get; }
-    float MinDbValue { get; }
-}
-
-public interface ISpectralDataProvider
-{
-    event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
-    SpectralData? GetCurrentSpectrum();
-    Task AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate, CancellationToken cancellationToken = default);
-}
-
-public interface ISpectrumConverter
-{
-    float[] ConvertToSpectrum(Complex[] fftResult, int sampleRate, SpectrumScale scale);
-}
-
-#endregion
-
 #region EventArgs and Data Models
 
 public class FftEventArgs : EventArgs

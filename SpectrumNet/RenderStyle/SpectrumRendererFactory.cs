@@ -5,10 +5,10 @@ namespace SpectrumNet
     public enum RenderStyle
     {
         Bars,
-        Raindrops,
 
         // Implementation for others renders temporary disabled to fix all issues and compabilites im main logic
 
+        //Raindrops,
         //AsciiDonut,
         //CircularBars,
         //CircularWave,
@@ -38,32 +38,6 @@ namespace SpectrumNet
         Low,
         Medium,
         High
-    }
-
-    public readonly struct Viewport
-    {
-        public readonly int X, Y, Width, Height;
-
-        public Viewport(int x, int y, int width, int height)
-        {
-            X = x;
-            Y = y;
-            Width = width;
-            Height = height;
-        }
-    }
-
-    public interface ISpectrumRenderer : IDisposable
-    {
-        void Initialize();
-
-        void Render(float[]? spectrum, Viewport viewport, float barWidth,
-                    float barSpacing, int barCount, ShaderProgram? shader,
-                    Action<Viewport> drawPerformanceInfo);
-
-        void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
-
-        RenderQuality Quality { get; set; }
     }
 
     public static class SpectrumRendererFactory
@@ -132,19 +106,17 @@ namespace SpectrumNet
 
         public static IEnumerable<ISpectrumRenderer> GetAllRenderers()
         {
-            lock (_lock) return _rendererCache.Values.ToList();
+            lock (_lock)
+                return _rendererCache.Values.ToList();
         }
 
         public static ISpectrumRenderer? GetCachedRenderer(RenderStyle style)
         {
             lock (_lock)
             {
-                bool exists = _rendererCache.TryGetValue(style, out var renderer);
-                if (!exists)
-                {
-                    SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Renderer for style {style} not found in cache");
-                }
-                return exists ? renderer : null;
+                return _rendererCache.TryGetValue(style, out var renderer)
+                    ? renderer
+                    : null;
             }
         }
 
@@ -152,10 +124,6 @@ namespace SpectrumNet
         {
             lock (_lock)
             {
-                SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                    $"Configuring all renderers - Overlay: {(isOverlayActive.HasValue ? isOverlayActive.Value.ToString() : "unchanged")}, " +
-                    $"Quality: {(quality.HasValue ? quality.Value.ToString() : "unchanged")}");
-
                 if (_rendererCache.Count == 0)
                 {
                     foreach (RenderStyle style in Enum.GetValues(typeof(RenderStyle)))
@@ -163,7 +131,6 @@ namespace SpectrumNet
                         try
                         {
                             CreateRenderer(style, isOverlayActive ?? false, quality ?? _globalQuality);
-                            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Pre-initialized renderer for {style}");
                         }
                         catch (Exception ex)
                         {
@@ -200,11 +167,11 @@ namespace SpectrumNet
 
         private static ISpectrumRenderer GetRendererInstance(RenderStyle style) => style switch
         {
-            RenderStyle.Bars => BarsRenderer.GetInstance(),
-            RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
+            RenderStyle.Bars => Bars3DRenderer.GetInstance(),
 
             // Implementation for others renders temporary disabled due to fix issues and compabilities 
 
+            //RenderStyle.Raindrops => RaindropsRenderer.GetInstance(),
             //RenderStyle.AsciiDonut => AsciiDonutRenderer.GetInstance(),
             //RenderStyle.CircularBars => CircularBarsRenderer.GetInstance(),
             //RenderStyle.CircularWave => CircularWaveRenderer.GetInstance(),
