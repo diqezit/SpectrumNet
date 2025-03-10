@@ -1,4 +1,6 @@
 ﻿#nullable enable
+using System.Windows.Media.Media3D;
+
 namespace SpectrumNet;
 
 /// <summary>
@@ -125,8 +127,6 @@ public sealed class Bars3DRenderer : ISpectrumRenderer, IDisposable, ICameraCont
 
     private Vector3 _cameraPositionOffset = Vector3.Zero;
     private Vector2 _cameraRotationOffset = Vector2.Zero;
-    private float _cameraTiltAngle = 10f;
-    private float _cameraHeightFactor = 0.8f;
 
     public Vector3 CameraPositionOffset
     {
@@ -152,26 +152,9 @@ public sealed class Bars3DRenderer : ISpectrumRenderer, IDisposable, ICameraCont
         }
     }
 
-    public float CameraTiltAngle
-    {
-        get => _cameraTiltAngle;
-        set
-        {
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Setting CameraTiltAngle from {_cameraTiltAngle} to {value}");
-            _cameraTiltAngle = Math.Clamp(value, CameraLimits.MinTilt, CameraLimits.MaxTilt);
-        }
-    }
-
-    public float CameraHeightFactor
-    {
-        get => _cameraHeightFactor;
-        set
-        {
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Setting CameraHeightFactor from {_cameraHeightFactor} to {value}");
-            _cameraHeightFactor = Math.Clamp(value, CameraLimits.MinHeight, CameraLimits.MaxHeight);
-        }
-    }
-
+    public Vector3 CameraPosition { get; set; } = new Vector3(0, 0, 400);
+    public Vector3 CameraForward { get; set; } = new Vector3(0, 0, -1);
+    public Vector3 CameraUp { get; set; } = new Vector3(0, 1, 0);
     #endregion
 
     #region Spectrum Processing & Render Settings
@@ -427,43 +410,17 @@ public sealed class Bars3DRenderer : ISpectrumRenderer, IDisposable, ICameraCont
     /// </summary>
     private (Matrix4 Projection, Matrix4 ModelView) CalculateRenderMatrices(Viewport viewport)
     {
-        // Проекционная матрица
         Matrix4 projectionMatrix = Matrix4.CreatePerspectiveFieldOfView(
             MathHelper.DegreesToRadians(SceneSettings.DefaultFovDegrees),
             viewport.Width / viewport.Height,
             0.1f,
             1000f);
 
-        // 1. Вычисляем базовую позицию камеры с применением CameraHeightFactor
-        float cameraHeight = viewport.Height * CameraHeightFactor;
-        float baseCameraZ = cameraHeight / MathF.Tan(MathHelper.DegreesToRadians(SceneSettings.DefaultPerspectiveAngle));
-        Vector3 baseCameraPos = new Vector3(viewport.Width / 2, -cameraHeight, baseCameraZ);
-
-        // 2. Применяем пользовательское смещение позиции
-        Vector3 cameraPosition = baseCameraPos + CameraPositionOffset;
-
-        // 3. Применяем базовый угол наклона и пользовательские вращения
-        float finalRotationY = _rotationAngle + CameraRotationOffset.X * 2f;
-        float finalTiltX = CameraTiltAngle + CameraRotationOffset.Y * 1.5f;
-
-        // Ограничиваем наклон камеры
-        finalTiltX = Math.Clamp(finalTiltX, CameraLimits.MinTilt, CameraLimits.MaxTilt);
-
-        // 4. Создаем матрицы вращения
-        Matrix4 tiltMatrix = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(finalTiltX));
-        Matrix4 rotationMatrix = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(finalRotationY));
-        Matrix4 modelMatrix = tiltMatrix * rotationMatrix;
-
-        // 5. Матрица вида - добавляем смещение для точки, на которую смотрит камера
-        Vector3 lookAtOffset = new Vector3(
-            CameraRotationOffset.X * 2f,
-            CameraRotationOffset.Y * 2f,
-            0);
-        Vector3 lookAt = new Vector3(viewport.Width / 2, viewport.Height / 2, 0) + lookAtOffset;
-        Vector3 up = Vector3.UnitY;
+        Vector3 cameraPosition = CameraPosition;
+        Vector3 lookAt = cameraPosition + CameraForward;
+        Vector3 up = CameraUp;
         Matrix4 viewMatrix = Matrix4.LookAt(cameraPosition, lookAt, up);
-
-        // Итоговая матрица модель-вид
+        Matrix4 modelMatrix = Matrix4.Identity; 
         Matrix4 modelViewMatrix = modelMatrix * viewMatrix;
 
         return (projectionMatrix, modelViewMatrix);
@@ -547,6 +504,8 @@ public sealed class Bars3DRenderer : ISpectrumRenderer, IDisposable, ICameraCont
         var scaledSpectrum = ScaleSpectrum(spectrum, targetCount, spectrum.Length);
         return SmoothSpectrum(scaledSpectrum, targetCount);
     }
+
+    #warning Нужно исправить начальную Y-позицию
 
     /// <summary>
     /// Рендерит трехмерные бары спектра
@@ -684,6 +643,9 @@ public sealed class Bars3DRenderer : ISpectrumRenderer, IDisposable, ICameraCont
     private record BarGeometryData(
         float[] Front, float[] Back, float[] Top,
         float[] Bottom, float[] Left, float[] Right);
+
+
+    #warning Нужно изменить Y-координаты в методе CreateBarGeometryData. Сейчас основание баров находится внизу (y = canvasHeight - barHeight), а верх — у canvasHeight
 
     private BarGeometryData CreateBarGeometryData(
         float x, float y, float z, float barWidth, float barHeight, float canvasHeight, float depth)

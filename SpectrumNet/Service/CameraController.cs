@@ -13,11 +13,22 @@ namespace SpectrumNet
     public class CameraController
     {
         private const string LogPrefix = "[CameraController] ";
-        private const float MouseSensitivity = 0.5f, MoveSpeed = 20f;
+        private const float MouseSensitivity = 0.25f; // Чувствительность мышки
+        private const float MoveSpeed = 250f; // Скорость камеры
+
         private readonly HashSet<Key> _pressedKeys = new();
-        private Point _lastMousePosition;
         private readonly Renderer _renderer;
+        private readonly Stopwatch _stopwatch = new();
+
         private ICameraControllable? _currentCamera;
+        private Point _lastMousePosition;
+        private Vector3 _cameraPosition = new(0, 0, 400);
+        private Vector3 _forward;
+        private Vector3 _right;
+        private Vector3 _up = new(0, 1, 0);
+        private float _yaw = 0f;
+        private float _pitch = 0f;
+
         public ICameraControllable? CurrentCamera => _currentCamera;
 
         public CameraController(Renderer renderer)
@@ -30,16 +41,8 @@ namespace SpectrumNet
                     $"Инициализирован для {_renderer.Controller.SelectedDrawingType}, камера активна: {_currentCamera != null}");
                 if (_currentCamera != null)
                 {
-                    _currentCamera.CameraRotationOffset = new Vector2(0.1f, 0.1f);
+                    _currentCamera.CameraPosition = new Vector3(0, 0, 400);
                     _renderer.RequestRender();
-                    Task.Delay(100).ContinueWith(_ =>
-                    {
-                        if (_currentCamera != null)
-                        {
-                            _currentCamera.CameraRotationOffset = new Vector2(0.2f, 0.2f);
-                            _renderer.RequestRender();
-                        }
-                    }, TaskScheduler.FromCurrentSynchronizationContext());
                 }
             }
             catch (Exception ex)
@@ -50,23 +53,13 @@ namespace SpectrumNet
 
         public void UpdateActiveCamera(RenderStyle style)
         {
-            // Сохраняем предыдущие настройки (если есть)
-            var prevPos = _currentCamera?.CameraPositionOffset ?? Vector3.Zero;
-            var prevRot = _currentCamera?.CameraRotationOffset ?? Vector2.Zero;
-            var prevTilt = _currentCamera?.CameraTiltAngle ?? 10f;
-            var prevHeight = _currentCamera?.CameraHeightFactor ?? 0.8f;
-
             var renderer = SpectrumRendererFactory.GetCachedRenderer(style);
             if (renderer is ICameraControllable cam)
             {
                 _currentCamera = cam;
-                if (prevPos != Vector3.Zero || prevRot != Vector2.Zero)
-                {
-                    cam.CameraPositionOffset = prevPos;
-                    cam.CameraRotationOffset = prevRot;
-                    cam.CameraTiltAngle = prevTilt;
-                    cam.CameraHeightFactor = prevHeight;
-                }
+                _currentCamera.CameraPosition = _cameraPosition;
+                _currentCamera.CameraForward = _forward;
+                _currentCamera.CameraUp = _up;
                 _renderer.RequestRender();
             }
             else
@@ -82,7 +75,6 @@ namespace SpectrumNet
             if (e.Key is Key.W or Key.A or Key.S or Key.D)
             {
                 _pressedKeys.Add(e.Key);
-                UpdateCameraPosition();
                 e.Handled = true;
             }
         }
@@ -102,51 +94,86 @@ namespace SpectrumNet
             Point currentPos = e.GetPosition(null);
             if (e.LeftButton == MouseButtonState.Pressed)
             {
-                var delta = currentPos - _lastMousePosition;
-                var rotationDelta = new Vector2((float)delta.X * MouseSensitivity, (float)delta.Y * MouseSensitivity);
-                Vector2 currentRotation = _currentCamera.CameraRotationOffset;
-                var newRotation = currentRotation + rotationDelta;
-                _currentCamera.CameraRotationOffset = newRotation;
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Mouse drag: {currentRotation} -> {newRotation}");
+                var deltaX = (float)(currentPos.X - _lastMousePosition.X) * MouseSensitivity;
+                var deltaY = (float)(currentPos.Y - _lastMousePosition.Y) * MouseSensitivity;
+
+                _yaw += deltaX;
+                _pitch -= deltaY;
+                _pitch = Math.Clamp(_pitch, -89f, 89f);
+
+                UpdateCameraOrientation();
                 _renderer.RequestRender();
             }
             _lastMousePosition = currentPos;
         }
 
-        private void UpdateCameraPosition()
+        private void UpdateCameraOrientation()
+        {
+            _forward.X = (float)(Math.Cos(MathHelper.DegreesToRadians(_yaw)) * Math.Cos(MathHelper.DegreesToRadians(_pitch)));
+            _forward.Y = (float)Math.Sin(MathHelper.DegreesToRadians(_pitch));
+            _forward.Z = (float)(Math.Sin(MathHelper.DegreesToRadians(_yaw)) * Math.Cos(MathHelper.DegreesToRadians(_pitch)));
+            _forward = Vector3.Normalize(_forward);
+            _right = Vector3.Normalize(Vector3.Cross(_forward, _up));
+
+            if (_currentCamera != null)
+            {
+                _currentCamera.CameraForward = _forward;
+                _currentCamera.CameraUp = _up;
+            }
+        }
+
+        private void UpdateCameraPosition(float deltaTime)
         {
             if (_currentCamera == null) return;
-            Vector3 offset = Vector3.Zero;
-            if (_pressedKeys.Contains(Key.W)) offset.Z -= MoveSpeed;
-            if (_pressedKeys.Contains(Key.S)) offset.Z += MoveSpeed;
-            if (_pressedKeys.Contains(Key.A)) offset.X -= MoveSpeed;
-            if (_pressedKeys.Contains(Key.D)) offset.X += MoveSpeed;
-            var newPos = _currentCamera.CameraPositionOffset + offset;
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Camera position: {_currentCamera.CameraPositionOffset} -> {newPos}");
-            _currentCamera.CameraPositionOffset = newPos;
-            _renderer.RequestRender();
+
+            Vector3 moveDirection = Vector3.Zero;
+            if (_pressedKeys.Contains(Key.W)) moveDirection += _forward;
+            if (_pressedKeys.Contains(Key.S)) moveDirection -= _forward;
+            if (_pressedKeys.Contains(Key.A)) moveDirection -= _right;
+            if (_pressedKeys.Contains(Key.D)) moveDirection += _right;
+
+            if (moveDirection != Vector3.Zero)
+            {
+                moveDirection = Vector3.Normalize(moveDirection);
+                _cameraPosition += moveDirection * MoveSpeed * deltaTime;
+                _currentCamera.CameraPosition = _cameraPosition;
+                _currentCamera.CameraForward = _forward;
+                _currentCamera.CameraUp = _up;
+                _renderer.RequestRender();
+            }
+        }
+
+        public void Update()
+        {
+            if (_stopwatch.IsRunning)
+            {
+                float deltaTime = (float)_stopwatch.Elapsed.TotalSeconds;
+                _stopwatch.Restart();
+                UpdateCameraPosition(deltaTime);
+            }
+            else
+            {
+                _stopwatch.Start();
+            }
         }
 
         public void HandleMouseWheel(MouseWheelEventArgs e)
         {
             if (_currentCamera == null) return;
-            const float zoomSpeed = 20f;
+            const float zoomSpeed = 50f;
             float zoomDelta = e.Delta > 0 ? -zoomSpeed : zoomSpeed;
-            var newPos = _currentCamera.CameraPositionOffset + new Vector3(0, 0, zoomDelta);
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Zoom: {_currentCamera.CameraPositionOffset.Z} -> {newPos.Z}");
-            _currentCamera.CameraPositionOffset = newPos;
+            _cameraPosition += _forward * zoomDelta * 0.1f;
             _renderer.RequestRender();
         }
 
         public void ResetCamera()
         {
             if (_currentCamera == null) return;
-            _currentCamera.CameraPositionOffset = Vector3.Zero;
-            _currentCamera.CameraRotationOffset = Vector2.Zero;
-            _currentCamera.CameraTiltAngle = 10f;
-            _currentCamera.CameraHeightFactor = 0.8f;
+            _cameraPosition = new Vector3(0, 0, 400);
+            _yaw = 0f;
+            _pitch = 0f;
+            UpdateCameraOrientation();
             _pressedKeys.Clear();
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Camera reset to default position");
             _renderer.RequestRender();
         }
 
@@ -157,14 +184,16 @@ namespace SpectrumNet
                 UpdateActiveCamera(_renderer.Controller.SelectedDrawingType);
                 if (_currentCamera == null) return;
             }
-            var originalRotation = _currentCamera.CameraRotationOffset;
-            _currentCamera.CameraRotationOffset = originalRotation + new Vector2(0.5f, 0.5f);
+
+            var originalPosition = _currentCamera.CameraPosition;
+            _currentCamera.CameraPosition += new Vector3(0, 0, 50);
             _renderer.RequestRender();
+
             Task.Delay(100).ContinueWith(_ =>
             {
                 if (_currentCamera != null)
                 {
-                    _currentCamera.CameraRotationOffset = originalRotation;
+                    _currentCamera.CameraPosition = originalPosition;
                     _renderer.RequestRender();
                 }
             }, TaskScheduler.FromCurrentSynchronizationContext());
@@ -177,9 +206,11 @@ namespace SpectrumNet
     public sealed class VisualizationManager : IDisposable
     {
         private const string LogPrefix = "[VisualizationManager] ";
+
         private readonly IAudioVisualizationController _controller;
         private readonly GLWpfControl _renderElement;
         private readonly IOpenGLService _glService;
+
         private Renderer? _renderer;
         private CameraController? _cameraController;
         private SpectrumAnalyzer? _analyzer;
@@ -238,6 +269,7 @@ namespace SpectrumNet
                     var orig = cam.CameraRotationOffset;
                     cam.CameraRotationOffset = orig + new Vector2(0.5f, 0.5f);
                     _renderer?.RequestRender();
+
                     Task.Delay(100).ContinueWith(_ =>
                     {
                         if (!_disposed)
@@ -246,6 +278,7 @@ namespace SpectrumNet
                             _renderer?.RequestRender();
                         }
                     }, TaskScheduler.FromCurrentSynchronizationContext());
+
                     SmartLogger.Log(LogLevel.Information, LogPrefix, $"Камера активирована для {_controller.SelectedDrawingType}");
                 }
             }
@@ -259,22 +292,7 @@ namespace SpectrumNet
         {
             try
             {
-                var curCamera = _cameraController?.CurrentCamera;
-                var currentPos = curCamera?.CameraPositionOffset ?? Vector3.Zero;
-                var currentRot = curCamera?.CameraRotationOffset ?? Vector2.Zero;
-                var currentTilt = curCamera?.CameraTiltAngle ?? 10f;
-                var currentHeight = curCamera?.CameraHeightFactor ?? 0.8f;
-
                 _cameraController?.UpdateActiveCamera(style);
-                if (_cameraController?.CurrentCamera != null &&
-                    (currentPos != Vector3.Zero || currentRot != Vector2.Zero))
-                {
-                    var cam = _cameraController.CurrentCamera;
-                    cam.CameraPositionOffset = currentPos;
-                    cam.CameraRotationOffset = currentRot;
-                    cam.CameraTiltAngle = currentTilt;
-                    cam.CameraHeightFactor = currentHeight;
-                }
                 _renderer?.RequestRender();
                 _renderElement?.InvalidateVisual();
             }
@@ -301,6 +319,7 @@ namespace SpectrumNet
         public void RequestRender()
         {
             if (_disposed) return;
+            _cameraController?.Update();
             _renderer?.RequestRender();
             _renderElement?.InvalidateVisual();
         }

@@ -57,12 +57,15 @@ public interface IAudioDeviceService : IDisposable
     void UnregisterEndpointNotificationCallback(IMMNotificationClient client);
 }
 
+/// <summary>
+/// Интерфейс для объектов с управляемой камерой
+/// </summary>
 public interface ICameraControllable
 {
-    Vector3 CameraPositionOffset { get; set; }
+    Vector3 CameraPosition { get; set; }
+    Vector3 CameraForward { get; set; }
+    Vector3 CameraUp { get; set; }
     Vector2 CameraRotationOffset { get; set; }
-    float CameraTiltAngle { get; set; }
-    float CameraHeightFactor { get; set; }
 }
 
 public interface IFftProcessor

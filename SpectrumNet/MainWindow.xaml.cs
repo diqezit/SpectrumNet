@@ -754,7 +754,11 @@ namespace SpectrumNet
 
         private void OnRendering(object? sender, EventArgs? e)
         {
-            try { _renderElement?.InvalidateVisual(); }
+            try
+            {
+                _visualizationManager?.CameraController?.Update();
+                // _renderElement?.InvalidateVisual();
+            }
             catch (Exception ex)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error updating visualization: {ex}");
