@@ -210,7 +210,29 @@ namespace SpectrumNet
     public class Settings : ISettings, INotifyPropertyChanged
     {
         #region Константы
-        private const string LogPrefix = "[Settings] ";
+        private const string LogPrefix = "Settings";
+        #endregion
+
+        #region Singleton и конструктор
+        private static readonly Lazy<Settings> _instance = new(() => new Settings());
+        public static Settings Instance => _instance.Value;
+
+        public Settings()
+        {
+            SmartLogger.Safe(() => ResetToDefaults(), "Settings", "Error initializing settings");
+        }
+        #endregion
+
+        #region INotifyPropertyChanged
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
+        {
+            if (Equals(field, value)) return false;
+            field = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            return true;
+        }
         #endregion
 
         #region Поля для рендереров
@@ -225,7 +247,7 @@ namespace SpectrumNet
             _overlayOffsetMultiplier, _overlayHeightMultiplier,
             _maxZDepth, _minZDepth;
 
-        #region Поля для AsciiDonutRenderer
+        // Поля для AsciiDonutRenderer
         private int
             _donutSegments,
             _donutLowQualitySkipFactor,
@@ -258,8 +280,7 @@ namespace SpectrumNet
             _donutRotationIntensityMax,
             _donutRotationIntensitySmoothingFactor;
         private string
-            _donutAsciiChars;
-        #endregion
+            _donutAsciiChars = string.Empty;
 
         // Поля для RaindropsRenderer
         private int _maxRaindrops;
@@ -288,41 +309,6 @@ namespace SpectrumNet
         private float
             _uiMinDbLevel, _uiMaxDbLevel, _uiAmplificationFactor;
         private string _selectedPalette = DefaultSettings.SelectedPalette;
-
-        [JsonIgnore]
-        private PropertyChangedEventHandler? _propertyChanged;
-
-        #endregion
-
-        #region Singleton и конструктор
-        private static readonly Lazy<Settings> _instance = new(() => new Settings());
-        public static Settings Instance => _instance.Value;
-
-        public Settings()
-        {
-            ResetToDefaults();
-        }
-        #endregion
-
-        #region INotifyPropertyChanged
-        public event PropertyChangedEventHandler? PropertyChanged
-        {
-            add { _propertyChanged += value; }
-            remove { _propertyChanged -= value; }
-        }
-
-        protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
-        {
-            if (Equals(field, value)) return false;
-            field = value;
-            OnPropertyChanged(propertyName);
-            return true;
-        }
-
-        protected virtual void OnPropertyChanged(string propertyName)
-        {
-            _propertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        }
         #endregion
 
         #region Свойства для рендереров
@@ -774,15 +760,16 @@ namespace SpectrumNet
             get => _isDarkTheme;
             set => SetProperty(ref _isDarkTheme, value);
         }
-
         #endregion
 
-        #region Базовые методы
+        #region Методы
         /// <summary>
         /// Сбрасывает все настройки на значения по умолчанию
         /// </summary>
         public void ResetToDefaults()
         {
+            SmartLogger.Safe(() =>
+            {
             // Particle renderer settings
             MaxParticles = DefaultSettings.MaxParticles;
             SpawnThresholdOverlay = DefaultSettings.SpawnThresholdOverlay;
@@ -826,46 +813,47 @@ namespace SpectrumNet
             DonutBaseRotationIntensity = DefaultSettings.DonutRenderer.BaseRotationIntensity;
             DonutSpectrumIntensityScale = DefaultSettings.DonutRenderer.SpectrumIntensityScale;
             DonutSmoothingFactorSpectrum = DefaultSettings.DonutRenderer.SmoothingFactorSpectrum;
-            DonutSmoothingFactorRotation = DefaultSettings.DonutRenderer.SmoothingFactorRotation;
-            DonutMaxRotationAngleChange = DefaultSettings.DonutRenderer.MaxRotationAngleChange;
-            DonutRotationSpeedX = DefaultSettings.DonutRenderer.RotationSpeedX;
-            DonutRotationSpeedY = DefaultSettings.DonutRenderer.RotationSpeedY;
-            DonutRotationSpeedZ = DefaultSettings.DonutRenderer.RotationSpeedZ;
-            DonutBarCountScaleFactorDonutScale = DefaultSettings.DonutRenderer.BarCountScaleFactorDonutScale;
-            DonutBarCountScaleFactorAlpha = DefaultSettings.DonutRenderer.BarCountScaleFactorAlpha;
-            DonutBaseAlphaIntensity = DefaultSettings.DonutRenderer.BaseAlphaIntensity;
-            DonutMaxSpectrumAlphaScale = DefaultSettings.DonutRenderer.MaxSpectrumAlphaScale;
-            DonutMinAlphaValue = DefaultSettings.DonutRenderer.MinAlphaValue;
-            DonutAlphaRange = DefaultSettings.DonutRenderer.AlphaRange;
-            DonutRotationIntensityMin = DefaultSettings.DonutRenderer.RotationIntensityMin;
-            DonutRotationIntensityMax = DefaultSettings.DonutRenderer.RotationIntensityMax;
-            DonutRotationIntensitySmoothingFactor = DefaultSettings.DonutRenderer.RotationIntensitySmoothingFactor;
-            DonutLowQualitySkipFactor = DefaultSettings.DonutRenderer.LowQualitySkipFactor;
-            DonutMediumQualitySkipFactor = DefaultSettings.DonutRenderer.MediumQualitySkipFactor;
-            DonutHighQualitySkipFactor = DefaultSettings.DonutRenderer.HighQualitySkipFactor;
-            DonutAsciiChars = DefaultSettings.DonutRenderer.AsciiChars;
+                DonutSmoothingFactorRotation = DefaultSettings.DonutRenderer.SmoothingFactorRotation;
+                DonutMaxRotationAngleChange = DefaultSettings.DonutRenderer.MaxRotationAngleChange;
+                DonutRotationSpeedX = DefaultSettings.DonutRenderer.RotationSpeedX;
+                DonutRotationSpeedY = DefaultSettings.DonutRenderer.RotationSpeedY;
+                DonutRotationSpeedZ = DefaultSettings.DonutRenderer.RotationSpeedZ;
+                DonutBarCountScaleFactorDonutScale = DefaultSettings.DonutRenderer.BarCountScaleFactorDonutScale;
+                DonutBarCountScaleFactorAlpha = DefaultSettings.DonutRenderer.BarCountScaleFactorAlpha;
+                DonutBaseAlphaIntensity = DefaultSettings.DonutRenderer.BaseAlphaIntensity;
+                DonutMaxSpectrumAlphaScale = DefaultSettings.DonutRenderer.MaxSpectrumAlphaScale;
+                DonutMinAlphaValue = DefaultSettings.DonutRenderer.MinAlphaValue;
+                DonutAlphaRange = DefaultSettings.DonutRenderer.AlphaRange;
+                DonutRotationIntensityMin = DefaultSettings.DonutRenderer.RotationIntensityMin;
+                DonutRotationIntensityMax = DefaultSettings.DonutRenderer.RotationIntensityMax;
+                DonutRotationIntensitySmoothingFactor = DefaultSettings.DonutRenderer.RotationIntensitySmoothingFactor;
+                DonutLowQualitySkipFactor = DefaultSettings.DonutRenderer.LowQualitySkipFactor;
+                DonutMediumQualitySkipFactor = DefaultSettings.DonutRenderer.MediumQualitySkipFactor;
+                DonutHighQualitySkipFactor = DefaultSettings.DonutRenderer.HighQualitySkipFactor;
+                DonutAsciiChars = DefaultSettings.DonutRenderer.AsciiChars;
 
-            // UI settings
-            WindowLeft = DefaultSettings.WindowLeft;
-            WindowTop = DefaultSettings.WindowTop;
-            WindowWidth = DefaultSettings.WindowWidth;
-            WindowHeight = DefaultSettings.WindowHeight;
-            WindowState = DefaultSettings.WindowState;
-            IsControlPanelVisible = DefaultSettings.IsControlPanelVisible;
-            SelectedRenderStyle = DefaultSettings.SelectedRenderStyle;
-            SelectedFftWindowType = DefaultSettings.SelectedFftWindowType;
-            SelectedScaleType = DefaultSettings.SelectedScaleType;
-            SelectedRenderQuality = DefaultSettings.SelectedRenderQuality;
-            UIBarCount = DefaultSettings.UIBarCount;
-            UIBarSpacing = DefaultSettings.UIBarSpacing;
-            SelectedPalette = DefaultSettings.SelectedPalette;
-            IsOverlayTopmost = DefaultSettings.IsOverlayTopmost;
-            UIMinDbLevel = DefaultSettings.UIMinDbLevel;
-            UIMaxDbLevel = DefaultSettings.UIMaxDbLevel;
-            UIAmplificationFactor = DefaultSettings.UIAmplificationFactor;
-            IsDarkTheme = DefaultSettings.IsDarkTheme;
+                // UI settings
+                WindowLeft = DefaultSettings.WindowLeft;
+                WindowTop = DefaultSettings.WindowTop;
+                WindowWidth = DefaultSettings.WindowWidth;
+                WindowHeight = DefaultSettings.WindowHeight;
+                WindowState = DefaultSettings.WindowState;
+                IsControlPanelVisible = DefaultSettings.IsControlPanelVisible;
+                SelectedRenderStyle = DefaultSettings.SelectedRenderStyle;
+                SelectedFftWindowType = DefaultSettings.SelectedFftWindowType;
+                SelectedScaleType = DefaultSettings.SelectedScaleType;
+                SelectedRenderQuality = DefaultSettings.SelectedRenderQuality;
+                UIBarCount = DefaultSettings.UIBarCount;
+                UIBarSpacing = DefaultSettings.UIBarSpacing;
+                SelectedPalette = DefaultSettings.SelectedPalette;
+                IsOverlayTopmost = DefaultSettings.IsOverlayTopmost;
+                UIMinDbLevel = DefaultSettings.UIMinDbLevel;
+                UIMaxDbLevel = DefaultSettings.UIMaxDbLevel;
+                UIAmplificationFactor = DefaultSettings.UIAmplificationFactor;
+                IsDarkTheme = DefaultSettings.IsDarkTheme;
 
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
+            }, "Settings", "Error resetting settings to defaults");
         }
         #endregion
     }

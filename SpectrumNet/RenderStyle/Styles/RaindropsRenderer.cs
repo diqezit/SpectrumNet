@@ -1,809 +1,538 @@
 ﻿#nullable enable
-
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Numerics; // для Vector<T>, если используется
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using OpenTK.Graphics.OpenGL4;
-using OpenTK.Mathematics;
-
 namespace SpectrumNet
 {
-    public sealed unsafe class RaindropsRenderer : ISpectrumRenderer, IDisposable
+    public sealed class RainParticleRenderer : BaseSpectrumRenderer
     {
-        #region Constants
-        private static class Constants
+        private static RainParticleRenderer? _instance;
+        private readonly SemaphoreSlim _particleSemaphore = new(1, 1);
+
+        #region Configurable Constants
+
+        private record ParticleSettings
         {
-            // Render Settings
-            public const float TARGET_DELTA_TIME = 0.016f;
-            public const float SMOOTH_FACTOR = 0.2f;
-            public const float TRAIL_LENGTH_MULTIPLIER = 0.15f;
-            public const float TRAIL_LENGTH_SIZE_FACTOR = 5f;
-            public const float TRAIL_STROKE_MULTIPLIER = 0.6f;
-            public const float TRAIL_OPACITY_MULTIPLIER = 150f;
-            public const float TRAIL_INTENSITY_THRESHOLD = 0.3f;
-
-            // Simulation Settings
-            public const int INITIAL_DROP_COUNT = 30;
-            public const float GRAVITY = 9.8f;
-            public const float LIFETIME_DECAY = 0.4f;
-            public const float SPLASH_REBOUND = 0.5f;
-            public const float SPLASH_VELOCITY_THRESHOLD = 1.0f;
-            public const float SPAWN_INTERVAL = 0.05f;
-            public const float FALLSPEED_THRESHOLD_MULTIPLIER = 1.5f;
-            public const float RAINDROP_SIZE_THRESHOLD_MULTIPLIER = 0.9f;
-            public const float RAINDROP_SIZE_HIGHLIGHT_THRESHOLD = 0.8f;
-            public const float INTENSITY_HIGHLIGHT_THRESHOLD = 0.4f;
-            public const float HIGHLIGHT_SIZE_MULTIPLIER = 0.4f;
-            public const float HIGHLIGHT_OFFSET_MULTIPLIER = 0.2f;
-
-            // Particle Creation Settings
-            public const int SPLASH_PARTICLE_COUNT_MIN = 3;
-            public const int SPLASH_PARTICLE_COUNT_MAX = 8;
-            public const float PARTICLE_VELOCITY_BASE_MULTIPLIER = 0.7f;
-            public const float PARTICLE_VELOCITY_INTENSITY_MULTIPLIER = 0.3f;
-            public const float SPLASH_UPWARD_BASE_MULTIPLIER = 0.8f;
-            public const float SPLASH_UPWARD_INTENSITY_MULTIPLIER = 0.2f;
-            public const float SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER = 0.7f;
-            public const float SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER = 0.6f;
-            public const float SPLASH_PARTICLE_INTENSITY_MULTIPLIER = 0.5f;
-            public const float SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET = 0.8f;
-
-            // Logger Settings
-            public const string LOGGER_PREFIX = "[RaindropsRenderer] ";
+            public const float MinSize = 2f;
+            public const float MaxSize = 10f;
+            public const float FallSpeed = 5f;
+            public const float AlphaMultiplier = 1.2f;
+            public const float WindInfluence = 0.3f;
+            public const float SplashSizeMultiplier = 1.5f;
         }
+
+        private record SceneSettings
+        {
+            public const float DefaultDepth = 20f;
+            public const float DefaultFovDegrees = 60f;
+            public const float DefaultRainHeight = 100f;
+            public const float DefaultParticleDensity = 0.05f;
+        }
+
+        private record LightingSettings
+        {
+            public const float DefaultRadius = 200f;
+            public const float DefaultBaseY = -150f;
+            public const float DefaultBaseZ = 100f;
+            public const float DefaultOscillationDivisor = 2f;
+        }
+
+        private record ViewSettings
+        {
+            public const float DefaultBaseY = -200f;
+            public const float DefaultBaseZ = 300f;
+            public const float DefaultOscillationAmplitude = 30f;
+            public const float DefaultOscillationFrequency = 0.3f;
+        }
+
+        private record GlowSettings
+        {
+            public const float EffectAlpha = 0.3f;
+            public const float ExtraSize = 3.0f;
+            public const float BlurRadius = 4.0f;
+        }
+
+        private float _lightRadius = LightingSettings.DefaultRadius;
+        private float _lightBaseY = LightingSettings.DefaultBaseY;
+        private float _lightBaseZ = LightingSettings.DefaultBaseZ;
+        private float _lightOscillationDivisor = LightingSettings.DefaultOscillationDivisor;
+
+        private float _viewBaseY = ViewSettings.DefaultBaseY;
+        private float _viewBaseZ = ViewSettings.DefaultBaseZ;
+        private float _viewOscillationAmplitude = ViewSettings.DefaultOscillationAmplitude;
+        private float _viewOscillationFrequency = ViewSettings.DefaultOscillationFrequency;
+
+        private float _depth = SceneSettings.DefaultDepth;
+        private float _rainHeight = SceneSettings.DefaultRainHeight;
+
         #endregion
 
-        #region Nested Types
-        private readonly struct RenderCache
+        #region Shader Management
+
+        private record ShaderCollection
         {
-            public readonly float Width, Height, LowerBound, UpperBound, StepSize;
-            public RenderCache(float width, float height, bool isOverlay)
-            {
-                Width = width;
-                Height = height;
-                LowerBound = isOverlay ? height * Settings.Instance.OverlayHeightMultiplier : height;
-                UpperBound = 0f;
-                StepSize = width / Settings.Instance.MaxRaindrops;
-            }
+            public ShaderProgram? Particle { get; set; }
+            public ShaderProgram? Splash { get; set; }
+            public ShaderProgram? Glow { get; set; }
+            public ShaderProgram? Bloom { get; set; }
+            public ShaderProgram? Scene { get; set; }
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        private readonly struct Raindrop
+        private ShaderCollection _shaders = new();
+
+        #endregion
+
+        #region Particle Management
+
+        private record Particle
         {
-            public readonly float X, Y, FallSpeed, Size, Intensity;
-            public readonly int SpectrumIndex;
-            public Raindrop(float x, float y, float fallSpeed, float size, float intensity, int spectrumIndex) =>
-                (X, Y, FallSpeed, Size, Intensity, SpectrumIndex) = (x, y, fallSpeed, size, intensity, spectrumIndex);
-            public Raindrop WithNewY(float newY) => new Raindrop(X, newY, FallSpeed, Size, Intensity, SpectrumIndex);
+            public Vector3 Position { get; set; }
+            public float Size { get; set; }
+            public float VelocityY { get; set; }
+            public float Alpha { get; set; }
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct Particle
+        private List<Particle> _particles = new();
+
+        #endregion
+
+        private RainParticleRenderer() : base("[RainParticleRenderer] ") { }
+
+        public static RainParticleRenderer GetInstance() => _instance ??= new RainParticleRenderer();
+
+        #region Spectrum Utility Methods (Specialized for Rain)
+
+        private float[] ScaleSpectrumForRain(float[]? spectrum, int targetCount, int? sourceLength = null)
         {
-            public float X, Y, VelocityX, VelocityY, Lifetime, Size;
-            public bool IsSplash;
-            public Particle(float x, float y, float velocityX, float velocityY, float size, bool isSplash) =>
-                (X, Y, VelocityX, VelocityY, Lifetime, Size, IsSplash) = (x, y, velocityX, velocityY, 1.0f, size, isSplash);
-            public bool Update(float deltaTime, float lowerBound)
-            {
-                X += VelocityX * deltaTime;
-                Y += VelocityY * deltaTime;
-                VelocityY += deltaTime * Constants.GRAVITY;
-                Lifetime -= deltaTime * Constants.LIFETIME_DECAY;
-                if (IsSplash && Y >= lowerBound)
+            if (spectrum == null || spectrum.Length == 0)
+                return new float[targetCount];
+
+            int actualSourceLength = sourceLength ?? spectrum.Length;
+
+            return SmartLogger.Safe(() => {
+                float[] scaledSpectrum = new float[targetCount];
+                float blockSize = (float)actualSourceLength / targetCount;
+
+                for (int i = 0; i < targetCount; i++)
                 {
-                    Y = lowerBound;
-                    VelocityY = -VelocityY * Constants.SPLASH_REBOUND;
-                    if (Math.Abs(VelocityY) < Constants.SPLASH_VELOCITY_THRESHOLD)
-                        VelocityY = 0;
-                }
-                return Lifetime > 0;
-            }
-        }
+                    float sum = 0;
+                    int start = (int)(i * blockSize);
+                    int end = Math.Min((int)((i + 1) * blockSize), actualSourceLength);
 
-        private sealed class ParticleBuffer
-        {
-            private Particle[] _particles;
-            private int _count;
-            private float _lowerBound;
-            private readonly Random _random;
-            public ParticleBuffer(int capacity, float lowerBound)
-            {
-                _particles = new Particle[capacity];
-                _count = 0;
-                _lowerBound = lowerBound;
-                _random = new Random();
-            }
-            public void UpdateLowerBound(float lowerBound) => _lowerBound = lowerBound;
-            public void ResizeBuffer(int newCapacity)
-            {
-                if (newCapacity <= 0) return;
-                var newParticles = new Particle[newCapacity];
-                int copyCount = Math.Min(_count, newCapacity);
-                if (copyCount > 0)
-                    Array.Copy(_particles, newParticles, copyCount);
-                _particles = newParticles;
-                _count = copyCount;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void AddParticle(in Particle particle)
-            {
-                if (_count < _particles.Length)
-                    _particles[_count++] = particle;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void Clear() => _count = 0;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void UpdateParticles(float deltaTime)
-            {
-                int writeIndex = 0;
-                for (int i = 0; i < _count; i++)
-                {
-                    ref Particle p = ref _particles[i];
-                    if (p.Update(deltaTime, _lowerBound))
+                    for (int j = start; j < end; j++)
                     {
-                        if (writeIndex != i)
-                            _particles[writeIndex] = p;
-                        writeIndex++;
+                        if (j >= 0 && j < spectrum.Length)
+                            sum += spectrum[j];
                     }
+
+                    // Для частиц дождя делаем более плавную интерполяцию
+                    float value = (end > start) ? sum / (end - start) : 0;
+
+                    // Применяем сглаживание для более естественного эффекта дождя
+                    if (i > 0)
+                        value = (value + scaledSpectrum[i - 1]) * 0.5f;
+
+                    scaledSpectrum[i] = value;
                 }
-                _count = writeIndex;
-            }
-            public List<float> CollectParticleInstances(Color4 baseColor)
-            {
-                var instances = new List<float>();
-                for (int i = 0; i < _count; i++)
-                {
-                    Particle p = _particles[i];
-                    float clampedLifetime = Math.Clamp(p.Lifetime, 0f, 1f);
-                    float alphaMultiplier = clampedLifetime * clampedLifetime;
-                    float alpha = 255 * alphaMultiplier;
-                    alpha = Math.Clamp(alpha, 0, 255);
-                    Color4 color = new Color4(baseColor.R, baseColor.G, baseColor.B, alpha / 255f);
-                    float sizeMultiplier = 0.8f + 0.2f * clampedLifetime;
-                    float radius = p.Size * sizeMultiplier;
-                    instances.Add(p.X); instances.Add(p.Y); // Центр
-                    instances.Add(radius);                  // Радиус
-                    instances.Add(color.R); instances.Add(color.G); instances.Add(color.B); instances.Add(color.A); // Цвет
-                }
-                return instances;
-            }
-            public void CreateSplashParticles(float x, float y, float intensity)
-            {
-                int count = Math.Min(_random.Next(Constants.SPLASH_PARTICLE_COUNT_MIN, Constants.SPLASH_PARTICLE_COUNT_MAX),
-                                     Settings.Instance.MaxParticles - _count);
-                if (count <= 0) return;
-                float particleVelocityMax = Settings.Instance.ParticleVelocityMax *
-                    (Constants.PARTICLE_VELOCITY_BASE_MULTIPLIER + intensity * Constants.PARTICLE_VELOCITY_INTENSITY_MULTIPLIER);
-                float upwardForce = Settings.Instance.SplashUpwardForce *
-                    (Constants.SPLASH_UPWARD_BASE_MULTIPLIER + intensity * Constants.SPLASH_UPWARD_INTENSITY_MULTIPLIER);
-                for (int i = 0; i < count; i++)
-                {
-                    float angle = (float)(_random.NextDouble() * Math.PI * 2);
-                    float speed = (float)(_random.NextDouble() * particleVelocityMax);
-                    float size = Settings.Instance.SplashParticleSize *
-                        (Constants.SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER + (float)_random.NextDouble() * Constants.SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER) *
-                        (intensity * Constants.SPLASH_PARTICLE_INTENSITY_MULTIPLIER + Constants.SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET);
-                    AddParticle(new Particle(
-                        x, y,
-                        MathF.Cos(angle) * speed,
-                        MathF.Sin(angle) * speed - upwardForce,
-                        size,
-                        true));
-                }
-            }
+
+                return scaledSpectrum;
+            }, new float[targetCount], LogPrefix, "Error scaling spectrum for rain particles");
         }
+
+        private float GetSpectrumValueForRain(float[]? spectrum, int index, float defaultValue = 0f)
+        {
+            if (spectrum == null || spectrum.Length == 0 || index < 0 || index >= spectrum.Length)
+                return defaultValue;
+
+            // Для частиц дождя добавляем небольшую случайную вариацию
+            Random rand = new();
+            float randomFactor = 0.9f + 0.2f * rand.NextSingle();
+            return spectrum[index] * randomFactor;
+        }
+
+        private int CalculateSpectrumIndexForRain(float position, float maxPosition, int spectrumLength)
+        {
+            if (spectrumLength <= 0 || maxPosition <= 0)
+                return 0;
+
+            // Для частиц дождя можем использовать нелинейное отображение позиции в индекс
+            // чтобы создать более интересный визуальный эффект
+            float normalizedPosition = position / maxPosition;
+            float adjustedPosition = normalizedPosition * normalizedPosition; // Квадратичное отображение
+
+            int index = (int)(adjustedPosition * spectrumLength);
+            return Math.Clamp(index, 0, spectrumLength - 1);
+        }
+
+        private bool IsValidSpectrumForRain(float[]? spectrum)
+        {
+            // Для частиц дождя мы можем быть более гибкими, поскольку они не так сильно
+            // зависят от точности спектра
+            return spectrum != null && spectrum.Length > 0;
+        }
+
         #endregion
 
-        #region Fields
-        private static RaindropsRenderer? _instance;
-        private RenderCache _renderCache;
-        private Raindrop[] _raindrops;
-        private int _raindropCount;
-        private readonly Random _random = new();
-        private float[] _smoothedSpectrumCache;
-        private bool _isInitialized, _isOverlayActive, _cacheNeedsUpdate, _disposed;
-        private readonly ParticleBuffer _particleBuffer;
-        private float _timeSinceLastSpawn;
-        private bool _firstRender = true;
-        private readonly Stopwatch _frameTimer = new();
-        private float _actualDeltaTime = Constants.TARGET_DELTA_TIME;
-        private float _averageLoudness = 0f;
-        private readonly object _spectrumLock = new();
-        private float[]? _processedSpectrum;
-        private int _frameCounter = 0;
-        private int _particleUpdateSkip = 1;
-        private int _effectsThreshold = 3;
-        private RenderQuality _quality = RenderQuality.Medium;
-        private bool _useAntiAlias = true;
-        private bool _useAdvancedEffects = true;
-        private Color4 _baseColor = Color4.CornflowerBlue;
+        #region Initialization and Configuration
 
-        // OpenGL ресурсы
-        private ShaderProgram _circleShader;
-        private ShaderProgram _lineShader;
-        private int _circleVAO, _circleTemplateVBO, _circleInstanceVBO;
-        private int _lineVAO, _lineVBO;
-        private Matrix4 _projection;
-        #endregion
-
-        #region Shader Sources
-        private const string CircleVertexShader = @"
-            #version 330 core
-            layout (location = 0) in vec2 aPosition;
-            layout (location = 1) in vec2 aCenter;
-            layout (location = 2) in float aRadius;
-            layout (location = 3) in vec4 aColor;
-            out vec4 vColor;
-            uniform mat4 uProjection;
-            void main() {
-                vec2 pos = aCenter + aPosition * aRadius;
-                gl_Position = uProjection * vec4(pos, 0.0, 1.0);
-                vColor = aColor;
-            }";
-
-        private const string LineVertexShader = @"
-            #version 330 core
-            layout (location = 0) in vec2 aPosition;
-            layout (location = 1) in vec4 aColor;
-            out vec4 vColor;
-            uniform mat4 uProjection;
-            void main() {
-                gl_Position = uProjection * vec4(aPosition, 0.0, 1.0);
-                vColor = aColor;
-            }";
-
-        private const string FragmentShader = @"
-            #version 330 core
-            in vec4 vColor;
-            out vec4 FragColor;
-            void main() {
-                FragColor = vColor;
-            }";
-        #endregion
-
-        #region Constructor and Instance Management
-        private RaindropsRenderer()
+        protected override void InitializeShaders()
         {
-            _raindrops = new Raindrop[Settings.Instance.MaxRaindrops];
-            _smoothedSpectrumCache = new float[Settings.Instance.MaxRaindrops];
-            _particleBuffer = new ParticleBuffer(Settings.Instance.MaxParticles, 1);
-            _renderCache = new RenderCache(1, 1, false);
-            _frameTimer.Start();
-            Settings.Instance.PropertyChanged += OnSettingsChanged;
-            InitializeOpenGLResources();
-            SmartLogger.Log(LogLevel.Debug, Constants.LOGGER_PREFIX, "RaindropsRenderer инициализирован");
-        }
+            var shaderSource = GetShaderSources();
 
-        private void InitializeOpenGLResources()
-        {
-            // Компилируем шейдеры: преобразуем идентификаторы в строки и передаем строковое имя шейдера
-            int circleVertexShaderId = CompileShader(ShaderType.VertexShader, CircleVertexShader);
-            int fragmentShaderId = CompileShader(ShaderType.FragmentShader, FragmentShader);
-            _circleShader = new ShaderProgram(circleVertexShaderId.ToString(), "CircleShader");
+            _shaders.Particle = SmartLogger.Safe(() => new ShaderProgram(shaderSource.Vertex3D, shaderSource.Fragment3D), null);
+            _shaders.Splash = SmartLogger.Safe(() => new ShaderProgram(shaderSource.Vertex, shaderSource.Fragment), null);
+            _shaders.Glow = SmartLogger.Safe(() => new ShaderProgram(shaderSource.Vertex, shaderSource.GlowFragment), null);
+            _shaders.Bloom = SmartLogger.Safe(() => new ShaderProgram(shaderSource.PostProcessVertex, shaderSource.BloomFragment), null);
+            _shaders.Scene = SmartLogger.Safe(() => new ShaderProgram(Shaders.vertexSceneShader, Shaders.fragmentSceneShader), null);
 
-            int lineVertexShaderId = CompileShader(ShaderType.VertexShader, LineVertexShader);
-            _lineShader = new ShaderProgram(lineVertexShaderId.ToString(), "LineShader");
-
-            SetupCircleTemplate();
-            SetupVAOs();
-        }
-
-        private int CompileShader(ShaderType type, string source)
-        {
-            int shader = GL.CreateShader(type);
-            GL.ShaderSource(shader, source);
-            GL.CompileShader(shader);
-            GL.GetShader(shader, ShaderParameter.CompileStatus, out int status);
-            if (status == 0)
+            if (_shaders.Scene != null)
             {
-                string log = GL.GetShaderInfoLog(shader);
-                throw new Exception($"Ошибка компиляции шейдера: {log}");
-            }
-            return shader;
-        }
-
-        private void SetupCircleTemplate()
-        {
-            _circleTemplateVBO = GL.GenBuffer();
-            GL.BindBuffer(BufferTarget.ArrayBuffer, _circleTemplateVBO);
-            var vertices = new float[34 * 2]; // 34 вершины (центр + 32 точки + повтор первой)
-            vertices[0] = 0f; vertices[1] = 0f;
-            for (int i = 0; i <= 32; i++)
-            {
-                float angle = i * MathF.PI * 2 / 32;
-                int idx = (i + 1) * 2;
-                vertices[idx] = MathF.Cos(angle);
-                vertices[idx + 1] = MathF.Sin(angle);
-            }
-            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StaticDraw);
-        }
-
-        private void SetupVAOs()
-        {
-            // VAO для кругов
-            _circleVAO = GL.GenVertexArray();
-            GL.BindVertexArray(_circleVAO);
-
-            GL.BindBuffer(BufferTarget.ArrayBuffer, _circleTemplateVBO);
-            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 0, 0);
-            GL.EnableVertexAttribArray(0);
-
-            _circleInstanceVBO = GL.GenBuffer();
-            GL.BindBuffer(BufferTarget.ArrayBuffer, _circleInstanceVBO);
-            // Шаг: vec2 (8 байт) + float (4 байта) + vec4 (16 байт) = 28 байт
-            GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 28, 0);
-            GL.VertexAttribDivisor(1, 1);
-            GL.EnableVertexAttribArray(1);
-            GL.VertexAttribPointer(2, 1, VertexAttribPointerType.Float, false, 28, 8);
-            GL.VertexAttribDivisor(2, 1);
-            GL.EnableVertexAttribArray(2);
-            GL.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, 28, 12);
-            GL.VertexAttribDivisor(3, 1);
-            GL.EnableVertexAttribArray(3);
-
-            // VAO для линий
-            _lineVAO = GL.GenVertexArray();
-            GL.BindVertexArray(_lineVAO);
-
-            _lineVBO = GL.GenBuffer();
-            GL.BindBuffer(BufferTarget.ArrayBuffer, _lineVBO);
-            // Шаг: vec2 (8 байт) + vec4 (16 байт) = 24 байта
-            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 24, 0);
-            GL.EnableVertexAttribArray(0);
-            GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 24, 8);
-            GL.EnableVertexAttribArray(1);
-        }
-
-        public static RaindropsRenderer GetInstance() => _instance ??= new RaindropsRenderer();
-
-        private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
-        {
-            if (e.PropertyName == nameof(Settings.MaxRaindrops))
-            {
-                var newRaindrops = new Raindrop[Settings.Instance.MaxRaindrops];
-                var newSmoothedCache = new float[Settings.Instance.MaxRaindrops];
-                int copyCount = Math.Min(_raindropCount, Settings.Instance.MaxRaindrops);
-                if (copyCount > 0)
-                    Array.Copy(_raindrops, newRaindrops, copyCount);
-                _raindrops = newRaindrops;
-                _smoothedSpectrumCache = newSmoothedCache;
-                _raindropCount = copyCount;
-                _cacheNeedsUpdate = true;
-            }
-            else if (e.PropertyName == nameof(Settings.MaxParticles))
-            {
-                _particleBuffer.ResizeBuffer(Settings.Instance.MaxParticles);
-            }
-            else if (e.PropertyName == nameof(Settings.OverlayHeightMultiplier))
-            {
-                _cacheNeedsUpdate = true;
-            }
-        }
-        #endregion
-
-        #region ISpectrumRenderer Implementation
-        public RenderQuality Quality
-        {
-            get => _quality;
-            set
-            {
-                if (_quality != value)
-                {
-                    _quality = value;
-                    ApplyQualitySettings();
-                }
+                SmartLogger.Safe(() => {
+                    _shaders.Scene.Use();
+                    GL.GetUniformLocation(_shaders.Scene.ProgramId, "projection");
+                    GL.GetUniformLocation(_shaders.Scene.ProgramId, "modelview");
+                }, LogPrefix, "Failed to get uniform locations");
             }
         }
 
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        private (
+            string Vertex3D, string Fragment3D, string Vertex, string Fragment,
+            string GlowFragment, string PostProcessVertex, string BloomFragment,
+            string ShadowMapVertex, string ShadowMapFragment,
+            string VertexScene, string FragmentScene
+        ) GetShaderSources() => (
+            Shaders.vertex3DShader,
+            Shaders.fragment3DShader,
+            Shaders.vertexShader,
+            Shaders.fragmentShader,
+            Shaders.glowFragmentShader,
+            Shaders.postProcessVertexShader,
+            Shaders.bloomFragmentShader,
+            Shaders.shadowMapVertexShader,
+            Shaders.shadowMapFragmentShader,
+            Shaders.vertexSceneShader,
+            Shaders.fragmentSceneShader
+        );
+
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
-            if (_isOverlayActive != isOverlayActive)
-            {
-                _isOverlayActive = isOverlayActive;
-                _cacheNeedsUpdate = true;
-                _firstRender = true;
-                _raindropCount = 0;
-                _particleBuffer.Clear();
-            }
             Quality = quality;
         }
 
-        public void Initialize()
-        {
-            if (_disposed)
-            {
-                _raindropCount = 0;
-                _particleBuffer.Clear();
-                _disposed = false;
-                InitializeOpenGLResources();
-            }
-            _isInitialized = true;
-            _firstRender = true;
-            SmartLogger.Log(LogLevel.Debug, Constants.LOGGER_PREFIX, "RaindropsRenderer инициализирован");
-        }
-
-        public void Render(float[]? spectrum, Viewport viewport, float barWidth,
-                           float barSpacing, int barCount, ShaderProgram? shader,
-                           Action<Viewport> drawPerformanceInfo)
-        {
-            if (!ValidateRenderParameters(spectrum, viewport))
-            {
-                SmartLogger.Log(LogLevel.Error, Constants.LOGGER_PREFIX, "Недопустимые параметры рендеринга для RaindropsRenderer");
-                return;
-            }
-
-            _projection = Matrix4.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, -1, 1);
-
-            float[] renderSpectrum;
-            int spectrumLength = spectrum!.Length;
-            int actualBarCount = Math.Min(spectrumLength, barCount);
-
-            lock (_spectrumLock)
-            {
-                _processedSpectrum = ProcessSpectrumSynchronously(spectrum, actualBarCount);
-                renderSpectrum = _processedSpectrum;
-            }
-
-            float targetDeltaTime = Constants.TARGET_DELTA_TIME;
-            float elapsed = (float)_frameTimer.Elapsed.TotalSeconds;
-            _frameTimer.Restart();
-            float speedMultiplier = elapsed / targetDeltaTime;
-            _actualDeltaTime = Math.Clamp(
-                targetDeltaTime * speedMultiplier,
-                Settings.Instance.MinTimeStep,
-                Settings.Instance.MaxTimeStep
-            );
-
-            _frameCounter = (_frameCounter + 1) % (_particleUpdateSkip + 1);
-
-            UpdateAndRenderScene(renderSpectrum, viewport, actualBarCount);
-
-            drawPerformanceInfo?.Invoke(viewport);
-        }
-        #endregion
-
-        #region Spectrum Processing
-        private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
-        {
-            if (barCount <= 0) return Array.Empty<float>();
-            Span<float> result = stackalloc float[barCount];
-            ProcessSpectrumData(spectrum.AsSpan(0, Math.Min(spectrum.Length, barCount)), result);
-            float[] output = new float[barCount];
-            result.CopyTo(output.AsSpan(0, barCount));
-            return output;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ProcessSpectrumData(ReadOnlySpan<float> src, Span<float> dst)
-        {
-            if (src.IsEmpty || dst.IsEmpty) return;
-            float sum = 0f;
-            float blockSize = src.Length / (float)dst.Length;
-            float smoothFactor = Constants.SMOOTH_FACTOR;
-
-            for (int i = 0; i < dst.Length; i++)
-            {
-                int start = (int)(i * blockSize);
-                int end = Math.Min((int)((i + 1) * blockSize), src.Length);
-                if (end <= start)
-                {
-                    dst[i] = dst[i] * (1 - smoothFactor);
-                    continue;
-                }
-                int count = end - start;
-                float value = 0f;
-                if (count >= Vector<float>.Count)
-                {
-                    int simdLength = count - (count % Vector<float>.Count);
-                    Vector<float> vSum = Vector<float>.Zero;
-                    for (int j = 0; j < simdLength; j += Vector<float>.Count)
-                    {
-                        float[] temp = src.Slice(start + j, Vector<float>.Count).ToArray();
-                        vSum += new Vector<float>(temp);
-                    }
-                    for (int k = 0; k < Vector<float>.Count; k++)
-                    {
-                        value += vSum[k];
-                    }
-                    for (int j = simdLength; j < count; j++)
-                    {
-                        value += src[start + j];
-                    }
-                }
-                else
-                {
-                    for (int j = start; j < end; j++)
-                    {
-                        value += src[j];
-                    }
-                }
-                value /= count;
-                dst[i] = dst[i] * (1 - smoothFactor) + value * smoothFactor;
-                sum += dst[i];
-            }
-            _averageLoudness = Math.Clamp(sum / dst.Length * 4.0f, 0f, 1f);
-        }
-        #endregion
-
-        #region Simulation Methods
-        private bool ValidateRenderParameters(float[]? spectrum, Viewport viewport) =>
-            _isInitialized && !_disposed &&
-            spectrum != null && spectrum.Length > 0 &&
-            viewport.Width > 0 && viewport.Height > 0;
-
-        private void UpdateAndRenderScene(float[] spectrum, Viewport viewport, int barCount)
-        {
-            if (_cacheNeedsUpdate || _renderCache.Width != viewport.Width || _renderCache.Height != viewport.Height)
-            {
-                _renderCache = new RenderCache(viewport.Width, viewport.Height, _isOverlayActive);
-                _particleBuffer.UpdateLowerBound(_renderCache.LowerBound);
-                _cacheNeedsUpdate = false;
-            }
-            if (_firstRender)
-            {
-                InitializeInitialDrops(barCount);
-                _firstRender = false;
-            }
-            _timeSinceLastSpawn += _actualDeltaTime;
-            UpdateSimulation(spectrum, barCount);
-
-            var particleInstances = _particleBuffer.CollectParticleInstances(_baseColor);
-            var trailVertices = CollectTrailVertices(spectrum);
-            var raindropInstances = CollectRaindropInstances(spectrum);
-
-            if (particleInstances.Count > 0)
-            {
-                GL.BindBuffer(BufferTarget.ArrayBuffer, _circleInstanceVBO);
-                GL.BufferData(BufferTarget.ArrayBuffer, particleInstances.Count * sizeof(float), particleInstances.ToArray(), BufferUsageHint.DynamicDraw);
-                _circleShader.Use();
-                GL.UniformMatrix4(GL.GetUniformLocation(_circleShader.ProgramId, "uProjection"), false, ref _projection);
-                GL.BindVertexArray(_circleVAO);
-                GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 34, particleInstances.Count / 7);
-            }
-
-            if (trailVertices.Count > 0)
-            {
-                GL.BindBuffer(BufferTarget.ArrayBuffer, _lineVBO);
-                GL.BufferData(BufferTarget.ArrayBuffer, trailVertices.Count * sizeof(float), trailVertices.ToArray(), BufferUsageHint.DynamicDraw);
-                _lineShader.Use();
-                GL.UniformMatrix4(GL.GetUniformLocation(_lineShader.ProgramId, "uProjection"), false, ref _projection);
-                GL.BindVertexArray(_lineVAO);
-                GL.DrawArrays(PrimitiveType.Triangles, 0, trailVertices.Count / 6);
-            }
-
-            if (raindropInstances.Count > 0)
-            {
-                GL.BindBuffer(BufferTarget.ArrayBuffer, _circleInstanceVBO);
-                GL.BufferData(BufferTarget.ArrayBuffer, raindropInstances.Count * sizeof(float), raindropInstances.ToArray(), BufferUsageHint.DynamicDraw);
-                _circleShader.Use();
-                GL.UniformMatrix4(GL.GetUniformLocation(_circleShader.ProgramId, "uProjection"), false, ref _projection);
-                GL.BindVertexArray(_circleVAO);
-                GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 34, raindropInstances.Count / 7);
-            }
-        }
-
-        private void InitializeInitialDrops(int barCount)
-        {
-            _raindropCount = 0;
-            float width = _renderCache.Width;
-            float height = _renderCache.Height;
-            int initialCount = Math.Min(Constants.INITIAL_DROP_COUNT, Settings.Instance.MaxRaindrops);
-            for (int i = 0; i < initialCount; i++)
-            {
-                int spectrumIndex = _random.Next(barCount);
-                float x = width * (float)_random.NextDouble();
-                float y = height * (float)_random.NextDouble() * 0.5f;
-                float speedVariation = (float)(_random.NextDouble() * Settings.Instance.SpeedVariation);
-                float fallSpeed = Settings.Instance.BaseFallSpeed + speedVariation;
-                float size = Settings.Instance.RaindropSize * (0.7f + (float)_random.NextDouble() * 0.6f);
-                float intensity = 0.3f + (float)_random.NextDouble() * 0.3f;
-                _raindrops[_raindropCount++] = new Raindrop(x, y, fallSpeed, size, intensity, spectrumIndex);
-            }
-        }
-
-        private void UpdateSimulation(float[] spectrum, int barCount)
-        {
-            UpdateRaindrops(spectrum);
-            if (_frameCounter == 0)
-            {
-                float adjustedDelta = _actualDeltaTime * (_particleUpdateSkip + 1);
-                _particleBuffer.UpdateParticles(adjustedDelta);
-            }
-            if (_timeSinceLastSpawn >= Constants.SPAWN_INTERVAL)
-            {
-                SpawnNewDrops(spectrum, barCount);
-                _timeSinceLastSpawn = 0;
-            }
-        }
-
-        private void UpdateRaindrops(float[] spectrum)
-        {
-            int writeIdx = 0;
-            for (int i = 0; i < _raindropCount; i++)
-            {
-                Raindrop drop = _raindrops[i];
-                float newY = drop.Y + drop.FallSpeed * _actualDeltaTime;
-                if (newY < _renderCache.LowerBound)
-                {
-                    _raindrops[writeIdx++] = drop.WithNewY(newY);
-                }
-                else
-                {
-                    float intensity = drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
-                    if (intensity > 0.2f)
-                    {
-                        _particleBuffer.CreateSplashParticles(drop.X, _renderCache.LowerBound, intensity);
-                    }
-                }
-            }
-            _raindropCount = writeIdx;
-        }
-
-        private void SpawnNewDrops(float[] spectrum, int barCount)
-        {
-            if (barCount <= 0 || spectrum.Length == 0) return;
-            float stepWidth = _renderCache.Width / barCount;
-            float threshold = _isOverlayActive ? Settings.Instance.SpawnThresholdOverlay : Settings.Instance.SpawnThresholdNormal;
-            float spawnBoost = 1.0f + _averageLoudness * 2.0f;
-            int maxSpawnsPerFrame = 3;
-            int spawnsThisFrame = 0;
-            for (int i = 0; i < barCount && i < spectrum.Length && spawnsThisFrame < maxSpawnsPerFrame; i++)
-            {
-                float intensity = spectrum[i];
-                if (intensity > threshold && _random.NextDouble() < Settings.Instance.SpawnProbability * intensity * spawnBoost)
-                {
-                    float x = i * stepWidth + stepWidth * 0.5f +
-                              (float)(_random.NextDouble() * stepWidth * 0.5f - stepWidth * 0.25f);
-                    float speedVariation = (float)(_random.NextDouble() * Settings.Instance.SpeedVariation);
-                    float fallSpeed = Settings.Instance.BaseFallSpeed *
-                                      (1f + intensity * Settings.Instance.IntensitySpeedMultiplier) +
-                                      speedVariation;
-                    float size = Settings.Instance.RaindropSize * (0.8f + intensity * 0.4f) * (0.9f + (float)_random.NextDouble() * 0.2f);
-                    if (_raindropCount < _raindrops.Length)
-                    {
-                        _raindrops[_raindropCount++] = new Raindrop(x, _renderCache.UpperBound, fallSpeed, size, intensity, i);
-                        spawnsThisFrame++;
-                    }
-                }
-            }
-        }
         #endregion
 
         #region Rendering Methods
-        private List<float> CollectTrailVertices(float[] spectrum)
+
+        public override void Render(
+            float[]? spectrum,
+            Viewport viewport,
+            float particleWidth,
+            float particleSpacing,
+            int particleCount,
+            ShaderProgram? shader,
+            Action<Viewport> drawPerformanceInfo)
         {
-            var vertices = new List<float>();
-            for (int i = 0; i < _raindropCount; i++)
+            if (!ValidateRenderParameters(spectrum, viewport, shader, requireSpectrum: false))
+                return;
+
+            ApplyShaderColor(shader);
+            // Используем наш специализированный метод для обработки спектра
+            float[] processedSpectrum = spectrum != null ? ScaleSpectrumForRain(spectrum, particleCount) : new float[0];
+
+            SmartLogger.Safe(() => UpdateParticles(viewport, processedSpectrum, particleCount),
+                LogPrefix, "Failed to update particles");
+
+            SetupOpenGLForRendering();
+            var matrices = CalculateRenderMatrices(viewport, SceneSettings.DefaultFovDegrees);
+            Vector3 lightPos = CalculateLightPosition(viewport);
+            Vector3 viewPos = CalculateViewPosition(viewport);
+
+            if (_sceneGeometry != null && _shaders.Scene != null)
             {
-                Raindrop drop = _raindrops[i];
-                if (drop.FallSpeed < Settings.Instance.BaseFallSpeed * Constants.FALLSPEED_THRESHOLD_MULTIPLIER ||
-                    drop.Size < Settings.Instance.RaindropSize * Constants.RAINDROP_SIZE_THRESHOLD_MULTIPLIER)
-                    continue;
-                float intensity = drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
-                if (intensity < Constants.TRAIL_INTENSITY_THRESHOLD) continue;
-                float trailLength = Math.Min(
-                    drop.FallSpeed * Constants.TRAIL_LENGTH_MULTIPLIER * intensity,
-                    drop.Size * Constants.TRAIL_LENGTH_SIZE_FACTOR
-                );
-                if (trailLength < Constants.TRAIL_INTENSITY_THRESHOLD) continue;
-                float alpha = Constants.TRAIL_OPACITY_MULTIPLIER * intensity;
-                alpha = Math.Clamp(alpha, 0, 255);
-                Color4 color = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha / 255f);
-                float width = drop.Size * Constants.TRAIL_STROKE_MULTIPLIER;
+                SmartLogger.Safe(() => _sceneGeometry.Render(_shaders.Scene, matrices.Projection, matrices.ModelView, lightPos, viewPos),
+                    LogPrefix, "Failed to render scene geometry");
+            }
 
-                float x1 = drop.X, y1 = drop.Y;
-                float x2 = drop.X, y2 = drop.Y - trailLength;
-                float dx = x2 - x1, dy = y2 - y1;
-                float len = MathF.Sqrt(dx * dx + dy * dy);
-                if (len > 0)
+            EnableTransparency();
+            SmartLogger.Safe(() => RenderRainParticles(viewport, _shaders.Particle ?? shader!, matrices.Projection, matrices.ModelView, lightPos, viewPos),
+                LogPrefix, "Failed to render rain particles");
+            DisableSpecialEffects();
+
+            if (_quality != RenderQuality.Low && _shaders.Bloom != null)
+                SmartLogger.Safe(() => ApplyBloomEffect(viewport),
+                    LogPrefix, "Failed to apply bloom effect");
+
+            SmartLogger.Safe(() => drawPerformanceInfo?.Invoke(viewport),
+                LogPrefix, "Failed to draw performance info");
+        }
+
+        private void ApplyShaderColor(ShaderProgram? shader)
+        {
+            if (shader != null && _shaders.Particle != null)
+                _shaders.Particle.Color = shader.Color;
+        }
+
+        private Vector3 CalculateLightPosition(Viewport viewport)
+        {
+            float lightRadius = _lightRadius;
+            return new Vector3(
+                viewport.Width / 2 + MathF.Cos(CameraRotationOffset.X * 0.5f) * lightRadius,
+                _lightBaseY + MathF.Sin(CameraRotationOffset.Y) * (lightRadius / _lightOscillationDivisor),
+                _lightBaseZ);
+        }
+
+        private Vector3 CalculateViewPosition(Viewport viewport)
+        {
+            return new Vector3(
+                viewport.Width / 2 + CameraPositionOffset.X * 0.25f,
+                _viewBaseY,
+                _viewBaseZ + _viewOscillationAmplitude * MathF.Sin(CameraRotationOffset.X * _viewOscillationFrequency)
+                         + CameraPositionOffset.Z * 0.25f);
+        }
+
+        #endregion
+
+        #region Particle Management
+
+        private void UpdateParticles(Viewport viewport, float[]? spectrum, int targetCount)
+        {
+            bool semaphoreAcquired = false;
+            try
+            {
+                semaphoreAcquired = _particleSemaphore.Wait(0);
+                if (!semaphoreAcquired) return;
+
+                SmartLogger.Safe(() => {
+                    Random rand = new();
+                    int particleCount = (int)(viewport.Width * viewport.Height * SceneSettings.DefaultParticleDensity);
+
+                    // Initialize particles if none exist
+                    if (_particles.Count == 0)
+                    {
+                        for (int i = 0; i < particleCount; i++)
+                        {
+                            _particles.Add(new Particle
+                            {
+                                Position = new Vector3(
+                                    rand.NextSingle() * viewport.Width,
+                                    _rainHeight + rand.NextSingle() * 100,
+                                    rand.NextSingle() * _depth),
+                                Size = ParticleSettings.MinSize + rand.NextSingle() * (ParticleSettings.MaxSize - ParticleSettings.MinSize),
+                                VelocityY = -ParticleSettings.FallSpeed * (1 + rand.NextSingle()),
+                                Alpha = 1.0f
+                            });
+                        }
+                    }
+
+                    // Update particle positions
+                    for (int i = 0; i < _particles.Count; i++)
+                    {
+                        var particle = _particles[i];
+                        var position = particle.Position;
+                        position.Y += particle.VelocityY;
+                        position.X += ParticleSettings.WindInfluence * MathF.Sin((float)DateTime.Now.Ticks / 10000000f);
+
+                        if (position.Y < 0)
+                        {
+                            position = new Vector3(
+                                rand.NextSingle() * viewport.Width,
+                                _rainHeight + rand.NextSingle() * 100,
+                                rand.NextSingle() * _depth);
+                            particle.VelocityY = -ParticleSettings.FallSpeed * (1 + rand.NextSingle());
+                        }
+
+                        // Используем наши специализированные методы для работы со спектром
+                        if (IsValidSpectrumForRain(spectrum))
+                        {
+                            // Вычисляем индекс спектра на основе позиции частицы
+                            int spectrumIndex = CalculateSpectrumIndexForRain(position.X, viewport.Width, spectrum!.Length);
+
+                            // Получаем безопасное значение из спектра с вариацией
+                            float spectrumValue = GetSpectrumValueForRain(spectrum, spectrumIndex);
+
+                            // Применяем значение спектра к скорости падения частицы
+                            particle.VelocityY = -ParticleSettings.FallSpeed * (1 + spectrumValue);
+                        }
+
+                        particle.Position = position;
+                    }
+                }, LogPrefix, "Failed to update particle positions");
+            }
+            finally
+            {
+                if (semaphoreAcquired)
+                    _particleSemaphore.Release();
+            }
+        }
+
+        private void RenderRainParticles(
+                    Viewport viewport,
+                    ShaderProgram baseShader,
+                    Matrix4 projectionMatrix,
+                    Matrix4 modelViewMatrix,
+                    Vector3 lightPos,
+                    Vector3 viewPos)
+        {
+            if (_shaders.Particle == null) return;
+
+            SmartLogger.Safe(() => {
+                GL.BindVertexArray(_glResources.VertexArrayObject);
+                GL.Enable(EnableCap.PointSprite);
+
+                foreach (var particle in _particles)
                 {
-                    dx /= len; dy /= len;
-                    float perpX = -dy, perpY = dx;
-                    float offsetX = perpX * (width / 2), offsetY = perpY * (width / 2);
+                    float alpha = particle.Alpha * ParticleSettings.AlphaMultiplier;
+                    Color4 particleColor = new(baseShader.Color.R, baseShader.Color.G, baseShader.Color.B, alpha);
 
-                    float[] quad = new float[]
-                    {
-                        x1 - offsetX, y1 - offsetY,
-                        x2 - offsetX, y2 - offsetY,
-                        x1 + offsetX, y1 + offsetY,
-                        x2 - offsetX, y2 - offsetY,
-                        x2 + offsetX, y2 + offsetY,
-                        x1 + offsetX, y1 + offsetY
-                    };
+                    RenderParticle(particle, particleColor, projectionMatrix, modelViewMatrix, lightPos, viewPos);
 
-                    for (int j = 0; j < 6; j++)
+                    // Render glow effect
+                    if (_useGlowEffect && _shaders.Glow != null && particle.Alpha > 0.5f)
                     {
-                        vertices.Add(quad[j * 2]); vertices.Add(quad[j * 2 + 1]);
-                        vertices.Add(color.R); vertices.Add(color.G); vertices.Add(color.B); vertices.Add(color.A);
+                        Color4 glowColor = new(baseShader.Color.R, baseShader.Color.G, baseShader.Color.B, GlowSettings.EffectAlpha);
+                        RenderGlowEffect(particle.Position, particle.Size, glowColor, projectionMatrix, modelViewMatrix);
+                    }
+
+                    // Render splash when particle hits ground
+                    if (particle.Position.Y <= 0 && _shaders.Splash != null)
+                    {
+                        Color4 splashColor = new(baseShader.Color.R, baseShader.Color.G, baseShader.Color.B, 0.5f);
+                        RenderSplash(particle.Position, particle.Size * ParticleSettings.SplashSizeMultiplier, splashColor, projectionMatrix, modelViewMatrix);
                     }
                 }
-            }
-            return vertices;
+
+                GL.Disable(EnableCap.PointSprite);
+                GL.BindVertexArray(0);
+            }, LogPrefix, "Failed to render rain particles");
         }
 
-        private List<float> CollectRaindropInstances(float[] spectrum)
+        private void RenderParticle(
+            Particle particle,
+            Color4 color,
+            Matrix4 projectionMatrix,
+            Matrix4 modelViewMatrix,
+            Vector3 lightPos,
+            Vector3 viewPos)
         {
-            var instances = new List<float>();
-            for (int i = 0; i < _raindropCount; i++)
-            {
-                Raindrop drop = _raindrops[i];
-                float intensity = drop.SpectrumIndex < spectrum.Length
-                    ? spectrum[drop.SpectrumIndex] * 0.7f + drop.Intensity * 0.3f
-                    : drop.Intensity;
-                float alpha = Math.Min(0.7f + intensity * 0.3f, 1.0f);
-                Color4 color = new Color4(_baseColor.R, _baseColor.G, _baseColor.B, alpha);
-                instances.Add(drop.X); instances.Add(drop.Y);
-                instances.Add(drop.Size);
-                instances.Add(color.R); instances.Add(color.G); instances.Add(color.B); instances.Add(color.A);
+            SmartLogger.Safe(() => {
+                _shaders.Particle!.Color = color;
+                _shaders.Particle.Use();
+                _shaders.Particle.SetUniform("projection", projectionMatrix);
+                _shaders.Particle.SetUniform("modelview", modelViewMatrix);
+                _shaders.Particle.SetUniform("lightPos", lightPos);
+                _shaders.Particle.SetUniform("viewPos", viewPos);
 
-                if (_effectsThreshold < 2 &&
-                    drop.Size > Settings.Instance.RaindropSize * Constants.RAINDROP_SIZE_HIGHLIGHT_THRESHOLD &&
-                    intensity > Constants.INTENSITY_HIGHLIGHT_THRESHOLD)
+                float[] vertices = { particle.Position.X, particle.Position.Y, particle.Position.Z };
+                GL.PointSize(particle.Size);
+                GL.BindBuffer(BufferTarget.ArrayBuffer, _glResources.VertexBufferObject);
+                GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
+                GL.EnableVertexAttribArray(0);
+                GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
+                GL.DrawArrays(PrimitiveType.Points, 0, 1);
+                GL.DisableVertexAttribArray(0);
+            }, LogPrefix, "Failed to render individual particle");
+        }
+
+        private void RenderGlowEffect(
+                    Vector3 position,
+                    float size,
+                    Color4 glowColor,
+                    Matrix4 projectionMatrix,
+                    Matrix4 modelViewMatrix)
+        {
+            SmartLogger.Safe(() => {
+                _shaders.Glow!.Color = glowColor;
+                _shaders.Glow.Use();
+                _shaders.Glow.SetUniform("projection", projectionMatrix);
+                _shaders.Glow.SetUniform("modelview", modelViewMatrix);
+                _shaders.Glow.SetUniform("uBlurRadius", GlowSettings.BlurRadius);
+
+                float[] vertices = {
+                    position.X - size, position.Y - size, position.Z,
+                    position.X + size, position.Y - size, position.Z,
+                    position.X + size, position.Y + size, position.Z,
+                    position.X - size, position.Y + size, position.Z
+                };
+                int[] indices = { 0, 1, 2, 0, 2, 3 };
+                DrawSimpleGeometry(vertices, indices);
+            }, LogPrefix, "Failed to render glow effect");
+        }
+
+        private void RenderSplash(
+            Vector3 position,
+            float size,
+            Color4 splashColor,
+            Matrix4 projectionMatrix,
+            Matrix4 modelViewMatrix)
+        {
+            SmartLogger.Safe(() => {
+                _shaders.Splash!.Color = splashColor;
+                _shaders.Splash.Use();
+                _shaders.Splash.SetUniform("projection", projectionMatrix);
+                _shaders.Splash.SetUniform("modelview", modelViewMatrix);
+
+                float[] vertices = {
+                    position.X - size, 0, position.Z,
+                    position.X + size, 0, position.Z,
+                    position.X + size, size / 2, position.Z,
+                    position.X - size, size / 2, position.Z
+                };
+                int[] indices = { 0, 1, 2, 0, 2, 3 };
+                DrawSimpleGeometry(vertices, indices);
+            }, LogPrefix, "Failed to render splash effect");
+        }
+
+        #endregion
+
+        #region Post-Processing Effects
+
+        private void ApplyBloomEffect(Viewport viewport)
+        {
+            if (_shaders.Bloom == null) return;
+
+            SmartLogger.Safe(() => {
+                _shaders.Bloom.Use();
+                _shaders.Bloom.SetUniform("uBlurRadius", GlowSettings.BlurRadius);
+
+                float[] vertices = { -1f, -1f, 0f, 1f, -1f, 0f, 1f, 1f, 0f, -1f, 1f, 0f };
+                int[] indices = { 0, 1, 2, 0, 2, 3 };
+                DrawSimpleGeometry(vertices, indices);
+            }, LogPrefix, "Failed to apply bloom effect");
+        }
+
+        #endregion
+
+        #region Resource Disposal
+
+        protected override void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
                 {
-                    float highlightSize = drop.Size * Constants.HIGHLIGHT_SIZE_MULTIPLIER;
-                    float highlightX = drop.X - drop.Size * Constants.HIGHLIGHT_OFFSET_MULTIPLIER;
-                    float highlightY = drop.Y - drop.Size * Constants.HIGHLIGHT_OFFSET_MULTIPLIER;
-                    float hAlpha = 150 * intensity;
-                    hAlpha = Math.Clamp(hAlpha, 0, 255);
-                    Color4 highlightColor = new Color4(1f, 1f, 1f, hAlpha / 255f);
-                    instances.Add(highlightX); instances.Add(highlightY);
-                    instances.Add(highlightSize);
-                    instances.Add(highlightColor.R); instances.Add(highlightColor.G); instances.Add(highlightColor.B); instances.Add(highlightColor.A);
+                    SmartLogger.SafeDispose(_particleSemaphore, "Particle semaphore");
+                    DisposeShaders();
+                    base.Dispose(disposing);
                 }
-            }
-            return instances;
-        }
-        #endregion
-
-        #region Quality Settings
-        private void ApplyQualitySettings()
-        {
-            switch (_quality)
-            {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _useAdvancedEffects = false;
-                    _effectsThreshold = 4;
-                    break;
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _useAdvancedEffects = true;
-                    _effectsThreshold = 3;
-                    break;
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _useAdvancedEffects = true;
-                    _effectsThreshold = 2;
-                    break;
+                _disposed = true;
             }
         }
-        #endregion
 
-        #region IDisposable Implementation
-        public void Dispose()
+        private void DisposeShaders()
         {
-            if (_disposed) return;
+            SmartLogger.SafeDispose(_shaders.Particle, "Particle shader");
+            _shaders.Particle = null;
 
-            _circleShader?.Dispose();
-            _lineShader?.Dispose();
-            GL.DeleteVertexArray(_circleVAO);
-            GL.DeleteBuffer(_circleTemplateVBO);
-            GL.DeleteBuffer(_circleInstanceVBO);
-            GL.DeleteVertexArray(_lineVAO);
-            GL.DeleteBuffer(_lineVBO);
+            SmartLogger.SafeDispose(_shaders.Splash, "Splash shader");
+            _shaders.Splash = null;
 
-            Settings.Instance.PropertyChanged -= OnSettingsChanged;
-            _processedSpectrum = null;
-            _isInitialized = false;
-            _disposed = true;
-            SmartLogger.Log(LogLevel.Debug, Constants.LOGGER_PREFIX, "RaindropsRenderer освобождён");
-            GC.SuppressFinalize(this);
+            SmartLogger.SafeDispose(_shaders.Glow, "Glow shader");
+            _shaders.Glow = null;
+
+            SmartLogger.SafeDispose(_shaders.Bloom, "Bloom shader");
+            _shaders.Bloom = null;
+
+            SmartLogger.SafeDispose(_shaders.Scene, "Scene shader");
+            _shaders.Scene = null;
         }
+
         #endregion
     }
 }

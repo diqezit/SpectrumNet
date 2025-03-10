@@ -6,7 +6,7 @@
     public class Shaders
     {
         public static readonly string vertex3DShader = @"
-            #version 330 core
+            #version 400 core
             layout(location = 0) in vec3 aPosition;
             layout(location = 1) in vec3 aNormal;
             layout(location = 2) in vec2 aTexCoord;
@@ -31,7 +31,7 @@
         ";
 
         public static readonly string fragment3DShader = @"
-            #version 330 core
+            #version 400 core
             
             struct Material {
                 vec3 ambient;
@@ -94,11 +94,9 @@
             
             void main()
             {
-                // Base material properties
                 Material mat;
-                
-                // If using texture, get diffuse from texture
                 vec3 objectColor;
+                
                 if (useTexture) {
                     vec4 texColor = texture(diffuseTexture, TexCoord);
                     objectColor = texColor.rgb;
@@ -110,38 +108,28 @@
                 
                 mat.ambient = objectColor * 0.3;
                 mat.diffuse = objectColor;
-                mat.specular = vec3(0.5, 0.5, 0.5);
+                mat.specular = vec3(0.5);
                 mat.shininess = 32.0;
                 
-                // Override with material uniform if provided
                 if (material.shininess > 0.0) {
                     mat = material;
                 }
                 
-                // Lighting calculations
                 vec3 normal = normalize(Normal);
                 vec3 viewDir = normalize(viewPos - FragPos);
-                vec3 result = vec3(0.0);
+                vec3 result = objectColor * 0.1;
                 
-                // Ambient occlusion as base illumination
-                vec3 ambientOcclusion = objectColor * 0.1;
-                result += ambientOcclusion;
-                
-                // Apply each light
                 for (int i = 0; i < numLights && i < 4; i++) {
                     result += calculateLight(lights[i], normal, viewDir, mat);
                 }
                 
-                // Gamma correction for more realistic lighting
                 result = pow(result, vec3(1.0/2.2));
-                
-                // Output color
                 FragColor = vec4(result, mat.opacity);
             }
         ";
 
         public static readonly string vertexShader = @"
-            #version 330 core
+            #version 400 core
             layout(location = 0) in vec3 aPosition;
             layout(location = 1) in vec2 aTexCoord;
             
@@ -158,7 +146,7 @@
         ";
 
         public static readonly string fragmentShader = @"
-            #version 330 core
+            #version 400 core
             in vec2 TexCoord;
             
             uniform vec4 color;
@@ -169,17 +157,14 @@
             
             void main()
             {
-                if (useTexture) {
-                    vec4 texColor = texture(diffuseTexture, TexCoord);
-                    FragColor = texColor * color;
-                } else {
-                    FragColor = color;
-                }
+                FragColor = useTexture 
+                    ? texture(diffuseTexture, TexCoord) * color 
+                    : color;
             }
         ";
 
         public static readonly string glowFragmentShader = @"
-            #version 330 core
+            #version 400 core
             in vec2 TexCoord;
             
             uniform vec4 color;
@@ -193,28 +178,20 @@
             
             void main()
             {
-                vec4 baseColor;
-                if (useTexture) {
-                    baseColor = texture(diffuseTexture, TexCoord) * color;
-                } else {
-                    baseColor = color;
-                }
+                vec4 baseColor = useTexture 
+                    ? texture(diffuseTexture, TexCoord) * color 
+                    : color;
                 
-                // Add pulsing glow effect
                 float glowFactor = 0.5 + 0.5 * sin(time * pulseRate);
                 glowFactor = mix(1.0, glowFactor, intensity);
-                
-                // Brighten the color for glow effect
                 vec3 glowColor = baseColor.rgb * glowFactor * (1.0 + intensity);
                 
-                // Output with original alpha
                 FragColor = vec4(glowColor, baseColor.a);
             }
         ";
 
-        // Post-processing shader for effects like bloom, blur, etc.
         public static readonly string postProcessVertexShader = @"
-            #version 330 core
+            #version 400 core
             layout(location = 0) in vec3 aPosition;
             layout(location = 1) in vec2 aTexCoord;
             
@@ -228,31 +205,27 @@
         ";
 
         public static readonly string bloomFragmentShader = @"
-            #version 330 core
-            in vec2 TexCoord;
-            
-            uniform sampler2D screenTexture;
-            uniform float bloomThreshold;
-            uniform float bloomIntensity;
-            
-            out vec4 FragColor;
-            
-            void main()
-            {
-                vec4 color = texture(screenTexture, TexCoord);
-                float brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-                
-                if (brightness > bloomThreshold) {
-                    FragColor = color * bloomIntensity;
-                } else {
-                    FragColor = vec4(0.0, 0.0, 0.0, color.a);
-                }
-            }
-        ";
+    #version 400 core
+    in vec2 TexCoord;
+    
+    uniform sampler2D screenTexture;
+    uniform float bloomThreshold;
+    uniform float bloomIntensity;
+    
+    out vec4 FragColor;
+    
+    void main()
+    {
+        vec4 color = texture(screenTexture, TexCoord);
+        float brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+        FragColor = brightness > bloomThreshold 
+            ? color * bloomIntensity 
+            : vec4(0.0, 0.0, 0.0, color.a);
+    }
+";
 
-        // Shadow mapping shader components
         public static readonly string shadowMapVertexShader = @"
-            #version 330 core
+            #version 400 core
             layout(location = 0) in vec3 aPosition;
             
             uniform mat4 lightSpaceMatrix;
@@ -265,12 +238,42 @@
         ";
 
         public static readonly string shadowMapFragmentShader = @"
-            #version 330 core
+            #version 400 core
             
             void main()
             {
-                // Depth is automatically written
+                // gl_FragDepth = gl_FragCoord.z;
             }
         ";
+
+        public static readonly string vertexSceneShader = @"
+    #version 330 core
+    layout(location = 0) in vec3 aPosition;
+    layout(location = 2) in vec3 aColor;
+    
+    uniform mat4 projection;
+    uniform mat4 modelview;
+    
+    out vec3 outColor;
+    
+    void main()
+    {
+        gl_Position = projection * modelview * vec4(aPosition, 1.0);
+        outColor = aColor;
+    }
+";
+
+        public static readonly string fragmentSceneShader = @"
+    #version 330 core
+    
+    in vec3 outColor;
+    out vec4 FragColor;
+    
+    void main()
+    {
+        FragColor = vec4(outColor, 1.0);
+    }
+";
+
     }
 }

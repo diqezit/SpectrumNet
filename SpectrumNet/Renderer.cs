@@ -2,13 +2,13 @@
 
 namespace SpectrumNet
 {
-    public sealed class Renderer : IDisposable
+    public partial class Renderer : IRenderer, IDisposable
     {
-        #region Константы и типы
+        #region Constants and Types
 
         private const int RENDER_TIMEOUT_MS = 16;
         private const string DEFAULT_STYLE = "Solid";
-        private const string LogPrefix = "[Renderer] ";
+        private const string LogPrefix = "Renderer";
 
         private readonly record struct RenderState(
             ShaderProgram? Paint,
@@ -18,7 +18,7 @@ namespace SpectrumNet
 
         #endregion
 
-        #region Поля
+        #region Fields
 
         private readonly SemaphoreSlim _renderLock = new(1, 1);
         private readonly SpectrumBrushes _spectrumStyles;
@@ -26,12 +26,15 @@ namespace SpectrumNet
         private readonly ISpectrumAnalyzer _analyzer;
         private readonly CancellationTokenSource _disposalTokenSource = new();
         private readonly IOpenGLService _glService;
+        private SpectrumPlaceholder? _placeholder;
+        public event EventHandler? RenderRequested;
 
         private string? _pendingStyleName;
         private Color4 _pendingColor;
         private ShaderProgram? _pendingShader;
         private GLWpfControl? _glControl;
         private DispatcherTimer? _renderTimer;
+        private DispatcherTimer? _resizeTimer;
         private Matrix4 _projectionMatrix;
         private RenderState _currentState;
 
@@ -40,25 +43,20 @@ namespace SpectrumNet
         private volatile bool _shouldShowPlaceholder = true;
         private bool _isInitialized;
         private bool _isGpuInfoLogged;
+        private volatile bool _isResizing;
 
         #endregion
 
-        #region Свойства и события
+        #region Properties and Events
 
         public string CurrentStyleName => _currentState.StyleName;
         public RenderQuality CurrentQuality => _currentState.Quality;
         public IAudioVisualizationController Controller => _controller;
         public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
 
-        public bool ShouldShowPlaceholder
-        {
-            get => _shouldShowPlaceholder;
-            set => _shouldShowPlaceholder = value;
-        }
-
         #endregion
 
-        #region Конструктор
+        #region Constructor
 
         public Renderer(
             SpectrumBrushes styles,
@@ -72,44 +70,39 @@ namespace SpectrumNet
             _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
             _glControl = glControl ?? throw new ArgumentNullException(nameof(glControl));
             _glService = glService ?? throw new ArgumentNullException(nameof(glService));
+            _placeholder = new SpectrumPlaceholder(_glService);
 
             if (_analyzer is IComponent comp)
                 comp.Disposed += (_, _) => _isAnalyzerDisposed = true;
 
             _shouldShowPlaceholder = !_controller.IsRecording;
             _glControl.Render += OnGlControlRender;
+            _glControl.SizeChanged += OnGlControlSizeChanged;
 
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer инициализирован");
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer initialized");
             PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
         }
 
         #endregion
 
-        #region Инициализация
+        #region Initialization
 
         private void InitializeRenderer()
         {
-            try
-            {
+            SmartLogger.Safe(() => {
                 InitializeDefaultState();
                 InitializeRenderTimer();
                 SubscribeToEvents();
                 SynchronizeWithController();
                 RequestRender();
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка инициализации рендерера: {ex}");
-                throw;
-            }
+            }, LogPrefix, "Renderer initialization error");
         }
 
         private void InitializeDefaultState()
         {
             var (_, shader) = _spectrumStyles.GetColorAndShader(DEFAULT_STYLE);
             ShaderProgram? clonedShader = shader?.Clone() ??
-                throw new InvalidOperationException($"{LogPrefix}Не удалось инициализировать стиль {DEFAULT_STYLE}");
-
+                throw new InvalidOperationException($"{LogPrefix}Failed to initialize style {DEFAULT_STYLE}");
             _currentState = new RenderState(clonedShader, RenderStyle.Bars, DEFAULT_STYLE, RenderQuality.Medium);
         }
 
@@ -122,35 +115,25 @@ namespace SpectrumNet
 
         private void SubscribeToEvents()
         {
-            if (_glControl is not null)
-                _glControl.SizeChanged += UpdateRenderDimensions;
-
             _controller.PropertyChanged += OnControllerPropertyChanged;
         }
 
         private void InitializeOpenGLResources()
         {
-            try
-            {
+            SmartLogger.Safe(() => {
                 _currentState.Paint?.Dispose();
                 _glService.Finish();
 
                 var (_, shader) = _spectrumStyles.GetColorAndShader(DEFAULT_STYLE);
                 ShaderProgram? clonedShader = shader?.Clone() ??
-                    throw new InvalidOperationException("Клонирование шейдера не удалось при инициализации ресурсов OpenGL.");
-
+                    throw new InvalidOperationException("Shader cloning failed during OpenGL resources initialization.");
                 _currentState = _currentState with { Paint = clonedShader };
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка инициализации ресурсов OpenGL: {ex}");
-                throw;
-            }
+            }, LogPrefix, "OpenGL resources initialization error");
         }
 
         #endregion
 
-        #region Обработчики событий
+        #region Event Handlers
 
         private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics) =>
             PerformanceUpdate?.Invoke(this, metrics);
@@ -214,30 +197,46 @@ namespace SpectrumNet
             RequestRender();
         }
 
-        private void UpdateRenderDimensions(object? sender, SizeChangedEventArgs e)
+        private void OnGlControlSizeChanged(object sender, System.Windows.SizeChangedEventArgs e)
         {
             if (_isDisposed || _glControl is null || !_glControl.IsInitialized)
                 return;
 
-            try
-            {
+            SmartLogger.Safe(() => {
                 int newWidth = (int)e.NewSize.Width;
                 int newHeight = (int)e.NewSize.Height;
                 if (newWidth <= 0 || newHeight <= 0)
                     return;
 
                 _projectionMatrix = Matrix4.CreateOrthographicOffCenter(0, newWidth, newHeight, 0, -1, 1);
+                _placeholder?.UpdateDimensions(newWidth, newHeight);
                 RequestRender();
-            }
-            catch (Exception ex)
+            }, LogPrefix, "Error updating dimensions");
+
+            if (_resizeTimer == null)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка обновления размеров: {ex.Message}");
+                _resizeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                _resizeTimer.Tick += OnResizeTimerTick;
             }
+            else
+            {
+                _resizeTimer.Stop();
+            }
+            _resizeTimer.Start();
+
+            _isResizing = true;
+        }
+
+        private void OnResizeTimerTick(object? sender, EventArgs e)
+        {
+            _resizeTimer?.Stop();
+            _isResizing = false;
+            RequestRender();
         }
 
         #endregion
 
-        #region Рендеринг
+        #region Rendering
 
         public void OnGlControlRender(TimeSpan delta)
         {
@@ -246,7 +245,7 @@ namespace SpectrumNet
 
             try
             {
-                if (_glControl is null || !_glControl.IsInitialized)
+                if (_glControl == null || !_glControl.IsInitialized)
                     return;
 
                 if (!_isInitialized)
@@ -257,10 +256,6 @@ namespace SpectrumNet
 
                 ApplyPendingStyleIfNeeded();
                 RenderFrameInternal(delta);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка рендеринга: {ex.Message}");
             }
             finally
             {
@@ -273,24 +268,17 @@ namespace SpectrumNet
             if (_pendingStyleName is null || _pendingShader is null)
                 return;
 
-            try
-            {
-                var clonedShader = _pendingShader.Clone() ??
-                    throw new ArgumentException($"Не удалось клонировать шейдер для стиля: {_pendingStyleName}");
+            ShaderProgram? oldShader = _currentState.Paint;
 
-                ShaderProgram? oldShader = _currentState.Paint;
+            SmartLogger.Safe(() => {
+                var clonedShader = _pendingShader.Clone() ??
+                    throw new ArgumentException($"Failed to clone shader for style: {_pendingStyleName}");
                 _currentState = _currentState with { Paint = clonedShader, StyleName = _pendingStyleName };
                 oldShader?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка смены стиля: {ex.Message}");
-            }
-            finally
-            {
-                _pendingStyleName = null;
-                _pendingShader = null;
-            }
+            }, LogPrefix, "Error switching style");
+
+            _pendingStyleName = null;
+            _pendingShader = null;
         }
 
         private void RenderFrameInternal(TimeSpan delta)
@@ -315,7 +303,7 @@ namespace SpectrumNet
 
         private bool ValidateRenderState()
         {
-            if (_glControl is null || !_glControl.IsInitialized ||
+            if (_glControl == null || !_glControl.IsInitialized ||
                 _glControl.ActualWidth <= 0 || _glControl.ActualHeight <= 0)
             {
                 _isInitialized = false;
@@ -344,7 +332,7 @@ namespace SpectrumNet
 
         private void PrepareRenderSurface()
         {
-            if (_glControl is null)
+            if (_glControl == null)
                 return;
 
             _glService.Viewport(0, 0, (int)_glControl.ActualWidth, (int)_glControl.ActualHeight);
@@ -362,7 +350,8 @@ namespace SpectrumNet
                    _analyzer is null ||
                    _isAnalyzerDisposed ||
                    !_controller.IsRecording ||
-                   _currentState.Paint is null;
+                   _currentState.Paint is null ||
+                   _isResizing;
         }
 
         private void RenderSpectrum()
@@ -374,7 +363,7 @@ namespace SpectrumNet
                 return;
             }
 
-            if (!TryCalcRenderParams(out float barWidth, out float barSpacing, out int barCount))
+            if (!CalculateRenderParameters(out float barWidth, out float barSpacing, out int barCount))
             {
                 RenderPlaceholder();
                 return;
@@ -383,7 +372,7 @@ namespace SpectrumNet
             var renderer = GetOrCreateRenderer();
             if (renderer is null)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Не удалось получить рендерер для стиля: {_currentState.Style}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to get renderer for style: {_currentState.Style}");
                 RenderPlaceholder();
                 return;
             }
@@ -439,27 +428,26 @@ namespace SpectrumNet
 
         private void RenderPlaceholder()
         {
-            _glService.ClearColor(1.0f, 0.1f, 1.0f, 1.0f);
-            _glService.Clear(ClearBufferMask.ColorBufferBit);
+            if (_glControl == null)
+                return;
+
+            if (_placeholder == null)
+            {
+                _placeholder = new SpectrumPlaceholder(_glService);
+            }
+
+            _placeholder.UpdateDimensions((float)_glControl.ActualWidth, (float)_glControl.ActualHeight);
+            _placeholder.Render();
         }
 
         private SpectralData? GetSpectrumData()
         {
-            try
-            {
-                return _analyzer?.GetCurrentSpectrum();
-            }
-            catch (ObjectDisposedException)
-            {
-                _isAnalyzerDisposed = true;
-                _shouldShowPlaceholder = true;
-                return null;
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка получения данных спектра: {ex.Message}");
-                return null;
-            }
+            return SmartLogger.Safe(() => _analyzer?.GetCurrentSpectrum(), defaultValue: null);
+        }
+
+        public bool CalculateRenderParameters(out float barWidth, out float barSpacing, out int barCount)
+        {
+            return TryCalcRenderParams(out barWidth, out barSpacing, out barCount);
         }
 
         private bool TryCalcRenderParams(out float barWidth, out float barSpacing, out int barCount)
@@ -482,13 +470,13 @@ namespace SpectrumNet
 
         #endregion
 
-        #region Конфигурация и синхронизация
+        #region Configuration and Synchronization
 
         public void SynchronizeWithController()
         {
             EnsureNotDisposed();
-            try
-            {
+
+            SmartLogger.Safe(() => {
                 bool needsUpdate = false;
 
                 if (_currentState.Style != _controller.SelectedDrawingType)
@@ -512,11 +500,7 @@ namespace SpectrumNet
 
                 if (needsUpdate)
                     RequestRender();
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка синхронизации: {ex.Message}");
-            }
+            }, LogPrefix, "Synchronization error");
         }
 
         public void UpdateRenderStyle(RenderStyle style)
@@ -525,7 +509,7 @@ namespace SpectrumNet
             if (_currentState.Style == style)
                 return;
 
-            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Обновление стиля рендеринга на {style}");
+            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Updating render style to {style}");
             _currentState = _currentState with { Style = style };
 
             ConfigureRendererForCurrentStyle();
@@ -534,8 +518,7 @@ namespace SpectrumNet
 
         private void ConfigureRendererForCurrentStyle()
         {
-            try
-            {
+            SmartLogger.Safe(() => {
                 var renderer = SpectrumRendererFactory.GetCachedRenderer(_currentState.Style) ??
                                SpectrumRendererFactory.CreateRenderer(
                                    _currentState.Style,
@@ -543,18 +526,14 @@ namespace SpectrumNet
                                    _currentState.Quality
                                );
                 renderer?.Configure(_controller.IsOverlayActive, _currentState.Quality);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Не удалось получить рендерер для стиля {_currentState.Style}: {ex.Message}");
-            }
+            }, LogPrefix, $"Failed to get renderer for style {_currentState.Style}");
         }
 
         public void UpdateSpectrumStyle(string styleName, Color4 color, ShaderProgram? shader)
         {
             EnsureNotDisposed();
             if (string.IsNullOrEmpty(styleName))
-                throw new ArgumentException("Имя стиля не может быть null или пустым", nameof(styleName));
+                throw new ArgumentException("Style name cannot be null or empty", nameof(styleName));
 
             if (styleName == _currentState.StyleName)
                 return;
@@ -588,32 +567,34 @@ namespace SpectrumNet
                     var renderer = SpectrumRendererFactory.GetCachedRenderer(_currentState.Style);
                     renderer?.Configure(_controller.IsOverlayActive, _currentState.Quality);
                 }
+
+                RenderRequested?.Invoke(this, EventArgs.Empty);
             }
         }
 
         public void UpdateRenderDimensions(int width, int height)
         {
             if (width <= 0 || height <= 0)
-                throw new ArgumentOutOfRangeException(width <= 0 ? nameof(width) : nameof(height), "Размеры должны быть больше нуля");
+                throw new ArgumentOutOfRangeException(width <= 0 ? nameof(width) : nameof(height), "Dimensions must be greater than zero");
 
             _projectionMatrix = Matrix4.CreateOrthographicOffCenter(0, width, height, 0, -1, 1);
+            _placeholder?.UpdateDimensions(width, height);
             RequestRender();
         }
 
         #endregion
 
-        #region Утилитарные методы и Dispose
+        #region Utility Methods and Dispose
 
         private void EnsureNotDisposed()
         {
             if (_isDisposed)
-                throw new ObjectDisposedException(nameof(Renderer), "Нельзя выполнить операцию на утилизированном рендерере");
+                throw new ObjectDisposedException(nameof(Renderer), "Cannot operate on a disposed renderer");
         }
 
         private void LogGpuInfo()
         {
-            try
-            {
+            SmartLogger.Safe(() => {
                 var openGlVersion = _glService.GetString(StringName.Version);
                 var vendor = _glService.GetString(StringName.Vendor);
                 var rendererStr = _glService.GetString(StringName.Renderer);
@@ -621,14 +602,10 @@ namespace SpectrumNet
                 if (string.IsNullOrEmpty(openGlVersion) ||
                     string.IsNullOrEmpty(vendor) ||
                     string.IsNullOrEmpty(rendererStr))
-                    throw new InvalidOperationException("Одна или более строк информации о GPU null или пустые");
+                    throw new InvalidOperationException("One or more GPU info strings are null or empty");
 
                 SmartLogger.Log(LogLevel.Information, LogPrefix, $"OpenGL: {openGlVersion}, Vendor: {vendor}, Renderer: {rendererStr}");
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Ошибка получения информации о GPU: {ex.Message}");
-            }
+            }, LogPrefix, "Error obtaining GPU info");
         }
 
         public void Dispose()
@@ -639,6 +616,7 @@ namespace SpectrumNet
             _isDisposed = _isAnalyzerDisposed = true;
             _disposalTokenSource.Cancel();
             _renderTimer?.Stop();
+            _resizeTimer?.Stop();
 
             PerformanceMetricsManager.PerformanceUpdated -= OnPerformanceMetricsUpdated;
 
@@ -648,23 +626,18 @@ namespace SpectrumNet
             if (_glControl is not null)
             {
                 _glControl.Render -= OnGlControlRender;
-                _glControl.SizeChanged -= UpdateRenderDimensions;
+                _glControl.SizeChanged -= OnGlControlSizeChanged;
                 _glControl = null;
             }
 
-            try
-            {
-                _currentState.Paint?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Ошибка при утилизации шейдера: {ex.Message}");
-            }
+            SmartLogger.SafeDispose(_currentState.Paint, "Renderer paint resources");
+            SmartLogger.SafeDispose(_placeholder, "Renderer placeholder");
+            _placeholder = null;
 
-            _renderLock.Dispose();
-            _disposalTokenSource.Dispose();
+            SmartLogger.SafeDispose(_renderLock, "Render lock");
+            SmartLogger.SafeDispose(_disposalTokenSource, "Disposal token source");
 
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer утилизирован");
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed");
         }
 
         #endregion

@@ -66,6 +66,7 @@ public interface ICameraControllable
     Vector3 CameraForward { get; set; }
     Vector3 CameraUp { get; set; }
     Vector2 CameraRotationOffset { get; set; }
+    Vector3 CameraPositionOffset { get; set; }
 }
 
 public interface IFftProcessor
@@ -122,6 +123,35 @@ public interface ISpectrumRenderer : IDisposable
     void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
 
     RenderQuality Quality { get; set; }
+
+}
+
+/// <summary>
+/// Интерфейс для рендереров, которые используют геометрию сцены вместо пустоты
+/// </summary>
+public interface ISceneRenderer
+{
+    SceneGeometry? SceneGeometry { get; }
+}
+
+public interface IRenderer
+{
+    IAudioVisualizationController Controller { get; }
+
+    string CurrentStyleName { get; }
+
+    RenderQuality CurrentQuality { get; }
+
+    void RequestRender();
+
+    void UpdateRenderDimensions(int width, int height);
+
+    bool CalculateRenderParameters(out float barWidth, out float barSpacing, out int barCount);
+
+    event EventHandler<PerformanceMetrics>? PerformanceUpdate;
+
+    event EventHandler? RenderRequested;
+
 }
 
 public class DefaultAudioDeviceService : IAudioDeviceService

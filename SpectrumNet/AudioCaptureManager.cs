@@ -6,7 +6,7 @@ namespace SpectrumNet
     {
         #region Constants and Fields
 
-        private const string LogPrefix = "[AudioCaptureManager] ";
+        private const string LogPrefix = "AudioCaptureManager";
         private const string _readyStatus = "Ready";
         private const string _recordingStatus = "Recording...";
         private const int _defaultDeviceCheckIntervalMs = 500;
@@ -75,41 +75,28 @@ namespace SpectrumNet
 
         private void RegisterDeviceNotifications()
         {
-            try
-            {
+            SmartLogger.Safe(() => {
                 _deviceService.RegisterEndpointNotificationCallback(_notificationHandler);
                 SmartLogger.Log(LogLevel.Information, LogPrefix,
                     "Audio device notification handler registered successfully", forceLog: true);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
-                    $"Failed to register endpoint notification callback: {ex.Message}\nStackTrace: {ex.StackTrace}");
-            }
+            }, LogPrefix, "Failed to register endpoint notification callback");
         }
 
         private MMDevice? GetDefaultAudioDevice()
         {
-            try
-            {
+            return SmartLogger.Safe(() => {
                 // Если ранее было получено устройство, освобождаем его
                 _currentDevice?.Dispose();
                 _currentDevice = _deviceService.GetDefaultAudioDevice();
                 if (_currentDevice is null)
                     SmartLogger.Log(LogLevel.Warning, LogPrefix, "No default audio device found");
                 return _currentDevice;
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"GetDefaultAudioDevice error: {ex.Message}");
-                return null;
-            }
+            }, defaultValue: null, LogPrefix, "GetDefaultAudioDevice error");
         }
 
         private async Task MonitorCaptureAsync(CancellationToken token)
         {
-            try
-            {
+            await SmartLogger.SafeAsync(async () => {
                 while (!token.IsCancellationRequested)
                 {
                     await Task.Delay(_deviceCheckIntervalMs, token);
@@ -119,21 +106,12 @@ namespace SpectrumNet
                     if (device is null || device.ID != _lastDeviceId)
                         OnDeviceChanged();
                 }
-            }
-            catch (TaskCanceledException)
-            {
-                // Ожидаемое завершение задачи
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in device monitoring: {ex.Message}");
-            }
+            }, LogPrefix, "Error in device monitoring");
         }
 
         private void OnDeviceChanged()
         {
-            try
-            {
+            SmartLogger.Safe(() => {
                 lock (_lock)
                 {
                     if (_isDisposed || _isReinitializing || _controller.IsTransitioning)
@@ -160,23 +138,13 @@ namespace SpectrumNet
                         }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
-                    $"Unhandled exception in OnDeviceChanged: {ex.Message}\nStackTrace: {ex.StackTrace}");
-            }
+            }, LogPrefix, "Unhandled exception in OnDeviceChanged");
 
             void TryStopCapture(string errorMsg)
             {
-                try
-                {
+                SmartLogger.Safe(() => {
                     StopCaptureAsync(true).GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"{errorMsg}: {ex.Message}");
-                }
+                }, LogPrefix, errorMsg);
             }
         }
 
@@ -186,8 +154,7 @@ namespace SpectrumNet
 
         public async Task ReinitializeCaptureAsync()
         {
-            try
-            {
+            await SmartLogger.SafeAsync(async () => {
                 _isReinitializing = true;
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Starting capture reinitialization", forceLog: true);
 
@@ -210,77 +177,70 @@ namespace SpectrumNet
                 await StartCaptureAsync();
                 SmartLogger.Log(LogLevel.Information, LogPrefix,
                     $"Capture successfully reinitialized with analyzer {analyzerHashCode}", forceLog: true);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error during capture reinitialization: {ex.Message}");
-                UpdateStatus(false, "Error reconnecting");
-            }
-            finally
-            {
-                _isReinitializing = false;
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Reinitialization completed");
-            }
+            }, LogPrefix, "Error during capture reinitialization");
+
+            _isReinitializing = false;
+            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Reinitialization completed");
         }
 
         private async Task<string> ReinitializeAnalyzerAndRendererAsync()
         {
             string analyzerHashCode = string.Empty;
-            await _controller.Dispatcher.InvokeAsync(() =>
-            {
-                // Пересоздаём анализатор и рендерер на UI-потоке
-                if (_controller.Renderer is not null)
-                {
-                    _controller.Renderer.Dispose();
-                    _controller.Renderer = null;
-                }
-                if (_controller.Analyzer is not null)
-                    _controller.Analyzer.Dispose();
-
-                var newAnalyzer = new SpectrumAnalyzer(
-                    new FftProcessor { WindowType = _controller.WindowType },
-                    new SpectrumConverter(_controller.GainParameters),
-                    SynchronizationContext.Current);
-                newAnalyzer.ScaleType = _controller.ScaleType;
-                _controller.Analyzer = newAnalyzer;
-
-                analyzerHashCode = newAnalyzer.GetHashCode().ToString("X8");
-
-                if (_controller.SpectrumCanvas is not null &&
-                    _controller.SpectrumCanvas.ActualWidth > 0 &&
-                    _controller.SpectrumCanvas.ActualHeight > 0)
-                {
-                    CreateRenderer(newAnalyzer);
-                }
-                else
-                {
-                    _controller.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(async () =>
+            await _controller.Dispatcher.InvokeAsync(() => {
+                SmartLogger.Safe(() => {
+                    // Пересоздаём анализатор и рендерер на UI-потоке
+                    if (_controller.Renderer is not null)
                     {
-                        await Task.Delay(200);
-                        _controller.Dispatcher.Invoke(() =>
+                        _controller.Renderer.Dispose();
+                        _controller.Renderer = null;
+                    }
+                    if (_controller.Analyzer is not null)
+                        _controller.Analyzer.Dispose();
+
+                    var newAnalyzer = new SpectrumAnalyzer(
+                        new FftProcessor { WindowType = _controller.WindowType },
+                        new SpectrumConverter(_controller.GainParameters),
+                        SynchronizationContext.Current);
+                    newAnalyzer.ScaleType = _controller.ScaleType;
+                    _controller.Analyzer = newAnalyzer;
+
+                    analyzerHashCode = newAnalyzer.GetHashCode().ToString("X8");
+
+                    if (_controller.SpectrumCanvas is not null &&
+                        _controller.SpectrumCanvas.ActualWidth > 0 &&
+                        _controller.SpectrumCanvas.ActualHeight > 0)
+                    {
+                        CreateRenderer(newAnalyzer);
+                    }
+                    else
+                    {
+                        _controller.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(async () =>
                         {
-                            if (_controller.SpectrumCanvas is not null &&
-                                _controller.SpectrumCanvas.ActualWidth > 0 &&
-                                _controller.SpectrumCanvas.ActualHeight > 0)
+                            await Task.Delay(200);
+                            _controller.Dispatcher.Invoke(() =>
                             {
-                                CreateRenderer(_controller.Analyzer);
-                            }
-                            else
-                            {
-                                SmartLogger.Log(LogLevel.Error, LogPrefix,
-                                    "Canvas still invalid after delay, cannot create renderer");
-                            }
-                        });
-                    }));
-                }
+                                if (_controller.SpectrumCanvas is not null &&
+                                    _controller.SpectrumCanvas.ActualWidth > 0 &&
+                                    _controller.SpectrumCanvas.ActualHeight > 0)
+                                {
+                                    CreateRenderer(_controller.Analyzer);
+                                }
+                                else
+                                {
+                                    SmartLogger.Log(LogLevel.Error, LogPrefix,
+                                        "Canvas still invalid after delay, cannot create renderer");
+                                }
+                            });
+                        }));
+                    }
+                }, LogPrefix, "Error reinitializing analyzer and renderer");
             });
             return analyzerHashCode;
         }
 
         private void CreateRenderer(SpectrumAnalyzer analyzer)
         {
-            try
-            {
+            SmartLogger.Safe(() => {
                 if (analyzer is null)
                 {
                     SmartLogger.Log(LogLevel.Error, LogPrefix, "Cannot create renderer - analyzer is null");
@@ -295,11 +255,7 @@ namespace SpectrumNet
                     _glService);
                 _controller.Renderer.SynchronizeWithController();
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer created and synchronized successfully");
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Failed to create renderer: {ex.Message}");
-            }
+            }, LogPrefix, "Failed to create renderer");
         }
 
         #endregion
@@ -308,6 +264,9 @@ namespace SpectrumNet
 
         public async Task StartCaptureAsync()
         {
+            CaptureState? captureState = null;
+            bool initSuccess = false;
+
             try
             {
                 lock (_lock)
@@ -337,6 +296,7 @@ namespace SpectrumNet
 
                     var capture = new WasapiLoopbackCapture(device);
                     _state = new CaptureState(analyzer, capture, new CancellationTokenSource());
+                    captureState = _state;
 
                     _state.Capture.DataAvailable += OnDataAvailable;
                     _state.Capture.RecordingStopped += OnRecordingStopped;
@@ -345,8 +305,13 @@ namespace SpectrumNet
                     UpdateStatus(true);
                     SmartLogger.Log(LogLevel.Information, LogPrefix,
                         $"Capture started on device: {device.FriendlyName} with existing analyzer");
+                    initSuccess = true;
                 }
-                await MonitorCaptureAsync(_state!.CTS.Token);
+
+                if (initSuccess && captureState != null)
+                {
+                    await MonitorCaptureAsync(captureState.CTS.Token);
+                }
             }
             catch (Exception ex)
             {
@@ -363,10 +328,10 @@ namespace SpectrumNet
                 stateToDispose = _state;
                 _state = null;
             }
+
             if (stateToDispose is not null)
             {
-                try
-                {
+                await SmartLogger.SafeAsync(async () => {
                     stateToDispose.CTS.Cancel();
                     await Task.Run(() =>
                     {
@@ -374,30 +339,26 @@ namespace SpectrumNet
                         stateToDispose.Capture.Dispose();
                         stateToDispose.Analyzer.SafeReset();
                     });
-                }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix, $"StopCapture error: {ex.Message}");
-                }
+                }, LogPrefix, "StopCapture error");
             }
+
             if (updateUI)
                 UpdateStatus(false);
         }
 
         private void InitializeCapture()
         {
-            DisposeCaptureState(_state);
-            _state = null;
+            SmartLogger.Safe(() => {
+                DisposeCaptureState(_state);
+                _state = null;
 
-            MMDevice? device = GetDefaultAudioDevice();
-            if (device is null)
-            {
-                UpdateStatus(false, "No audio device");
-                return;
-            }
+                MMDevice? device = GetDefaultAudioDevice();
+                if (device is null)
+                {
+                    UpdateStatus(false, "No audio device");
+                    return;
+                }
 
-            try
-            {
                 var analyzer = _controller.Analyzer;
                 if (analyzer is null)
                 {
@@ -418,12 +379,7 @@ namespace SpectrumNet
                 SmartLogger.Log(LogLevel.Information, LogPrefix,
                     $"Audio capture started on device: {device.FriendlyName} using existing analyzer",
                     forceLog: true);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Capture initialization failed: {ex.Message}");
-                UpdateStatus(false, "Capture init failed");
-            }
+            }, LogPrefix, "Capture initialization failed");
         }
 
         #endregion
@@ -447,15 +403,14 @@ namespace SpectrumNet
             if (e.BytesRecorded <= 0 || _state?.Analyzer is null)
                 return;
 
-            var waveFormat = _state.Capture.WaveFormat
-                ?? throw new InvalidOperationException("WaveFormat is null");
+            SmartLogger.Safe(() => {
+                var waveFormat = _state.Capture.WaveFormat
+                    ?? throw new InvalidOperationException("WaveFormat is null");
 
-            int channels = waveFormat.Channels;
-            int frameCount = e.BytesRecorded / 4 / channels;
-            float[] monoSamples = new float[frameCount];
+                int channels = waveFormat.Channels;
+                int frameCount = e.BytesRecorded / 4 / channels;
+                float[] monoSamples = new float[frameCount];
 
-            try
-            {
                 Span<byte> bufferSpan = new(e.Buffer, 0, e.BytesRecorded);
                 for (int frame = 0; frame < frameCount; frame++)
                 {
@@ -469,62 +424,62 @@ namespace SpectrumNet
                 }
 
                 _ = _state.Analyzer.AddSamplesAsync(monoSamples, waveFormat.SampleRate);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing audio data: {ex.Message}");
-            }
+            }, LogPrefix, "Error processing audio data");
         }
 
         #endregion
 
         #region Helper Methods
 
-        private SpectrumAnalyzer InitializeAnalyzer()
+        private SpectrumAnalyzer? InitializeAnalyzer()
         {
-            return _controller.Dispatcher.Invoke(() =>
-            {
-                var currentContext = SynchronizationContext.Current;
-                SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                    $"Initializing analyzer with SynchronizationContext: {(currentContext is not null ? "Present" : "Null")}");
-
-                var analyzer = new SpectrumAnalyzer(
-                    new FftProcessor { WindowType = _controller.WindowType },
-                    new SpectrumConverter(_controller.GainParameters),
-                    currentContext
-                );
-
-                analyzer.SetWindowType(_controller.WindowType);
-                analyzer.SetScaleType(_controller.ScaleType);
-
-                analyzer.SpectralDataReady += (s, e) =>
-                    SmartLogger.Log(LogLevel.Debug, LogPrefix,
-                        $"SpectralDataReady fired, data length: {e.Data.Spectrum.Length}");
-
-                if (_controller.Renderer is not null)
+            return SmartLogger.Safe(() => {
+                return _controller.Dispatcher.Invoke(() =>
                 {
-                    _controller.Renderer.UpdateRenderDimensions(
-                        (int)_controller.SpectrumCanvas.ActualWidth,
-                        (int)_controller.SpectrumCanvas.ActualHeight
+                    var currentContext = SynchronizationContext.Current;
+                    SmartLogger.Log(LogLevel.Debug, LogPrefix,
+                        $"Initializing analyzer with SynchronizationContext: {(currentContext is not null ? "Present" : "Null")}");
+
+                    var analyzer = new SpectrumAnalyzer(
+                        new FftProcessor { WindowType = _controller.WindowType },
+                        new SpectrumConverter(_controller.GainParameters),
+                        currentContext
                     );
-                }
-                return analyzer;
-            });
+
+                    analyzer.SetWindowType(_controller.WindowType);
+                    analyzer.SetScaleType(_controller.ScaleType);
+
+                    analyzer.SpectralDataReady += (s, e) =>
+                        SmartLogger.Log(LogLevel.Debug, LogPrefix,
+                            $"SpectralDataReady fired, data length: {e.Data.Spectrum.Length}");
+
+                    if (_controller.Renderer is not null)
+                    {
+                        _controller.Renderer.UpdateRenderDimensions(
+                            (int)_controller.SpectrumCanvas.ActualWidth,
+                            (int)_controller.SpectrumCanvas.ActualHeight
+                        );
+                    }
+                    return analyzer;
+                });
+            }, defaultValue: null, LogPrefix, "Error initializing analyzer");
         }
 
         private void UpdateStatus(bool isRecording, string? customStatus = null)
         {
-            _controller.Dispatcher.Invoke(() =>
-            {
-                IsRecording = isRecording;
-                _controller.IsRecording = isRecording;
-                _controller.StatusText = customStatus ?? (isRecording ? _recordingStatus : _readyStatus);
-                _controller.OnPropertyChanged(
-                    nameof(IAudioVisualizationController.IsRecording),
-                    nameof(IAudioVisualizationController.CanStartCapture),
-                    nameof(IAudioVisualizationController.StatusText)
-                );
-            });
+            SmartLogger.Safe(() => {
+                _controller.Dispatcher.Invoke(() =>
+                {
+                    IsRecording = isRecording;
+                    _controller.IsRecording = isRecording;
+                    _controller.StatusText = customStatus ?? (isRecording ? _recordingStatus : _readyStatus);
+                    _controller.OnPropertyChanged(
+                        nameof(IAudioVisualizationController.IsRecording),
+                        nameof(IAudioVisualizationController.CanStartCapture),
+                        nameof(IAudioVisualizationController.StatusText)
+                    );
+                });
+            }, LogPrefix, "Error updating status");
         }
 
         private void DisposeCaptureState(CaptureState? state)
@@ -532,11 +487,14 @@ namespace SpectrumNet
             if (state is null)
                 return;
 
-            state.Capture.DataAvailable -= OnDataAvailable;
-            state.Capture.RecordingStopped -= OnRecordingStopped;
-            state.Capture.Dispose();
-            state.CTS.Dispose();
-            state.Analyzer.Dispose();
+            SmartLogger.Safe(() => {
+                state.Capture.DataAvailable -= OnDataAvailable;
+                state.Capture.RecordingStopped -= OnRecordingStopped;
+
+                SmartLogger.SafeDispose(state.Capture, "WasapiLoopbackCapture");
+                SmartLogger.SafeDispose(state.CTS, "CancellationTokenSource");
+                SmartLogger.SafeDispose(state.Analyzer, "SpectrumAnalyzer");
+            }, LogPrefix, "Error disposing capture state");
         }
 
         #endregion
@@ -548,17 +506,21 @@ namespace SpectrumNet
             if (_isDisposed)
                 return;
 
-            lock (_lock)
-            {
-                if (_isDisposed)
-                    return;
+            SmartLogger.Safe(() => {
+                lock (_lock)
+                {
+                    if (_isDisposed)
+                        return;
 
-                StopCaptureAsync().GetAwaiter().GetResult();
-                _deviceService.UnregisterEndpointNotificationCallback(_notificationHandler);
-                _currentDevice?.Dispose();
-                _deviceService.Dispose();
-                _isDisposed = true;
-            }
+                    StopCaptureAsync().GetAwaiter().GetResult();
+                    _deviceService.UnregisterEndpointNotificationCallback(_notificationHandler);
+
+                    SmartLogger.SafeDispose(_currentDevice, "Current audio device");
+                    SmartLogger.SafeDispose(_deviceService, "Audio device service");
+
+                    _isDisposed = true;
+                }
+            }, LogPrefix, "Error during dispose");
         }
 
         #endregion
@@ -571,14 +533,23 @@ namespace SpectrumNet
             public AudioEndpointNotificationHandler(Action deviceChangeCallback) =>
                 _deviceChangeCallback = deviceChangeCallback ?? throw new ArgumentNullException(nameof(deviceChangeCallback));
 
-            public void OnDeviceStateChanged(string deviceId, DeviceState newState) => _deviceChangeCallback();
-            public void OnDeviceAdded(string pwstrDeviceId) => _deviceChangeCallback();
-            public void OnDeviceRemoved(string deviceId) => _deviceChangeCallback();
+            public void OnDeviceStateChanged(string deviceId, DeviceState newState) =>
+                SmartLogger.Safe(_deviceChangeCallback, LogPrefix, "Error in OnDeviceStateChanged callback");
+
+            public void OnDeviceAdded(string pwstrDeviceId) =>
+                SmartLogger.Safe(_deviceChangeCallback, LogPrefix, "Error in OnDeviceAdded callback");
+
+            public void OnDeviceRemoved(string deviceId) =>
+                SmartLogger.Safe(_deviceChangeCallback, LogPrefix, "Error in OnDeviceRemoved callback");
+
             public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
             {
-                if (flow == DataFlow.Render && role == Role.Multimedia)
-                    _deviceChangeCallback();
+                SmartLogger.Safe(() => {
+                    if (flow == DataFlow.Render && role == Role.Multimedia)
+                        _deviceChangeCallback();
+                }, LogPrefix, "Error in OnDefaultDeviceChanged callback");
             }
+
             public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }
         }
 
