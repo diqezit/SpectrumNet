@@ -99,13 +99,23 @@ namespace SpectrumNet
             await SmartLogger.SafeAsync(async () => {
                 while (!token.IsCancellationRequested)
                 {
-                    await Task.Delay(_deviceCheckIntervalMs, token);
+                    try
+                    {
+                        await Task.Delay(_deviceCheckIntervalMs).WaitAsync(token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break; 
+                    }
+
                     if (!IsRecording || _controller.IsTransitioning)
                         continue;
+
                     MMDevice? device = GetDefaultAudioDevice();
                     if (device is null || device.ID != _lastDeviceId)
                         OnDeviceChanged();
                 }
+                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Device monitoring completed normally");
             }, LogPrefix, "Error in device monitoring");
         }
 

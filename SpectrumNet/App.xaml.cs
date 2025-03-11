@@ -18,6 +18,12 @@ public partial class App : System.Windows.Application
             base.OnStartup(e);
             SpectrumNet.CommonResources.InitialiseResources();
 
+            // Установка BrushesProvider для PaletteNameToBrushConverter
+            if (Resources["PaletteNameToBrushConverter"] is PaletteNameToBrushConverter converter)
+            {
+                converter.BrushesProvider = SpectrumBrushes.Instance;
+            }
+
             Current.Exit += (_, args) => SmartLogger.Log(LogLevel.Information, "App",
                 "Application is shutting down normally", forceLog: true);
         }

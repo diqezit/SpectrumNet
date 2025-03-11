@@ -93,7 +93,7 @@ namespace SpectrumNet
 
         #endregion
 
-        private RainParticleRenderer() : base("[RainParticleRenderer] ") { }
+        private RainParticleRenderer() : base("RainParticleRenderer") { }
 
         public static RainParticleRenderer GetInstance() => _instance ??= new RainParticleRenderer();
 

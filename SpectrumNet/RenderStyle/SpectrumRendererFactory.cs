@@ -317,7 +317,7 @@ namespace SpectrumNet
             }, new float[targetCount], LogPrefix, "Error scaling spectrum");
         }
 
-        protected float GetSpectrumValueSafely(float[]? spectrum, int index, float defaultValue = 0f)
+        protected static float GetSpectrumValueSafely(float[]? spectrum, int index, float defaultValue = 0f)
         {
             if (spectrum == null || spectrum.Length == 0 || index < 0 || index >= spectrum.Length)
                 return defaultValue;
@@ -325,7 +325,7 @@ namespace SpectrumNet
             return spectrum[index];
         }
 
-        protected int CalculateSpectrumIndex(float position, float maxPosition, int spectrumLength)
+        protected static int CalculateSpectrumIndex(float position, float maxPosition, int spectrumLength)
         {
             if (spectrumLength <= 0 || maxPosition <= 0)
                 return 0;
@@ -334,7 +334,7 @@ namespace SpectrumNet
             return Math.Clamp(index, 0, spectrumLength - 1);
         }
 
-        protected bool IsValidSpectrum(float[]? spectrum, int minLength = 2)
+        protected static bool IsValidSpectrum(float[]? spectrum, int minLength = 2)
         {
             return spectrum != null && spectrum.Length >= minLength;
         }

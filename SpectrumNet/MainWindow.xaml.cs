@@ -4,7 +4,7 @@ namespace SpectrumNet;
 
 public partial class MainWindow : System.Windows.Window, IAudioVisualizationController
 {
-    private const string LogPrefix = "[MainWindow] ";
+    private const string LogPrefix = "MainWindow";
 
     // Core components
     private GLWpfControl? _renderElement;
@@ -19,6 +19,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private bool _isOverlayActive, _isPopupOpen, _isOverlayTopmost = true,
                 _isControlPanelVisible = true, _isTransitioning, _isDisposed,
                 _showPerformanceInfo = true, _isOpenGLInitialized;
+    private bool _isControlPanelOpen;
 
     // Configuration state
     private RenderStyle _selectedDrawingType = RenderStyle.Bars;
@@ -34,6 +35,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private PropertyChangedEventHandler? _themePropertyChangedHandler;
     private OverlayWindow? _overlayWindow;
     private readonly object _openGLLock = new();
+    private ControlPanelWindow? _controlPanelWindow;
 
     // Core properties
     public GLWpfControlSettings GlSettings => _glSettings;
@@ -49,9 +51,18 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             {
                 var oldRenderer = _renderer;
                 _renderer = value;
-
                 SmartLogger.SafeDispose(oldRenderer as IDisposable, "old renderer");
             }
+        }
+    }
+
+    public bool IsControlPanelOpen
+    {
+        get => _isControlPanelOpen;
+        set
+        {
+            _isControlPanelOpen = value;
+            OnPropertyChanged(nameof(IsControlPanelOpen));
         }
     }
 
@@ -76,9 +87,14 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     public int BarCount
     {
-        get => Settings.Instance.UIBarCount;
+        get => Settings.Instance?.UIBarCount ?? DefaultSettings.UIBarCount;
         set
         {
+            if (Settings.Instance == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set BarCount");
+                return;
+            }
             if (value <= 0)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set invalid bar count: {value}");
@@ -91,9 +107,14 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     public double BarSpacing
     {
-        get => Settings.Instance.UIBarSpacing;
+        get => Settings.Instance?.UIBarSpacing ?? DefaultSettings.UIBarSpacing; 
         set
         {
+            if (Settings.Instance == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set BarSpacing");
+                return;
+            }
             if (value < 0)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set negative spacing: {value}");
@@ -112,8 +133,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (_isOverlayActive == value) return;
             _isOverlayActive = value;
             OnPropertyChanged(nameof(IsOverlayActive));
-
-            SmartLogger.Safe(() => {
+            SmartLogger.Safe(() =>
+            {
                 SpectrumRendererFactory.ConfigureAllRenderers(value);
                 _renderElement?.InvalidateVisual();
             }, source: LogPrefix, errorMessage: "Error updating visualization");
@@ -126,13 +147,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         set
         {
             if (_captureManager?.IsRecording == value) return;
-
-            Dispatcher.InvokeAsync(() => {
+            Dispatcher.InvokeAsync(() =>
+            {
                 if (value)
                     _ = StartCaptureAsync();
                 else
                     _ = StopCaptureAsync();
-
                 OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
             });
         }
@@ -160,8 +180,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (_selectedScaleType == value) return;
             _selectedScaleType = value;
             OnPropertyChanged(nameof(ScaleType));
-
-            SmartLogger.Safe(() => {
+            SmartLogger.Safe(() =>
+            {
                 _analyzer?.SetScaleType(value);
                 _visualizationManager?.RequestRender();
                 _renderElement?.InvalidateVisual();
@@ -176,12 +196,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         set
         {
             if (_selectedDrawingType == value) return;
-
             _selectedDrawingType = value;
             OnPropertyChanged(nameof(SelectedDrawingType));
             Settings.Instance.SelectedRenderStyle = value;
-
-            SmartLogger.Safe(() => {
+            SmartLogger.Safe(() =>
+            {
                 _visualizationManager?.HandleRenderStyleChanged(value);
                 _renderElement?.InvalidateVisual();
             }, source: LogPrefix, errorMessage: "Error changing render style");
@@ -196,8 +215,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (Settings.Instance.SelectedRenderQuality == value) return;
             Settings.Instance.SelectedRenderQuality = value;
             OnPropertyChanged(nameof(RenderQuality));
-
-            SmartLogger.Safe(() => {
+            SmartLogger.Safe(() =>
+            {
                 SpectrumRendererFactory.GlobalQuality = value;
                 _visualizationManager?.RequestRender();
                 _renderElement?.InvalidateVisual();
@@ -215,7 +234,6 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, "Attempt to set empty style name");
                 value = DefaultSettings.SelectedPalette;
             }
-
             if (Settings.Instance.SelectedPalette == value) return;
             Settings.Instance.SelectedPalette = value;
             OnPropertyChanged(nameof(SelectedStyle));
@@ -241,8 +259,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (_selectedFftWindowType == value) return;
             _selectedFftWindowType = value;
             OnPropertyChanged(nameof(WindowType));
-
-            SmartLogger.Safe(() => {
+            SmartLogger.Safe(() =>
+            {
                 _analyzer?.SetWindowType(value);
                 _visualizationManager?.RequestRender();
                 _renderElement?.InvalidateVisual();
@@ -317,12 +335,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         get => _gainParameters?.MinDbValue ?? DefaultSettings.UIMinDbLevel;
         set
         {
+            if (Settings.Instance == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set MinDbLevel");
+                return;
+            }
             ArgumentNullException.ThrowIfNull(_gainParameters, nameof(_gainParameters));
-
             if (value >= _gainParameters.MaxDbValue)
             {
-                SmartLogger.Log(LogLevel.Warning, LogPrefix,
-                    $"Min dB level ({value}) must be less than max ({_gainParameters.MaxDbValue})");
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Min dB level ({value}) must be less than max ({_gainParameters.MaxDbValue})");
                 value = _gainParameters.MaxDbValue - 1;
             }
             UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel));
@@ -335,12 +356,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         get => _gainParameters?.MaxDbValue ?? DefaultSettings.UIMaxDbLevel;
         set
         {
+            if (Settings.Instance == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set MaxDbLevel");
+                return;
+            }
             ArgumentNullException.ThrowIfNull(_gainParameters, nameof(_gainParameters));
-
             if (value <= _gainParameters.MinDbValue)
             {
-                SmartLogger.Log(LogLevel.Warning, LogPrefix,
-                    $"Max dB level ({value}) must be greater than min ({_gainParameters.MinDbValue})");
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Max dB level ({value}) must be greater than min ({_gainParameters.MinDbValue})");
                 value = _gainParameters.MinDbValue + 1;
             }
             UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
@@ -353,8 +377,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         get => _gainParameters?.AmplificationFactor ?? DefaultSettings.UIAmplificationFactor;
         set
         {
+            if (Settings.Instance == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set AmplificationFactor");
+                return;
+            }
             ArgumentNullException.ThrowIfNull(_gainParameters, nameof(_gainParameters));
-
             if (value < 0)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Amplification factor cannot be negative: {value}");
@@ -371,7 +399,6 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     public MainWindow()
     {
         InitializeComponent();
-
         _renderElement = SmartLogger.Safe(() => FindName("OpenTkControl") as GLWpfControl,
             defaultValue: null,
             source: LogPrefix,
@@ -401,12 +428,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     #region Initialization
     private void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             InitializeOpenGL();
             InitComponents();
             InitializeRenderers();
             OnPropertyChanged(nameof(AvailablePalettes));
-
             var converter = Resources["PaletteNameToBrushConverter"] as PaletteNameToBrushConverter;
             if (converter != null)
             {
@@ -421,16 +448,13 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         {
             if (_isOpenGLInitialized)
                 return;
-
             ArgumentNullException.ThrowIfNull(_renderElement, nameof(_renderElement));
-
             _glSettings = new GLWpfControlSettings
             {
                 MajorVersion = 4,
                 MinorVersion = 0,
                 RenderContinuously = false
             };
-
             _renderElement.Start(_glSettings);
             _renderElement.Render += OpenTkControl_OnRender;
             _isOpenGLInitialized = true;
@@ -440,7 +464,6 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void OpenTkControl_OnRender(TimeSpan delta)
     {
         if (_isDisposed) return;
-
         if (_renderElement?.IsInitialized == true && _renderer != null)
         {
             SmartLogger.Safe(() => _renderer.OnGlControlRender(delta),
@@ -452,13 +475,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void InitComponents()
     {
         ArgumentNullException.ThrowIfNull(_renderElement, nameof(_renderElement));
-
         var syncContext = SynchronizationContext.Current ??
             throw new InvalidOperationException("SynchronizationContext.Current is null");
 
         _spectrumStyles = new SpectrumBrushes();
         _disposables = new CompositeDisposable();
-
         _analyzer = new SpectrumAnalyzer(
             new FftProcessor { WindowType = _selectedFftWindowType },
             new SpectrumConverter(_gainParameters ?? throw new InvalidOperationException("Gain parameters not initialized")),
@@ -468,7 +489,6 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
         IAudioDeviceService deviceService = new DefaultAudioDeviceService();
         IOpenGLService glService = new OpenGLService();
-
         _captureManager = new AudioCaptureManager(this, deviceService, glService);
         _disposables.Add(_captureManager);
 
@@ -476,7 +496,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         _visualizationManager.Initialize(_analyzer, _spectrumStyles);
         _disposables.Add(_visualizationManager);
 
-        Dispatcher.InvokeAsync(() => {
+        Dispatcher.InvokeAsync(() =>
+        {
             if (!_isDisposed && _visualizationManager?.CameraController != null)
             {
                 _visualizationManager.CameraController.ActivateCamera();
@@ -490,12 +511,10 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     {
         if (SpectrumRendererFactory.IsInitialized)
             return;
-
         foreach (RenderStyle style in Enum.GetValues<RenderStyle>())
         {
             SpectrumRendererFactory.CreateRenderer(style, false);
         }
-
         SpectrumRendererFactory.IsInitialized = true;
     }
 
@@ -555,7 +574,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     #region Settings Management
     private void LoadAndApplySettings()
     {
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             SettingsWindow.Instance.LoadSettings();
             ApplyWindowSettings();
             EnsureWindowIsVisible();
@@ -584,7 +604,6 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     {
         var screenRect = new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
         var windowRect = new Rect(Left, Top, Width, Height);
-
         if (!screenRect.IntersectsWith(windowRect))
         {
             Left = (screenRect.Width - Width) / 2;
@@ -610,15 +629,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             SmartLogger.Log(LogLevel.Error, LogPrefix, "Capture manager not initialized");
             return;
         }
-
         if (_captureManager.IsRecording)
         {
             SmartLogger.Log(LogLevel.Warning, LogPrefix, "Capture already in progress");
             return;
         }
-
-        await SmartLogger.SafeAsync(async () => {
-            await Dispatcher.InvokeAsync(async () => {
+        await SmartLogger.SafeAsync(async () =>
+        {
+            await Dispatcher.InvokeAsync(async () =>
+            {
                 await _captureManager.StartCaptureAsync();
                 UpdateProps();
                 _renderElement?.InvalidateVisual();
@@ -633,15 +652,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             SmartLogger.Log(LogLevel.Error, LogPrefix, "Capture manager not initialized");
             return;
         }
-
         if (!_captureManager.IsRecording)
         {
             SmartLogger.Log(LogLevel.Warning, LogPrefix, "No capture in progress");
             return;
         }
-
-        await SmartLogger.SafeAsync(async () => {
-            await Dispatcher.InvokeAsync(async () => {
+        await SmartLogger.SafeAsync(async () =>
+        {
+            await Dispatcher.InvokeAsync(async () =>
+            {
                 await _captureManager.StopCaptureAsync();
                 UpdateProps();
                 _renderElement?.InvalidateVisual();
@@ -650,6 +669,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     }
     #endregion
 
+    // Методы управления оверлеем остаются без изменений
     #region Overlay Management
     private void OpenOverlay()
     {
@@ -659,9 +679,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             _overlayWindow.Topmost = IsOverlayTopmost;
             return;
         }
-
         CloseOverlayInternal();
-
         _overlayWindow = SmartLogger.Safe(() => new OverlayWindow(
             this,
             new OverlayConfiguration(
@@ -679,7 +697,6 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         {
             return;
         }
-
         _overlayWindow.Closed += (_, _) => OnOverlayClosed();
         _overlayWindow.Show();
         IsOverlayActive = true;
@@ -687,7 +704,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     private void CloseOverlay()
     {
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             CloseOverlayInternal();
             IsOverlayActive = false;
         }, source: LogPrefix, errorMessage: "Error closing overlay");
@@ -706,14 +724,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     private void OnOverlayClosed()
     {
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             if (_overlayWindow != null)
             {
                 SmartLogger.SafeDispose(_overlayWindow, "overlay window");
                 _overlayWindow = null;
             }
-
-            Dispatcher.InvokeAsync(() => {
+            Dispatcher.InvokeAsync(() =>
+            {
                 IsOverlayActive = false;
                 SpectrumRendererFactory.ConfigureAllRenderers(false);
                 _renderElement?.InvalidateVisual();
@@ -724,12 +743,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     private void OnOverlayButtonClick(object? sender, RoutedEventArgs e)
     {
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             if (IsOverlayActive)
                 CloseOverlay();
             else
                 OpenOverlay();
-
             SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
             _renderElement?.InvalidateVisual();
         }, source: LogPrefix, errorMessage: "Error toggling overlay");
@@ -737,15 +756,45 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     #endregion
 
     #region Event Handlers
+    /// <summary>
+    /// Обрабатывает нажатие на кнопку переключения панели управления.
+    /// Открывает или закрывает ControlPanelWindow.
+    /// </summary>
+    private void ToggleButtonContainer_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            SmartLogger.Safe(() =>
+            {
+                if (_controlPanelWindow == null || !_controlPanelWindow.IsVisible)
+                {
+                    _controlPanelWindow = new ControlPanelWindow(this);
+                    _controlPanelWindow.Closed += (s, args) =>
+                    {
+                        _controlPanelWindow = null;
+                        IsControlPanelOpen = false;
+                    };
+                    _controlPanelWindow.Show();
+                    IsControlPanelOpen = true;
+                }
+                else
+                {
+                    _controlPanelWindow.Close();
+                    _controlPanelWindow = null;
+                    IsControlPanelOpen = false;
+                }
+            }, source: LogPrefix, errorMessage: "Error toggling control panel window");
+        }
+    }
+
     private void OnRendering(object? sender, EventArgs? e)
     {
         if (_isDisposed) return;
-
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             lock (_openGLLock)
             {
                 _visualizationManager?.CameraController?.Update();
-
                 if (_visualizationManager?.NeedsRender == true)
                 {
                     _renderElement?.InvalidateVisual();
@@ -758,12 +807,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void OnStateChanged(object? sender, EventArgs? e)
     {
         if (MaximizeButton == null || MaximizeIcon == null) return;
-
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             MaximizeIcon.Data = Geometry.Parse(WindowState == System.Windows.WindowState.Maximized
                 ? "M0,0 L20,0 L20,20 L0,20 Z"
                 : "M2,2 H18 V18 H2 Z");
-
             Settings.Instance.WindowState = WindowState;
         }, source: LogPrefix, errorMessage: "Error changing icon");
     }
@@ -777,14 +825,13 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs? e)
     {
         if (e == null) return;
-
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             if (WindowState == System.Windows.WindowState.Normal)
             {
                 Settings.Instance.WindowWidth = Width;
                 Settings.Instance.WindowHeight = Height;
             }
-
             if (_renderElement != null)
             {
                 UpdateRendererDimensions((int)_renderElement.ActualWidth, (int)_renderElement.ActualHeight);
@@ -792,11 +839,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         }, source: LogPrefix, errorMessage: "Error updating window size settings");
     }
 
-    private void OnComboBoxSelectionChanged(object? sender, SelectionChangedEventArgs? e)
+    internal void OnComboBoxSelectionChanged(object? sender, SelectionChangedEventArgs? e)
     {
         if (sender is not System.Windows.Controls.ComboBox cb || e == null) return;
-
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             switch (cb.Name)
             {
                 case "RenderStyleComboBox" when cb.SelectedItem is RenderStyle rs:
@@ -815,13 +862,20 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         }, source: LogPrefix, errorMessage: "Error handling selection change");
     }
 
+    /// <summary>
+    /// Обрабатывает закрытие основного окна, закрывая также ControlPanelWindow.
+    /// </summary>
     private async void OnWindowClosed(object? sender, EventArgs? e)
     {
         _isDisposed = true;
-
-        await SmartLogger.SafeAsync(async () => {
+        await SmartLogger.SafeAsync(async () =>
+        {
             SettingsWindow.Instance.SaveSettings();
-
+            if (_controlPanelWindow != null)
+            {
+                _controlPanelWindow.Close();
+                _controlPanelWindow = null;
+            }
             _cleanupCts.Cancel();
 
             CompositionTarget.Rendering -= OnRendering;
@@ -843,10 +897,9 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 try
                 {
                     await Dispatcher.InvokeAsync(async () =>
-                    await _captureManager.StopCaptureAsync()).Task;
+                        await _captureManager.StopCaptureAsync()).Task;
                 }
                 catch { }
-
                 SmartLogger.SafeDispose(_captureManager, "capture manager");
                 _captureManager = null;
             }
@@ -881,7 +934,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     {
         if (e?.ChangedButton == System.Windows.Input.MouseButton.Left)
         {
-            SmartLogger.Safe(() => {
+            SmartLogger.Safe(() =>
+            {
                 DragMove();
                 if (WindowState == System.Windows.WindowState.Normal)
                 {
@@ -895,11 +949,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void OnWindowMouseDoubleClick(object? sender, System.Windows.Input.MouseButtonEventArgs? e)
     {
         if (e == null) return;
-
-        SmartLogger.Safe(() => {
-        if (e.OriginalSource is DependencyObject originalElement)
+        SmartLogger.Safe(() =>
         {
-            DependencyObject? element = originalElement;
+            if (e.OriginalSource is DependencyObject originalElement)
+            {
+                DependencyObject? element = originalElement;
                 while (element != null)
                 {
                     if (element is System.Windows.Controls.CheckBox)
@@ -910,7 +964,6 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                     element = VisualTreeHelper.GetParent(element);
                 }
             }
-
             if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
             {
                 e.Handled = true;
@@ -919,11 +972,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         }, source: LogPrefix, errorMessage: "Error handling double click");
     }
 
-    private void OnSliderValueChanged(object? sender, RoutedPropertyChangedEventArgs<double>? e)
+    internal void OnSliderValueChanged(object? sender, RoutedPropertyChangedEventArgs<double>? e)
     {
         if (sender is not Slider slider || e == null) return;
-
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             var sliderActions = new Dictionary<string, Action<double>>
             {
                 ["barSpacingSlider"] = value => BarSpacing = value,
@@ -932,17 +985,17 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 ["maxDbLevelSlider"] = value => MaxDbLevel = (float)value,
                 ["amplificationFactorSlider"] = value => AmplificationFactor = (float)value
             };
-
             if (sliderActions.TryGetValue(slider.Name, out var action))
                 action(slider.Value);
         }, source: LogPrefix, errorMessage: "Error handling slider change");
     }
 
-    private void OnButtonClick(object sender, RoutedEventArgs e)
+    internal void OnButtonClick(object sender, RoutedEventArgs e)
     {
         if (sender is not System.Windows.Controls.Button btn) return;
 
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             var actions = new Dictionary<string, Action>
             {
                 ["StartCaptureButton"] = async () => await StartCaptureAsync(),
@@ -950,17 +1003,14 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 ["OverlayButton"] = () => OnOverlayButtonClick(sender, e),
                 ["OpenSettingsButton"] = () =>
                 {
-                    if (this.OpenSettingsButton != null)
+                    btn.IsEnabled = false; 
+                    try
                     {
-                        this.OpenSettingsButton.IsEnabled = false;
-                        try
-                        {
-                            new SettingsWindow().ShowDialog();
-                        }
-                        finally
-                        {
-                            this.OpenSettingsButton.IsEnabled = true;
-                        }
+                        new SettingsWindow().ShowDialog(); 
+                    }
+                    finally
+                    {
+                        btn.IsEnabled = true; 
                     }
                 },
                 ["OpenPopupButton"] = () => IsPopupOpen = !IsPopupOpen,
@@ -989,9 +1039,9 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     private void MainWindow_KeyDown(object sender, KeyEventArgs e)
     {
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             _visualizationManager?.CameraController?.HandleKeyDown(e);
-
             if (!e.Handled)
             {
                 switch (e.Key)
@@ -1018,20 +1068,13 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         SmartLogger.Safe(() => _visualizationManager?.CameraController?.HandleKeyUp(e),
             source: LogPrefix, errorMessage: "Error handling key up");
     }
-
-    private void ToggleButtonContainer_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (e.LeftButton == MouseButtonState.Pressed)
-        {
-            IsControlPanelVisible = !IsControlPanelVisible;
-        }
-    }
     #endregion
 
     #region Helper Methods
     private void UpdateOverlayTopmostState()
     {
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             if (_overlayWindow?.IsInitialized == true)
                 _overlayWindow.Topmost = IsOverlayTopmost;
         }, source: LogPrefix, errorMessage: "Error updating topmost state");
@@ -1044,8 +1087,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Invalid dimensions: {width}x{height}");
             return;
         }
-
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             lock (_openGLLock)
             {
                 _visualizationManager?.UpdateRenderDimensions(width, height);
@@ -1068,8 +1111,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName)
     {
         ArgumentNullException.ThrowIfNull(setter, nameof(setter));
-
-        SmartLogger.Safe(() => {
+        SmartLogger.Safe(() =>
+        {
             setter(newValue);
             OnPropertyChanged(propertyName);
             Dispatcher.InvokeAsync(() => _renderElement?.InvalidateVisual(), DispatcherPriority.Render);
@@ -1080,21 +1123,17 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
             return false;
-
         field = value;
         OnPropertyChanged(propertyName ?? string.Empty);
-
         SmartLogger.Safe(() => callback?.Invoke(),
             source: LogPrefix,
             errorMessage: "Error executing callback in SetField");
-
         return true;
     }
 
     public void OnPropertyChanged(params string[] propertyNames)
     {
         if (_isDisposed) return;
-
         foreach (var name in propertyNames)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
