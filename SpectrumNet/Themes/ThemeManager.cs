@@ -11,7 +11,7 @@ namespace SpectrumNet
         /// <summary>
         /// Initializes the application resources by loading and merging resource dictionaries.
         /// </summary>
-        public static void InitialiseResources()
+        public static void InitialiseResources() => SmartLogger.Safe(() =>
         {
             Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
             {
@@ -20,14 +20,18 @@ namespace SpectrumNet
             });
 
             ThemeManager.Instance.ApplyThemeToWindow(Application.Current.MainWindow);
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = nameof(InitialiseResources),
+            ErrorMessage = "Failed to initialize application resources"
+        });
 
         /// <summary>
         /// Handles mouse wheel scrolling for sliders.
         /// </summary>
         /// <param name="sender">The object that raised the event.</param>
         /// <param name="e">The mouse wheel event arguments.</param>
-        public void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e)
+        public void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e) => SmartLogger.Safe(() =>
         {
             if (sender is Slider slider)
             {
@@ -35,7 +39,11 @@ namespace SpectrumNet
                 slider.Value = Math.Clamp(slider.Value + (e.Delta > 0 ? change : -change), slider.Minimum, slider.Maximum);
                 e.Handled = true;
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = nameof(Slider_MouseWheelScroll),
+            ErrorMessage = "Error handling mouse wheel scroll for slider"
+        });
     }
     #endregion
 
@@ -66,12 +74,11 @@ namespace SpectrumNet
             get => _isDarkTheme;
             private set
             {
-                if (_isDarkTheme != value)
-                {
-                    _isDarkTheme = value;
-                    OnPropertyChanged(nameof(IsDarkTheme));
-                    OnThemeChanged(value);
-                }
+                if (_isDarkTheme == value) return;
+
+                _isDarkTheme = value;
+                OnPropertyChanged(nameof(IsDarkTheme));
+                OnThemeChanged(value);
             }
         }
         #endregion
@@ -107,8 +114,10 @@ namespace SpectrumNet
         /// Registers a window with the ThemeManager.
         /// </summary>
         /// <param name="window">The window to register.</param>
-        public void RegisterWindow(Window window)
+        public void RegisterWindow(Window window) => SmartLogger.Safe(() =>
         {
+            if (window == null) return;
+
             CleanupUnusedReferences();
 
             if (!_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
@@ -117,33 +126,53 @@ namespace SpectrumNet
                 window.Closed += OnWindowClosed;
                 ApplyThemeToWindow(window);
             }
-        }
-
-        public void SetTheme(bool isDarkTheme)
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            IsDarkTheme = isDarkTheme;
-        }
+            Source = nameof(RegisterWindow),
+            ErrorMessage = "Failed to register window with ThemeManager"
+        });
+
+        /// <summary>
+        /// Sets the theme to either dark or light.
+        /// </summary>
+        /// <param name="isDarkTheme">Whether to use dark theme.</param>
+        public void SetTheme(bool isDarkTheme) => SmartLogger.Safe(() =>
+            IsDarkTheme = isDarkTheme,
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = nameof(SetTheme),
+                ErrorMessage = "Failed to set theme"
+            });
 
         /// <summary>
         /// Unregisters a window from the ThemeManager.
         /// </summary>
         /// <param name="window">The window to unregister.</param>
-        public void UnregisterWindow(Window window)
+        public void UnregisterWindow(Window window) => SmartLogger.Safe(() =>
         {
-            CleanupUnusedReferences();
+            if (window == null) return;
 
+            CleanupUnusedReferences();
             _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
             window.Closed -= OnWindowClosed;
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = nameof(UnregisterWindow),
+            ErrorMessage = "Failed to unregister window from ThemeManager"
+        });
 
         /// <summary>
         /// Toggles between light and dark themes.
         /// </summary>
-        public void ToggleTheme()
+        public void ToggleTheme() => SmartLogger.Safe(() =>
         {
             IsDarkTheme = !IsDarkTheme;
             UpdateAllWindows();
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = nameof(ToggleTheme),
+            ErrorMessage = "Failed to toggle theme"
+        });
         #endregion
 
         #region Private Methods
@@ -152,35 +181,58 @@ namespace SpectrumNet
         /// </summary>
         /// <param name="path">The path to the theme resource.</param>
         /// <returns>The loaded ResourceDictionary.</returns>
-        private static ResourceDictionary LoadThemeResource(string path) => new()
+        private static ResourceDictionary LoadThemeResource(string path)
         {
-            Source = new Uri($"pack://application:,,,/SpectrumNet;component/{path}", UriKind.Absolute)
-        };
+            ResourceDictionary? result = null;
+            SmartLogger.Safe(() =>
+            {
+                result = new ResourceDictionary
+                {
+                    Source = new Uri($"pack://application:,,,/SpectrumNet;component/{path}", UriKind.Absolute)
+                };
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = nameof(LoadThemeResource),
+                ErrorMessage = $"Failed to load theme resource from {path}"
+            });
+
+            return result ?? new ResourceDictionary();
+        }
 
         /// <summary>
         /// Removes references to closed windows from the registered windows list.
         /// </summary>
-        private void CleanupUnusedReferences() =>
-            _registeredWindows.RemoveAll(wr => !wr.TryGetTarget(out _));
+        private void CleanupUnusedReferences() => SmartLogger.Safe(() =>
+            _registeredWindows.RemoveAll(wr => !wr.TryGetTarget(out _)),
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = nameof(CleanupUnusedReferences),
+                ErrorMessage = "Error cleaning up unused window references"
+            });
 
         /// <summary>
         /// Handles the window closed event.
         /// </summary>
         /// <param name="sender">The object that raised the event.</param>
         /// <param name="e">The event arguments.</param>
-        private void OnWindowClosed(object? sender, EventArgs e)
+        private void OnWindowClosed(object? sender, EventArgs e) => SmartLogger.Safe(() =>
         {
             if (sender is Window window)
             {
                 _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
                 window.Closed -= OnWindowClosed;
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = nameof(OnWindowClosed),
+            ErrorMessage = "Error handling window closed event"
+        });
 
         /// <summary>
         /// Updates the theme for all registered windows.
         /// </summary>
-        private void UpdateAllWindows()
+        private void UpdateAllWindows() => SmartLogger.Safe(() =>
         {
             foreach (var windowRef in _registeredWindows.ToList())
             {
@@ -189,25 +241,57 @@ namespace SpectrumNet
                     ApplyThemeToWindow(window);
                 }
             }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = nameof(UpdateAllWindows),
+            ErrorMessage = "Failed to update all windows with new theme"
+        });
+
+        /// <summary>
+        /// Applies the current theme to the specified window asynchronously.
+        /// </summary>
+        /// <param name="window">The window to apply the theme to.</param>
+        /// <param name="cancellationToken">Optional token to cancel the operation.</param>
+        public async Task ApplyThemeToWindowAsync(Window? window, CancellationToken cancellationToken = default)
+        {
+            await SmartLogger.SafeAsync(async () =>
+            {
+                if (window == null) return;
+
+                var themeDict = _themeDictionaries[IsDarkTheme];
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    foreach (var key in themeDict.Keys)
+                    {
+                        Application.Current.Resources[key] = themeDict[key];
+                    }
+                }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken);
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = nameof(ApplyThemeToWindowAsync),
+                ErrorMessage = "Failed to apply theme to window"
+            });
         }
 
         /// <summary>
         /// Applies the current theme to the specified window.
         /// </summary>
         /// <param name="window">The window to apply the theme to.</param>
-        public void ApplyThemeToWindow(Window window)
+        /// <param name="cancellationToken">Optional token to cancel the operation.</param>
+        public void ApplyThemeToWindow(Window? window, CancellationToken cancellationToken = default)
         {
-            if (window == null) return;
-
-            var themeDict = _themeDictionaries[IsDarkTheme];
-            Application.Current.Dispatcher.Invoke(() =>
+            var task = ApplyThemeToWindowAsync(window, cancellationToken);
+            task.ContinueWith(t =>
             {
-                foreach (var key in themeDict.Keys)
+                if (t.Exception != null)
                 {
-                    Application.Current.Resources[key] = themeDict[key]; 
+                    SmartLogger.Error($"Error in ApplyThemeToWindow: {t.Exception.InnerException?.Message}",
+                        nameof(ApplyThemeToWindow));
                 }
-            });
+            }, TaskContinuationOptions.OnlyOnFaulted);
         }
+
         #endregion
 
         #region Event Triggers
@@ -243,7 +327,10 @@ namespace SpectrumNet
         /// Initializes a new instance of the ThemeChangedEventArgs class.
         /// </summary>
         /// <param name="isDarkTheme">A value indicating whether the dark theme is active.</param>
-        public ThemeChangedEventArgs(bool isDarkTheme) => IsDarkTheme = isDarkTheme;
+        public ThemeChangedEventArgs(bool isDarkTheme)
+        {
+            IsDarkTheme = isDarkTheme;
+        }
     }
     #endregion
 }

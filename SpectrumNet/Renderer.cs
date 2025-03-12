@@ -1,28 +1,30 @@
 ﻿#nullable enable
-
 namespace SpectrumNet
 {
-
     public sealed class Renderer : IDisposable
     {
-        const int RENDER_TIMEOUT_MS = 16;
-        const string DEFAULT_STYLE = "Solid";
-        const string MESSAGE = "Push start to begin record...";
-        const string LogPrefix = "[Renderer] ";
+        private const int RENDER_TIMEOUT_MS = 16;
+        private const string DEFAULT_STYLE = "Solid";
+        private const string MESSAGE = "Push start to begin record...";
+        private const string LogPrefix = "Renderer";
 
-        record struct RenderState(SKPaint Paint, RenderStyle Style, string StyleName, RenderQuality Quality);
+        private record struct RenderState(
+            SKPaint Paint,
+            RenderStyle Style,
+            string StyleName,
+            RenderQuality Quality);
 
-        readonly SemaphoreSlim _renderLock = new(1, 1);
-        readonly SpectrumBrushes _spectrumStyles;
-        readonly IAudioVisualizationController _controller;
-        readonly SpectrumAnalyzer _analyzer;
-        readonly CancellationTokenSource _disposalTokenSource = new();
+        private readonly SemaphoreSlim _renderLock = new(1, 1);
+        private readonly SpectrumBrushes _spectrumStyles;
+        private readonly IAudioVisualizationController _controller;
+        private readonly SpectrumAnalyzer _analyzer;
+        private readonly CancellationTokenSource _disposalTokenSource = new();
 
-        SKElement? _skElement;
-        DispatcherTimer? _renderTimer;
-        RenderState _currentState;
-        volatile bool _isDisposed, _isAnalyzerDisposed;
-        volatile bool _shouldShowPlaceholder = true;
+        private SKElement? _skElement;
+        private DispatcherTimer? _renderTimer;
+        private RenderState _currentState;
+        private volatile bool _isDisposed, _isAnalyzerDisposed;
+        private volatile bool _shouldShowPlaceholder = true;
 
         public string CurrentStyleName => _currentState.StyleName;
         public RenderQuality CurrentQuality => _currentState.Quality;
@@ -34,7 +36,11 @@ namespace SpectrumNet
             set => _shouldShowPlaceholder = value;
         }
 
-        public Renderer(SpectrumBrushes styles, IAudioVisualizationController controller, SpectrumAnalyzer analyzer, SKElement element)
+        public Renderer(
+            SpectrumBrushes styles,
+            IAudioVisualizationController controller,
+            SpectrumAnalyzer analyzer,
+            SKElement element)
         {
             _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
             _controller = controller ?? throw new ArgumentNullException(nameof(controller));
@@ -51,11 +57,11 @@ namespace SpectrumNet
             PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
         }
 
-        void InitializeRenderer()
+        private void InitializeRenderer()
         {
             var (color, brush) = _spectrumStyles.GetColorAndBrush(DEFAULT_STYLE);
             _currentState = new RenderState(
-                brush.Clone() ?? throw new InvalidOperationException($"{LogPrefix}Failed to initialize {DEFAULT_STYLE} style"),
+                brush.Clone() ?? throw new InvalidOperationException($"{LogPrefix} Failed to initialize {DEFAULT_STYLE} style"),
                 RenderStyle.Bars,
                 DEFAULT_STYLE,
                 RenderQuality.Medium);
@@ -80,7 +86,7 @@ namespace SpectrumNet
             PerformanceUpdate?.Invoke(this, metrics);
         }
 
-        void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        private void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             if (e == null) return;
 
@@ -90,13 +96,16 @@ namespace SpectrumNet
                     _shouldShowPlaceholder = !_controller.IsRecording;
                     RequestRender();
                     break;
+
                 case nameof(IAudioVisualizationController.IsOverlayActive):
                     SpectrumRendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
                     RequestRender();
                     break;
+
                 case nameof(IAudioVisualizationController.SelectedDrawingType):
                     UpdateRenderStyle(_controller.SelectedDrawingType);
                     break;
+
                 case nameof(IAudioVisualizationController.SelectedStyle):
                     if (!string.IsNullOrEmpty(_controller.SelectedStyle))
                     {
@@ -104,15 +113,18 @@ namespace SpectrumNet
                         UpdateSpectrumStyle(_controller.SelectedStyle, color, brush);
                     }
                     break;
+
                 case nameof(IAudioVisualizationController.RenderQuality):
                     UpdateRenderQuality(_controller.RenderQuality);
                     break;
+
                 case nameof(IAudioVisualizationController.WindowType):
                 case nameof(IAudioVisualizationController.ScaleType):
                     _analyzer.UpdateSettings(_controller.WindowType, _controller.ScaleType);
                     SynchronizeWithController();
                     RequestRender();
                     break;
+
                 case nameof(IAudioVisualizationController.BarSpacing):
                 case nameof(IAudioVisualizationController.BarCount):
                     RequestRender();
@@ -120,13 +132,13 @@ namespace SpectrumNet
             }
         }
 
-        void OnElementLoaded(object? sender, RoutedEventArgs e)
+        private void OnElementLoaded(object? sender, RoutedEventArgs e)
         {
             if (_skElement != null)
                 UpdateRenderDimensions((int)_skElement.ActualWidth, (int)_skElement.ActualHeight);
         }
 
-        void OnElementUnloaded(object? sender, RoutedEventArgs e)
+        private void OnElementUnloaded(object? sender, RoutedEventArgs e)
         {
             _renderTimer?.Stop();
         }
@@ -144,27 +156,32 @@ namespace SpectrumNet
             if (_isDisposed || !_renderLock.Wait(RENDER_TIMEOUT_MS))
                 return;
 
-            try
+            SmartLogger.Safe(() =>
             {
                 RenderFrameInternal(e.Surface.Canvas, e.Info);
-            }
-            catch (ObjectDisposedException)
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                _isAnalyzerDisposed = true;
-                _renderTimer?.Stop();
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering frame: {ex}", forceLog: true);
-                RenderPlaceholder(e.Surface.Canvas);
-            }
-            finally
-            {
-                _renderLock.Release();
-            }
+                Source = LogPrefix,
+                ErrorMessage = "Error rendering frame",
+                ExceptionHandler = ex =>
+                {
+                    if (ex is ObjectDisposedException)
+                    {
+                        _isAnalyzerDisposed = true;
+                        _renderTimer?.Stop();
+                    }
+                    else
+                    {
+                        RenderPlaceholder(e.Surface.Canvas);
+                    }
+                }
+            });
+
+            _renderLock.Release();
         }
 
-        void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
+        private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
         {
             if (canvas == null) return;
 
@@ -180,9 +197,7 @@ namespace SpectrumNet
             if (spectrum == null)
             {
                 if (!_controller.IsRecording)
-                {
                     RenderPlaceholder(canvas);
-                }
                 return;
             }
 
@@ -195,21 +210,36 @@ namespace SpectrumNet
             RenderSpectrum(canvas, spectrum, info, barWidth, barSpacing, barCount);
         }
 
-        bool ShouldRenderPlaceholder() =>
+        private bool ShouldRenderPlaceholder() =>
             _shouldShowPlaceholder || _isAnalyzerDisposed || _analyzer == null || !_controller.IsRecording;
 
-        SpectralData? GetSpectrumData()
+        private SpectralData? GetSpectrumData()
         {
-            try { return _analyzer?.GetCurrentSpectrum(); }
-            catch (ObjectDisposedException)
-            {
-                _isAnalyzerDisposed = true;
-                _shouldShowPlaceholder = true;
-                return null;
-            }
+            var result = SmartLogger.Safe<SpectralData>(
+                () => _analyzer.GetCurrentSpectrum(),
+                options: new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = LogPrefix,
+                    ErrorMessage = "Error getting spectrum data",
+                    ExceptionHandler = ex =>
+                    {
+                        if (ex is ObjectDisposedException)
+                        {
+                            _isAnalyzerDisposed = true;
+                            _shouldShowPlaceholder = true;
+                        }
+                    }
+                });
+            return result.Success ? result.Result : null;
         }
 
-        void RenderSpectrum(SKCanvas canvas, SpectralData spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount)
+        private void RenderSpectrum(
+            SKCanvas canvas,
+            SpectralData spectrum,
+            SKImageInfo info,
+            float barWidth,
+            float barSpacing,
+            int barCount)
         {
             if (canvas == null || spectrum == null) return;
 
@@ -226,23 +256,31 @@ namespace SpectrumNet
                 barSpacing,
                 barCount,
                 _currentState.Paint,
-                (c, i) => PerformanceMetricsManager.DrawPerformanceInfo(c, i, _controller.ShowPerformanceInfo));
+                (c, i) => PerformanceMetricsManager.DrawPerformanceInfo(
+                    c, i, _controller.ShowPerformanceInfo));
         }
 
-        bool TryCalcRenderParams(SKImageInfo info, out float barWidth, out float barSpacing, out int barCount)
+        private bool TryCalcRenderParams(
+            SKImageInfo info,
+            out float barWidth,
+            out float barSpacing,
+            out int barCount)
         {
             barWidth = barSpacing = 0;
             barCount = _controller.BarCount;
             int totalWidth = info.Width;
+
             if (totalWidth <= 0 || barCount <= 0)
                 return false;
+
             barSpacing = Math.Min((float)_controller.BarSpacing, totalWidth / (barCount + 1));
             barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
             barSpacing = barCount > 1 ? (totalWidth - barCount * barWidth) / (barCount - 1) : 0;
+
             return true;
         }
 
-        static void RenderPlaceholder(SKCanvas canvas)
+        private static void RenderPlaceholder(SKCanvas canvas)
         {
             if (canvas == null) return;
 
@@ -290,6 +328,7 @@ namespace SpectrumNet
             EnsureNotDisposed();
             if (_currentState.Style == style)
                 return;
+
             _currentState = _currentState with { Style = style };
             RequestRender();
         }
@@ -299,13 +338,24 @@ namespace SpectrumNet
             EnsureNotDisposed();
             if (string.IsNullOrEmpty(styleName) || styleName == _currentState.StyleName)
                 return;
+
             var oldPaint = _currentState.Paint;
-            _currentState = _currentState with
+
+            SmartLogger.Safe(() =>
             {
-                Paint = brush.Clone() ?? throw new InvalidOperationException("Brush clone failed"),
-                StyleName = styleName
-            };
-            oldPaint?.Dispose();
+                _currentState = _currentState with
+                {
+                    Paint = brush.Clone() ?? throw new InvalidOperationException("Brush clone failed"),
+                    StyleName = styleName
+                };
+                oldPaint?.Dispose();
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error updating spectrum style"
+            });
+
             RequestRender();
         }
 
@@ -320,7 +370,11 @@ namespace SpectrumNet
 
             RequestRender();
 
-            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Render quality updated to {quality}", forceLog: true);
+            SmartLogger.Log(
+                LogLevel.Information,
+                LogPrefix,
+                $"Render quality updated to {quality}",
+                forceLog: true);
         }
 
         public void RequestRender()
@@ -335,7 +389,7 @@ namespace SpectrumNet
                 RequestRender();
         }
 
-        void EnsureNotDisposed()
+        private void EnsureNotDisposed()
         {
             if (_isDisposed)
                 throw new ObjectDisposedException(nameof(Renderer));
@@ -345,28 +399,46 @@ namespace SpectrumNet
         {
             if (_isDisposed)
                 return;
+
             _isDisposed = _isAnalyzerDisposed = true;
-            _disposalTokenSource.Cancel();
-            _renderTimer?.Stop();
 
-            PerformanceMetricsManager.PerformanceUpdated -= OnPerformanceMetricsUpdated;
-
-            if (_controller is INotifyPropertyChanged notifier)
-                notifier.PropertyChanged -= OnControllerPropertyChanged;
-
-            if (_skElement != null)
+            SmartLogger.Safe(() =>
             {
-                _skElement.PaintSurface -= RenderFrame;
-                _skElement.Loaded -= OnElementLoaded;
-                _skElement.Unloaded -= OnElementUnloaded;
-                _skElement = null;
-            }
+                _disposalTokenSource.Cancel();
+                _renderTimer?.Stop();
 
-            _currentState.Paint?.Dispose();
-            _renderLock.Dispose();
-            _disposalTokenSource.Dispose();
+                PerformanceMetricsManager.PerformanceUpdated -= OnPerformanceMetricsUpdated;
 
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
+                if (_controller is INotifyPropertyChanged notifier)
+                    notifier.PropertyChanged -= OnControllerPropertyChanged;
+
+                if (_skElement != null)
+                {
+                    _skElement.PaintSurface -= RenderFrame;
+                    _skElement.Loaded -= OnElementLoaded;
+                    _skElement.Unloaded -= OnElementUnloaded;
+                    _skElement = null;
+                }
+
+                _currentState.Paint?.Dispose();
+                SmartLogger.SafeDispose(_renderLock, "RenderLock", new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = LogPrefix,
+                    ErrorMessage = "Error disposing render lock"
+                });
+                SmartLogger.SafeDispose(_disposalTokenSource, "DisposalTokenSource", new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = LogPrefix,
+                    ErrorMessage = "Error disposing disposal token source"
+                });
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error during renderer disposal"
+            });
         }
     }
 }

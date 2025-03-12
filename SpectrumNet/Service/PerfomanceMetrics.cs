@@ -9,7 +9,7 @@ public static class PerformanceMetricsManager
         public const int MaxFrames = 120;
         public const float CpuSmoothing = 0.2f;
         public const float FpsSmoothing = 0.1f;
-        public const string LogPrefix = "[PerformanceMetrics] ";
+        public const string LogPrefix = "PerformanceMetrics";
         public const double HighCpuThreshold = 80.0;
         public const double MediumCpuThreshold = 60.0;
         public const double HighMemoryThreshold = 1000.0;
@@ -64,10 +64,7 @@ public static class PerformanceMetricsManager
     public static double CurrentCpuUsage => _cpuUsage;
     public static TimeSpan UpTime => _timer.Elapsed;
 
-    static PerformanceMetricsManager()
-    {
-        Initialize();
-    }
+    static PerformanceMetricsManager() => Initialize();
 
     public static void Initialize()
     {
@@ -80,11 +77,13 @@ public static class PerformanceMetricsManager
             _isInitialized = true;
             _timer.Start();
 
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => Cleanup();
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
 
             SmartLogger.Log(LogLevel.Information, Constants.LogPrefix, "Performance monitoring initialized", forceLog: true);
         }
     }
+
+    private static void OnProcessExit(object? sender, EventArgs e) => Cleanup();
 
     public static PerformanceMetrics UpdateMetrics()
     {
@@ -92,7 +91,8 @@ public static class PerformanceMetricsManager
         UpdateCpuUsage();
         double ramUsage = GetResourceUsage(ResourceType.Ram);
 
-        if (fps <= 0) fps = _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
+        if (fps <= 0)
+            fps = _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
 
         var metrics = new PerformanceMetrics(
             _timer.Elapsed.TotalMilliseconds / Math.Max(1, _frameIndex),
@@ -106,43 +106,44 @@ public static class PerformanceMetricsManager
 
     public static void DrawPerformanceInfo(SKCanvas? canvas, SKImageInfo info, bool showPerformanceInfo)
     {
-        if (canvas == null || info.Width <= 0 || info.Height <= 0)
+        if (canvas == null || info.Width <= 0 || info.Height <= 0 || !showPerformanceInfo)
             return;
 
-        if (!showPerformanceInfo)
-            return;
-
-        try
-        {
-            float fps = CalculateFps();
-            UpdateCpuUsage();
-            double ramUsage = GetResourceUsage(ResourceType.Ram);
-
-            if (fps <= 0) fps = _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
-
-            SKColor textColor = GetPerformanceColor(_currentLevel);
-
-            using var paint = new SKPaint
+        SmartLogger.Safe(() => DrawPerformanceInfoInternal(canvas, info),
+            new SmartLogger.ErrorHandlingOptions
             {
-                TextSize = 12,
-                IsAntialias = true,
-                Color = textColor,
-                SubpixelText = true
-            };
+                Source = Constants.LogPrefix,
+                ErrorMessage = "Error drawing performance info"
+            });
+    }
 
-            string infoText = FormattableString.Invariant(
-                $"RAM: {ramUsage:F1} MB | CPU: {_cpuUsage:F1}% | FPS: {fps:F0} | {_currentLevel}");
+    private static void DrawPerformanceInfoInternal(SKCanvas canvas, SKImageInfo info)
+    {
+        float fps = CalculateFps();
+        UpdateCpuUsage();
+        double ramUsage = GetResourceUsage(ResourceType.Ram);
 
-            canvas.DrawText(infoText, 10, 20, paint);
+        if (fps <= 0)
+            fps = _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
 
-            if (_frameIndex % 60 == 0)
-            {
-                SmartLogger.Log(LogLevel.Debug, Constants.LogPrefix, $"Current FPS: {fps:F1} | Level: {_currentLevel}", forceLog: false);
-            }
-        }
-        catch (Exception ex)
+        SKColor textColor = GetPerformanceColor(_currentLevel);
+
+        using var paint = new SKPaint
         {
-            SmartLogger.Log(LogLevel.Error, Constants.LogPrefix, $"Error drawing performance info: {ex.Message}", forceLog: true);
+            TextSize = 12,
+            IsAntialias = true,
+            Color = textColor,
+            SubpixelText = true
+        };
+
+        string infoText = FormattableString.Invariant(
+            $"RAM: {ramUsage:F1} MB | CPU: {_cpuUsage:F1}% | FPS: {fps:F0} | {_currentLevel}");
+
+        canvas.DrawText(infoText, 10, 20, paint);
+
+        if (_frameIndex % 60 == 0)
+        {
+            SmartLogger.Log(LogLevel.Debug, Constants.LogPrefix, $"Current FPS: {fps:F1} | Level: {_currentLevel}", forceLog: false);
         }
     }
 
@@ -219,72 +220,67 @@ public static class PerformanceMetricsManager
         if ((now - _lastCpuUpdate) < _cpuUpdateInterval)
             return;
 
+        SmartLogger.Safe(() => UpdateCpuUsageInternal(now),
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = Constants.LogPrefix,
+                ErrorMessage = "Error updating CPU usage"
+            });
+    }
+
+    private static void UpdateCpuUsageInternal(DateTime now)
+    {
         lock (_syncLock)
         {
-            try
+            using var process = Process.GetCurrentProcess();
+            var cpuTime = process.TotalProcessorTime;
+            double elapsed = _timer.Elapsed.TotalSeconds;
+
+            if (_lastCpuTime != TimeSpan.Zero)
             {
-                using var process = Process.GetCurrentProcess();
-                var cpuTime = process.TotalProcessorTime;
-                double elapsed = _timer.Elapsed.TotalSeconds;
+                double cpuDelta = (cpuTime - _lastCpuTime).TotalSeconds;
+                double timeDelta = elapsed - _lastTotalTime;
 
-                if (_lastCpuTime != TimeSpan.Zero)
+                if (timeDelta > 0)
                 {
-                    double cpuDelta = (cpuTime - _lastCpuTime).TotalSeconds;
-                    double timeDelta = elapsed - _lastTotalTime;
+                    double instantUsage = cpuDelta / (timeDelta * _processorCount) * 100;
+                    _cpuUsage = _cpuUsage * (1 - Constants.CpuSmoothing) + instantUsage * Constants.CpuSmoothing;
 
-                    if (timeDelta > 0)
+                    if (_cpuUsage > Constants.HighCpuThreshold)
                     {
-                        double instantUsage = cpuDelta / (timeDelta * _processorCount) * 100;
-                        _cpuUsage = _cpuUsage * (1 - Constants.CpuSmoothing) + instantUsage * Constants.CpuSmoothing;
-
-                        if (_cpuUsage > Constants.HighCpuThreshold)
-                        {
-                            SmartLogger.Log(LogLevel.Warning, Constants.LogPrefix, $"High CPU usage: {_cpuUsage:F1}%", forceLog: false);
-                        }
-                    }
-                    else
-                    {
-                        SmartLogger.Log(LogLevel.Warning, Constants.LogPrefix, "Invalid time delta in CPU calculation", forceLog: false);
+                        SmartLogger.Log(LogLevel.Warning, Constants.LogPrefix, $"High CPU usage: {_cpuUsage:F1}%", forceLog: false);
                     }
                 }
+                else
+                {
+                    SmartLogger.Log(LogLevel.Warning, Constants.LogPrefix, "Invalid time delta in CPU calculation", forceLog: false);
+                }
+            }
 
-                _lastCpuTime = cpuTime;
-                _lastTotalTime = elapsed;
-                _lastCpuUpdate = now;
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, Constants.LogPrefix, $"Error updating CPU usage: {ex.Message}", forceLog: true);
-            }
+            _lastCpuTime = cpuTime;
+            _lastTotalTime = elapsed;
+            _lastCpuUpdate = now;
         }
     }
 
     private static double GetResourceUsage(ResourceType type)
     {
-        try
+        using var process = Process.GetCurrentProcess();
+        double usage = type switch
         {
-            using var process = Process.GetCurrentProcess();
-            double usage = type switch
-            {
-                ResourceType.Ram => process.PagedMemorySize64 / (1024.0 * 1024.0),
-                ResourceType.ManagedRam => Math.Max(
-                    process.PagedMemorySize64 / (1024.0 * 1024.0),
-                    GC.GetTotalMemory(false) / (1024.0 * 1024.0)),
-                _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown resource type")
-            };
+            ResourceType.Ram => process.PagedMemorySize64 / (1024.0 * 1024.0),
+            ResourceType.ManagedRam => Math.Max(
+                process.PagedMemorySize64 / (1024.0 * 1024.0),
+                GC.GetTotalMemory(false) / (1024.0 * 1024.0)),
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown resource type")
+        };
 
-            if (usage > Constants.HighMemoryThreshold)
-            {
-                SmartLogger.Log(LogLevel.Warning, Constants.LogPrefix, $"High memory usage: {usage:F1} MB", forceLog: false);
-            }
-
-            return usage;
-        }
-        catch (Exception ex)
+        if (usage > Constants.HighMemoryThreshold)
         {
-            SmartLogger.Log(LogLevel.Error, Constants.LogPrefix, $"Error calculating resource usage: {ex.Message}", forceLog: true);
-            return 0;
+            SmartLogger.Log(LogLevel.Warning, Constants.LogPrefix, $"High memory usage: {usage:F1} MB", forceLog: false);
         }
+
+        return usage;
     }
 
     private static SKColor GetTextColor()
@@ -301,17 +297,14 @@ public static class PerformanceMetricsManager
         }
     }
 
-    private static SKColor GetPerformanceColor(PerformanceLevel level)
+    private static SKColor GetPerformanceColor(PerformanceLevel level) => level switch
     {
-        return level switch
-        {
-            PerformanceLevel.Excellent => SKColors.LimeGreen,
-            PerformanceLevel.Good => SKColors.DodgerBlue,
-            PerformanceLevel.Fair => SKColors.Orange,
-            PerformanceLevel.Poor => SKColors.Red,
-            _ => GetTextColor()
-        };
-    }
+        PerformanceLevel.Excellent => SKColors.LimeGreen,
+        PerformanceLevel.Good => SKColors.DodgerBlue,
+        PerformanceLevel.Fair => SKColors.Orange,
+        PerformanceLevel.Poor => SKColors.Red,
+        _ => GetTextColor()
+    };
 
     private static void UpdatePerformanceHistory(float fps, double cpuUsage, double ramUsage)
     {
@@ -352,25 +345,18 @@ public static class PerformanceMetricsManager
         bool hasHighMemory = ramUsage > Constants.HighMemoryThreshold;
         bool hasMediumMemory = ramUsage > Constants.MediumMemoryThreshold;
 
-        if (fps >= Constants.MinGoodFps && !hasHighCpu && !hasHighMemory)
+        return (fps, hasHighCpu, hasMediumCpu, hasHighMemory, hasMediumMemory) switch
         {
-            return !hasMediumCpu && !hasMediumMemory
-                ? PerformanceLevel.Excellent
-                : PerformanceLevel.Good;
-        }
-        else if (fps >= Constants.MinFairFps && !hasHighCpu)
-        {
-            return PerformanceLevel.Fair;
-        }
-        else
-        {
-            return PerformanceLevel.Poor;
-        }
+            ( >= Constants.MinGoodFps, false, false, false, false) => PerformanceLevel.Excellent,
+            ( >= Constants.MinGoodFps, false, _, false, _) => PerformanceLevel.Good,
+            ( >= Constants.MinFairFps, false, _, _, _) => PerformanceLevel.Fair,
+            _ => PerformanceLevel.Poor
+        };
     }
 
     private static void Cleanup()
     {
-        try
+        SmartLogger.Safe(() =>
         {
             PerformanceUpdated = null;
             PerformanceLevelChanged = null;
@@ -381,11 +367,12 @@ public static class PerformanceMetricsManager
             }
 
             SmartLogger.Log(LogLevel.Information, Constants.LogPrefix, "Performance monitoring resources cleaned up", forceLog: true);
-        }
-        catch (Exception ex)
+        },
+        new SmartLogger.ErrorHandlingOptions
         {
-            SmartLogger.Log(LogLevel.Error, Constants.LogPrefix, $"Error during cleanup: {ex.Message}", forceLog: true);
-        }
+            Source = Constants.LogPrefix,
+            ErrorMessage = "Error during cleanup"
+        });
     }
 
     private enum ResourceType

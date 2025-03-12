@@ -304,8 +304,11 @@ namespace SpectrumNet
     /// </remarks>
     public sealed class SpectrumBrushes : IDisposable
     {
+        private static readonly Lazy<SpectrumBrushes> _instance = new Lazy<SpectrumBrushes>(() => new SpectrumBrushes());
         private readonly ConcurrentDictionary<string, Palette> _palettes = new(StringComparer.OrdinalIgnoreCase);
         private bool _disposed;
+
+        public static SpectrumBrushes Instance => _instance.Value;
 
         /// <summary>
         /// Gets a read-only view of registered palettes.

@@ -134,13 +134,6 @@ public interface IAudioVisualizationController : INotifyPropertyChanged
     SpectrumBrushes SpectrumStyles { get; }
 
     /// <summary>
-    /// Gets or sets the status text displayed in the user interface.
-    /// <br/>
-    /// Получает или задает текст статуса, отображаемый в пользовательском интерфейсе.
-    /// </summary>
-    string StatusText { get; set; }
-
-    /// <summary>
     /// Gets or sets the FFT (Fast Fourier Transform) window type used for spectrum analysis.
     /// <br/>
     /// Получает или задает тип окна FFT (Fast Fourier Transform), используемый для анализа спектра.
@@ -153,4 +146,45 @@ public interface IAudioVisualizationController : INotifyPropertyChanged
     /// Получает или задает значение, указывающее, следует ли отображать информацию о производительности.
     /// </summary>
     bool ShowPerformanceInfo { get; set; }
+}
+
+
+/// <summary>
+/// Enumeration of rendering quality levels.
+/// </summary>
+public enum RenderQuality
+{
+    Low,
+    Medium,
+    High
+}
+
+/// <summary>
+/// Interface for classes that perform spectrum rendering.
+/// </summary>
+public interface ISpectrumRenderer : IDisposable
+{
+    /// <summary>Initializes the renderer.</summary>
+    void Initialize();
+
+    /// <summary>Renders the spectrum on the given canvas.</summary>
+    /// <param name="canvas">Canvas for drawing.</param>
+    /// <param name="spectrum">Array of spectrum values.</param>
+    /// <param name="info">Image information.</param>
+    /// <param name="barWidth">Width of bars.</param>
+    /// <param name="barSpacing">Spacing between bars.</param>
+    /// <param name="barCount">Number of bars.</param>
+    /// <param name="paint">Object for styling the rendering.</param>
+    /// <param name="drawPerformanceInfo">Method for drawing performance information.</param>
+    void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
+                float barSpacing, int barCount, SKPaint? paint,
+                Action<SKCanvas, SKImageInfo> drawPerformanceInfo);
+
+    /// <summary>Configures the renderer for overlay mode and quality settings.</summary>
+    /// <param name="isOverlayActive">Whether overlay mode is active.</param>
+    /// <param name="quality">Rendering quality level.</param>
+    void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
+
+    /// <summary>Gets or sets the current rendering quality.</summary>
+    RenderQuality Quality { get; set; }
 }
