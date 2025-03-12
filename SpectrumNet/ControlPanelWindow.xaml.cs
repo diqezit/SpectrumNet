@@ -1,6 +1,6 @@
 ﻿namespace SpectrumNet
 {
-    public partial class ControlPanelWindow : Window
+    public partial class ControlPanelWindow : System.Windows.Window
     {
         private readonly MainWindow _mainWindow;
 

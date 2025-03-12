@@ -31,15 +31,13 @@
     
     <!-- OpenTK библиотеки -->
     <PackageReference Include="OpenTK" Version="4.9.3" />
-    <PackageReference Include="OpenTK.Core" Version="4.9.3" />
-    <PackageReference Include="OpenTK.GLControl" Version="4.0.2" />
-    <PackageReference Include="OpenTK.GLWpfControl" Version="4.3.3" />
     
     <!-- WinForms интеграция для WPF -->
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.2" />
+    <PackageReference Include="OpenTK.Core" Version="4.9.3" />
+    <PackageReference Include="OpenTK.GLWpfControl" Version="4.3.3" />
     <PackageReference Include="OpenTK.Graphics" Version="4.9.3" />
     <PackageReference Include="OpenTK.Mathematics" Version="4.9.3" />
-    <PackageReference Include="OpenTK.Windowing.Common" Version="4.9.3" />
     <PackageReference Include="OpenTK.Windowing.Desktop" Version="4.9.3" />
     <PackageReference Include="OpenTK.Windowing.GraphicsLibraryFramework" Version="4.9.3" />
     <Reference Include="WindowsFormsIntegration" />

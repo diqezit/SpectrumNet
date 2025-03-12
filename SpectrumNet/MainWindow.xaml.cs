@@ -14,12 +14,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private GainParameters? _gainParameters;
     private VisualizationManager? _visualizationManager;
     private Renderer? _renderer;
+    private OverlayWindow? _overlayWindow;
+    private ControlPanelWindow? _controlPanelWindow;
+    private CompositeDisposable? _disposables;
+    private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
     // State flags
     private bool _isOverlayActive, _isPopupOpen, _isOverlayTopmost = true,
                 _isControlPanelVisible = true, _isTransitioning, _isDisposed,
-                _showPerformanceInfo = true, _isOpenGLInitialized;
-    private bool _isControlPanelOpen;
+                _showPerformanceInfo = true, _isOpenGLInitialized, _isControlPanelOpen;
 
     // Configuration state
     private RenderStyle _selectedDrawingType = RenderStyle.Bars;
@@ -31,11 +34,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     // Synchronization
     private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
     private readonly CancellationTokenSource _cleanupCts = new();
-    private CompositeDisposable? _disposables;
-    private PropertyChangedEventHandler? _themePropertyChangedHandler;
-    private OverlayWindow? _overlayWindow;
     private readonly object _openGLLock = new();
-    private ControlPanelWindow? _controlPanelWindow;
 
     // Core properties
     public GLWpfControlSettings GlSettings => _glSettings;
@@ -47,12 +46,10 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         get => _renderer;
         set
         {
-            if (_renderer != value)
-            {
-                var oldRenderer = _renderer;
-                _renderer = value;
-                SmartLogger.SafeDispose(oldRenderer as IDisposable, "old renderer");
-            }
+            if (_renderer == value) return;
+            var oldRenderer = _renderer;
+            _renderer = value;
+            SmartLogger.SafeDispose(oldRenderer as IDisposable, "old renderer");
         }
     }
 
@@ -95,11 +92,13 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set BarCount");
                 return;
             }
+
             if (value <= 0)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set invalid bar count: {value}");
                 value = DefaultSettings.UIBarCount;
             }
+
             Settings.Instance.UIBarCount = value;
             OnPropertyChanged(nameof(BarCount));
         }
@@ -107,7 +106,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     public double BarSpacing
     {
-        get => Settings.Instance?.UIBarSpacing ?? DefaultSettings.UIBarSpacing; 
+        get => Settings.Instance?.UIBarSpacing ?? DefaultSettings.UIBarSpacing;
         set
         {
             if (Settings.Instance == null)
@@ -115,11 +114,13 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set BarSpacing");
                 return;
             }
+
             if (value < 0)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set negative spacing: {value}");
                 value = DefaultSettings.UIBarSpacing;
             }
+
             Settings.Instance.UIBarSpacing = value;
             OnPropertyChanged(nameof(BarSpacing));
         }
@@ -133,10 +134,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (_isOverlayActive == value) return;
             _isOverlayActive = value;
             OnPropertyChanged(nameof(IsOverlayActive));
+
             SmartLogger.Safe(() =>
             {
                 SpectrumRendererFactory.ConfigureAllRenderers(value);
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
             }, source: LogPrefix, errorMessage: "Error updating visualization");
         }
     }
@@ -149,10 +151,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (_captureManager?.IsRecording == value) return;
             Dispatcher.InvokeAsync(() =>
             {
-                if (value)
-                    _ = StartCaptureAsync();
-                else
-                    _ = StopCaptureAsync();
+                if (value) _ = StartCaptureAsync();
+                else _ = StopCaptureAsync();
                 OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
             });
         }
@@ -163,12 +163,10 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         get => _showPerformanceInfo;
         set
         {
-            if (_showPerformanceInfo != value)
-            {
-                _showPerformanceInfo = value;
-                OnPropertyChanged(nameof(ShowPerformanceInfo));
-                _visualizationManager?.RequestRender();
-            }
+            if (_showPerformanceInfo == value) return;
+            _showPerformanceInfo = value;
+            OnPropertyChanged(nameof(ShowPerformanceInfo));
+            _visualizationManager?.RequestRender();
         }
     }
 
@@ -180,11 +178,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (_selectedScaleType == value) return;
             _selectedScaleType = value;
             OnPropertyChanged(nameof(ScaleType));
+
             SmartLogger.Safe(() =>
             {
                 _analyzer?.SetScaleType(value);
                 _visualizationManager?.RequestRender();
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
                 Settings.Instance.SelectedScaleType = value;
             }, source: LogPrefix, errorMessage: "Error changing scale type");
         }
@@ -199,10 +198,11 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             _selectedDrawingType = value;
             OnPropertyChanged(nameof(SelectedDrawingType));
             Settings.Instance.SelectedRenderStyle = value;
+
             SmartLogger.Safe(() =>
             {
                 _visualizationManager?.HandleRenderStyleChanged(value);
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
             }, source: LogPrefix, errorMessage: "Error changing render style");
         }
     }
@@ -215,11 +215,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (Settings.Instance.SelectedRenderQuality == value) return;
             Settings.Instance.SelectedRenderQuality = value;
             OnPropertyChanged(nameof(RenderQuality));
+
             SmartLogger.Safe(() =>
             {
                 SpectrumRendererFactory.GlobalQuality = value;
                 _visualizationManager?.RequestRender();
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
             }, source: LogPrefix, errorMessage: "Error updating render quality");
         }
     }
@@ -234,6 +235,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, "Attempt to set empty style name");
                 value = DefaultSettings.SelectedPalette;
             }
+
             if (Settings.Instance.SelectedPalette == value) return;
             Settings.Instance.SelectedPalette = value;
             OnPropertyChanged(nameof(SelectedStyle));
@@ -259,11 +261,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             if (_selectedFftWindowType == value) return;
             _selectedFftWindowType = value;
             OnPropertyChanged(nameof(WindowType));
+
             SmartLogger.Safe(() =>
             {
                 _analyzer?.SetWindowType(value);
                 _visualizationManager?.RequestRender();
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
                 Settings.Instance.SelectedFftWindowType = value;
             }, source: LogPrefix, errorMessage: "Error changing FFT window type");
         }
@@ -340,12 +343,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set MinDbLevel");
                 return;
             }
+
             ArgumentNullException.ThrowIfNull(_gainParameters, nameof(_gainParameters));
+
             if (value >= _gainParameters.MaxDbValue)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Min dB level ({value}) must be less than max ({_gainParameters.MaxDbValue})");
                 value = _gainParameters.MaxDbValue - 1;
             }
+
             UpdateGainParameter(value, v => _gainParameters.MinDbValue = v, nameof(MinDbLevel));
             Settings.Instance.UIMinDbLevel = value;
         }
@@ -361,12 +367,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set MaxDbLevel");
                 return;
             }
+
             ArgumentNullException.ThrowIfNull(_gainParameters, nameof(_gainParameters));
+
             if (value <= _gainParameters.MinDbValue)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Max dB level ({value}) must be greater than min ({_gainParameters.MinDbValue})");
                 value = _gainParameters.MinDbValue + 1;
             }
+
             UpdateGainParameter(value, v => _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
             Settings.Instance.UIMaxDbLevel = value;
         }
@@ -382,12 +391,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.Log(LogLevel.Error, LogPrefix, "Settings.Instance is null, cannot set AmplificationFactor");
                 return;
             }
+
             ArgumentNullException.ThrowIfNull(_gainParameters, nameof(_gainParameters));
+
             if (value < 0)
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Amplification factor cannot be negative: {value}");
                 value = 0;
             }
+
             UpdateGainParameter(value, v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
             Settings.Instance.UIAmplificationFactor = value;
         }
@@ -399,6 +411,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     public MainWindow()
     {
         InitializeComponent();
+
         _renderElement = SmartLogger.Safe(() => FindName("OpenTkControl") as GLWpfControl,
             defaultValue: null,
             source: LogPrefix,
@@ -426,36 +439,45 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     }
 
     #region Initialization
-    private void OnWindowLoaded(object sender, RoutedEventArgs e)
-    {
+    private void OnWindowLoaded(object sender, RoutedEventArgs e) =>
         SmartLogger.Safe(() =>
         {
-            InitializeOpenGL();
-            InitComponents();
-            InitializeRenderers();
-            OnPropertyChanged(nameof(AvailablePalettes));
-            var converter = Resources["PaletteNameToBrushConverter"] as PaletteNameToBrushConverter;
-            if (converter != null)
+        InitializeOpenGL();
+        InitComponents();
+        InitializeRenderers();
+        OnPropertyChanged(nameof(AvailablePalettes));
+            if (Resources["PaletteNameToBrushConverter"] is PaletteNameToBrushConverter converter)
             {
                 converter.BrushesProvider = SpectrumStyles;
             }
         }, source: LogPrefix, errorMessage: "Failed to initialize window");
-    }
 
     private void InitializeOpenGL()
     {
         lock (_openGLLock)
         {
-            if (_isOpenGLInitialized)
-                return;
+            if (_isOpenGLInitialized) return;
+
             ArgumentNullException.ThrowIfNull(_renderElement, nameof(_renderElement));
+
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "Initializing OpenGL context");
+
             _glSettings = new GLWpfControlSettings
             {
                 MajorVersion = 4,
                 MinorVersion = 0,
                 RenderContinuously = false
             };
+
             _renderElement.Start(_glSettings);
+
+            if (!_renderElement.IsInitialized)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Failed to initialize OpenGL context");
+                return;
+            }
+
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "OpenGL context initialized successfully");
             _renderElement.Render += OpenTkControl_OnRender;
             _isOpenGLInitialized = true;
         }
@@ -464,17 +486,18 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void OpenTkControl_OnRender(TimeSpan delta)
     {
         if (_isDisposed) return;
-        if (_renderElement?.IsInitialized == true && _renderer != null)
-        {
-            SmartLogger.Safe(() => _renderer.OnGlControlRender(delta),
-                source: LogPrefix,
-                errorMessage: "Error during render");
-        }
+
+        if (!_isOpenGLInitialized || _renderElement?.IsInitialized != true || _renderer == null) return;
+
+        SmartLogger.Safe(() => _renderer.OnGlControlRender(delta),
+            source: LogPrefix,
+            errorMessage: "Error during render");
     }
 
     private void InitComponents()
     {
         ArgumentNullException.ThrowIfNull(_renderElement, nameof(_renderElement));
+
         var syncContext = SynchronizationContext.Current ??
             throw new InvalidOperationException("SynchronizationContext.Current is null");
 
@@ -509,12 +532,15 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     private void InitializeRenderers()
     {
-        if (SpectrumRendererFactory.IsInitialized)
-            return;
+        if (SpectrumRendererFactory.IsInitialized) return;
+
+        SmartLogger.Log(LogLevel.Information, LogPrefix, "Initializing renderers");
+
         foreach (RenderStyle style in Enum.GetValues<RenderStyle>())
         {
             SpectrumRendererFactory.CreateRenderer(style, false);
         }
+
         SpectrumRendererFactory.IsInitialized = true;
     }
 
@@ -546,41 +572,36 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         };
     }
 
-    private void OnRenderElementSizeChanged(object sender, SizeChangedEventArgs e)
-    {
+    private void OnRenderElementSizeChanged(object sender, SizeChangedEventArgs e) =>
         SmartLogger.Safe(() => _visualizationManager?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height),
             source: LogPrefix, errorMessage: "Error updating render dimensions");
-    }
 
     private void ConfigureTheme()
     {
         var tm = ThemeManager.Instance;
-        if (tm != null)
+        if (tm == null) return;
+
+        tm.RegisterWindow(this);
+        _themePropertyChangedHandler = (_, e) =>
         {
-            tm.RegisterWindow(this);
-            _themePropertyChangedHandler = (_, e) =>
+            if (e?.PropertyName == nameof(ThemeManager.IsDarkTheme))
             {
-                if (e?.PropertyName == nameof(ThemeManager.IsDarkTheme))
-                {
-                    OnPropertyChanged(nameof(IsDarkTheme));
-                    Settings.Instance.IsDarkTheme = tm.IsDarkTheme;
-                }
-            };
-            tm.PropertyChanged += _themePropertyChangedHandler;
-        }
+                OnPropertyChanged(nameof(IsDarkTheme));
+                Settings.Instance.IsDarkTheme = tm.IsDarkTheme;
+            }
+        };
+        tm.PropertyChanged += _themePropertyChangedHandler;
     }
     #endregion
 
     #region Settings Management
-    private void LoadAndApplySettings()
-    {
+    private void LoadAndApplySettings() =>
         SmartLogger.Safe(() =>
         {
             SettingsWindow.Instance.LoadSettings();
             ApplyWindowSettings();
             EnsureWindowIsVisible();
         }, source: LogPrefix, errorMessage: "Error loading settings");
-    }
 
     private void ApplyWindowSettings()
     {
@@ -604,6 +625,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     {
         var screenRect = new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
         var windowRect = new Rect(Left, Top, Width, Height);
+
         if (!screenRect.IntersectsWith(windowRect))
         {
             Left = (screenRect.Width - Width) / 2;
@@ -629,18 +651,20 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             SmartLogger.Log(LogLevel.Error, LogPrefix, "Capture manager not initialized");
             return;
         }
+
         if (_captureManager.IsRecording)
         {
             SmartLogger.Log(LogLevel.Warning, LogPrefix, "Capture already in progress");
             return;
         }
+
         await SmartLogger.SafeAsync(async () =>
         {
             await Dispatcher.InvokeAsync(async () =>
             {
                 await _captureManager.StartCaptureAsync();
                 UpdateProps();
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
             }).Task;
         }, source: LogPrefix, errorMessage: "Error starting capture");
     }
@@ -652,24 +676,25 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             SmartLogger.Log(LogLevel.Error, LogPrefix, "Capture manager not initialized");
             return;
         }
+
         if (!_captureManager.IsRecording)
         {
             SmartLogger.Log(LogLevel.Warning, LogPrefix, "No capture in progress");
             return;
         }
+
         await SmartLogger.SafeAsync(async () =>
         {
             await Dispatcher.InvokeAsync(async () =>
             {
                 await _captureManager.StopCaptureAsync();
                 UpdateProps();
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
             }).Task;
         }, source: LogPrefix, errorMessage: "Error stopping capture");
     }
     #endregion
 
-    // Методы управления оверлеем остаются без изменений
     #region Overlay Management
     private void OpenOverlay()
     {
@@ -679,7 +704,9 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             _overlayWindow.Topmost = IsOverlayTopmost;
             return;
         }
+
         CloseOverlayInternal();
+
         _overlayWindow = SmartLogger.Safe(() => new OverlayWindow(
             this,
             new OverlayConfiguration(
@@ -693,37 +720,31 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             )
         ), defaultValue: null, source: LogPrefix, errorMessage: "Failed to create overlay window");
 
-        if (_overlayWindow == null)
-        {
-            return;
-        }
+        if (_overlayWindow == null) return;
+
         _overlayWindow.Closed += (_, _) => OnOverlayClosed();
         _overlayWindow.Show();
         IsOverlayActive = true;
     }
 
-    private void CloseOverlay()
-    {
+    private void CloseOverlay() =>
         SmartLogger.Safe(() =>
         {
             CloseOverlayInternal();
             IsOverlayActive = false;
         }, source: LogPrefix, errorMessage: "Error closing overlay");
-    }
 
     private void CloseOverlayInternal()
     {
-        if (_overlayWindow != null)
-        {
-            _overlayWindow.Closed -= (_, _) => OnOverlayClosed();
-            _overlayWindow.Close();
-            SmartLogger.SafeDispose(_overlayWindow, "overlay window");
-            _overlayWindow = null;
-        }
+        if (_overlayWindow == null) return;
+
+        _overlayWindow.Closed -= (_, _) => OnOverlayClosed();
+        _overlayWindow.Close();
+        SmartLogger.SafeDispose(_overlayWindow, "overlay window");
+        _overlayWindow = null;
     }
 
-    private void OnOverlayClosed()
-    {
+    private void OnOverlayClosed() =>
         SmartLogger.Safe(() =>
         {
             if (_overlayWindow != null)
@@ -731,73 +752,71 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 SmartLogger.SafeDispose(_overlayWindow, "overlay window");
                 _overlayWindow = null;
             }
+
             Dispatcher.InvokeAsync(() =>
             {
                 IsOverlayActive = false;
                 SpectrumRendererFactory.ConfigureAllRenderers(false);
-                _renderElement?.InvalidateVisual();
+                InvalidateRenderElement();
                 Activate();
             });
         }, source: LogPrefix, errorMessage: "Error handling overlay closed");
-    }
 
-    private void OnOverlayButtonClick(object? sender, RoutedEventArgs e)
-    {
+    private void OnOverlayButtonClick(object? sender, RoutedEventArgs e) =>
         SmartLogger.Safe(() =>
         {
             if (IsOverlayActive)
                 CloseOverlay();
             else
                 OpenOverlay();
+
             SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
-            _renderElement?.InvalidateVisual();
+            InvalidateRenderElement();
         }, source: LogPrefix, errorMessage: "Error toggling overlay");
-    }
     #endregion
 
     #region Event Handlers
-    /// <summary>
-    /// Обрабатывает нажатие на кнопку переключения панели управления.
-    /// Открывает или закрывает ControlPanelWindow.
-    /// </summary>
     private void ToggleButtonContainer_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed)
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+
+        SmartLogger.Safe(() =>
         {
-            SmartLogger.Safe(() =>
+            if (_controlPanelWindow == null || !_controlPanelWindow.IsVisible)
             {
-                if (_controlPanelWindow == null || !_controlPanelWindow.IsVisible)
+                _controlPanelWindow = new ControlPanelWindow(this);
+                _controlPanelWindow.Closed += (s, args) =>
                 {
-                    _controlPanelWindow = new ControlPanelWindow(this);
-                    _controlPanelWindow.Closed += (s, args) =>
-                    {
-                        _controlPanelWindow = null;
-                        IsControlPanelOpen = false;
-                    };
-                    _controlPanelWindow.Show();
-                    IsControlPanelOpen = true;
-                }
-                else
-                {
-                    _controlPanelWindow.Close();
                     _controlPanelWindow = null;
                     IsControlPanelOpen = false;
-                }
-            }, source: LogPrefix, errorMessage: "Error toggling control panel window");
-        }
+                };
+                _controlPanelWindow.Show();
+                IsControlPanelOpen = true;
+            }
+            else
+            {
+                _controlPanelWindow.Close();
+                _controlPanelWindow = null;
+                IsControlPanelOpen = false;
+            }
+        }, source: LogPrefix, errorMessage: "Error toggling control panel window");
     }
 
     private void OnRendering(object? sender, EventArgs? e)
     {
         if (_isDisposed) return;
+
         SmartLogger.Safe(() =>
         {
             lock (_openGLLock)
             {
+                if (!_isOpenGLInitialized) return;
+
                 _visualizationManager?.CameraController?.Update();
+
                 if (_visualizationManager?.NeedsRender == true)
                 {
-                    _renderElement?.InvalidateVisual();
+                    InvalidateRenderElement();
                     _visualizationManager.NeedsRender = false;
                 }
             }
@@ -807,6 +826,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void OnStateChanged(object? sender, EventArgs? e)
     {
         if (MaximizeButton == null || MaximizeIcon == null) return;
+
         SmartLogger.Safe(() =>
         {
             MaximizeIcon.Data = Geometry.Parse(WindowState == System.Windows.WindowState.Maximized
@@ -816,15 +836,14 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         }, source: LogPrefix, errorMessage: "Error changing icon");
     }
 
-    private void OnThemeToggleButtonChanged(object? sender, RoutedEventArgs? e)
-    {
+    private void OnThemeToggleButtonChanged(object? sender, RoutedEventArgs? e) =>
         SmartLogger.Safe(() => ThemeManager.Instance?.ToggleTheme(),
             source: LogPrefix, errorMessage: "Error toggling theme");
-    }
 
     private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs? e)
     {
         if (e == null) return;
+
         SmartLogger.Safe(() =>
         {
             if (WindowState == System.Windows.WindowState.Normal)
@@ -832,6 +851,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                 Settings.Instance.WindowWidth = Width;
                 Settings.Instance.WindowHeight = Height;
             }
+
             if (_renderElement != null)
             {
                 UpdateRendererDimensions((int)_renderElement.ActualWidth, (int)_renderElement.ActualHeight);
@@ -842,6 +862,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     internal void OnComboBoxSelectionChanged(object? sender, SelectionChangedEventArgs? e)
     {
         if (sender is not System.Windows.Controls.ComboBox cb || e == null) return;
+
         SmartLogger.Safe(() =>
         {
             switch (cb.Name)
@@ -862,20 +883,19 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
         }, source: LogPrefix, errorMessage: "Error handling selection change");
     }
 
-    /// <summary>
-    /// Обрабатывает закрытие основного окна, закрывая также ControlPanelWindow.
-    /// </summary>
     private async void OnWindowClosed(object? sender, EventArgs? e)
     {
         _isDisposed = true;
         await SmartLogger.SafeAsync(async () =>
         {
             SettingsWindow.Instance.SaveSettings();
+
             if (_controlPanelWindow != null)
             {
                 _controlPanelWindow.Close();
                 _controlPanelWindow = null;
             }
+
             _cleanupCts.Cancel();
 
             CompositionTarget.Rendering -= OnRendering;
@@ -894,12 +914,8 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
             if (_captureManager != null)
             {
-                try
-                {
-                    await Dispatcher.InvokeAsync(async () =>
-                        await _captureManager.StopCaptureAsync()).Task;
-                }
-                catch { }
+                await Dispatcher.InvokeAsync(async () =>
+                    await _captureManager.StopCaptureAsync()).Task;
                 SmartLogger.SafeDispose(_captureManager, "capture manager");
                 _captureManager = null;
             }
@@ -932,23 +948,23 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
     private void OnWindowDrag(object? sender, System.Windows.Input.MouseButtonEventArgs? e)
     {
-        if (e?.ChangedButton == System.Windows.Input.MouseButton.Left)
+        if (e?.ChangedButton != System.Windows.Input.MouseButton.Left) return;
+
+        SmartLogger.Safe(() =>
         {
-            SmartLogger.Safe(() =>
+            DragMove();
+            if (WindowState == System.Windows.WindowState.Normal)
             {
-                DragMove();
-                if (WindowState == System.Windows.WindowState.Normal)
-                {
-                    Settings.Instance.WindowLeft = Left;
-                    Settings.Instance.WindowTop = Top;
-                }
-            }, source: LogPrefix, errorMessage: "Error moving window");
-        }
+                Settings.Instance.WindowLeft = Left;
+                Settings.Instance.WindowTop = Top;
+            }
+        }, source: LogPrefix, errorMessage: "Error moving window");
     }
 
     private void OnWindowMouseDoubleClick(object? sender, System.Windows.Input.MouseButtonEventArgs? e)
     {
         if (e == null) return;
+
         SmartLogger.Safe(() =>
         {
             if (e.OriginalSource is DependencyObject originalElement)
@@ -964,6 +980,7 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
                     element = VisualTreeHelper.GetParent(element);
                 }
             }
+
             if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
             {
                 e.Handled = true;
@@ -975,18 +992,27 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     internal void OnSliderValueChanged(object? sender, RoutedPropertyChangedEventArgs<double>? e)
     {
         if (sender is not Slider slider || e == null) return;
+
         SmartLogger.Safe(() =>
         {
-            var sliderActions = new Dictionary<string, Action<double>>
+            switch (slider.Name)
             {
-                ["barSpacingSlider"] = value => BarSpacing = value,
-                ["barCountSlider"] = value => BarCount = (int)value,
-                ["minDbLevelSlider"] = value => MinDbLevel = (float)value,
-                ["maxDbLevelSlider"] = value => MaxDbLevel = (float)value,
-                ["amplificationFactorSlider"] = value => AmplificationFactor = (float)value
-            };
-            if (sliderActions.TryGetValue(slider.Name, out var action))
-                action(slider.Value);
+                case "barSpacingSlider":
+                    BarSpacing = slider.Value;
+                    break;
+                case "barCountSlider":
+                    BarCount = (int)slider.Value;
+                    break;
+                case "minDbLevelSlider":
+                    MinDbLevel = (float)slider.Value;
+                    break;
+                case "maxDbLevelSlider":
+                    MaxDbLevel = (float)slider.Value;
+                    break;
+                case "amplificationFactorSlider":
+                    AmplificationFactor = (float)slider.Value;
+                    break;
+            }
         }, source: LogPrefix, errorMessage: "Error handling slider change");
     }
 
@@ -996,89 +1022,95 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
 
         SmartLogger.Safe(() =>
         {
-            var actions = new Dictionary<string, Action>
+            switch (btn.Name)
             {
-                ["StartCaptureButton"] = async () => await StartCaptureAsync(),
-                ["StopCaptureButton"] = async () => await StopCaptureAsync(),
-                ["OverlayButton"] = () => OnOverlayButtonClick(sender, e),
-                ["OpenSettingsButton"] = () =>
-                {
-                    btn.IsEnabled = false; 
-                    try
-                    {
-                        new SettingsWindow().ShowDialog(); 
-                    }
-                    finally
-                    {
-                        btn.IsEnabled = true; 
-                    }
-                },
-                ["OpenPopupButton"] = () => IsPopupOpen = !IsPopupOpen,
-                ["MinimizeButton"] = MinimizeWindow,
-                ["MaximizeButton"] = MaximizeWindow,
-                ["CloseButton"] = CloseWindow,
-                ["ResetCameraButton"] = () => _visualizationManager?.CameraController?.ResetCamera()
-            };
-
-            if (actions.TryGetValue(btn.Name, out var act))
-                act();
+                case "StartCaptureButton":
+                    _ = StartCaptureAsync();
+                    break;
+                case "StopCaptureButton":
+                    _ = StopCaptureAsync();
+                    break;
+                case "OverlayButton":
+                    OnOverlayButtonClick(sender, e);
+                    break;
+                case "OpenSettingsButton":
+                    OpenSettingsDialog(btn);
+                    break;
+                case "OpenPopupButton":
+                    IsPopupOpen = !IsPopupOpen;
+                    break;
+                case "MinimizeButton":
+                    MinimizeWindow();
+                    break;
+                case "MaximizeButton":
+                    MaximizeWindow();
+                    break;
+                case "CloseButton":
+                    CloseWindow();
+                    break;
+                case "ResetCameraButton":
+                    _visualizationManager?.CameraController?.ResetCamera();
+                    break;
+            }
         }, source: LogPrefix, errorMessage: $"Error handling button click: {btn.Name}");
     }
 
-    private void Window_MouseMove(object sender, MouseEventArgs e)
+    private void OpenSettingsDialog(System.Windows.Controls.Button button)
     {
+        button.IsEnabled = false;
+        try
+        {
+            new SettingsWindow().ShowDialog();
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
+    private void Window_MouseMove(object sender, MouseEventArgs e) =>
         SmartLogger.Safe(() => _visualizationManager?.CameraController?.HandleMouseMove(e),
             source: LogPrefix, errorMessage: "Error handling mouse move");
-    }
 
-    private void Window_MouseWheel(object sender, MouseWheelEventArgs e)
-    {
+    private void Window_MouseWheel(object sender, MouseWheelEventArgs e) =>
         SmartLogger.Safe(() => _visualizationManager?.CameraController?.HandleMouseWheel(e),
             source: LogPrefix, errorMessage: "Error handling mouse wheel");
-    }
 
-    private void MainWindow_KeyDown(object sender, KeyEventArgs e)
-    {
+    private void MainWindow_KeyDown(object sender, KeyEventArgs e) =>
         SmartLogger.Safe(() =>
         {
             _visualizationManager?.CameraController?.HandleKeyDown(e);
-            if (!e.Handled)
+            if (e.Handled) return;
+
+            switch (e.Key)
             {
-                switch (e.Key)
-                {
-                    case Key.F10:
-                        RenderQuality = RenderQuality.Low;
-                        e.Handled = true;
-                        break;
-                    case Key.F11:
-                        RenderQuality = RenderQuality.Medium;
-                        e.Handled = true;
-                        break;
-                    case Key.F12:
-                        RenderQuality = RenderQuality.High;
-                        e.Handled = true;
-                        break;
-                }
+                case Key.F10:
+                    RenderQuality = RenderQuality.Low;
+                    e.Handled = true;
+                    break;
+                case Key.F11:
+                    RenderQuality = RenderQuality.Medium;
+                    e.Handled = true;
+                    break;
+                case Key.F12:
+                    RenderQuality = RenderQuality.High;
+                    e.Handled = true;
+                    break;
             }
         }, source: LogPrefix, errorMessage: "Error handling key down");
-    }
 
-    private void MainWindow_KeyUp(object sender, KeyEventArgs e)
-    {
+    private void MainWindow_KeyUp(object sender, KeyEventArgs e) =>
         SmartLogger.Safe(() => _visualizationManager?.CameraController?.HandleKeyUp(e),
             source: LogPrefix, errorMessage: "Error handling key up");
-    }
     #endregion
 
     #region Helper Methods
-    private void UpdateOverlayTopmostState()
-    {
+    private void UpdateOverlayTopmostState() =>
         SmartLogger.Safe(() =>
         {
             if (_overlayWindow?.IsInitialized == true)
                 _overlayWindow.Topmost = IsOverlayTopmost;
         }, source: LogPrefix, errorMessage: "Error updating topmost state");
-    }
 
     private void UpdateRendererDimensions(int width, int height)
     {
@@ -1087,10 +1119,12 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
             SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Invalid dimensions: {width}x{height}");
             return;
         }
+
         SmartLogger.Safe(() =>
         {
             lock (_openGLLock)
             {
+                if (!_isOpenGLInitialized) return;
                 _visualizationManager?.UpdateRenderDimensions(width, height);
             }
         }, source: LogPrefix, errorMessage: "Error updating renderer dimensions");
@@ -1111,33 +1145,43 @@ public partial class MainWindow : System.Windows.Window, IAudioVisualizationCont
     private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName)
     {
         ArgumentNullException.ThrowIfNull(setter, nameof(setter));
+
         SmartLogger.Safe(() =>
         {
             setter(newValue);
             OnPropertyChanged(propertyName);
-            Dispatcher.InvokeAsync(() => _renderElement?.InvalidateVisual(), DispatcherPriority.Render);
+            Dispatcher.InvokeAsync(() => InvalidateRenderElement(), DispatcherPriority.Render);
         }, source: LogPrefix, errorMessage: "Error updating gain parameter");
     }
 
     protected bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
     {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-            return false;
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+
         field = value;
         OnPropertyChanged(propertyName ?? string.Empty);
+
         SmartLogger.Safe(() => callback?.Invoke(),
             source: LogPrefix,
             errorMessage: "Error executing callback in SetField");
+
         return true;
     }
 
     public void OnPropertyChanged(params string[] propertyNames)
     {
         if (_isDisposed) return;
+
         foreach (var name in propertyNames)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
+    }
+
+    private void InvalidateRenderElement()
+    {
+        if (_renderElement == null || !_isOpenGLInitialized) return;
+        _renderElement.InvalidateVisual();
     }
     #endregion
 }

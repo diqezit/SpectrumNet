@@ -4,8 +4,6 @@ namespace SpectrumNet
 {
     public partial class Renderer : IRenderer, IDisposable
     {
-        #region Constants and Types
-
         private const int RENDER_TIMEOUT_MS = 16;
         private const string DEFAULT_STYLE = "Solid";
         private const string LogPrefix = "Renderer";
@@ -16,47 +14,29 @@ namespace SpectrumNet
             string StyleName,
             RenderQuality Quality);
 
-        #endregion
-
-        #region Fields
-
         private readonly SemaphoreSlim _renderLock = new(1, 1);
         private readonly SpectrumBrushes _spectrumStyles;
         private readonly IAudioVisualizationController _controller;
         private readonly ISpectrumAnalyzer _analyzer;
         private readonly CancellationTokenSource _disposalTokenSource = new();
         private readonly IOpenGLService _glService;
-        private SpectrumPlaceholder? _placeholder;
-        public event EventHandler? RenderRequested;
 
+        private SpectrumPlaceholder? _placeholder;
         private string? _pendingStyleName;
         private Color4 _pendingColor;
         private ShaderProgram? _pendingShader;
         private GLWpfControl? _glControl;
-        private DispatcherTimer? _renderTimer;
-        private DispatcherTimer? _resizeTimer;
+        private DispatcherTimer? _renderTimer, _resizeTimer;
         private Matrix4 _projectionMatrix;
         private RenderState _currentState;
-
-        private volatile bool _isDisposed;
-        private volatile bool _isAnalyzerDisposed;
-        private volatile bool _shouldShowPlaceholder = true;
-        private bool _isInitialized;
-        private bool _isGpuInfoLogged;
-        private volatile bool _isResizing;
-
-        #endregion
-
-        #region Properties and Events
+        private volatile bool _isDisposed, _isAnalyzerDisposed, _shouldShowPlaceholder = true,
+                            _isInitialized, _isGpuInfoLogged, _isResizing;
 
         public string CurrentStyleName => _currentState.StyleName;
         public RenderQuality CurrentQuality => _currentState.Quality;
         public IAudioVisualizationController Controller => _controller;
         public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
-
-        #endregion
-
-        #region Constructor
+        public event EventHandler? RenderRequested;
 
         public Renderer(
             SpectrumBrushes styles,
@@ -73,7 +53,7 @@ namespace SpectrumNet
             _placeholder = new SpectrumPlaceholder(_glService);
 
             if (_analyzer is IComponent comp)
-                comp.Disposed += (_, _) => _isAnalyzerDisposed = true;
+                comp.Disposed += OnAnalyzerDisposed;
 
             _shouldShowPlaceholder = !_controller.IsRecording;
             _glControl.Render += OnGlControlRender;
@@ -83,12 +63,11 @@ namespace SpectrumNet
             PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
         }
 
-        #endregion
+        private void OnAnalyzerDisposed(object? sender, EventArgs e) => _isAnalyzerDisposed = true;
 
         #region Initialization
 
-        private void InitializeRenderer()
-        {
+        private void InitializeRenderer() =>
             SmartLogger.Safe(() => {
                 InitializeDefaultState();
                 InitializeRenderTimer();
@@ -96,30 +75,27 @@ namespace SpectrumNet
                 SynchronizeWithController();
                 RequestRender();
             }, LogPrefix, "Renderer initialization error");
-        }
 
         private void InitializeDefaultState()
         {
             var (_, shader) = _spectrumStyles.GetColorAndShader(DEFAULT_STYLE);
             ShaderProgram? clonedShader = shader?.Clone() ??
-                throw new InvalidOperationException($"{LogPrefix}Failed to initialize style {DEFAULT_STYLE}");
+                throw new InvalidOperationException($"{LogPrefix} Failed to initialize style {DEFAULT_STYLE}");
             _currentState = new RenderState(clonedShader, RenderStyle.Bars, DEFAULT_STYLE, RenderQuality.Medium);
         }
 
         private void InitializeRenderTimer()
         {
             _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(RENDER_TIMEOUT_MS) };
-            _renderTimer.Tick += (_, _) => RequestRender();
+            _renderTimer.Tick += OnRenderTimerTick;
             _renderTimer.Start();
         }
 
-        private void SubscribeToEvents()
-        {
-            _controller.PropertyChanged += OnControllerPropertyChanged;
-        }
+        private void OnRenderTimerTick(object? sender, EventArgs e) => RequestRender();
 
-        private void InitializeOpenGLResources()
-        {
+        private void SubscribeToEvents() => _controller.PropertyChanged += OnControllerPropertyChanged;
+
+        private void InitializeOpenGLResources() =>
             SmartLogger.Safe(() => {
                 _currentState.Paint?.Dispose();
                 _glService.Finish();
@@ -129,7 +105,6 @@ namespace SpectrumNet
                     throw new InvalidOperationException("Shader cloning failed during OpenGL resources initialization.");
                 _currentState = _currentState with { Paint = clonedShader };
             }, LogPrefix, "OpenGL resources initialization error");
-        }
 
         #endregion
 
@@ -141,27 +116,42 @@ namespace SpectrumNet
         private void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             if (e is null) return;
+
             switch (e.PropertyName)
             {
                 case nameof(IAudioVisualizationController.IsRecording):
-                    HandleRecordingChanged();
+                    _shouldShowPlaceholder = !_controller.IsRecording;
+                    RequestRender();
                     break;
+
                 case nameof(IAudioVisualizationController.IsOverlayActive):
-                    HandleOverlayActiveChanged();
+                    SpectrumRendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
+                    RequestRender();
                     break;
+
                 case nameof(IAudioVisualizationController.SelectedDrawingType):
                     UpdateRenderStyle(_controller.SelectedDrawingType);
                     break;
+
                 case nameof(IAudioVisualizationController.SelectedStyle):
-                    HandleStyleChanged();
+                    if (!string.IsNullOrEmpty(_controller.SelectedStyle))
+                    {
+                        var (color, shader) = _spectrumStyles.GetColorAndShader(_controller.SelectedStyle);
+                        UpdateSpectrumStyle(_controller.SelectedStyle, color, shader);
+                    }
                     break;
+
                 case nameof(IAudioVisualizationController.RenderQuality):
                     UpdateRenderQuality(_controller.RenderQuality);
                     break;
+
                 case nameof(IAudioVisualizationController.WindowType):
                 case nameof(IAudioVisualizationController.ScaleType):
-                    HandleAnalyzerSettingsChanged();
+                    _analyzer.UpdateSettings(_controller.WindowType, _controller.ScaleType);
+                    SynchronizeWithController();
+                    RequestRender();
                     break;
+
                 case nameof(IAudioVisualizationController.BarSpacing):
                 case nameof(IAudioVisualizationController.BarCount):
                     RequestRender();
@@ -169,35 +159,7 @@ namespace SpectrumNet
             }
         }
 
-        private void HandleRecordingChanged()
-        {
-            _shouldShowPlaceholder = !_controller.IsRecording;
-            RequestRender();
-        }
-
-        private void HandleOverlayActiveChanged()
-        {
-            SpectrumRendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
-            RequestRender();
-        }
-
-        private void HandleStyleChanged()
-        {
-            if (!string.IsNullOrEmpty(_controller.SelectedStyle))
-            {
-                var (color, shader) = _spectrumStyles.GetColorAndShader(_controller.SelectedStyle);
-                UpdateSpectrumStyle(_controller.SelectedStyle, color, shader);
-            }
-        }
-
-        private void HandleAnalyzerSettingsChanged()
-        {
-            _analyzer.UpdateSettings(_controller.WindowType, _controller.ScaleType);
-            SynchronizeWithController();
-            RequestRender();
-        }
-
-        private void OnGlControlSizeChanged(object sender, System.Windows.SizeChangedEventArgs e)
+        private void OnGlControlSizeChanged(object? sender, System.Windows.SizeChangedEventArgs e)
         {
             if (_isDisposed || _glControl is null || !_glControl.IsInitialized)
                 return;
@@ -205,14 +167,18 @@ namespace SpectrumNet
             SmartLogger.Safe(() => {
                 int newWidth = (int)e.NewSize.Width;
                 int newHeight = (int)e.NewSize.Height;
-                if (newWidth <= 0 || newHeight <= 0)
-                    return;
+                if (newWidth <= 0 || newHeight <= 0) return;
 
                 _projectionMatrix = Matrix4.CreateOrthographicOffCenter(0, newWidth, newHeight, 0, -1, 1);
                 _placeholder?.UpdateDimensions(newWidth, newHeight);
                 RequestRender();
             }, LogPrefix, "Error updating dimensions");
 
+            HandleResizing();
+        }
+
+        private void HandleResizing()
+        {
             if (_resizeTimer == null)
             {
                 _resizeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -222,8 +188,8 @@ namespace SpectrumNet
             {
                 _resizeTimer.Stop();
             }
-            _resizeTimer.Start();
 
+            _resizeTimer.Start();
             _isResizing = true;
         }
 
@@ -240,13 +206,11 @@ namespace SpectrumNet
 
         public void OnGlControlRender(TimeSpan delta)
         {
-            if (_isDisposed || !_renderLock.Wait(0))
-                return;
+            if (_isDisposed || !_renderLock.Wait(0)) return;
 
             try
             {
-                if (_glControl == null || !_glControl.IsInitialized)
-                    return;
+                if (_glControl == null || !_glControl.IsInitialized) return;
 
                 if (!_isInitialized)
                 {
@@ -265,11 +229,9 @@ namespace SpectrumNet
 
         private void ApplyPendingStyleIfNeeded()
         {
-            if (_pendingStyleName is null || _pendingShader is null)
-                return;
+            if (_pendingStyleName is null || _pendingShader is null) return;
 
             ShaderProgram? oldShader = _currentState.Paint;
-
             SmartLogger.Safe(() => {
                 var clonedShader = _pendingShader.Clone() ??
                     throw new ArgumentException($"Failed to clone shader for style: {_pendingStyleName}");
@@ -283,13 +245,15 @@ namespace SpectrumNet
 
         private void RenderFrameInternal(TimeSpan delta)
         {
-            if (!ValidateRenderState())
-                return;
+            if (!ValidateRenderState()) return;
+            if (!_isInitialized) InitializeOpenGLResources();
 
-            if (!_isInitialized)
-                InitializeOpenGLIfNeeded();
+            if (!_isGpuInfoLogged)
+            {
+                LogGpuInfo();
+                _isGpuInfoLogged = true;
+            }
 
-            LogGpuInfoOnce();
             PrepareRenderSurface();
 
             if (ShouldRenderPlaceholder())
@@ -301,62 +265,30 @@ namespace SpectrumNet
             RenderSpectrum();
         }
 
-        private bool ValidateRenderState()
-        {
-            if (_glControl == null || !_glControl.IsInitialized ||
-                _glControl.ActualWidth <= 0 || _glControl.ActualHeight <= 0)
-            {
-                _isInitialized = false;
-                return false;
-            }
-            return true;
-        }
-
-        private void InitializeOpenGLIfNeeded()
-        {
-            if (!_isInitialized)
-            {
-                InitializeOpenGLResources();
-                _isInitialized = true;
-            }
-        }
-
-        private void LogGpuInfoOnce()
-        {
-            if (!_isGpuInfoLogged)
-            {
-                LogGpuInfo();
-                _isGpuInfoLogged = true;
-            }
-        }
+        private bool ValidateRenderState() =>
+            _glControl != null && _glControl.IsInitialized &&
+            _glControl.ActualWidth > 0 && _glControl.ActualHeight > 0;
 
         private void PrepareRenderSurface()
         {
-            if (_glControl == null)
-                return;
+            if (_glControl == null) return;
 
             _glService.Viewport(0, 0, (int)_glControl.ActualWidth, (int)_glControl.ActualHeight);
             _glService.ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
             _glService.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             if (_projectionMatrix == default)
-                _projectionMatrix = Matrix4.CreateOrthographicOffCenter(0, (int)_glControl.ActualWidth, (int)_glControl.ActualHeight, 0, -1, 1);
+                _projectionMatrix = Matrix4.CreateOrthographicOffCenter(
+                    0, (int)_glControl.ActualWidth, (int)_glControl.ActualHeight, 0, -1, 1);
         }
 
-        private bool ShouldRenderPlaceholder()
-        {
-            return _shouldShowPlaceholder ||
-                   _controller.IsTransitioning ||
-                   _analyzer is null ||
-                   _isAnalyzerDisposed ||
-                   !_controller.IsRecording ||
-                   _currentState.Paint is null ||
-                   _isResizing;
-        }
+        private bool ShouldRenderPlaceholder() =>
+            _shouldShowPlaceholder || _controller.IsTransitioning || _analyzer is null ||
+            _isAnalyzerDisposed || !_controller.IsRecording || _currentState.Paint is null || _isResizing;
 
         private void RenderSpectrum()
         {
-            var spectrum = GetSpectrumData();
+            var spectrum = SmartLogger.Safe(() => _analyzer?.GetCurrentSpectrum(), defaultValue: null);
             if (spectrum is null || spectrum.Spectrum.Length == 0)
             {
                 RenderPlaceholder();
@@ -385,86 +317,63 @@ namespace SpectrumNet
                 barSpacing,
                 barCount,
                 _currentState.Paint,
-                DrawPerformanceInfoIfNeeded
+                DrawPerformanceInfo
             );
 
-            NotifyUIThreadAboutRenderingState();
+            UpdateControllerState();
         }
 
-        private ISpectrumRenderer? GetOrCreateRenderer()
-        {
-            var renderer = SpectrumRendererFactory.GetCachedRenderer(_currentState.Style);
-            if (renderer == null)
-            {
-                renderer = SpectrumRendererFactory.CreateRenderer(
-                    _currentState.Style,
-                    _controller.IsOverlayActive,
-                    _currentState.Quality
-                );
-            }
-            else
-            {
-                renderer.Configure(_controller.IsOverlayActive, _currentState.Quality);
-            }
-            return renderer;
-        }
-
-        private void DrawPerformanceInfoIfNeeded(Viewport viewport)
+        private void DrawPerformanceInfo(Viewport viewport)
         {
             if (_controller.ShowPerformanceInfo)
                 PerformanceMetricsManager.DrawPerformanceInfo(viewport, _controller.ShowPerformanceInfo);
         }
 
-        private void NotifyUIThreadAboutRenderingState()
+        private void UpdateControllerState() =>
+            _controller.Dispatcher.Invoke(() => _controller.OnPropertyChanged(
+                nameof(IAudioVisualizationController.IsRecording),
+                nameof(IAudioVisualizationController.CanStartCapture)));
+
+        private ISpectrumRenderer? GetOrCreateRenderer()
         {
-            _controller.Dispatcher.Invoke(() =>
-            {
-                _controller.OnPropertyChanged(
-                    nameof(IAudioVisualizationController.IsRecording),
-                    nameof(IAudioVisualizationController.CanStartCapture)
-                );
-            });
+            var renderer = SpectrumRendererFactory.GetCachedRenderer(_currentState.Style) ??
+                           SpectrumRendererFactory.CreateRenderer(
+                               _currentState.Style,
+                               _controller.IsOverlayActive,
+                               _currentState.Quality);
+
+            renderer?.Configure(_controller.IsOverlayActive, _currentState.Quality);
+            return renderer;
         }
 
         private void RenderPlaceholder()
         {
-            if (_glControl == null)
-                return;
+            if (_glControl == null) return;
 
-            if (_placeholder == null)
-            {
-                _placeholder = new SpectrumPlaceholder(_glService);
-            }
-
+            _placeholder ??= new SpectrumPlaceholder(_glService);
             _placeholder.UpdateDimensions((float)_glControl.ActualWidth, (float)_glControl.ActualHeight);
             _placeholder.Render();
         }
 
-        private SpectralData? GetSpectrumData()
-        {
-            return SmartLogger.Safe(() => _analyzer?.GetCurrentSpectrum(), defaultValue: null);
-        }
-
         public bool CalculateRenderParameters(out float barWidth, out float barSpacing, out int barCount)
-        {
-            return TryCalcRenderParams(out barWidth, out barSpacing, out barCount);
-        }
-
-        private bool TryCalcRenderParams(out float barWidth, out float barSpacing, out int barCount)
         {
             barWidth = barSpacing = 0;
             barCount = _controller.BarCount;
             int totalWidth = _glControl is not null ? (int)_glControl.ActualWidth : 0;
 
-            if (totalWidth <= 0 || barCount <= 0)
-                return false;
+            if (totalWidth <= 0 || barCount <= 0) return false;
 
             barCount = Math.Max(1, barCount);
             totalWidth = Math.Max(1, totalWidth);
             barSpacing = Math.Min((float)_controller.BarSpacing, totalWidth / (barCount + 1));
             barSpacing = Math.Max(0, barSpacing);
             barWidth = Math.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
-            barSpacing = barCount > 1 ? (totalWidth - barCount * barWidth) / (barCount - 1) : 0;
+
+            if (barCount > 1)
+                barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
+            else
+                barSpacing = 0;
+
             return true;
         }
 
@@ -474,7 +383,7 @@ namespace SpectrumNet
 
         public void SynchronizeWithController()
         {
-            EnsureNotDisposed();
+            if (_isDisposed) throw new ObjectDisposedException(nameof(Renderer));
 
             SmartLogger.Safe(() => {
                 bool needsUpdate = false;
@@ -498,45 +407,35 @@ namespace SpectrumNet
                     needsUpdate = true;
                 }
 
-                if (needsUpdate)
-                    RequestRender();
+                if (needsUpdate) RequestRender();
             }, LogPrefix, "Synchronization error");
         }
 
         public void UpdateRenderStyle(RenderStyle style)
         {
-            EnsureNotDisposed();
-            if (_currentState.Style == style)
-                return;
+            if (_isDisposed || _currentState.Style == style) return;
 
             SmartLogger.Log(LogLevel.Information, LogPrefix, $"Updating render style to {style}");
             _currentState = _currentState with { Style = style };
 
-            ConfigureRendererForCurrentStyle();
-            RequestRender();
-        }
-
-        private void ConfigureRendererForCurrentStyle()
-        {
             SmartLogger.Safe(() => {
                 var renderer = SpectrumRendererFactory.GetCachedRenderer(_currentState.Style) ??
                                SpectrumRendererFactory.CreateRenderer(
                                    _currentState.Style,
                                    _controller.IsOverlayActive,
-                                   _currentState.Quality
-                               );
+                                   _currentState.Quality);
                 renderer?.Configure(_controller.IsOverlayActive, _currentState.Quality);
             }, LogPrefix, $"Failed to get renderer for style {_currentState.Style}");
+
+            RequestRender();
         }
 
         public void UpdateSpectrumStyle(string styleName, Color4 color, ShaderProgram? shader)
         {
-            EnsureNotDisposed();
+            if (_isDisposed) throw new ObjectDisposedException(nameof(Renderer));
             if (string.IsNullOrEmpty(styleName))
                 throw new ArgumentException("Style name cannot be null or empty", nameof(styleName));
-
-            if (styleName == _currentState.StyleName)
-                return;
+            if (styleName == _currentState.StyleName) return;
 
             _pendingStyleName = styleName;
             _pendingColor = color;
@@ -546,9 +445,7 @@ namespace SpectrumNet
 
         public void UpdateRenderQuality(RenderQuality quality)
         {
-            EnsureNotDisposed();
-            if (_currentState.Quality == quality)
-                return;
+            if (_isDisposed || _currentState.Quality == quality) return;
 
             _currentState = _currentState with { Quality = quality };
             SpectrumRendererFactory.GlobalQuality = quality;
@@ -557,25 +454,26 @@ namespace SpectrumNet
 
         public void RequestRender()
         {
-            if (!_isDisposed && _glControl is not null &&
-                (!_controller.IsOverlayActive || _glControl != _controller.SpectrumCanvas))
+            if (_isDisposed || _glControl is null ||
+                (_controller.IsOverlayActive && _glControl == _controller.SpectrumCanvas)) return;
+
+            _glControl.InvalidateVisual();
+
+            if (_isInitialized)
             {
-                _glControl.InvalidateVisual();
-
-                if (_isInitialized)
-                {
-                    var renderer = SpectrumRendererFactory.GetCachedRenderer(_currentState.Style);
-                    renderer?.Configure(_controller.IsOverlayActive, _currentState.Quality);
-                }
-
-                RenderRequested?.Invoke(this, EventArgs.Empty);
+                var renderer = SpectrumRendererFactory.GetCachedRenderer(_currentState.Style);
+                renderer?.Configure(_controller.IsOverlayActive, _currentState.Quality);
             }
+
+            RenderRequested?.Invoke(this, EventArgs.Empty);
         }
 
         public void UpdateRenderDimensions(int width, int height)
         {
             if (width <= 0 || height <= 0)
-                throw new ArgumentOutOfRangeException(width <= 0 ? nameof(width) : nameof(height), "Dimensions must be greater than zero");
+                throw new ArgumentOutOfRangeException(
+                    width <= 0 ? nameof(width) : nameof(height),
+                    "Dimensions must be greater than zero");
 
             _projectionMatrix = Matrix4.CreateOrthographicOffCenter(0, width, height, 0, -1, 1);
             _placeholder?.UpdateDimensions(width, height);
@@ -586,14 +484,7 @@ namespace SpectrumNet
 
         #region Utility Methods and Dispose
 
-        private void EnsureNotDisposed()
-        {
-            if (_isDisposed)
-                throw new ObjectDisposedException(nameof(Renderer), "Cannot operate on a disposed renderer");
-        }
-
-        private void LogGpuInfo()
-        {
+        private void LogGpuInfo() =>
             SmartLogger.Safe(() => {
                 var openGlVersion = _glService.GetString(StringName.Version);
                 var vendor = _glService.GetString(StringName.Vendor);
@@ -604,14 +495,13 @@ namespace SpectrumNet
                     string.IsNullOrEmpty(rendererStr))
                     throw new InvalidOperationException("One or more GPU info strings are null or empty");
 
-                SmartLogger.Log(LogLevel.Information, LogPrefix, $"OpenGL: {openGlVersion}, Vendor: {vendor}, Renderer: {rendererStr}");
+                SmartLogger.Log(LogLevel.Information, LogPrefix,
+                    $"OpenGL: {openGlVersion}, Vendor: {vendor}, Renderer: {rendererStr}");
             }, LogPrefix, "Error obtaining GPU info");
-        }
 
         public void Dispose()
         {
-            if (_isDisposed)
-                return;
+            if (_isDisposed) return;
 
             _isDisposed = _isAnalyzerDisposed = true;
             _disposalTokenSource.Cancel();
@@ -630,12 +520,12 @@ namespace SpectrumNet
                 _glControl = null;
             }
 
-            SmartLogger.SafeDispose(_currentState.Paint, "Renderer paint resources");
-            SmartLogger.SafeDispose(_placeholder, "Renderer placeholder");
+            SmartLogger.Safe(() => _currentState.Paint?.Dispose(), LogPrefix, "Error disposing paint resources");
+            SmartLogger.Safe(() => _placeholder?.Dispose(), LogPrefix, "Error disposing placeholder");
             _placeholder = null;
 
-            SmartLogger.SafeDispose(_renderLock, "Render lock");
-            SmartLogger.SafeDispose(_disposalTokenSource, "Disposal token source");
+            SmartLogger.Safe(() => _renderLock?.Dispose(), LogPrefix, "Error disposing render lock");
+            SmartLogger.Safe(() => _disposalTokenSource?.Dispose(), LogPrefix, "Error disposing token source");
 
             SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed");
         }

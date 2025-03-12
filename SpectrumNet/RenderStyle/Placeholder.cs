@@ -100,7 +100,7 @@ namespace SpectrumNet
             }
         }
 
-        private void Initialize()
+        public void Initialize()
         {
             if (_isDisposed || _isInitialized)
                 return;

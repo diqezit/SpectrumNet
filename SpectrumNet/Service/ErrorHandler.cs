@@ -342,4 +342,22 @@
             }
         }
     }
+
+    /// <summary>
+    /// Дополнения для компактного кода
+    /// </summary>
+    public static class Extensions
+    {
+        public static void ForEach<T>(this IEnumerable<T> source, Action<T> action)
+        {
+            foreach (var item in source)
+                action(item);
+        }
+
+        public static T With<T>(this T obj, Action<T> action)
+        {
+            action(obj);
+            return obj;
+        }
+    }
 }

@@ -22,12 +22,11 @@ namespace SpectrumNet
         private readonly MainWindow _mainWindow;
         private readonly OverlayConfiguration _configuration;
         private readonly CancellationTokenSource _disposalTokenSource = new();
-        private bool _isDisposed;
+        private bool _isDisposed, _isGlInitialized;
         private IntPtr _hwnd;
         private HwndSource? _hwndSource;
         private GLWpfControl? _glControl;
         private DispatcherTimer? _renderTimer;
-        private bool _isGlInitialized = false;
         private SpectrumPlaceholder? _overlayPlaceholder;
 
         public new bool IsInitialized => _glControl != null && !_isDisposed && _isGlInitialized;
@@ -58,7 +57,7 @@ namespace SpectrumNet
 
         private void InitializeGlControl()
         {
-            _glControl = new GLWpfControl
+            GLWpfControl _glControl = new GLWpfControl
             {
                 VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
@@ -93,21 +92,18 @@ namespace SpectrumNet
             this.Closing += OnClosing;
             this.SourceInitialized += OnSourceInitialized;
             this.Loaded += OnWindowLoaded;
-            if (_configuration.EnableEscapeToClose)
-            {
-                this.KeyDown += OnKeyDown;
-            }
             this.SizeChanged += OnSizeChanged;
+
+            if (_configuration.EnableEscapeToClose)
+                this.KeyDown += OnKeyDown;
         }
 
-        private void OnWindowLoaded(object sender, RoutedEventArgs e)
-        {
+        private void OnWindowLoaded(object sender, RoutedEventArgs e) =>
             SmartLogger.Safe(() =>
             {
                 SetFullscreenDimensions();
                 InitializeOpenGL();
             }, "OverlayWindow", "Error in OnWindowLoaded");
-        }
 
         private void SetFullscreenDimensions()
         {
@@ -120,24 +116,22 @@ namespace SpectrumNet
 
         private void InitializeOpenGL()
         {
-            if (_glControl != null && !_isGlInitialized)
-            {
-                _glControl.Start(_mainWindow.GlSettings);
-                _glControl.Render += OnGlControlRender;
-                _isGlInitialized = true;
+            if (_glControl == null || _isGlInitialized) return;
 
-                _overlayPlaceholder = SmartLogger.Safe<SpectrumPlaceholder>(() => new SpectrumPlaceholder(new OpenGLService()), defaultValue: null);
+            _glControl.Start(_mainWindow.GlSettings);
+            _glControl.Render += OnGlControlRender;
+            _isGlInitialized = true;
 
-                if (_overlayPlaceholder != null)
-                {
-                    SmartLogger.Safe(() => {
-                        _overlayPlaceholder.UpdateDimensions((float)Width, (float)Height);
-                    });
-                }
+            _overlayPlaceholder = SmartLogger.Safe<SpectrumPlaceholder>(
+                () => new SpectrumPlaceholder(new OpenGLService()),
+                defaultValue: null
+            );
 
-                _renderTimer?.Start();
-                _mainWindow.IsOverlayActive = true;
-            }
+            if (_overlayPlaceholder != null)
+                SmartLogger.Safe(() => _overlayPlaceholder.UpdateDimensions((float)Width, (float)Height));
+
+            _renderTimer?.Start();
+            _mainWindow.IsOverlayActive = true;
         }
 
         private void OnGlControlRender(TimeSpan delta)
@@ -150,39 +144,37 @@ namespace SpectrumNet
                 GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
                 GL.Viewport(0, 0, (int)_glControl.ActualWidth, (int)_glControl.ActualHeight);
 
-                if (_overlayPlaceholder != null &&
-                    (_glControl.ActualWidth > 0 && _glControl.ActualHeight > 0))
-                {
+                var hasValidDimensions = _glControl.ActualWidth > 0 && _glControl.ActualHeight > 0;
+
+                if (_overlayPlaceholder != null && hasValidDimensions)
                     _overlayPlaceholder.UpdateDimensions((float)_glControl.ActualWidth, (float)_glControl.ActualHeight);
-                }
 
                 if (_overlayPlaceholder != null)
                 {
-                    bool renderSuccess = SmartLogger.Safe<bool>(() => {
+                    bool renderSuccess = SmartLogger.Safe(() =>
+                    {
                         _overlayPlaceholder.Render();
                         return true;
                     }, defaultValue: false);
 
                     if (!renderSuccess)
-                    {
-                        GL.ClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-                        GL.Clear(ClearBufferMask.ColorBufferBit);
-                    }
+                        SetErrorBackgroundColor();
                 }
                 else
-                {
-                    GL.ClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-                    GL.Clear(ClearBufferMask.ColorBufferBit);
-                }
+                    SetErrorBackgroundColor();
             });
+        }
+
+        private void SetErrorBackgroundColor()
+        {
+            GL.ClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
         }
 
         private void RenderTimerTick(object? sender, EventArgs e)
         {
             if (_isGlInitialized && _glControl != null)
-            {
                 _glControl.InvalidateVisual();
-            }
         }
 
         private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -206,9 +198,7 @@ namespace SpectrumNet
         private void UnsubscribeGlControlEvents()
         {
             if (_glControl != null)
-            {
                 _glControl.Render -= OnGlControlRender;
-            }
         }
 
         private void CleanupOpenGLResources()
@@ -226,9 +216,7 @@ namespace SpectrumNet
             _hwndSource = HwndSource.FromHwnd(_hwnd);
 
             if (_hwndSource != null)
-            {
                 _hwndSource.AddHook(WndProc);
-            }
 
             ConfigureWindowStyleEx();
         }
@@ -239,29 +227,27 @@ namespace SpectrumNet
             const int MA_NOACTIVATE = 3;
             const int WM_SETFOCUS = 0x0007;
 
-            if (msg == WM_MOUSEACTIVATE)
+            switch (msg)
             {
-                handled = true;
-                return (IntPtr)MA_NOACTIVATE;
-            }
+                case WM_MOUSEACTIVATE:
+                    handled = true;
+                    return (IntPtr)MA_NOACTIVATE;
 
-            if (msg == WM_SETFOCUS)
-            {
-                ReturnFocusToMainWindow();
-                handled = true;
-                return IntPtr.Zero;
-            }
+                case WM_SETFOCUS:
+                    ReturnFocusToMainWindow();
+                    handled = true;
+                    return IntPtr.Zero;
 
-            return IntPtr.Zero;
+                default:
+                    return IntPtr.Zero;
+            }
         }
 
         private void ReturnFocusToMainWindow()
         {
             IntPtr mainWindowHandle = new WindowInteropHelper(_mainWindow).Handle;
             if (mainWindowHandle != IntPtr.Zero)
-            {
                 NativeMethods.SetForegroundWindow(mainWindowHandle);
-            }
         }
 
         private void OnKeyDown(object sender, WpfKeyEventArgs e)
@@ -275,15 +261,15 @@ namespace SpectrumNet
 
         private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
         {
-            if (_glControl != null && _isGlInitialized && _overlayPlaceholder != null &&
-                e.NewSize.Width > 0 && e.NewSize.Height > 0)
+            if (_glControl == null || !_isGlInitialized || _overlayPlaceholder == null ||
+                e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
+                return;
+
+            SmartLogger.Safe(() =>
             {
-                SmartLogger.Safe(() =>
-                {
-                    _overlayPlaceholder.UpdateDimensions((float)e.NewSize.Width, (float)e.NewSize.Height);
-                    _glControl.InvalidateVisual();
-                }, "OverlayWindow", "Failed to update dimensions");
-            }
+                _overlayPlaceholder.UpdateDimensions((float)e.NewSize.Width, (float)e.NewSize.Height);
+                _glControl.InvalidateVisual();
+            }, "OverlayWindow", "Failed to update dimensions");
         }
 
         private void ConfigureWindowStyleEx()
@@ -319,36 +305,32 @@ namespace SpectrumNet
             const int MA_NOACTIVATE = 3;
             const int WM_SETFOCUS = 0x0007;
 
-            if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
+            switch (msg)
             {
-                Close();
-                handled = true;
-                return IntPtr.Zero;
-            }
+                case WM_HOTKEY when wParam.ToInt32() == HOTKEY_ID:
+                    Close();
+                    handled = true;
+                    return IntPtr.Zero;
 
-            if (msg == WM_MOUSEACTIVATE)
-            {
-                handled = true;
-                return (IntPtr)MA_NOACTIVATE;
-            }
+                case WM_MOUSEACTIVATE:
+                    handled = true;
+                    return (IntPtr)MA_NOACTIVATE;
 
-            if (msg == WM_SETFOCUS)
-            {
-                ReturnFocusToMainWindow();
-                handled = true;
-                return IntPtr.Zero;
-            }
+                case WM_SETFOCUS:
+                    ReturnFocusToMainWindow();
+                    handled = true;
+                    return IntPtr.Zero;
 
-            return IntPtr.Zero;
+                default:
+                    return IntPtr.Zero;
+            }
         }
 
         private void UnregisterHotKey()
         {
             const int HOTKEY_ID = 9000;
             if (_hwnd != IntPtr.Zero)
-            {
                 NativeMethods.UnregisterHotKey(_hwnd, HOTKEY_ID);
-            }
         }
 
         public void Dispose()
@@ -377,13 +359,10 @@ namespace SpectrumNet
             this.Closing -= OnClosing;
             this.SourceInitialized -= OnSourceInitialized;
             this.Loaded -= OnWindowLoaded;
+            this.SizeChanged -= OnSizeChanged;
 
             if (_configuration.EnableEscapeToClose)
-            {
                 this.KeyDown -= OnKeyDown;
-            }
-
-            this.SizeChanged -= OnSizeChanged;
         }
 
         private void ReleaseResources()
