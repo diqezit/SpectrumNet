@@ -87,7 +87,17 @@ namespace SpectrumNet
         public bool ShowPerformanceInfo
         {
             get => _showPerformanceInfo;
-            set => SetField(ref _showPerformanceInfo, value);
+            set
+            {
+                if (_showPerformanceInfo != value)
+                {
+                    _showPerformanceInfo = value;
+                    Settings.Instance.ShowPerformanceInfo = value; 
+                    _saveSettingsTimer.Stop();
+                    _saveSettingsTimer.Start(); 
+                    OnPropertyChanged(nameof(ShowPerformanceInfo));
+                }
+            }
         }
 
         public bool IsTransitioning => _isTransitioning;
@@ -208,11 +218,13 @@ namespace SpectrumNet
             get => _isOverlayTopmost;
             set
             {
-                if (SetField(ref _isOverlayTopmost, value, UpdateOverlayTopmostState))
+                if (_isOverlayTopmost != value)
                 {
-                    Settings.Instance.IsOverlayTopmost = value;
+                    _isOverlayTopmost = value;
+                    Settings.Instance.IsOverlayTopmost = value; 
                     _saveSettingsTimer.Stop();
-                    _saveSettingsTimer.Start();
+                    _saveSettingsTimer.Start(); 
+                    OnPropertyChanged(nameof(IsOverlayTopmost));
                 }
             }
         }
@@ -397,6 +409,7 @@ namespace SpectrumNet
                 Height = Settings.Instance.WindowHeight;
                 WindowState = Settings.Instance.WindowState;
 
+                ShowPerformanceInfo = Settings.Instance.ShowPerformanceInfo;
                 IsOverlayTopmost = Settings.Instance.IsOverlayTopmost;
                 SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
                 WindowType = Settings.Instance.SelectedFftWindowType;
@@ -501,6 +514,7 @@ namespace SpectrumNet
                 }
 
                 IsOverlayActive = true;
+                spectrumCanvas.InvalidateVisual();
 
                 if (_renderer != null)
                     _renderer.UpdateRenderDimensions(

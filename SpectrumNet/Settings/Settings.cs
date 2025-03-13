@@ -49,6 +49,7 @@ namespace SpectrumNet
         double UIBarSpacing { get; set; }
         string SelectedPalette { get; set; }
         bool IsOverlayTopmost { get; set; }
+        bool ShowPerformanceInfo { get; set; }
         float UIMinDbLevel { get; set; }
         float UIMaxDbLevel { get; set; }
         float UIAmplificationFactor { get; set; }
@@ -139,7 +140,8 @@ namespace SpectrumNet
         public const bool
             IsControlPanelVisible = true,
             IsOverlayTopmost = true,
-            IsDarkTheme = true;
+            IsDarkTheme = true,
+            ShowPerformanceInfo = true;
         public static readonly RenderStyle SelectedRenderStyle = RenderStyle.Bars;
         public static readonly FftWindowType SelectedFftWindowType = FftWindowType.Hann;
         public static readonly SpectrumScale SelectedScaleType = SpectrumScale.Linear;
@@ -279,7 +281,7 @@ namespace SpectrumNet
             _uiBarSpacing;
         private WindowState _windowState;
         private bool
-            _isControlPanelVisible, _isOverlayTopmost, _isDarkTheme;
+            _isControlPanelVisible, _isOverlayTopmost, _isDarkTheme, _showPerformanceInfo;
         private int _uiBarCount;
         private RenderStyle _selectedRenderStyle = DefaultSettings.SelectedRenderStyle;
         private FftWindowType _selectedFftWindowType = DefaultSettings.SelectedFftWindowType;
@@ -751,6 +753,12 @@ namespace SpectrumNet
             set => SetProperty(ref _isOverlayTopmost, value);
         }
 
+        public bool ShowPerformanceInfo
+        {
+            get => _showPerformanceInfo;
+            set => SetProperty(ref _showPerformanceInfo, value);
+        }
+
         public float UIMinDbLevel
         {
             get => _uiMinDbLevel;
@@ -860,6 +868,7 @@ namespace SpectrumNet
             UIBarSpacing = DefaultSettings.UIBarSpacing;
             SelectedPalette = DefaultSettings.SelectedPalette;
             IsOverlayTopmost = DefaultSettings.IsOverlayTopmost;
+            ShowPerformanceInfo = DefaultSettings.ShowPerformanceInfo;
             UIMinDbLevel = DefaultSettings.UIMinDbLevel;
             UIMaxDbLevel = DefaultSettings.UIMaxDbLevel;
             UIAmplificationFactor = DefaultSettings.UIAmplificationFactor;
