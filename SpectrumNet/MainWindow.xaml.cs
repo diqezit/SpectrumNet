@@ -6,13 +6,13 @@ namespace SpectrumNet
     {
         private const string LogPrefix = "MainWindow";
 
-        private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
-        private readonly CancellationTokenSource _cleanupCts = new();
+        private SemaphoreSlim _transitionSemaphore = new(1, 1);
+        private CancellationTokenSource _cleanupCts = new();
+        private DispatcherTimer _saveSettingsTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+        private Dictionary<string, Action> _buttonActions;
 
         private bool _isOverlayActive, _isPopupOpen, _isOverlayTopmost = true,
-                     _isTransitioning, _isDisposed,
-                     _showPerformanceInfo = true;
-
+                     _isTransitioning, _isDisposed, _showPerformanceInfo = true;
         private RenderStyle _selectedDrawingType = RenderStyle.Bars;
         private FftWindowType _selectedFftWindowType = FftWindowType.Hann;
         private SpectrumScale _selectedScaleType = SpectrumScale.Linear;
@@ -22,18 +22,15 @@ namespace SpectrumNet
         private Renderer? _renderer;
         private SpectrumBrushes? _spectrumStyles;
         private SpectrumAnalyzer? _analyzer;
-        private AudioCaptureManager? _captureManager;
+        private AudioCapture? _captureManager;
         private CompositeDisposable? _disposables;
         private GainParameters? _gainParameters;
         private SKElement? _renderElement;
         private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
-        private record struct InitializationContext(
-            SynchronizationContext SyncContext,
-            GainParameters GainParams);
+        private record struct InitializationContext(SynchronizationContext SyncContext, GainParameters GainParams);
 
         #region IAudioVisualizationController Properties
-        // Свойства интерфейса остались без изменений, так как они не содержат try-catch или проблем с SmartLogger
         public SpectrumAnalyzer Analyzer
         {
             get => _analyzer ?? throw new InvalidOperationException("Analyzer not initialized");
@@ -70,11 +67,6 @@ namespace SpectrumNet
                 if (_isOverlayActive == value) return;
                 _isOverlayActive = value;
                 OnPropertyChanged(nameof(IsOverlayActive));
-                UpdateVisualization(() =>
-                {
-                    SpectrumRendererFactory.ConfigureAllRenderers(value);
-                    _renderElement?.InvalidateVisual();
-                });
             }
         }
 
@@ -84,21 +76,18 @@ namespace SpectrumNet
             set
             {
                 if (_captureManager?.IsRecording == value) return;
-                _ = value ? StartCaptureAsync() : StopCaptureAsync();
-                OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
+
+                if (_captureManager != null)
+                    _ = _captureManager.ToggleCaptureAsync();
+                else
+                    SmartLogger.Log(LogLevel.Error, LogPrefix, "Cannot toggle recording: CaptureManager is null");
             }
         }
 
         public bool ShowPerformanceInfo
         {
             get => _showPerformanceInfo;
-            set
-            {
-                if (_showPerformanceInfo == value) return;
-                _showPerformanceInfo = value;
-                OnPropertyChanged(nameof(ShowPerformanceInfo));
-                _renderer?.RequestRender();
-            }
+            set => SetField(ref _showPerformanceInfo, value);
         }
 
         public bool IsTransitioning => _isTransitioning;
@@ -118,13 +107,9 @@ namespace SpectrumNet
                 _selectedScaleType = value;
                 OnPropertyChanged(nameof(ScaleType));
 
-                UpdateVisualization(() =>
-                {
-                    _analyzer?.SetScaleType(value);
-                    _renderer?.RequestRender();
-                    _renderElement?.InvalidateVisual();
-                    Settings.Instance.SelectedScaleType = value;
-                });
+                Settings.Instance.SelectedScaleType = value;
+                _saveSettingsTimer.Stop();
+                _saveSettingsTimer.Start();
             }
         }
 
@@ -144,13 +129,9 @@ namespace SpectrumNet
                 Settings.Instance.SelectedRenderQuality = value;
                 OnPropertyChanged(nameof(RenderQuality));
 
-                UpdateVisualization(() =>
-                {
-                    SpectrumRendererFactory.GlobalQuality = value;
-                    _renderer?.RequestRender();
-                    _renderElement?.InvalidateVisual();
-                    SmartLogger.Log(LogLevel.Information, LogPrefix, $"Render quality set to {value}");
-                });
+                SmartLogger.Log(LogLevel.Information, LogPrefix, $"Render quality set to {value}");
+                _saveSettingsTimer.Stop();
+                _saveSettingsTimer.Start();
             }
         }
 
@@ -168,6 +149,10 @@ namespace SpectrumNet
                 if (Settings.Instance.SelectedPalette == value) return;
                 Settings.Instance.SelectedPalette = value;
                 OnPropertyChanged(nameof(SelectedStyle));
+
+                SmartLogger.Log(LogLevel.Information, LogPrefix, $"Selected style changed to {value}");
+                _saveSettingsTimer.Stop();
+                _saveSettingsTimer.Start();
             }
         }
 
@@ -186,19 +171,14 @@ namespace SpectrumNet
                 _selectedFftWindowType = value;
                 OnPropertyChanged(nameof(WindowType));
 
-                UpdateVisualization(() =>
-                {
-                    _analyzer?.SetWindowType(value);
-                    _renderer?.RequestRender();
-                    _renderElement?.InvalidateVisual();
-                    Settings.Instance.SelectedFftWindowType = value;
-                });
+                Settings.Instance.SelectedFftWindowType = value;
+                _saveSettingsTimer.Stop();
+                _saveSettingsTimer.Start();
             }
         }
         #endregion
 
         #region Additional Public Properties
-        // Дополнительные свойства также остались без изменений
         public static bool IsDarkTheme => ThemeManager.Instance?.IsDarkTheme ?? false;
 
         public static IEnumerable<RenderStyle> AvailableDrawingTypes =>
@@ -211,9 +191,7 @@ namespace SpectrumNet
             Enum.GetValues<SpectrumScale>().OrderBy(s => s.ToString());
 
         public IReadOnlyDictionary<string, Palette> AvailablePalettes =>
-            _spectrumStyles?.RegisteredPalettes
-                .OrderBy(kvp => kvp.Key)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+            _spectrumStyles?.RegisteredPalettes.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
             ?? new Dictionary<string, Palette>();
 
         public static IEnumerable<RenderQuality> AvailableRenderQualities =>
@@ -231,7 +209,11 @@ namespace SpectrumNet
             set
             {
                 if (SetField(ref _isOverlayTopmost, value, UpdateOverlayTopmostState))
+                {
                     Settings.Instance.IsOverlayTopmost = value;
+                    _saveSettingsTimer.Stop();
+                    _saveSettingsTimer.Start();
+                }
             }
         }
 
@@ -246,45 +228,29 @@ namespace SpectrumNet
             }
         }
 
-        public bool IsControlPanelOpen
-        {
-            get => _controlPanelWindow != null && _controlPanelWindow.IsVisible;
-        }
+        public bool IsControlPanelOpen => _controlPanelWindow != null && _controlPanelWindow.IsVisible;
 
         public float MinDbLevel
         {
             get => _gainParameters!.MinDbValue;
-            set => UpdateDbLevel(value,
-                v => v < _gainParameters!.MaxDbValue,
-                v => _gainParameters!.MinDbValue = v,
-                _gainParameters!.MaxDbValue - 1,
-                v => Settings.Instance.UIMinDbLevel = v,
-                $"Min dB level ({value}) must be less than max ({_gainParameters!.MaxDbValue})",
-                nameof(MinDbLevel));
+            set => UpdateDbLevel(value, v => v < _gainParameters!.MaxDbValue, v => _gainParameters!.MinDbValue = v,
+                _gainParameters!.MaxDbValue - 1, v => Settings.Instance.UIMinDbLevel = v,
+                $"Min dB level ({value}) must be less than max ({_gainParameters!.MaxDbValue})", nameof(MinDbLevel));
         }
 
         public float MaxDbLevel
         {
             get => _gainParameters!.MaxDbValue;
-            set => UpdateDbLevel(value,
-                v => v > _gainParameters!.MinDbValue,
-                v => _gainParameters!.MaxDbValue = v,
-                _gainParameters!.MinDbValue + 1,
-                v => Settings.Instance.UIMaxDbLevel = v,
-                $"Max dB level ({value}) must be greater than min ({_gainParameters!.MinDbValue})",
-                nameof(MaxDbLevel));
+            set => UpdateDbLevel(value, v => v > _gainParameters!.MinDbValue, v => _gainParameters!.MaxDbValue = v,
+                _gainParameters!.MinDbValue + 1, v => Settings.Instance.UIMaxDbLevel = v,
+                $"Max dB level ({value}) must be greater than min ({_gainParameters!.MinDbValue})", nameof(MaxDbLevel));
         }
 
         public float AmplificationFactor
         {
             get => _gainParameters!.AmplificationFactor;
-            set => UpdateDbLevel(value,
-                v => v >= 0,
-                v => _gainParameters!.AmplificationFactor = v,
-                0,
-                v => Settings.Instance.UIAmplificationFactor = v,
-                $"Amplification factor cannot be negative: {value}",
-                nameof(AmplificationFactor));
+            set => UpdateDbLevel(value, v => v >= 0, v => _gainParameters!.AmplificationFactor = v, 0,
+                v => Settings.Instance.UIAmplificationFactor = v, $"Amplification factor cannot be negative: {value}", nameof(AmplificationFactor));
         }
         #endregion
 
@@ -296,6 +262,14 @@ namespace SpectrumNet
             var syncContext = SynchronizationContext.Current ??
                 throw new InvalidOperationException("No synchronization context. Window must be created in UI thread.");
 
+            _buttonActions = new Dictionary<string, Action>
+            {
+                ["MinimizeButton"] = MinimizeWindow,
+                ["MaximizeButton"] = MaximizeWindow,
+                ["CloseButton"] = CloseWindow,
+                ["OpenControlPanelButton"] = ToggleControlPanel
+            };
+
             LoadAndApplySettings();
 
             _gainParameters = new GainParameters(
@@ -305,9 +279,13 @@ namespace SpectrumNet
                 Settings.Instance.UIAmplificationFactor
             ) ?? throw new InvalidOperationException("Failed to create gain parameters");
 
+            _saveSettingsTimer.Tick += (s, e) => {
+                _saveSettingsTimer.Stop();
+                SettingsWindow.Instance.SaveSettings();
+            };
+
             DataContext = this;
             InitComponents(new InitializationContext(syncContext, _gainParameters));
-
             SetupPaletteConverter();
             InitEventHandlers();
             ConfigureTheme();
@@ -335,7 +313,7 @@ namespace SpectrumNet
 
             _disposables.Add(_analyzer);
 
-            _captureManager = new AudioCaptureManager(this) ??
+            _captureManager = new AudioCapture(this) ??
                 throw new InvalidOperationException("Failed to create AudioCaptureManager");
 
             _disposables.Add(_captureManager);
@@ -347,30 +325,21 @@ namespace SpectrumNet
         }
 
         private void SetupPaletteConverter() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (Application.Current.Resources["PaletteNameToBrushConverter"] is PaletteNameToBrushConverter converter)
                     converter.BrushesProvider = SpectrumStyles;
                 else
                     SmartLogger.Log(LogLevel.Error, LogPrefix, "PaletteNameToBrushConverter not found in application resources");
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error setting up palette converter"
-            });
+            }, "Error setting up palette converter");
 
         private void InitEventHandlers()
         {
-            if (_renderElement != null)
-                _renderElement.PaintSurface += OnPaintSurface;
-
             SizeChanged += OnWindowSizeChanged;
             StateChanged += OnStateChanged;
             MouseDoubleClick += OnWindowMouseDoubleClick;
             Closed += OnWindowClosed;
             KeyDown += OnKeyDown;
             LocationChanged += OnWindowLocationChanged;
-
             PropertyChanged += OnPropertyChangedInternal;
         }
 
@@ -384,6 +353,19 @@ namespace SpectrumNet
                 tm.RegisterWindow(this);
                 _themePropertyChangedHandler = OnThemePropertyChanged;
                 tm.PropertyChanged += _themePropertyChangedHandler;
+                UpdateThemeToggleButtonState();
+            }
+        }
+
+        private void UpdateThemeToggleButtonState()
+        {
+            if (ThemeToggleButton != null)
+            {
+                ThemeToggleButton.Checked -= OnThemeToggleButtonChanged;
+                ThemeToggleButton.Unchecked -= OnThemeToggleButtonChanged;
+                ThemeToggleButton.IsChecked = IsDarkTheme;
+                ThemeToggleButton.Checked += OnThemeToggleButtonChanged;
+                ThemeToggleButton.Unchecked += OnThemeToggleButtonChanged;
             }
         }
 
@@ -393,27 +375,22 @@ namespace SpectrumNet
             {
                 OnPropertyChanged(nameof(IsDarkTheme));
                 Settings.Instance.IsDarkTheme = tm.IsDarkTheme;
+                UpdateThemeToggleButtonState();
             }
         }
         #endregion
 
         #region Settings Management
         private void LoadAndApplySettings() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 SettingsWindow.Instance.LoadSettings();
                 ApplyWindowSettings();
                 EnsureWindowIsVisible();
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings loaded and applied successfully");
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error loading and applying settings"
-            });
+            }, "Error loading and applying settings");
 
         private void ApplyWindowSettings() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 Left = Settings.Instance.WindowLeft;
                 Top = Settings.Instance.WindowTop;
                 Width = Settings.Instance.WindowWidth;
@@ -427,23 +404,17 @@ namespace SpectrumNet
                 RenderQuality = Settings.Instance.SelectedRenderQuality;
                 SelectedStyle = Settings.Instance.SelectedPalette;
                 ThemeManager.Instance?.SetTheme(Settings.Instance.IsDarkTheme);
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error applying window settings"
-            });
+            }, "Error applying window settings");
 
         private void EnsureWindowIsVisible() =>
-            SmartLogger.Safe(() =>
-            {
-                bool isVisible = System.Windows.Forms.Screen.AllScreens.Any(screen =>
-                {
+            SafeExecute(() => {
+                bool isVisible = System.Windows.Forms.Screen.AllScreens.Any(screen => {
                     var screenBounds = new System.Drawing.Rectangle(
                         screen.WorkingArea.X, screen.WorkingArea.Y,
                         screen.WorkingArea.Width, screen.WorkingArea.Height);
 
                     var windowRect = new System.Drawing.Rectangle(
-                        (int)Left, (int)Top, (int)Width, (int)Height);
+                                    (int)Left, (int)Top, (int)Width, (int)Height);
 
                     return screenBounds.IntersectsWith(windowRect);
                 });
@@ -453,33 +424,19 @@ namespace SpectrumNet
                     WindowStartupLocation = WindowStartupLocation.CenterScreen;
                     SmartLogger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center (was outside visible area)");
                 }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error ensuring window visibility"
-            });
+            }, "Error ensuring window visibility");
 
         private void OnWindowLocationChanged(object? sender, EventArgs e) =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (WindowState == WindowState.Normal)
                     SaveWindowPosition();
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating window location"
-            });
+            }, "Error updating window location");
 
         private void SaveWindowPosition() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 Settings.Instance.WindowLeft = Left;
                 Settings.Instance.WindowTop = Top;
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error saving window position"
-            });
+            }, "Error saving window position");
         #endregion
 
         #region Capture Management
@@ -491,15 +448,7 @@ namespace SpectrumNet
                 return;
             }
 
-            await SmartLogger.SafeAsync(async () =>
-            {
-                await _captureManager.StartCaptureAsync();
-                UpdateProps();
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error starting audio capture"
-            });
+            await _captureManager.StartCaptureAsync();
         }
 
         public async Task StopCaptureAsync()
@@ -510,22 +459,23 @@ namespace SpectrumNet
                 return;
             }
 
-            await SmartLogger.SafeAsync(async () =>
-            {
-                await _captureManager.StopCaptureAsync();
-                UpdateProps();
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error stopping audio capture"
-            });
+            await _captureManager.StopCaptureAsync();
+        }
+
+        public async Task ToggleCaptureAsync()
+        {
+            if (_captureManager == null) return;
+
+            if (IsRecording)
+                await StopCaptureAsync();
+            else
+                await StartCaptureAsync();
         }
         #endregion
 
         #region Overlay Management
-        private void OpenOverlay() =>
-            SmartLogger.Safe(() =>
-            {
+        public void OpenOverlay() =>
+            SafeExecute(() => {
                 if (_overlayWindow?.IsInitialized == true)
                 {
                     _overlayWindow.Show();
@@ -541,218 +491,118 @@ namespace SpectrumNet
                     );
 
                     _overlayWindow = new OverlayWindow(this, config);
-
                     if (_overlayWindow == null)
                     {
                         SmartLogger.Log(LogLevel.Error, LogPrefix, "Failed to create overlay window");
                         return;
                     }
-
                     _overlayWindow.Closed += (_, _) => OnOverlayClosed();
                     _overlayWindow.Show();
                 }
 
                 IsOverlayActive = true;
-                SpectrumRendererFactory.ConfigureAllRenderers(true);
-                _renderElement?.InvalidateVisual();
-                UpdateRendererDimensions((int)SystemParameters.PrimaryScreenWidth,
-                                         (int)SystemParameters.PrimaryScreenHeight);
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error opening overlay window"
-            });
 
-        private void CloseOverlay() =>
-            SmartLogger.Safe(() => _overlayWindow?.Close(), new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error closing overlay"
-            });
+                if (_renderer != null)
+                    _renderer.UpdateRenderDimensions(
+                        (int)SystemParameters.PrimaryScreenWidth,
+                        (int)SystemParameters.PrimaryScreenHeight);
+            }, "Error opening overlay window");
 
-        private void HandleOverlayCloseFailed()
-        {
-            if (_overlayWindow != null)
-            {
-                SmartLogger.SafeDispose(_overlayWindow, "overlay window", new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing overlay window"
-                });
-                _overlayWindow = null;
-                IsOverlayActive = false;
-            }
-        }
+        public void CloseOverlay() =>
+            SafeExecute(() => _overlayWindow?.Close(), "Error closing overlay");
 
         private void OnOverlayClosed() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (_overlayWindow != null)
                 {
-                    SmartLogger.SafeDispose(_overlayWindow, "overlay window", new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error disposing overlay window"
-                    });
+                    SmartLogger.SafeDispose(_overlayWindow, "overlay window", GetLoggerOptions("Error disposing overlay window"));
                     _overlayWindow = null;
                 }
 
                 IsOverlayActive = false;
-                SpectrumRendererFactory.ConfigureAllRenderers(false);
-                _renderElement?.InvalidateVisual();
                 Activate();
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error handling overlay closed"
-            });
-
-        private void OnOverlayButtonClick(object sender, RoutedEventArgs e) =>
-            SmartLogger.Safe(() =>
-            {
-                if (IsOverlayActive)
-                {
-                    CloseOverlay();
-                    if (_overlayWindow != null && _overlayWindow.IsVisible)
-                    {
-                        HandleOverlayCloseFailed();
-                    }
-                }
-                else
-                    OpenOverlay();
-
-                SpectrumRendererFactory.ConfigureAllRenderers(IsOverlayActive);
-                _renderElement?.InvalidateVisual();
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error toggling overlay"
-            });
+                Focus();
+            }, "Error handling overlay closed");
         #endregion
 
         #region Control Panel Management
-        private void OpenControlPanel() =>
-            SmartLogger.Safe(() =>
-            {
+        public void OpenControlPanel() =>
+            SafeExecute(() => {
                 if (_controlPanelWindow?.IsVisible == true)
                 {
                     _controlPanelWindow.Activate();
                     if (_controlPanelWindow.WindowState == WindowState.Minimized)
                         _controlPanelWindow.WindowState = WindowState.Normal;
-
                     return;
                 }
 
                 _controlPanelWindow = new ControlPanelWindow(this);
                 _controlPanelWindow.Owner = this;
+                _controlPanelWindow.WindowStartupLocation = WindowStartupLocation.Manual;
+                double left = this.Left + (this.ActualWidth - _controlPanelWindow.Width) / 2;
+                double top = this.Top + this.ActualHeight - 250; // Появление границ окна конфига
+                _controlPanelWindow.Left = left;
+                _controlPanelWindow.Top = top;
                 _controlPanelWindow.Show();
-                _controlPanelWindow.Closed += (s, e) =>
-                {
+                _controlPanelWindow.Closed += (s, e) => {
                     _controlPanelWindow = null;
                     OnPropertyChanged(nameof(IsControlPanelOpen));
+                    Activate();
+                    Focus();
                 };
 
                 OnPropertyChanged(nameof(IsControlPanelOpen));
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error opening control panel window"
-            });
+            }, "Error opening control panel window");
 
         public void CloseControlPanel() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (_controlPanelWindow != null)
                 {
                     _controlPanelWindow.Close();
                     _controlPanelWindow = null;
                     OnPropertyChanged(nameof(IsControlPanelOpen));
+                    Activate();
+                    Focus();
                 }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error closing control panel window"
-            });
+            }, "Error closing control panel window");
 
         public void MinimizeControlPanel() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (_controlPanelWindow?.IsVisible == true)
                 {
                     _controlPanelWindow.WindowState = WindowState.Minimized;
                 }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error minimizing control panel window"
-            });
+            }, "Error minimizing control panel window");
 
         public void ToggleControlPanel() =>
-            SmartLogger.Safe(() =>
-            {
-                if (_controlPanelWindow?.IsVisible == true)
-                {
-                    CloseControlPanel();
-                }
+            ToggleWindow(OpenControlPanel, CloseControlPanel, () => _controlPanelWindow?.IsVisible == true, "Error toggling control panel window");
+
+        private void ToggleWindow(Action openAction, Action closeAction, Func<bool> isOpenChecker, string errorMessage) =>
+            SafeExecute(() => {
+                if (isOpenChecker())
+                    closeAction();
                 else
-                {
-                    OpenControlPanel();
-                }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error toggling control panel window"
-            });
+                    openAction();
+            }, errorMessage);
         #endregion
 
         #region Event Handlers
         public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
         {
-            if (e == null)
+            if (e == null || _renderer == null)
             {
                 SmartLogger.Log(LogLevel.Error, LogPrefix, "PaintSurface called with null arguments");
                 return;
             }
 
-            if (IsOverlayActive && sender == _renderElement)
-            {
-                e.Surface.Canvas.Clear(SKColors.Transparent);
-                return;
-            }
-
-            var renderResult = SmartLogger.Safe<bool>(() =>
-            {
-                _renderer?.RenderFrame(sender, e);
-                return true;
-            }, false, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error rendering frame"
-            });
-
-            bool renderSuccess = renderResult.Success && renderResult.Result == true;
-
-            if (!renderSuccess)
-            {
-                SmartLogger.Safe(() => e.Surface.Canvas.Clear(SKColors.Transparent),
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error clearing canvas"
-                    });
-            }
+            _renderer.RenderFrame(sender, e);
         }
 
         private void OnRendering(object? sender, EventArgs? e) =>
-            SmartLogger.Safe(() => _renderElement?.InvalidateVisual(), new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating visualization"
-            });
+            SafeExecute(() => _renderer?.RequestRender(), "Error requesting render");
 
         private void OnStateChanged(object? sender, EventArgs? e) =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (MaximizeButton != null && MaximizeIcon != null)
                 {
                     MaximizeIcon.Data = Geometry.Parse(WindowState == WindowState.Maximized
@@ -761,183 +611,33 @@ namespace SpectrumNet
 
                     Settings.Instance.WindowState = WindowState;
                 }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error changing icon"
-            });
+            }, "Error changing icon");
 
         private void OnThemeToggleButtonChanged(object? sender, RoutedEventArgs? e) =>
-            SmartLogger.Safe(() => ThemeManager.Instance?.ToggleTheme(), new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error toggling theme"
-            });
+            SafeExecute(() => ThemeManager.Instance?.ToggleTheme(), "Error toggling theme");
 
         private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs? e) =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (e == null) return;
 
-                _renderer?.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
+                if (_renderer != null)
+                    _renderer.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
                 if (WindowState == WindowState.Normal)
                 {
                     Settings.Instance.WindowWidth = Width;
                     Settings.Instance.WindowHeight = Height;
                 }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating dimensions"
-            });
+            }, "Error updating dimensions");
 
-        public void OnComboBoxSelectionChanged(object? sender, SelectionChangedEventArgs? e) =>
-            SmartLogger.Safe(() =>
-            {
-                if (sender is not ComboBox cb || e == null) return;
-
-                switch (cb.Name)
-                {
-                    case "RenderStyleComboBox" when cb.SelectedItem is RenderStyle rs:
-                        SelectedDrawingType = rs;
-                        break;
-                    case "FftWindowTypeComboBox" when cb.SelectedItem is FftWindowType wt:
-                        WindowType = wt;
-                        break;
-                    case "ScaleTypeComboBox" when cb.SelectedItem is SpectrumScale scale:
-                        ScaleType = scale;
-                        break;
-                    case "RenderQualityComboBox" when cb.SelectedItem is RenderQuality quality:
-                        RenderQuality = quality;
-                        break;
-                }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error handling selection change"
-            });
-
-        private async void OnWindowClosed(object? sender, EventArgs? e)
-        {
-            SmartLogger.Safe(() => SettingsWindow.Instance.SaveSettings(), new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error saving settings"
-            });
-            _cleanupCts.Cancel();
-
-            UnsubscribeFromEvents();
-            await CleanupResourcesAsync();
-
-            _isDisposed = true;
-            Application.Current?.Shutdown();
-        }
-
-        private void UnsubscribeFromEvents()
-        {
-            CompositionTarget.Rendering -= OnRendering;
-
-            if (_renderElement != null)
-                _renderElement.PaintSurface -= OnPaintSurface;
-
-            SizeChanged -= OnWindowSizeChanged;
-            StateChanged -= OnStateChanged;
-            MouseDoubleClick -= OnWindowMouseDoubleClick;
-            Closed -= OnWindowClosed;
-            LocationChanged -= OnWindowLocationChanged;
-
-            if (_themePropertyChangedHandler != null && ThemeManager.Instance != null)
-                ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
-        }
-
-        private async Task CleanupResourcesAsync()
-        {
-            if (_captureManager != null)
-            {
-                await SmartLogger.SafeAsync(async () => await _captureManager.StopCaptureAsync(),
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error stopping capture"
-                    });
-                SmartLogger.SafeDispose(_captureManager, "capture manager", new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing capture manager"
-                });
-                _captureManager = null;
-            }
-
-            SmartLogger.SafeDispose(_analyzer, "analyzer", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing analyzer"
-            });
-            SmartLogger.SafeDispose(_renderer, "renderer", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing renderer"
-            });
-            _analyzer = null;
-            _renderer = null;
-            _spectrumStyles = null;
-
-            SmartLogger.SafeDispose(_disposables, "disposables", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing disposables"
-            });
-            _disposables = null;
-
-            SmartLogger.SafeDispose(_transitionSemaphore, "transition semaphore", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing transition semaphore"
-            });
-            SmartLogger.SafeDispose(_cleanupCts, "cleanup token source", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing cleanup token source"
-            });
-
-            if (_overlayWindow != null)
-            {
-                _overlayWindow.Close();
-                SmartLogger.SafeDispose(_overlayWindow, "overlay window", new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing overlay window"
-                });
-                _overlayWindow = null;
-            }
-
-            if (_controlPanelWindow != null)
-            {
-                _controlPanelWindow.Close();
-                _controlPanelWindow = null;
-            }
-        }
-
-        private void OnWindowDrag(object? sender, System.Windows.Input.MouseButtonEventArgs? e) =>
-            SmartLogger.Safe(() =>
-            {
-                if (e?.ChangedButton == System.Windows.Input.MouseButton.Left)
-                {
-                    DragMove();
-
-                    if (WindowState == WindowState.Normal)
-                        SaveWindowPosition();
-                }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error moving window"
-            });
+        public void OnButtonClick(object sender, RoutedEventArgs e) =>
+            SafeExecute(() => {
+                if (sender is Button btn && _buttonActions.TryGetValue(btn.Name, out var action))
+                    action();
+            }, "Error handling button click");
 
         private void OnWindowMouseDoubleClick(object? sender, System.Windows.Input.MouseButtonEventArgs? e) =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (e == null) return;
 
                 if (IsCheckBoxOrChild(e.OriginalSource as DependencyObject))
@@ -951,173 +651,196 @@ namespace SpectrumNet
                     e.Handled = true;
                     MaximizeWindow();
                 }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error handling double click"
-            });
+            }, "Error handling double click");
 
         private bool IsCheckBoxOrChild(DependencyObject? element)
         {
             while (element != null)
             {
-                if (element is CheckBox)
-                    return true;
+                if (element is CheckBox) return true;
                 element = VisualTreeHelper.GetParent(element);
             }
             return false;
         }
 
-        public void OnSliderValueChanged(object? sender, RoutedPropertyChangedEventArgs<double>? e) =>
-            SmartLogger.Safe(() =>
-            {
-                if (sender is not Slider slider || e == null) return;
+        public void OnSliderValueChanged(object? sender, RoutedPropertyChangedEventArgs<double>? e) { }
+        public void OnComboBoxSelectionChanged(object? sender, SelectionChangedEventArgs? e) { }
 
-                switch (slider.Name)
-                {
-                    case "barSpacingSlider":
-                        BarSpacing = slider.Value;
-                        break;
-                    case "barCountSlider":
-                        BarCount = (int)slider.Value;
-                        break;
-                    case "minDbLevelSlider":
-                        MinDbLevel = (float)slider.Value;
-                        break;
-                    case "maxDbLevelSlider":
-                        MaxDbLevel = (float)slider.Value;
-                        break;
-                    case "amplificationFactorSlider":
-                        AmplificationFactor = (float)slider.Value;
-                        break;
-                }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error handling slider change"
-            });
+        public void OnKeyDown(object sender, KeyEventArgs e)
+        {
+            SafeExecute(() => {
+                if (!IsActive) return;
 
-        public void OnButtonClick(object sender, RoutedEventArgs e) =>
-            SmartLogger.Safe(() =>
-            {
-                if (sender is not Button btn) return;
-
-                switch (btn.Name)
-                {
-                    case "StartCaptureButton":
-                        _ = StartCaptureAsync();
-                        break;
-                    case "StopCaptureButton":
-                        _ = StopCaptureAsync();
-                        break;
-                    case "OverlayButton":
-                        OnOverlayButtonClick(sender, e);
-                        break;
-                    case "OpenSettingsButton":
-                        OpenSettings();
-                        break;
-                    case "OpenPopupButton":
-                        IsPopupOpen = !IsPopupOpen;
-                        break;
-                    case "MinimizeButton":
-                        MinimizeWindow();
-                        break;
-                    case "MaximizeButton":
-                        MaximizeWindow();
-                        break;
-                    case "CloseButton":
-                        CloseWindow();
-                        break;
-                    case "OpenControlPanelButton":
-                        ToggleControlPanel();
-                        break;
-                }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error handling button click"
-            });
-
-        private void OpenSettings() =>
-            SmartLogger.Safe(() =>
-            {
-                new SettingsWindow().ShowDialog();
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error opening settings"
-            });
-
-        private void OnKeyDown(object sender, KeyEventArgs e) =>
-            SmartLogger.Safe(() =>
-            {
                 switch (e.Key)
                 {
+                    case Key.Space:
+                        if (!(Keyboard.FocusedElement is TextBox ||
+                              Keyboard.FocusedElement is PasswordBox ||
+                              Keyboard.FocusedElement is ComboBox))
+                        {
+                            _ = ToggleCaptureAsync();
+                            e.Handled = true;
+                        }
+                        break;
                     case Key.F10:
-                    case Key.F11:
-                    case Key.F12:
-                        HandleQualityHotkey(e.Key);
+                        RenderQuality = RenderQuality.Low;
                         e.Handled = true;
                         break;
+                    case Key.F11:
+                        RenderQuality = RenderQuality.Medium;
+                        e.Handled = true;
+                        break;
+                    case Key.F12:
+                        RenderQuality = RenderQuality.High;
+                        e.Handled = true;
+                        break;
+                    case Key.Escape:
+                        if (WindowState == WindowState.Maximized)
+                        {
+                            WindowState = WindowState.Normal;
+                            e.Handled = true;
+                        }
+                        break;
                 }
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error handling key down"
-            });
+            }, "Error handling key down");
+        }
 
-        private void HandleQualityHotkey(Key key)
+        private void OnWindowDrag(object? sender, System.Windows.Input.MouseButtonEventArgs? e) =>
+            SafeExecute(() => {
+                if (e?.ChangedButton == System.Windows.Input.MouseButton.Left)
+                {
+                    DragMove();
+
+                    if (WindowState == WindowState.Normal)
+                        SaveWindowPosition();
+                }
+            }, "Error moving window");
+
+        private async void OnWindowClosed(object? sender, EventArgs? e)
         {
-            var quality = key switch
-            {
-                Key.F10 => RenderQuality.Low,
-                Key.F11 => RenderQuality.Medium,
-                Key.F12 => RenderQuality.High,
-                _ => RenderQuality.Medium
-            };
+            _saveSettingsTimer.Stop();
+            SafeExecute(() => SettingsWindow.Instance.SaveSettings(), "Error saving settings on window close");
+            _cleanupCts.Cancel();
 
-            RenderQuality = quality;
-            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Quality set to {quality} via hotkey");
+            UnsubscribeFromEvents();
+            await CleanupResourcesAsync();
+
+            _isDisposed = true;
+            Application.Current?.Shutdown();
+        }
+
+        private void UnsubscribeFromEvents()
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            SizeChanged -= OnWindowSizeChanged;
+            StateChanged -= OnStateChanged;
+            MouseDoubleClick -= OnWindowMouseDoubleClick;
+            Closed -= OnWindowClosed;
+            LocationChanged -= OnWindowLocationChanged;
+            KeyDown -= OnKeyDown;
+
+            if (_themePropertyChangedHandler != null && ThemeManager.Instance != null)
+                ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
+        }
+
+        private async Task CleanupResourcesAsync()
+        {
+            _saveSettingsTimer.Stop();
+
+            if (_captureManager != null)
+            {
+                await DisposeResourceAsync(_captureManager,
+                    async cm => await cm.StopCaptureAsync(),
+                    "capture manager",
+                    () => _captureManager = null);
+            }
+
+            if (_analyzer != null)
+            {
+                await DisposeResourceAsync(_analyzer, null, "analyzer",
+                    () => _analyzer = null);
+            }
+
+            if (_renderer != null)
+            {
+                await DisposeResourceAsync(_renderer, null, "renderer",
+                    () => _renderer = null);
+            }
+
+            _spectrumStyles = null;
+
+            if (_disposables != null)
+            {
+                await DisposeResourceAsync(_disposables, null, "disposables",
+                    () => _disposables = null);
+            }
+
+            if (_transitionSemaphore != null)
+            {
+                await DisposeResourceAsync(_transitionSemaphore, null, "transition semaphore",
+                    () => _transitionSemaphore = null);
+            }
+
+            if (_cleanupCts != null)
+            {
+                await DisposeResourceAsync(_cleanupCts, null, "cleanup token source",
+                    () => _cleanupCts = null);
+            }
+
+            if (_overlayWindow != null)
+            {
+                _overlayWindow.Close();
+                await DisposeResourceAsync(_overlayWindow, null, "overlay window",
+                    () => _overlayWindow = null);
+            }
+
+            if (_controlPanelWindow != null)
+            {
+                _controlPanelWindow.Close();
+                _controlPanelWindow = null;
+            }
         }
         #endregion
 
         #region Helper Methods
-        private void UpdateVisualization(Action action) =>
-            SmartLogger.Safe(action, new SmartLogger.ErrorHandlingOptions
+        private SmartLogger.ErrorHandlingOptions GetLoggerOptions(string errorMessage) =>
+            new SmartLogger.ErrorHandlingOptions
             {
                 Source = LogPrefix,
-                ErrorMessage = "Error updating visualization"
-            });
+                ErrorMessage = errorMessage
+            };
+
+        private void SafeExecute(Action action, string errorMessage) =>
+            SmartLogger.Safe(action, GetLoggerOptions(errorMessage));
+
+        private async Task DisposeResourceAsync<T>(
+            T resource,
+            Func<T, Task>? asyncCleanup = null,
+            string resourceName = "resource",
+            Action? afterDispose = null)
+            where T : IDisposable
+        {
+            if (resource == null) return;
+
+            if (asyncCleanup != null)
+                await SmartLogger.SafeAsync(async () => await asyncCleanup(resource),
+                    GetLoggerOptions($"Error stopping {resourceName}"));
+
+            SmartLogger.SafeDispose(resource, resourceName, GetLoggerOptions($"Error disposing {resourceName}"));
+
+            afterDispose?.Invoke();
+        }
 
         private void UpdateOverlayTopmostState() =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (_overlayWindow?.IsInitialized == true)
                     _overlayWindow.Topmost = IsOverlayTopmost;
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating topmost state"
-            });
-
-        private void UpdateRendererDimensions(int width, int height) =>
-            SmartLogger.Safe(() =>
-            {
-                if (width <= 0 || height <= 0)
-                {
-                    SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Invalid dimensions for renderer: {width}x{height}");
-                    return;
-                }
-
-                _renderer?.UpdateRenderDimensions(width, height);
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating renderer dimensions"
-            });
+            }, "Error updating topmost state");
 
         private void CloseWindow() => Close();
+
         private void MinimizeWindow() => WindowState = WindowState.Minimized;
+
         private void MaximizeWindow() =>
             WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
@@ -1125,8 +848,7 @@ namespace SpectrumNet
             OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
 
         private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName) =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 if (setter == null)
                 {
                     SmartLogger.Log(LogLevel.Error, LogPrefix, "Null delegate passed for parameter update");
@@ -1135,38 +857,45 @@ namespace SpectrumNet
 
                 setter(newValue);
                 OnPropertyChanged(propertyName);
-                _renderElement?.InvalidateVisual();
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating gain parameter"
-            });
+            }, "Error updating gain parameter");
 
         private void UpdateSetting<T>(T value, Action<T> setter, string propertyName,
-                                     Func<T, bool> validator, T defaultValue, string errorMessage)
+                                    Func<T, bool> validator, T defaultValue, string errorMessage)
         {
             if (!validator(value))
             {
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set {errorMessage}: {value}");
                 value = defaultValue;
             }
+
             setter(value);
             OnPropertyChanged(propertyName);
+            _saveSettingsTimer.Stop();
+            _saveSettingsTimer.Start();
         }
 
-        private void UpdateEnumProperty<T>(ref T field, T value, Action<T> settingUpdater, [CallerMemberName] string propertyName = "") where T : struct, Enum
+        private void UpdateEnumProperty<T>(ref T field, T value, Action<T> settingUpdater,
+                                                 [CallerMemberName] string propertyName = "")
+                                                 where T : struct, Enum
         {
             if (EqualityComparer<T>.Default.Equals(field, value)) return;
+
             field = value;
             OnPropertyChanged(propertyName);
             settingUpdater(value);
+            _saveSettingsTimer.Stop();
+            _saveSettingsTimer.Start();
         }
 
         private void UpdateDbLevel(float value, Func<float, bool> validator, Action<float> setter,
-                                 float fallbackValue, Action<float> settingUpdater, string errorMessage,
-                                 string propertyName)
+                                                 float fallbackValue, Action<float> settingUpdater, string errorMessage,
+                                                 string propertyName)
         {
-            if (_gainParameters == null) return;
+            if (_gainParameters == null)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix, "Gain parameters not initialized in UpdateDbLevel");
+                return;
+            }
 
             if (!validator(value))
             {
@@ -1176,11 +905,8 @@ namespace SpectrumNet
 
             UpdateGainParameter(value, setter, propertyName);
             settingUpdater(value);
-            SmartLogger.Safe(() => SettingsWindow.Instance.SaveSettings(), new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error saving settings after updating gain parameter"
-            });
+            _saveSettingsTimer.Stop();
+            _saveSettingsTimer.Start();
         }
 
         protected bool SetField<T>(ref T field, T value, Action? callback = null, [CallerMemberName] string? propertyName = null)
@@ -1191,25 +917,17 @@ namespace SpectrumNet
             field = value;
             OnPropertyChanged(propertyName ?? string.Empty);
 
-            SmartLogger.Safe(() => callback?.Invoke(), new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error executing callback in SetField"
-            });
+            if (callback != null)
+                SafeExecute(() => callback(), $"Error executing callback for {propertyName}");
 
             return true;
         }
 
         public void OnPropertyChanged(params string[] propertyNames) =>
-            SmartLogger.Safe(() =>
-            {
+            SafeExecute(() => {
                 foreach (var name in propertyNames)
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error notifying property change"
-            });
+            }, "Error notifying property change");
         #endregion
     }
 }

@@ -29,6 +29,16 @@
     <SolidColorBrush x:Key="ButtonPressedForegroundBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="ButtonBorderBrush" Color="#2F3436"/>
 
+    <!-- Дополнительные цвета для ModernButtonStyle (темная тема) -->
+    <Color x:Key="ButtonHoverBackgroundColor">#2F3436</Color>
+    <SolidColorBrush x:Key="ButtonAccentBrush" Color="#4D7DFE"/>
+    <SolidColorBrush x:Key="ButtonAccentHoverBrush" Color="#2E5BFF"/>
+    <SolidColorBrush x:Key="ButtonShadowColor" Color="#40000000"/>
+
+    <!-- Цвета для кнопок управления окном (темная тема) -->
+    <SolidColorBrush x:Key="CloseButtonHoverBrush" Color="#FF4D4D"/>
+    <SolidColorBrush x:Key="CloseButtonPressedBrush" Color="#E60000"/>
+
     <!-- Цвета окна -->
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#151718"/>
     <SolidColorBrush x:Key="WindowForegroundBrush" Color="#FFFFFF"/>
@@ -87,4 +97,14 @@
     <!-- Дополнительные ресурсы -->
     <SolidColorBrush x:Key="ControlsPanelBackgroundBrush" Color="#252A2B"/>
     <SolidColorBrush x:Key="TitleBarBackgroundBrush" Color="#4D7DFE"/>
+
+
+    <!-- Ресурсы для заголовка Spectrum Analyser (темная тема) -->
+    <Color x:Key="TitleGradientColor1">#FFFFFF</Color>
+    <Color x:Key="TitleGradientColor2">#B3E5FC</Color>
+    <Color x:Key="TitleGradientColor3">#81D4FA</Color>
+    <Color x:Key="TitleShadowColor">#80000000</Color>
+    <SolidColorBrush x:Key="TitleGlowBrush" Color="#4CFFFFFF"/>
+    <Color x:Key="TitleUnderlineTransparent">#00FFFFFF</Color>
+    <Color x:Key="TitleUnderlineSolid">#FFFFFF</Color>
 </ResourceDictionary>

@@ -2,8 +2,61 @@
 
 namespace SpectrumNet
 {
-    public sealed class AsciiDonutRenderer : ISpectrumRenderer, IDisposable
+    /// <summary>
+    /// Renders an ASCII art 3D donut that reacts to audio spectrum data.
+    /// </summary>
+    public sealed class AsciiDonutRenderer : BaseSpectrumRenderer
     {
+        #region Constants
+        private static class Constants
+        {
+            public const string LOG_PREFIX = "AsciiDonutRenderer";
+
+            // Rendering parameters
+            public const float DEFAULT_ROTATION_SPEED_X = 0.01f;
+            public const float DEFAULT_ROTATION_SPEED_Y = 0.02f;
+            public const float DEFAULT_ROTATION_SPEED_Z = 0.005f;
+            public const float DEFAULT_ROTATION_INTENSITY = 1.0f;
+            public const float DEFAULT_DEPTH_SCALE_FACTOR = 2.0f;
+            public const float DEFAULT_DEPTH_OFFSET = 3.0f;
+
+            // Animation constants
+            public const float MIN_ROTATION_INTENSITY = 0.5f;
+            public const float MAX_ROTATION_INTENSITY = 2.0f;
+            public const float MAX_ROTATION_ANGLE_CHANGE = 0.1f;
+            public const float ROTATION_INTENSITY_SMOOTHING = 0.2f;
+            public const float ROTATION_SMOOTHING = 0.1f;
+
+            // Light settings
+            public const float LIGHT_DIR_X = 0.6f;
+            public const float LIGHT_DIR_Y = 0.6f;
+            public const float LIGHT_DIR_Z = -1.0f;
+
+            // Geometry settings
+            public const int DEFAULT_SEGMENTS = 36;
+            public const float DEFAULT_RADIUS = 1.0f;
+            public const float DEFAULT_TUBE_RADIUS = 0.5f;
+            public const float DEFAULT_SCALE = 0.4f;
+
+            // Alpha settings
+            public const float MIN_ALPHA_VALUE = 0.2f;
+            public const float ALPHA_RANGE = 0.8f;
+            public const float BASE_ALPHA_INTENSITY = 0.7f;
+            public const float MAX_SPECTRUM_ALPHA_SCALE = 0.3f;
+
+            // Quality settings
+            public const int LOW_QUALITY_SKIP_FACTOR = 3;
+            public const int MEDIUM_QUALITY_SKIP_FACTOR = 1;
+            public const int HIGH_QUALITY_SKIP_FACTOR = 0;
+
+            // Character rendering
+            public const float CHAR_OFFSET_X = 4.0f;
+            public const float CHAR_OFFSET_Y = 4.0f;
+            public const float DEFAULT_FONT_SIZE = 12.0f;
+            public const string DEFAULT_ASCII_CHARS = " .,-~:;=!*#$@";
+        }
+        #endregion
+
         #region Helper Structures
         private readonly record struct Vertex(float X, float Y, float Z);
 
@@ -26,35 +79,36 @@ namespace SpectrumNet
                 DepthRange = maxZ - minZ + float.Epsilon;
                 MaxSpectrum = maxSpectrum;
                 LogBarCount = logBarCount;
-                AlphaMultiplier = 1f + logBarCount * Settings.Instance.DonutBarCountScaleFactorAlpha;
+                AlphaMultiplier = 1f + logBarCount * 0.1f; // Scale factor for alpha based on bar count
             }
         }
         #endregion
 
         #region Static Fields
-        private static readonly string[] AsciiCharStrings;
-        private static readonly float[] CosTable;
-        private static readonly float[] SinTable;
-        private static readonly Lazy<AsciiDonutRenderer> LazyInstance = new(
+        private static readonly string[] _asciiCharStrings;
+        private static readonly float[] _cosTable;
+        private static readonly float[] _sinTable;
+        private static readonly Lazy<AsciiDonutRenderer> _lazyInstance = new(
             () => new AsciiDonutRenderer(), System.Threading.LazyThreadSafetyMode.ExecutionAndPublication);
 
         static AsciiDonutRenderer()
         {
-            var settings = Settings.Instance;
-            CosTable = new float[settings.DonutSegments];
-            SinTable = new float[settings.DonutSegments];
-            for (int i = 0; i < settings.DonutSegments; i++)
+            int segments = Constants.DEFAULT_SEGMENTS;
+            _cosTable = new float[segments];
+            _sinTable = new float[segments];
+
+            for (int i = 0; i < segments; i++)
             {
-                float angle = i * MathF.PI * 2f / settings.DonutSegments;
-                CosTable[i] = MathF.Cos(angle);
-                SinTable[i] = MathF.Sin(angle);
+                float angle = i * MathF.PI * 2f / segments;
+                _cosTable[i] = MathF.Cos(angle);
+                _sinTable[i] = MathF.Sin(angle);
             }
-            AsciiCharStrings = settings.DonutAsciiChars.ToCharArray().Select(c => c.ToString()).ToArray();
+
+            _asciiCharStrings = Constants.DEFAULT_ASCII_CHARS.ToCharArray().Select(c => c.ToString()).ToArray();
         }
         #endregion
 
         #region Instance Fields
-        private readonly ISettings _settings = Settings.Instance;
         private readonly Vertex[] _vertices;
         private ProjectedVertex[] _projectedVertices;
         private ProjectedVertex[] _renderedVertices;
@@ -65,14 +119,9 @@ namespace SpectrumNet
         private readonly Vector3 _lightDirection;
 
         private float _rotationAngleX, _rotationAngleY, _rotationAngleZ;
-        private float _currentRotationIntensity = 1.0f;
+        private float _currentRotationIntensity = Constants.DEFAULT_ROTATION_INTENSITY;
         private Matrix4x4 _rotationMatrix = Matrix4x4.Identity;
 
-        private bool _isDisposed;
-        private float[] _spectrum = Array.Empty<float>();
-        private float[] _smoothedSpectrum = Array.Empty<float>();
-        private float[]? _lastSpectrum;
-        private int _currentBarCount;
         private int _skipVertexCount;
         private int _lastWidth, _lastHeight;
 
@@ -80,88 +129,124 @@ namespace SpectrumNet
         private SKPicture? _cachedDonut;
         private bool _needsRecreateCache = true;
 
-        // Background threads for spectrum data processing
-        private readonly Thread _processingThread;
-        private readonly CancellationTokenSource _cts = new();
-        private readonly AutoResetEvent _spectrumDataAvailable = new(false);
-        private readonly AutoResetEvent _processingComplete = new(false);
-        private float[]? _spectrumToProcess;
-        private int _barCountToProcess;
-        private bool _processingRunning;
+        // Background processing
+        private bool _dataReady;
         private RenderData? _currentRenderData;
         private SKImageInfo _lastImageInfo;
-        private bool _dataReady;
-
-        // Rendering quality settings
-        private RenderQuality _quality = RenderQuality.Medium;
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
         #endregion
 
-        #region Constructor and Initialization
-        public static AsciiDonutRenderer GetInstance() => LazyInstance.Value;
+        #region Singleton
+        public static AsciiDonutRenderer GetInstance() => _lazyInstance.Value;
 
         private AsciiDonutRenderer()
         {
-            var settings = _settings;
-
             // Initialize light direction
-            _lightDirection = Vector3.Normalize(new Vector3(0.6f, 0.6f, -1.0f));
+            _lightDirection = Vector3.Normalize(new Vector3(
+                Constants.LIGHT_DIR_X,
+                Constants.LIGHT_DIR_Y,
+                Constants.LIGHT_DIR_Z));
 
-            _vertices = new Vertex[settings.DonutSegments * settings.DonutSegments];
+            // Initialize geometry
+            int segments = Constants.DEFAULT_SEGMENTS;
+            _vertices = new Vertex[segments * segments];
             _projectedVertices = new ProjectedVertex[_vertices.Length];
             _renderedVertices = new ProjectedVertex[_vertices.Length];
-            _alphaCache = new byte[settings.DonutAsciiChars.Length];
-            _font = new SKFont { Size = settings.DonutFontSize, Hinting = SKFontHinting.None };
+            _alphaCache = new byte[Constants.DEFAULT_ASCII_CHARS.Length];
+
+            _font = new SKFont
+            {
+                Size = Constants.DEFAULT_FONT_SIZE,
+                Hinting = SKFontHinting.None
+            };
 
             InitializeVertices();
             InitializeAlphaCache();
-
-            _processingThread = new Thread(ProcessSpectrumThreadFunc)
-            {
-                IsBackground = true,
-                Name = "DonutProcessor"
-            };
-            _processingRunning = true;
-            _processingThread.Start();
         }
         #endregion
 
-        #region Public Methods
-        public void Initialize() { /* No-op for compatibility with interface */ }
-
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-        {
-            Quality = quality;
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Configured: Overlay={isOverlayActive}, Quality={quality}");
-        }
-
-        public RenderQuality Quality
-        {
-            get => _quality;
-            set
+        #region Initialization and Configuration
+        public override void Initialize() => SmartLogger.Safe(
+            () => {
+                base.Initialize();
+                _needsRecreateCache = true;
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                if (_quality != value)
+                Source = $"{Constants.LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            });
+
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium) => SmartLogger.Safe(
+            () => {
+                base.Configure(isOverlayActive, quality);
+                ApplyQualitySettings();
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Configure",
+                ErrorMessage = "Failed to configure renderer"
+            });
+
+        protected override void ApplyQualitySettings() => SmartLogger.Safe(
+            () => {
+                base.ApplyQualitySettings();
+
+                int oldSkipVertexCount = _skipVertexCount;
+
+                _skipVertexCount = _quality switch
                 {
-                    _quality = value;
-                    ApplyQualitySettings();
-                }
-            }
-        }
+                    RenderQuality.Low => Constants.LOW_QUALITY_SKIP_FACTOR,
+                    RenderQuality.Medium => Constants.MEDIUM_QUALITY_SKIP_FACTOR,
+                    RenderQuality.High => Constants.HIGH_QUALITY_SKIP_FACTOR,
+                    _ => Constants.MEDIUM_QUALITY_SKIP_FACTOR
+                };
 
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
-            float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
-        {
-            try
+                // If skip factor has changed, completely reset processed data
+                if (_skipVertexCount != oldSkipVertexCount)
+                {
+                    // Reset all cached vertex data
+                    lock (_renderDataLock)
+                    {
+                        _dataReady = false;
+                        _currentRenderData = null;
+                    }
+                }
+
+                // Invalidate caches that depend on quality
+                InvalidateCachedResources();
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                // Fast parameter validation
-                if (!ValidateRenderParameters(canvas, spectrum, paint, info))
+                Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+                ErrorMessage = "Failed to apply quality settings"
+            });
+        #endregion
+
+        #region Rendering Implementation
+        public override void Render(
+            SKCanvas? canvas,
+            float[]? spectrum,
+            SKImageInfo info,
+            float barWidth,
+            float barSpacing,
+            int barCount,
+            SKPaint? paint,
+            Action<SKCanvas, SKImageInfo> drawPerformanceInfo) => SmartLogger.Safe(
+            () => {
+                // Use base class validation
+                if (!QuickValidate(canvas, spectrum, info, paint))
+                {
+                    drawPerformanceInfo?.Invoke(canvas!, info);
                     return;
+                }
 
                 // Quick rejection if canvas is outside visible area
                 if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+                {
+                    drawPerformanceInfo?.Invoke(canvas, info);
                     return;
+                }
 
                 _lastImageInfo = info;
 
@@ -173,7 +258,12 @@ namespace SpectrumNet
                     _lastHeight = info.Height;
                 }
 
-                SubmitSpectrumForProcessing(spectrum!, barCount);
+                // Process spectrum data using base class method
+                int pointCount = Math.Min(spectrum!.Length, barCount);
+                float[] processedSpectrum = PrepareSpectrum(spectrum, pointCount, spectrum.Length);
+
+                // Compute donut data with processed spectrum
+                ComputeDonutData(processedSpectrum, barCount, info);
 
                 if (_dataReady)
                 {
@@ -181,166 +271,25 @@ namespace SpectrumNet
                 }
 
                 drawPerformanceInfo?.Invoke(canvas, info);
-            }
-            catch (Exception ex)
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in Render: {ex.Message}");
-            }
-        }
-
-        public void Dispose()
-        {
-            if (_isDisposed)
-                return;
-
-            try
-            {
-                _processingRunning = false;
-                _cts.Cancel();
-                _spectrumDataAvailable.Set();
-
-                // Safely terminate processing thread
-                if (_processingThread.IsAlive && !_processingThread.Join(100))
-                {
-                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Processing thread did not terminate gracefully");
-                }
-
-                _cts.Dispose();
-                _spectrumDataAvailable.Dispose();
-                _processingComplete.Dispose();
-                _font.Dispose();
-                _cachedDonut?.Dispose();
-
-                _isDisposed = true;
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error during disposal: {ex.Message}");
-            }
-            finally
-            {
-                GC.SuppressFinalize(this);
-            }
-        }
+                Source = $"{Constants.LOG_PREFIX}.Render",
+                ErrorMessage = "Error in render method"
+            });
         #endregion
 
-        #region Background Processing
-        private void SubmitSpectrumForProcessing(float[] spectrum, int barCount)
-        {
-            try
-            {
-                // Check if spectrum has significantly changed to decide whether to update cache
-                bool significantChange = false;
-
-                if (_lastSpectrum != null && _lastSpectrum.Length == spectrum.Length)
-                {
-                    float maxDiff = 0;
-                    for (int i = 0; i < spectrum.Length; i++)
-                    {
-                        maxDiff = Math.Max(maxDiff, Math.Abs(spectrum[i] - _lastSpectrum[i]));
-                    }
-
-                    // If difference is significant, update cache
-                    if (maxDiff > 0.1f)
-                    {
-                        significantChange = true;
-                        _needsRecreateCache = true;
-                    }
-                }
-                else
-                {
-                    significantChange = true;
-                    _needsRecreateCache = true;
-                    _lastSpectrum = new float[spectrum.Length];
-                }
-
-                // Copy current spectrum for comparison in next frame
-                if (significantChange)
-                {
-                    Array.Copy(spectrum, _lastSpectrum, spectrum.Length);
-                }
-
-                lock (_renderDataLock)
-                {
-                    _spectrumToProcess = spectrum;
-                    _barCountToProcess = barCount;
-                }
-
-                _spectrumDataAvailable.Set();
-                // Wait for processing to complete with timeout
-                if (!_processingComplete.WaitOne(5))
-                {
-                    SmartLogger.Log(LogLevel.Debug, LogPrefix, "Processing timeout occurred");
-                }
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in SubmitSpectrumForProcessing: {ex.Message}");
-            }
-        }
-
-        private void ProcessSpectrumThreadFunc()
-        {
-            try
-            {
-                while (_processingRunning && !_cts.Token.IsCancellationRequested)
-                {
-                    _spectrumDataAvailable.WaitOne();
-
-                    if (_cts.Token.IsCancellationRequested)
-                        break;
-
-                    float[]? spectrumCopy = null;
-                    int barCountCopy = 0;
-
-                    lock (_renderDataLock)
-                    {
-                        if (_spectrumToProcess != null)
-                        {
-                            spectrumCopy = new float[_spectrumToProcess.Length];
-                            Array.Copy(_spectrumToProcess, spectrumCopy, _spectrumToProcess.Length);
-                            barCountCopy = _barCountToProcess;
-                        }
-                    }
-
-                    if (spectrumCopy != null)
-                    {
-                        ComputeDonutData(spectrumCopy, barCountCopy, _lastImageInfo);
-                    }
-
-                    _processingComplete.Set();
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Normal termination on cancellation
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in processing thread: {ex.Message}");
-            }
-        }
-
-        private void ComputeDonutData(float[] spectrum, int barCount, SKImageInfo info)
-        {
-            try
-            {
-                if (_cts.Token.IsCancellationRequested)
-                    return;
-
-                _spectrum = spectrum;
-                _currentBarCount = barCount;
-
-                UpdateRotationIntensity();
-                SmoothSpectrum();
+        #region Donut Data Processing
+        private void ComputeDonutData(float[] spectrum, int barCount, SKImageInfo info) => SmartLogger.Safe(
+            () => {
+                UpdateRotationIntensity(spectrum);
                 UpdateRotationAngles();
                 _rotationMatrix = CreateRotationMatrix();
 
                 float centerX = info.Width * 0.5f;
                 float centerY = info.Height * 0.5f;
-                float logBarCount = MathF.Log2(_currentBarCount + 1);
-                float scale = MathF.Min(centerX, centerY) * _settings.DonutScale *
-                              (1f + logBarCount * _settings.DonutBarCountScaleFactorDonutScale);
+                float logBarCount = MathF.Log2(barCount + 1);
+                float scale = MathF.Min(centerX, centerY) * Constants.DEFAULT_SCALE;
 
                 // Consider skipVertexCount for optimization
                 int step = _skipVertexCount + 1;
@@ -355,16 +304,14 @@ namespace SpectrumNet
 
                 ProjectVertices(scale, centerX, centerY);
 
-                if (_cts.Token.IsCancellationRequested)
-                    return;
-
                 // Sort by depth (from greater to lesser)
-                Array.Sort(_projectedVertices, Comparer<ProjectedVertex>.Create((a, b) => b.Depth.CompareTo(a.Depth)));
+                Array.Sort(_projectedVertices, Comparer<ProjectedVertex>.Create((a, b) =>
+                    b.Depth.CompareTo(a.Depth)));
 
                 float maxZ = _projectedVertices.Length > 0 ? _projectedVertices[0].Depth : 0f;
                 float minZ = _projectedVertices.Length > 0 ? _projectedVertices[^1].Depth : 0f;
 
-                float maxSpectrum = _spectrum.Length > 0 ? _spectrum.Max() : 0f;
+                float maxSpectrum = spectrum.Length > 0 ? spectrum.Max() : 0f;
 
                 lock (_renderDataLock)
                 {
@@ -372,205 +319,67 @@ namespace SpectrumNet
                     _currentRenderData = new RenderData(_renderedVertices, minZ, maxZ, maxSpectrum, logBarCount);
                     _dataReady = true;
                 }
-            }
-            catch (Exception ex)
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error computing donut data: {ex.Message}");
-            }
-        }
-        #endregion
+                Source = $"{Constants.LOG_PREFIX}.ComputeDonutData",
+                ErrorMessage = "Error computing donut data"
+            });
 
-        #region Rendering
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? paint, SKImageInfo info) =>
-            !_isDisposed && canvas != null && spectrum != null && spectrum.Length > 0 && paint != null &&
-            info.Width > 0 && info.Height > 0;
-
-        private void RenderDonut(SKCanvas canvas, SKImageInfo info, SKPaint paint)
-        {
-            RenderData renderData;
-            lock (_renderDataLock)
-            {
-                if (!_dataReady || _currentRenderData == null)
+        private void UpdateRotationIntensity(float[] spectrum) => SmartLogger.Safe(
+            () => {
+                if (spectrum.Length == 0)
+                {
+                    _currentRotationIntensity = Constants.DEFAULT_ROTATION_INTENSITY;
                     return;
-                renderData = _currentRenderData.Value;
-            }
-
-            // Use caching only for high quality when it's justified
-            if (_quality == RenderQuality.High && _useAdvancedEffects)
-            {
-                if (_needsRecreateCache || _cachedDonut == null)
-                {
-                    using var recorder = new SKPictureRecorder();
-                    using var recordCanvas = recorder.BeginRecording(new SKRect(0, 0, info.Width, info.Height));
-
-                    RenderDonutInternal(recordCanvas, info, paint, renderData);
-
-                    _cachedDonut?.Dispose();
-                    _cachedDonut = recorder.EndRecording();
-                    _needsRecreateCache = false;
                 }
 
-                canvas.DrawPicture(_cachedDonut);
-            }
-            else
+                float sum = 0f;
+                for (int i = 0; i < spectrum.Length; i++)
+                    sum += spectrum[i];
+
+                float average = sum / spectrum.Length;
+                float newIntensity = Constants.DEFAULT_ROTATION_INTENSITY + average;
+
+                _currentRotationIntensity = _currentRotationIntensity * (1f - Constants.ROTATION_INTENSITY_SMOOTHING) +
+                                          newIntensity * Constants.ROTATION_INTENSITY_SMOOTHING;
+
+                _currentRotationIntensity = ClampF(
+                    _currentRotationIntensity,
+                    Constants.MIN_ROTATION_INTENSITY,
+                    Constants.MAX_ROTATION_INTENSITY);
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                // For low and medium quality, render directly
-                RenderDonutInternal(canvas, info, paint, renderData);
-            }
-        }
+                Source = $"{Constants.LOG_PREFIX}.UpdateRotationIntensity",
+                ErrorMessage = "Error updating rotation intensity"
+            });
 
-        private void RenderDonutInternal(SKCanvas canvas, SKImageInfo info, SKPaint paint, RenderData renderData)
-        {
-            paint.IsAntialias = _useAntiAlias;
-            paint.FilterQuality = _filterQuality;
-            var originalColor = paint.Color;
+        private void UpdateRotationAngles() => SmartLogger.Safe(
+            () => {
+                _rotationAngleX = UpdateAngle(
+                    _rotationAngleX,
+                    Constants.DEFAULT_ROTATION_SPEED_X * _currentRotationIntensity,
+                    Constants.ROTATION_SMOOTHING,
+                    Constants.MAX_ROTATION_ANGLE_CHANGE);
 
-            // Clear and reuse dictionary for vertex grouping
-            _verticesByCharIndex.Clear();
+                _rotationAngleY = UpdateAngle(
+                    _rotationAngleY,
+                    Constants.DEFAULT_ROTATION_SPEED_Y * _currentRotationIntensity,
+                    Constants.ROTATION_SMOOTHING,
+                    Constants.MAX_ROTATION_ANGLE_CHANGE);
 
-            foreach (var vertex in renderData.Vertices)
+                _rotationAngleZ = UpdateAngle(
+                    _rotationAngleZ,
+                    Constants.DEFAULT_ROTATION_SPEED_Z * _currentRotationIntensity,
+                    Constants.ROTATION_SMOOTHING,
+                    Constants.MAX_ROTATION_ANGLE_CHANGE);
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                if (vertex.X < 0 || vertex.X >= info.Width || vertex.Y < 0 || vertex.Y >= info.Height)
-                    continue;
-
-                float normalizedDepth = (vertex.Depth - renderData.MinZ) / renderData.DepthRange;
-                if (normalizedDepth is < 0f or > 1f)
-                    continue;
-
-                int charIndex = (int)ClampF(vertex.LightIntensity * (AsciiCharStrings.Length - 1), 0, AsciiCharStrings.Length - 1);
-
-                if (!_verticesByCharIndex.TryGetValue(charIndex, out var vertices))
-                {
-                    vertices = new List<ProjectedVertex>();
-                    _verticesByCharIndex[charIndex] = vertices;
-                }
-
-                vertices.Add(vertex);
-            }
-
-            // Render all vertices of the same character type in one pass to minimize state changes
-            foreach (var kvp in _verticesByCharIndex)
-            {
-                int charIndex = kvp.Key;
-                var vertices = kvp.Value;
-
-                byte baseAlpha = _alphaCache[charIndex];
-                byte alpha = (byte)ClampF(
-                    baseAlpha * (_settings.DonutBaseAlphaIntensity + renderData.MaxSpectrum * _settings.DonutMaxSpectrumAlphaScale) *
-                    renderData.AlphaMultiplier, 0, 255);
-
-                paint.Color = originalColor.WithAlpha(alpha);
-
-                foreach (var vertex in vertices)
-                {
-                    canvas.DrawText(AsciiCharStrings[charIndex],
-                        vertex.X - _settings.DonutCharOffsetX,
-                        vertex.Y + _settings.DonutCharOffsetY,
-                        _font, paint);
-                }
-            }
-
-            paint.Color = originalColor;
-        }
-        #endregion
-
-        #region Helper Methods
-        private void InitializeVertices()
-        {
-            int idx = 0;
-            for (int i = 0; i < _settings.DonutSegments; i++)
-            {
-                for (int j = 0; j < _settings.DonutSegments; j++)
-                {
-                    float r = _settings.DonutRadius + _settings.DonutTubeRadius * CosTable[j];
-                    _vertices[idx++] = new Vertex(r * CosTable[i], r * SinTable[i], _settings.DonutTubeRadius * SinTable[j]);
-                }
-            }
-        }
-
-        private void InitializeAlphaCache()
-        {
-            for (int i = 0; i < AsciiCharStrings.Length; i++)
-            {
-                float normalizedIndex = i / (float)(AsciiCharStrings.Length - 1);
-                _alphaCache[i] = (byte)((_settings.DonutMinAlphaValue + _settings.DonutAlphaRange * normalizedIndex) * 255);
-            }
-        }
-
-        private void UpdateRotationIntensity()
-        {
-            if (_spectrum.Length == 0)
-            {
-                _currentRotationIntensity = 1.0f;
-                return;
-            }
-
-            float sum = 0f;
-            for (int i = 0; i < _spectrum.Length; i++)
-                sum += _spectrum[i];
-
-            float average = sum / _spectrum.Length;
-            float newIntensity = _settings.DonutBaseRotationIntensity + (average * _settings.DonutSpectrumIntensityScale);
-            _currentRotationIntensity = _currentRotationIntensity * (1f - _settings.DonutRotationIntensitySmoothingFactor) +
-                                       newIntensity * _settings.DonutRotationIntensitySmoothingFactor;
-            _currentRotationIntensity = ClampF(_currentRotationIntensity, _settings.DonutRotationIntensityMin, _settings.DonutRotationIntensityMax);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        private void SmoothSpectrum()
-        {
-            if (_smoothedSpectrum.Length != _spectrum.Length)
-            {
-                _smoothedSpectrum = new float[_spectrum.Length];
-                Array.Copy(_spectrum, _smoothedSpectrum, _spectrum.Length);
-            }
-
-            // Use Vector for SIMD acceleration with large arrays
-            if (_spectrum.Length >= Vector<float>.Count)
-            {
-                int vectorSize = Vector<float>.Count;
-                int vectorizedLength = _spectrum.Length - (_spectrum.Length % vectorSize);
-
-                Vector<float> smoothingFactor = new Vector<float>(_settings.DonutSmoothingFactorSpectrum);
-                Vector<float> oneMinusSmoothingFactor = new Vector<float>(1f - _settings.DonutSmoothingFactorSpectrum);
-
-                for (int i = 0; i < vectorizedLength; i += vectorSize)
-                {
-                    Vector<float> spectrumVec = new Vector<float>(_spectrum, i);
-                    Vector<float> smoothedVec = new Vector<float>(_smoothedSpectrum, i);
-
-                    Vector<float> result = (smoothingFactor * spectrumVec) + (oneMinusSmoothingFactor * smoothedVec);
-                    result.CopyTo(_smoothedSpectrum, i);
-                }
-
-                // Process remaining elements
-                for (int i = vectorizedLength; i < _spectrum.Length; i++)
-                {
-                    _smoothedSpectrum[i] = _settings.DonutSmoothingFactorSpectrum * _spectrum[i] +
-                                          (1f - _settings.DonutSmoothingFactorSpectrum) * _smoothedSpectrum[i];
-                }
-            }
-            else
-            {
-                // For small arrays, use regular loop
-                for (int i = 0; i < _spectrum.Length; i++)
-                {
-                    _smoothedSpectrum[i] = _settings.DonutSmoothingFactorSpectrum * _spectrum[i] +
-                                          (1f - _settings.DonutSmoothingFactorSpectrum) * _smoothedSpectrum[i];
-                }
-            }
-        }
-
-        private void UpdateRotationAngles()
-        {
-            _rotationAngleX = UpdateAngle(_rotationAngleX, _settings.DonutRotationSpeedX * _currentRotationIntensity,
-                                         _settings.DonutSmoothingFactorRotation, _settings.DonutMaxRotationAngleChange);
-            _rotationAngleY = UpdateAngle(_rotationAngleY, _settings.DonutRotationSpeedY * _currentRotationIntensity,
-                                         _settings.DonutSmoothingFactorRotation, _settings.DonutMaxRotationAngleChange);
-            _rotationAngleZ = UpdateAngle(_rotationAngleZ, _settings.DonutRotationSpeedZ * _currentRotationIntensity,
-                                         _settings.DonutSmoothingFactorRotation, _settings.DonutMaxRotationAngleChange);
-        }
+                Source = $"{Constants.LOG_PREFIX}.UpdateRotationAngles",
+                ErrorMessage = "Error updating rotation angles"
+            });
 
         private float UpdateAngle(float current, float speed, float smoothing, float maxChange)
         {
@@ -588,49 +397,53 @@ namespace SpectrumNet
             return diff;
         }
 
-        private static float ClampF(float value, float min, float max) =>
-            value < min ? min : (value > max ? max : value);
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Matrix4x4 CreateRotationMatrix() =>
             Matrix4x4.CreateRotationX(_rotationAngleX) *
             Matrix4x4.CreateRotationY(_rotationAngleY) *
             Matrix4x4.CreateRotationZ(_rotationAngleZ);
+        #endregion
 
+        #region Vertex Processing
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        private void ProjectVertices(float scale, float centerX, float centerY)
-        {
-            float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
-            float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
-            float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
+        private void ProjectVertices(float scale, float centerX, float centerY) => SmartLogger.Safe(
+            () => {
+                float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
+                float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
+                float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
 
-            // Consider skipVertexCount for optimization
-            int step = _skipVertexCount + 1;
-            int vertexCount = _vertices.Length / step;
+                // Consider skipVertexCount for optimization
+                int step = _skipVertexCount + 1;
+                int vertexCount = _vertices.Length / step;
 
-            // Use Parallel.For only for high quality or large number of vertices
-            if (_quality == RenderQuality.High || _vertices.Length > 1000)
-            {
-                Parallel.For(0, vertexCount, i =>
+                // Use Parallel.For only for high quality or large number of vertices
+                if (_quality == RenderQuality.High || _vertices.Length > 1000)
                 {
-                    int vertexIndex = i * step;
-                    var vertex = _vertices[vertexIndex];
-                    ProjectSingleVertex(vertex, m11, m12, m13, m21, m22, m23, m31, m32, m33,
-                                      scale, centerX, centerY, i);
-                });
-            }
-            else
-            {
-                // For low and medium quality, use regular loop
-                for (int i = 0; i < vertexCount; i++)
-                {
-                    int vertexIndex = i * step;
-                    var vertex = _vertices[vertexIndex];
-                    ProjectSingleVertex(vertex, m11, m12, m13, m21, m22, m23, m31, m32, m33,
-                                      scale, centerX, centerY, i);
+                    Parallel.For(0, vertexCount, i =>
+                    {
+                        int vertexIndex = i * step;
+                        var vertex = _vertices[vertexIndex];
+                        ProjectSingleVertex(vertex, m11, m12, m13, m21, m22, m23, m31, m32, m33,
+                                          scale, centerX, centerY, i);
+                    });
                 }
-            }
-        }
+                else
+                {
+                    // For low and medium quality, use regular loop
+                    for (int i = 0; i < vertexCount; i++)
+                    {
+                        int vertexIndex = i * step;
+                        var vertex = _vertices[vertexIndex];
+                        ProjectSingleVertex(vertex, m11, m12, m13, m21, m22, m23, m31, m32, m33,
+                                          scale, centerX, centerY, i);
+                    }
+                }
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.ProjectVertices",
+                ErrorMessage = "Error projecting vertices"
+            });
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ProjectSingleVertex(Vertex vertex,
@@ -643,8 +456,8 @@ namespace SpectrumNet
             float ry = vertex.X * m12 + vertex.Y * m22 + vertex.Z * m32;
             float rz = vertex.X * m13 + vertex.Y * m23 + vertex.Z * m33;
 
-            float rzScaled = rz * _settings.DonutDepthScaleFactor;
-            float invDepth = 1f / (rzScaled + _settings.DonutDepthOffset);
+            float rzScaled = rz * Constants.DEFAULT_DEPTH_SCALE_FACTOR;
+            float invDepth = 1f / (rzScaled + Constants.DEFAULT_DEPTH_OFFSET);
 
             // Calculate lighting only for high and medium quality
             float lightIntensity;
@@ -668,71 +481,197 @@ namespace SpectrumNet
             {
                 X = rx * scale * invDepth + centerX,
                 Y = ry * scale * invDepth + centerY,
-                Depth = rzScaled + _settings.DonutDepthOffset,
+                Depth = rzScaled + Constants.DEFAULT_DEPTH_OFFSET,
                 LightIntensity = lightIntensity
             };
         }
-
-        private void ApplyQualitySettings()
-        {
-            _needsRecreateCache = true; // Invalidate cache when quality settings change
-
-            int oldSkipVertexCount = _skipVertexCount;
-
-            switch (_quality)
-            {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
-                    _skipVertexCount = _settings.DonutLowQualitySkipFactor;
-                    break;
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
-                    _skipVertexCount = _settings.DonutMediumQualitySkipFactor;
-                    break;
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
-                    _skipVertexCount = _settings.DonutHighQualitySkipFactor;
-                    break;
-            }
-
-            // If skip factor has changed, completely reset processed data
-            if (_skipVertexCount != oldSkipVertexCount)
-            {
-                // Reset all cached vertex data
-                lock (_renderDataLock)
-                {
-                    _dataReady = false;
-                    _currentRenderData = null;
-                }
-            }
-
-            // Invalidate caches that depend on quality
-            InvalidateCachedResources();
-
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Quality settings applied: {_quality}");
-        }
-
-        private void InvalidateCachedResources()
-        {
-            if (_cachedDonut != null)
-            {
-                _cachedDonut.Dispose();
-                _cachedDonut = null;
-            }
-
-            // Reset other cached data
-            _dataReady = false;
-        }
         #endregion
 
-        #region Logging
-        private const string LogPrefix = "[AsciiDonutRenderer] ";
+        #region Donut Rendering
+        private void RenderDonut(SKCanvas canvas, SKImageInfo info, SKPaint paint) => SmartLogger.Safe(
+            () => {
+                RenderData renderData;
+                lock (_renderDataLock)
+                {
+                    if (!_dataReady || _currentRenderData == null)
+                        return;
+                    renderData = _currentRenderData.Value;
+                }
+
+                // Use caching only for high quality when it's justified
+                if (_quality == RenderQuality.High && _useAdvancedEffects)
+                {
+                    if (_needsRecreateCache || _cachedDonut == null)
+                    {
+                        using var recorder = new SKPictureRecorder();
+                        using var recordCanvas = recorder.BeginRecording(new SKRect(0, 0, info.Width, info.Height));
+
+                        RenderDonutInternal(recordCanvas, info, paint, renderData);
+
+                        _cachedDonut?.Dispose();
+                        _cachedDonut = recorder.EndRecording();
+                        _needsRecreateCache = false;
+                    }
+
+                    canvas.DrawPicture(_cachedDonut);
+                }
+                else
+                {
+                    // For low and medium quality, render directly
+                    RenderDonutInternal(canvas, info, paint, renderData);
+                }
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.RenderDonut",
+                ErrorMessage = "Error rendering donut"
+            });
+
+        private void RenderDonutInternal(SKCanvas canvas, SKImageInfo info, SKPaint paint, RenderData renderData) => SmartLogger.Safe(
+            () => {
+                paint.IsAntialias = _useAntiAlias;
+                paint.FilterQuality = _filterQuality;
+                var originalColor = paint.Color;
+
+                // Clear and reuse dictionary for vertex grouping
+                _verticesByCharIndex.Clear();
+
+                foreach (var vertex in renderData.Vertices)
+                {
+                    if (vertex.X < 0 || vertex.X >= info.Width || vertex.Y < 0 || vertex.Y >= info.Height)
+                        continue;
+
+                    float normalizedDepth = (vertex.Depth - renderData.MinZ) / renderData.DepthRange;
+                    if (normalizedDepth is < 0f or > 1f)
+                        continue;
+
+                    int charIndex = (int)ClampF(vertex.LightIntensity * (_asciiCharStrings.Length - 1), 0, _asciiCharStrings.Length - 1);
+
+                    if (!_verticesByCharIndex.TryGetValue(charIndex, out var vertices))
+                    {
+                        vertices = new List<ProjectedVertex>();
+                        _verticesByCharIndex[charIndex] = vertices;
+                    }
+
+                    vertices.Add(vertex);
+                }
+
+                // Render all vertices of the same character type in one pass to minimize state changes
+                foreach (var kvp in _verticesByCharIndex)
+                {
+                    int charIndex = kvp.Key;
+                    var vertices = kvp.Value;
+
+                    byte baseAlpha = _alphaCache[charIndex];
+                    byte alpha = (byte)ClampF(
+                        baseAlpha * (Constants.BASE_ALPHA_INTENSITY + renderData.MaxSpectrum * Constants.MAX_SPECTRUM_ALPHA_SCALE) *
+                        renderData.AlphaMultiplier, 0, 255);
+
+                    paint.Color = originalColor.WithAlpha(alpha);
+
+                    foreach (var vertex in vertices)
+                    {
+                        canvas.DrawText(_asciiCharStrings[charIndex],
+                            vertex.X - Constants.CHAR_OFFSET_X,
+                            vertex.Y + Constants.CHAR_OFFSET_Y,
+                            _font, paint);
+                    }
+                }
+
+                paint.Color = originalColor;
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.RenderDonutInternal",
+                ErrorMessage = "Error in internal donut rendering"
+            });
+
+        private void InvalidateCachedResources() => SmartLogger.Safe(
+            () => {
+                if (_cachedDonut != null)
+                {
+                    _cachedDonut.Dispose();
+                    _cachedDonut = null;
+                }
+
+                // Reset other cached data
+                _dataReady = false;
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.InvalidateCachedResources",
+                ErrorMessage = "Failed to invalidate cached resources"
+            });
+        #endregion
+
+        #region Initialization Helpers
+        private void InitializeVertices() => SmartLogger.Safe(
+            () => {
+                int segments = Constants.DEFAULT_SEGMENTS;
+                int idx = 0;
+
+                for (int i = 0; i < segments; i++)
+                {
+                    for (int j = 0; j < segments; j++)
+                    {
+                        float r = Constants.DEFAULT_RADIUS + Constants.DEFAULT_TUBE_RADIUS * _cosTable[j];
+                        _vertices[idx++] = new Vertex(
+                            r * _cosTable[i],
+                            r * _sinTable[i],
+                            Constants.DEFAULT_TUBE_RADIUS * _sinTable[j]);
+                    }
+                }
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.InitializeVertices",
+                ErrorMessage = "Failed to initialize vertices"
+            });
+
+        private void InitializeAlphaCache() => SmartLogger.Safe(
+            () => {
+                for (int i = 0; i < _asciiCharStrings.Length; i++)
+                {
+                    float normalizedIndex = i / (float)(_asciiCharStrings.Length - 1);
+                    _alphaCache[i] = (byte)((Constants.MIN_ALPHA_VALUE + Constants.ALPHA_RANGE * normalizedIndex) * 255);
+                }
+            },
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.InitializeAlphaCache",
+                ErrorMessage = "Failed to initialize alpha cache"
+            });
+        #endregion
+
+        #region Utility Methods
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float ClampF(float value, float min, float max) =>
+            value < min ? min : (value > max ? max : value);
+        #endregion
+
+        #region Disposal
+        public override void Dispose()
+        {
+            if (!_disposed)
+            {
+                SmartLogger.Safe(() =>
+                {
+                    // Dispose managed resources
+                    _font.Dispose();
+                    _cachedDonut?.Dispose();
+
+                    // Call base class disposal
+                    base.Dispose();
+
+                    SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
+                },
+                new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = $"{Constants.LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error disposing renderer"
+                });
+            }
+        }
         #endregion
     }
 }

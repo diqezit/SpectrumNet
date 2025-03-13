@@ -4,7 +4,6 @@
         xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:local="clr-namespace:SpectrumNet"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"
         Title="Spectrum Analyser"
         Height="600" Width="800"
         MinHeight="600" MinWidth="800"
@@ -16,133 +15,135 @@
         StateChanged="OnStateChanged"
         MouseDoubleClick="OnWindowMouseDoubleClick">
 
+    <!-- Ресурсы окна -->
     <Window.Resources>
         <Duration x:Key="StandardAnimationDuration">0:0:0.3</Duration>
         <CubicEase x:Key="StandardEaseOut" EasingMode="EaseOut"/>
-        <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
-        <Style TargetType="Thumb" BasedOn="{StaticResource ScrollBarThumbStyle}"/>
     </Window.Resources>
 
+    <!-- Настройки Chrome для окна без рамки -->
     <shell:WindowChrome.WindowChrome>
-        <shell:WindowChrome 
-            CaptionHeight="0"
-            CornerRadius="0"
-            GlassFrameThickness="0"
-            ResizeBorderThickness="6"/>
+        <shell:WindowChrome CaptionHeight="0"
+                            CornerRadius="0"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="6"/>
     </shell:WindowChrome.WindowChrome>
 
-    <Border 
-        Background="{DynamicResource WindowBackgroundBrush}"
-        BorderBrush="{DynamicResource WindowBorderBrush}"
-        BorderThickness="1"
-        CornerRadius="12">
+    <!-- Основной контейнер окна -->
+    <Border Background="{DynamicResource WindowBackgroundBrush}"
+            BorderBrush="{DynamicResource WindowBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="50"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <Border 
-                Grid.Row="0"
-                Style="{DynamicResource TitleBarBorderStyle}"
-                Height="50"
-                CornerRadius="12,12,0,0"
-                MouseLeftButtonDown="OnWindowDrag">
+            <!-- Заголовок окна -->
+            <Border Grid.Row="0"
+                    Style="{DynamicResource TitleBarBorderStyle}"
+                    CornerRadius="12,12,0,0"
+                    MouseLeftButtonDown="OnWindowDrag">
                 <Grid>
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock 
-                        Grid.Column="0"
-                        Text="Spectrum Analyser"
-                        Margin="24,0,0,0"
-                        FontSize="20"
-                        FontWeight="Bold"
-                        Foreground="White"
-                        VerticalAlignment="Center"/>
+                    <!-- Переключатель темы (левая часть) -->
+                    <ToggleButton x:Name="ThemeToggleButton"
+                                  Grid.Column="0"
+                                  Style="{DynamicResource ThemeSwitchStyle}"
+                                  Margin="24,0,0,0"
+                                  ToolTip="Переключить тему (светлая/темная)"
+                                  Checked="OnThemeToggleButtonChanged"
+                                  Unchecked="OnThemeToggleButtonChanged"/>
 
-                    <StackPanel 
-                        Grid.Column="1"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Right"
-                        Margin="0,0,12,0">
-                        <ToggleButton 
-                            x:Name="ThemeToggleButton"
-                            Style="{DynamicResource ToggleSwitchStyle}"
-                            Width="100"
-                            Margin="0,0,20,0"
-                            Checked="OnThemeToggleButtonChanged"
-                            Unchecked="OnThemeToggleButtonChanged"/>
+                    <!-- Заголовок (центральная часть) -->
+                    <ContentControl Grid.Column="1"
+                Content="Spectrum Analyser"
+                Style="{StaticResource SpectrumAnalyserTitleStyle}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"/>
 
-                        <Button 
-                            x:Name="OpenControlPanelButton"
-                            Style="{DynamicResource WindowControlButtonStyle}"
-                            Margin="0,0,10,0"
-                            Click="OnButtonClick">
-                            <Path 
-                                Data="M4,4 L16,4 L16,8 L4,8 M4,12 L16,12 L16,16 L4,16"
-                                Stroke="White"
-                                StrokeThickness="2"/>
+                    <!-- Кнопки управления окном (правая часть) -->
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,12,0">
+
+                        <!-- Кнопка настроек -->
+                        <Button x:Name="OpenControlPanelButton"
+        Style="{DynamicResource WindowControlButtonStyle}"
+        Margin="0,0,10,0"
+        Width="30" 
+        Height="30"
+        ToolTip="Открыть панель управления"
+        Click="OnButtonClick">
+                            <Viewbox Width="20" Height="20" Stretch="Uniform">
+                                <Path 
+              Stroke="White"
+              StrokeThickness="2"
+              StrokeLineJoin="Round"
+              StrokeEndLineCap="Round"
+              StrokeStartLineCap="Round"
+              Fill="Transparent"
+              Data="M9.5,3 A6.5,6.5 0 1 1 9.5,16 A6.5,6.5 0 0 1 9.5,3 Z M9.5,6 A3.5,3.5 0 1 0 9.5,13 A3.5,3.5 0 0 0 9.5,6 Z M9.5,0 L9.5,2 M9.5,17 L9.5,19 M0,9.5 L2,9.5 M17,9.5 L19,9.5 M2.8,2.8 L4.2,4.2 M14.8,14.8 L16.2,16.2 M2.8,16.2 L4.2,14.8 M14.8,4.2 L16.2,2.8"/>
+                            </Viewbox>
                         </Button>
 
-                        <Button 
-                            x:Name="MinimizeButton"
-                            Style="{DynamicResource WindowControlButtonStyle}"
-                            Click="OnButtonClick">
-                            <Path 
-                                Data="M0,10 H20"
-                                Stroke="White"
-                                StrokeThickness="2"/>
+                        <!-- Кнопка сворачивания -->
+                        <Button x:Name="MinimizeButton"
+        Style="{DynamicResource WindowControlButtonStyle}"
+        ToolTip="Свернуть"
+        Click="OnButtonClick">
+                            <Path Data="M4,10 H16"
+          Stroke="White"
+          StrokeThickness="2"
+          StrokeEndLineCap="Round"
+          StrokeStartLineCap="Round"/>
                         </Button>
 
-                        <Button 
-                            x:Name="MaximizeButton"
-                            Style="{DynamicResource WindowControlButtonStyle}"
-                            Click="OnButtonClick">
-                            <Path 
-                                x:Name="MaximizeIcon"
-                                Data="M2,2 H18 V18 H2 Z"
-                                Stroke="White"
-                                StrokeThickness="2"
-                                Fill="Transparent"/>
+                        <!-- Кнопка разворачивания -->
+                        <Button x:Name="MaximizeButton"
+        Style="{DynamicResource WindowControlButtonStyle}"
+        ToolTip="Развернуть/Восстановить"
+        Click="OnButtonClick">
+                            <Path x:Name="MaximizeIcon"
+          Data="M4,4 H16 V16 H4 Z"
+          Stroke="White"
+          StrokeThickness="2"
+          StrokeEndLineCap="Square"
+          StrokeStartLineCap="Square"
+          StrokeLineJoin="Round"
+          Fill="Transparent"/>
                         </Button>
 
-                        <Button 
-                            x:Name="CloseButton"
-                            Style="{DynamicResource WindowCloseButtonStyle}"
-                            Click="OnButtonClick">
-                            <Path 
-                                Data="M4,4 L16,16 M16,4 L4,16"
-                                Stroke="White"
-                                StrokeThickness="2"/>
+                        <!-- Кнопка закрытия -->
+                        <Button x:Name="CloseButton"
+                                Style="{DynamicResource WindowCloseButtonStyle}"
+                                ToolTip="Закрыть"
+                                Click="OnButtonClick">
+                            <Path Data="M3,3 L17,17 M17,3 L3,17"
+                                  Stroke="White"
+                                  StrokeThickness="2"/>
                         </Button>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <Grid 
-                Grid.Row="1"
-                Margin="24">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <Border 
-                    Grid.Row="0"
+            <!-- Основная область с визуализацией -->
+            <Border Grid.Row="1"
                     x:Name="SpectrumContainer"
                     Background="{DynamicResource SurfaceBrush}"
                     CornerRadius="16"
-                    Margin="0,0,0,10">
-                    <sk:SKElement 
-                        x:Name="spectrumCanvas"
-                        Margin="16"
-                        Opacity="1"
-                        PaintSurface="OnPaintSurface"/>
-                </Border>
-            </Grid>
+                    Margin="24,24,24,24">
+                <sk:SKElement x:Name="spectrumCanvas"
+                              Margin="16"
+                              PaintSurface="OnPaintSurface"/>
+            </Border>
         </Grid>
     </Border>
 </Window>

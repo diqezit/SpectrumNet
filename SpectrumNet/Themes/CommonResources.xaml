@@ -40,15 +40,46 @@
     <Style x:Key="WindowControlButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
         <Setter Property="Width" Value="40"/>
         <Setter Property="Height" Value="40"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}" CornerRadius="20">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Grid>
+                        <Ellipse x:Name="ButtonBackground"
+                             Fill="Transparent">
+                        </Ellipse>
+
+                        <ContentPresenter x:Name="ContentPresenter"
+                                     HorizontalAlignment="Center" 
+                                     VerticalAlignment="Center">
+                        </ContentPresenter>
+                    </Grid>
+
                     <ControlTemplate.Triggers>
+                        <!-- Наведение -->
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource WindowControlHoverBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="1.1" ScaleY="1.1" CenterX="10" CenterY="10"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- Нажатие -->
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource WindowControlPressedBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="0.9" ScaleY="0.9" CenterX="10" CenterY="10"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- Отключено -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ContentPresenter" Property="Opacity" Value="0.4"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -58,12 +89,49 @@
 
     <!-- Стиль кнопки закрытия окна -->
     <Style x:Key="WindowCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowControlButtonStyle}">
-        <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="#FF4136"/>
-                <Setter Property="Foreground" Value="White"/>
-            </Trigger>
-        </Style.Triggers>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Ellipse x:Name="ButtonBackground"
+                             Fill="Transparent">
+                        </Ellipse>
+
+                        <ContentPresenter x:Name="ContentPresenter"
+                                     HorizontalAlignment="Center" 
+                                     VerticalAlignment="Center">
+                        </ContentPresenter>
+                    </Grid>
+
+                    <ControlTemplate.Triggers>
+                        <!-- Наведение -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource CloseButtonHoverBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="1.1" ScaleY="1.1" CenterX="10" CenterY="10"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- Нажатие -->
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource CloseButtonPressedBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="0.9" ScaleY="0.9" CenterX="10" CenterY="10"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- Отключено -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ContentPresenter" Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Стиль современной кнопки -->
@@ -74,31 +142,239 @@
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ButtonBorderBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="ButtonBorder"
+                    <Grid>
+                        <!-- Основная кнопка -->
+                        <Border x:Name="ButtonBorder"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="6">
-                        <ContentPresenter HorizontalAlignment="Center" 
-                                          VerticalAlignment="Center"
-                                          Margin="{TemplateBinding Padding}"
-                                          RecognizesAccessKey="True"/>
-                    </Border>
+
+                            <!-- Блик на кнопке (градиент сверху) -->
+                            <Grid>
+                                <Border x:Name="HighlightBorder"
+                                   CornerRadius="5,5,0,0"
+                                   Height="12"
+                                   VerticalAlignment="Top">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#30FFFFFF" Offset="0"/>
+                                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+
+                                <!-- Контент кнопки -->
+                                <ContentPresenter x:Name="ContentPresenter"
+                                             HorizontalAlignment="Center" 
+                                             VerticalAlignment="Center"
+                                             Margin="{TemplateBinding Padding}"
+                                             RecognizesAccessKey="True"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
+                        <!-- Наведение мыши -->
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource ButtonHoverBorderBrush}"/>
                             <Setter Property="Foreground" Value="{DynamicResource ButtonHoverForegroundBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform Y="-1"/>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
+
+                        <!-- Нажатие кнопки -->
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter Property="Background" Value="{DynamicResource ButtonPressedBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonPressedBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource ButtonPressedBorderBrush}"/>
                             <Setter Property="Foreground" Value="{DynamicResource ButtonPressedForegroundBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform Y="1"/>
+                                </Setter.Value>
+                            </Setter>
+                            <Setter TargetName="HighlightBorder" Property="Opacity" Value="0.5"/>
                         </Trigger>
+
+                        <!-- Фокус -->
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource FocusedBorderBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+
+                        <!-- Отключенное состояние -->
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource ButtonDisabledBorderBrush}"/>
                             <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}"/>
+                            <Setter TargetName="HighlightBorder" Property="Opacity" Value="0.3"/>
+                            <Setter TargetName="ContentPresenter" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Акцентированный стиль кнопки -->
+    <Style x:Key="AccentButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}"/>
+                <Setter Property="Opacity" Value="0.8"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Плоский стиль кнопки -->
+    <Style x:Key="FlatButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter Property="Background" Value="{DynamicResource ButtonPressedBrush}"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Стиль кнопки с иконкой -->
+    <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource FlatButtonStyle}">
+        <Setter Property="Width" Value="40"/>
+        <Setter Property="Height" Value="40"/>
+        <Setter Property="Padding" Value="8"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <!-- Основная кнопка -->
+                        <Border x:Name="ButtonBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="20">
+
+                            <!-- Контент кнопки (иконка) -->
+                            <ContentPresenter x:Name="ContentPresenter"
+                                         HorizontalAlignment="Center" 
+                                         VerticalAlignment="Center"
+                                         Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Наведение мыши -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="1.1" ScaleY="1.1" CenterX="12" CenterY="12"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- Нажатие кнопки -->
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonPressedBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="0.9" ScaleY="0.9" CenterX="12" CenterY="12"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- Отключенное состояние -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}"/>
+                            <Setter TargetName="ContentPresenter" Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Стиль кнопки-переключателя -->
+    <Style x:Key="ToggleSwitchStyle" TargetType="ToggleButton">
+        <Setter Property="Width" Value="50"/>
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid>
+                        <!-- Фон переключателя -->
+                        <Border x:Name="SwitchBackground"
+                            Width="50"
+                            Height="24"
+                            CornerRadius="12"
+                            Background="{DynamicResource ButtonBackgroundBrush}"
+                            BorderBrush="{DynamicResource ButtonBorderBrush}"
+                            BorderThickness="1"/>
+
+                        <!-- Ручка переключателя -->
+                        <Border x:Name="SwitchHandle"
+                            Width="18"
+                            Height="18"
+                            CornerRadius="9"
+                            Background="White"
+                            HorizontalAlignment="Left"
+                            Margin="3,0,0,0">
+                            <!-- Иконка для ручки (опционально) -->
+                            <Path x:Name="SwitchIcon"
+                              Width="10"
+                              Height="10"
+                              Stretch="Uniform"
+                              Fill="{DynamicResource AccentBrush}"
+                              Data="M12,2 L15,5 17,5 17,7 15,7 12,10 10,10 10,2 Z M2,9 L2,15 22,15 22,9 Z"
+                              Visibility="Collapsed"/>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Когда переключатель включен -->
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SwitchBackground" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="SwitchBackground" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="SwitchHandle" Property="Margin" Value="29,0,0,0"/>
+                            <Setter TargetName="SwitchIcon" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="SwitchIcon" Property="Data" Value="M7,2 L17,2 22,7 22,17 17,22 7,22 2,17 2,7 Z M16,16 L16,13 13,13 13,11 16,11 16,8 18,8 18,11 21,11 21,13 18,13 18,16 Z"/>
+                        </Trigger>
+
+                        <!-- При наведении -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="SwitchHandle" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="1.1" ScaleY="1.1" CenterX="9" CenterY="9"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- Когда отключен -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="SwitchBackground" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="SwitchHandle" Property="Opacity" Value="0.7"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -149,8 +425,8 @@
         </Setter>
     </Style>
 
-    <!-- Стиль переключателя (Toggle Switch) -->
-    <Style x:Key="ToggleSwitchStyle" TargetType="ToggleButton">
+    <!-- Стиль переключателя (Toggle Switch) с улучшенными плавными анимациями солнца/луны -->
+    <Style x:Key="ThemeSwitchStyle" TargetType="ToggleButton">
         <Setter Property="Width" Value="56"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Background" Value="#FFE0E0E0"/>
@@ -164,64 +440,540 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Grid>
+                        <!-- Фон переключателя с внутренним свечением -->
                         <Border x:Name="SwitchBorder"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="14"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="14"
+                        Padding="{TemplateBinding Padding}">
+                            <!-- Внутреннее свечение для ночного режима -->
+                            <Border x:Name="InnerGlow" 
+                                Background="Transparent" 
+                                CornerRadius="12.5" 
+                                Opacity="0">
+                                <Border.Effect>
+                                    <BlurEffect Radius="8"/>
+                                </Border.Effect>
+                            </Border>
                         </Border>
-                        <Ellipse x:Name="ToggleIndicator"
-                                 Width="20" Height="20"
-                                 Fill="White"
-                                 HorizontalAlignment="Left"
-                                 VerticalAlignment="Center"
-                                 Margin="4,0,0,0">
-                            <Ellipse.RenderTransform>
+
+                        <!-- Динамический индикатор переключения (солнце/луна) -->
+                        <Grid x:Name="ToggleIndicator"
+                          Width="22" Height="22"
+                          HorizontalAlignment="Left"
+                          VerticalAlignment="Center"
+                          Margin="3,0,0,0">
+                            <!-- Внешний круг индикатора с тенью -->
+                            <Ellipse x:Name="IndicatorBackground">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush>
+                                        <GradientStop x:Name="IndicatorGradientStop1" Color="#FFFFF176" Offset="0"/>
+                                        <GradientStop x:Name="IndicatorGradientStop2" Color="#FFFFB74D" Offset="1"/>
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                                <Ellipse.Effect>
+                                    <DropShadowEffect x:Name="IndicatorShadow" ShadowDepth="1" BlurRadius="3" Opacity="0.3" Color="#FF000000"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+
+                            <!-- Солнце -->
+                            <Path x:Name="SunIndicator"
+                              Width="16" Height="16"
+                              StrokeLineJoin="Round"
+                              StrokeEndLineCap="Round"
+                              StrokeStartLineCap="Round"
+                              Opacity="1"
+                              RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="SunScaleTransform" ScaleX="1" ScaleY="1"/>
+                                        <RotateTransform x:Name="SunRotateTransform" Angle="0"/>
+                                    </TransformGroup>
+                                </Path.RenderTransform>
+                                <Path.Fill>
+                                    <RadialGradientBrush GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                        <GradientStop Color="#FFFFF200" Offset="0"/>
+                                        <GradientStop Color="#FFFF9800" Offset="1"/>
+                                    </RadialGradientBrush>
+                                </Path.Fill>
+                                <Path.Stroke>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#FFFF9800" Offset="0"/>
+                                        <GradientStop Color="#FFFF5722" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Path.Stroke>
+                                <Path.StrokeThickness>0.7</Path.StrokeThickness>
+                                <Path.Data>
+                                    <GeometryGroup>
+                                        <!-- Центральный круг -->
+                                        <EllipseGeometry Center="8,8" RadiusX="4" RadiusY="4"/>
+                                        <!-- Лучи солнца -->
+                                        <LineGeometry StartPoint="8,1" EndPoint="8,3"/>
+                                        <LineGeometry StartPoint="8,13" EndPoint="8,15"/>
+                                        <LineGeometry StartPoint="1,8" EndPoint="3,8"/>
+                                        <LineGeometry StartPoint="13,8" EndPoint="15,8"/>
+                                        <LineGeometry StartPoint="3.1,3.1" EndPoint="4.5,4.5"/>
+                                        <LineGeometry StartPoint="11.5,11.5" EndPoint="12.9,12.9"/>
+                                        <LineGeometry StartPoint="3.1,12.9" EndPoint="4.5,11.5"/>
+                                        <LineGeometry StartPoint="11.5,4.5" EndPoint="12.9,3.1"/>
+                                    </GeometryGroup>
+                                </Path.Data>
+                                <Path.Effect>
+                                    <DropShadowEffect x:Name="SunGlowEffect" ShadowDepth="0" BlurRadius="5" Opacity="0.7" Color="#FFFF9800"/>
+                                </Path.Effect>
+                            </Path>
+
+                            <!-- Луна -->
+                            <Path x:Name="MoonIndicator"
+                              Width="16" Height="16"
+                              StrokeLineJoin="Round"
+                              StrokeEndLineCap="Round"
+                              Opacity="0"
+                              RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="MoonScaleTransform" ScaleX="0.8" ScaleY="0.8"/>
+                                        <RotateTransform x:Name="MoonRotateTransform" Angle="-30"/>
+                                    </TransformGroup>
+                                </Path.RenderTransform>
+                                <Path.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#FF9FA8DA" Offset="0"/>
+                                        <GradientStop Color="#FF5C6BC0" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Path.Fill>
+                                <Path.Stroke>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#FF3F51B5" Offset="0"/>
+                                        <GradientStop Color="#FF303F9F" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Path.Stroke>
+                                <Path.StrokeThickness>0.7</Path.StrokeThickness>
+                                <Path.Data>
+                                    <PathGeometry>
+                                        <PathFigure StartPoint="12,3">
+                                            <PathFigure.Segments>
+                                                <ArcSegment Point="12,13" Size="5,5" IsLargeArc="True" SweepDirection="Clockwise"/>
+                                                <ArcSegment Point="6,8" Size="4.5,6" IsLargeArc="False" SweepDirection="Clockwise"/>
+                                                <ArcSegment Point="12,3" Size="6,5" IsLargeArc="False" SweepDirection="Clockwise"/>
+                                            </PathFigure.Segments>
+                                        </PathFigure>
+                                    </PathGeometry>
+                                </Path.Data>
+                                <Path.Effect>
+                                    <DropShadowEffect x:Name="MoonGlowEffect" Color="#FF9FA8DA" BlurRadius="5" ShadowDepth="0" Opacity="0.5"/>
+                                </Path.Effect>
+                            </Path>
+
+                            <!-- Маленькие звезды с анимацией мерцания -->
+                            <Canvas x:Name="StarsCanvas" Opacity="0">
+                                <Path x:Name="Star1" Fill="#FFFFFFFF" Data="M3,3 L3.5,1 L4,3 L6,3.5 L4,4 L3.5,6 L3,4 L1,3.5 Z" RenderTransformOrigin="0.5,0.5">
+                                    <Path.RenderTransform>
+                                        <ScaleTransform x:Name="Star1Scale" ScaleX="1" ScaleY="1"/>
+                                    </Path.RenderTransform>
+                                    <Path.Effect>
+                                        <DropShadowEffect Color="#FFFFFFFF" BlurRadius="2" ShadowDepth="0" Opacity="0.8"/>
+                                    </Path.Effect>
+                                </Path>
+                                <Path x:Name="Star2" Fill="#FFF5F5F5" Data="M10,1 L10.3,0 L10.6,1 L11.5,1.3 L10.6,1.6 L10.3,2.5 L10,1.6 L9,1.3 Z" RenderTransformOrigin="0.5,0.5">
+                                    <Path.RenderTransform>
+                                        <ScaleTransform x:Name="Star2Scale" ScaleX="1" ScaleY="1"/>
+                                    </Path.RenderTransform>
+                                    <Path.Effect>
+                                        <DropShadowEffect Color="#FFFFFFFF" BlurRadius="1.5" ShadowDepth="0" Opacity="0.7"/>
+                                    </Path.Effect>
+                                </Path>
+                            </Canvas>
+
+                            <Grid.RenderTransform>
                                 <TranslateTransform x:Name="IndicatorTransform"/>
-                            </Ellipse.RenderTransform>
-                        </Ellipse>
+                            </Grid.RenderTransform>
+                        </Grid>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
+                                        <!-- Анимация перемещения индикатора -->
                                         <DoubleAnimation Storyboard.TargetName="IndicatorTransform"
-                                                         Storyboard.TargetProperty="X"
-                                                         To="70"
-                                                         Duration="0:0:0.5">
+                                                 Storyboard.TargetProperty="X"
+                                                 To="28"
+                                                 Duration="0:0:0.5">
                                             <DoubleAnimation.EasingFunction>
-                                                <QuadraticEase EasingMode="EaseInOut"/>
+                                                <CubicEase EasingMode="EaseInOut"/>
                                             </DoubleAnimation.EasingFunction>
                                         </DoubleAnimation>
+
+                                        <!-- Анимация изменения цвета фона -->
                                         <ColorAnimation Storyboard.TargetName="SwitchBorder"
-                                                        Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                        To="#FF2196F3"
-                                                        Duration="0:0:0.5"/>
+                                                Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
+                                                To="#FF3F51B5"
+                                                Duration="0:0:0.5"/>
+
+                                        <!-- Анимация внутреннего свечения -->
+                                        <ColorAnimation Storyboard.TargetName="InnerGlow"
+                                               Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
+                                               To="#7F5C6BC0"
+                                               Duration="0:0:0.5"/>
+                                        <DoubleAnimation Storyboard.TargetName="InnerGlow"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 To="1"
+                                                 Duration="0:0:0.5"/>
+
+                                        <!-- Анимация исчезновения солнца с вращением и уменьшением -->
+                                        <DoubleAnimation Storyboard.TargetName="SunIndicator"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 To="0"
+                                                 Duration="0:0:0.25"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunRotateTransform"
+                                                 Storyboard.TargetProperty="Angle"
+                                                 To="90"
+                                                 Duration="0:0:0.3"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleX"
+                                                 To="0.5"
+                                                 Duration="0:0:0.25"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleY"
+                                                 To="0.5"
+                                                 Duration="0:0:0.25"/>
+
+                                        <!-- Анимация появления луны с вращением и увеличением -->
+                                        <DoubleAnimation Storyboard.TargetName="MoonIndicator"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 From="0" To="1"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.3"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonRotateTransform"
+                                                 Storyboard.TargetProperty="Angle"
+                                                 From="-30" To="0"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleX"
+                                                 From="0.8" To="1"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleY"
+                                                 From="0.8" To="1"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.4"/>
+
+                                        <!-- Анимация появления звезд с эффектом мерцания -->
+                                        <DoubleAnimation Storyboard.TargetName="StarsCanvas"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 From="0" To="1"
+                                                 BeginTime="0:0:0.3"
+                                                 Duration="0:0:0.3"/>
+
+                                        <!-- Анимация мерцания первой звезды -->
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Star1Scale" 
+                                                               Storyboard.TargetProperty="ScaleX"
+                                                               BeginTime="0:0:0.4"
+                                                               RepeatBehavior="Forever">
+                                            <LinearDoubleKeyFrame Value="1.0" KeyTime="0:0:0.0"/>
+                                            <EasingDoubleKeyFrame Value="1.3" KeyTime="0:0:0.7">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                            <EasingDoubleKeyFrame Value="1.0" KeyTime="0:0:1.4">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                        </DoubleAnimationUsingKeyFrames>
+
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Star1Scale" 
+                                                               Storyboard.TargetProperty="ScaleY"
+                                                               BeginTime="0:0:0.4"
+                                                               RepeatBehavior="Forever">
+                                            <LinearDoubleKeyFrame Value="1.0" KeyTime="0:0:0.0"/>
+                                            <EasingDoubleKeyFrame Value="1.3" KeyTime="0:0:0.7">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                            <EasingDoubleKeyFrame Value="1.0" KeyTime="0:0:1.4">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                        </DoubleAnimationUsingKeyFrames>
+
+                                        <!-- Анимация мерцания второй звезды (с другим таймингом) -->
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Star2Scale" 
+                                                               Storyboard.TargetProperty="ScaleX"
+                                                               BeginTime="0:0:0.5"
+                                                               RepeatBehavior="Forever">
+                                            <LinearDoubleKeyFrame Value="1.0" KeyTime="0:0:0.0"/>
+                                            <EasingDoubleKeyFrame Value="1.2" KeyTime="0:0:0.5">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                            <EasingDoubleKeyFrame Value="1.0" KeyTime="0:0:1.0">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                        </DoubleAnimationUsingKeyFrames>
+
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Star2Scale" 
+                                                               Storyboard.TargetProperty="ScaleY"
+                                                               BeginTime="0:0:0.5"
+                                                               RepeatBehavior="Forever">
+                                            <LinearDoubleKeyFrame Value="1.0" KeyTime="0:0:0.0"/>
+                                            <EasingDoubleKeyFrame Value="1.2" KeyTime="0:0:0.5">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                            <EasingDoubleKeyFrame Value="1.0" KeyTime="0:0:1.0">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <SineEase EasingMode="EaseInOut"/>
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                        </DoubleAnimationUsingKeyFrames>
+
+                                        <!-- Анимация изменения цвета индикатора (градиент) -->
+                                        <ColorAnimation Storyboard.TargetName="IndicatorGradientStop1"
+                                                Storyboard.TargetProperty="Color"
+                                                To="#FF7986CB"
+                                                Duration="0:0:0.4"/>
+
+                                        <ColorAnimation Storyboard.TargetName="IndicatorGradientStop2"
+                                                Storyboard.TargetProperty="Color"
+                                                To="#FF5C6BC0"
+                                                Duration="0:0:0.4"/>
+
+                                        <!-- Анимация тени индикатора -->
+                                        <ColorAnimation Storyboard.TargetName="IndicatorShadow"
+                                                Storyboard.TargetProperty="Color"
+                                                To="#FF303F9F"
+                                                Duration="0:0:0.4"/>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
+                                        <!-- Анимация перемещения индикатора -->
                                         <DoubleAnimation Storyboard.TargetName="IndicatorTransform"
-                                                         Storyboard.TargetProperty="X"
-                                                         To="0"
-                                                         Duration="0:0:0.5">
+                                                 Storyboard.TargetProperty="X"
+                                                 To="0"
+                                                 Duration="0:0:0.5">
                                             <DoubleAnimation.EasingFunction>
-                                                <QuadraticEase EasingMode="EaseInOut"/>
+                                                <CubicEase EasingMode="EaseInOut"/>
                                             </DoubleAnimation.EasingFunction>
                                         </DoubleAnimation>
+
+                                        <!-- Анимация изменения цвета фона -->
                                         <ColorAnimation Storyboard.TargetName="SwitchBorder"
-                                                        Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                        To="#FFE0E0E0"
-                                                        Duration="0:0:0.5"/>
+                                                Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
+                                                To="#FFE0E0E0"
+                                                Duration="0:0:0.5"/>
+
+                                        <!-- Анимация внутреннего свечения -->
+                                        <DoubleAnimation Storyboard.TargetName="InnerGlow"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 To="0"
+                                                 Duration="0:0:0.3"/>
+
+                                        <!-- Остановка анимации мерцания звезд -->
+                                        <DoubleAnimation Storyboard.TargetName="Star1Scale"
+                                                 Storyboard.TargetProperty="ScaleX"
+                                                 To="1"
+                                                 Duration="0:0:0.1"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star1Scale"
+                                                 Storyboard.TargetProperty="ScaleY"
+                                                 To="1"
+                                                 Duration="0:0:0.1"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star2Scale"
+                                                 Storyboard.TargetProperty="ScaleX"
+                                                 To="1"
+                                                 Duration="0:0:0.1"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star2Scale"
+                                                 Storyboard.TargetProperty="ScaleY"
+                                                 To="1"
+                                                 Duration="0:0:0.1"/>
+
+                                        <!-- Анимация исчезновения звезд -->
+                                        <DoubleAnimation Storyboard.TargetName="StarsCanvas"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 To="0"
+                                                 Duration="0:0:0.2"/>
+
+                                        <!-- Анимация исчезновения луны с вращением и уменьшением -->
+                                        <DoubleAnimation Storyboard.TargetName="MoonIndicator"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 To="0"
+                                                 Duration="0:0:0.25"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonRotateTransform"
+                                                 Storyboard.TargetProperty="Angle"
+                                                 To="30"
+                                                 Duration="0:0:0.3"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleX"
+                                                 To="0.8"
+                                                 Duration="0:0:0.25"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleY"
+                                                 To="0.8"
+                                                 Duration="0:0:0.25"/>
+
+                                        <!-- Анимация появления солнца с вращением и увеличением -->
+                                        <DoubleAnimation Storyboard.TargetName="SunIndicator"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 From="0" To="1"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.3"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunRotateTransform"
+                                                 Storyboard.TargetProperty="Angle"
+                                                 From="-90" To="0"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleX"
+                                                 From="0.5" To="1"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunScaleTransform"
+                                                 Storyboard.TargetProperty="ScaleY"
+                                                 From="0.5" To="1"
+                                                 BeginTime="0:0:0.2"
+                                                 Duration="0:0:0.4"/>
+
+                                        <!-- Анимация изменения цвета индикатора (градиент) -->
+                                        <ColorAnimation Storyboard.TargetName="IndicatorGradientStop1"
+                                                Storyboard.TargetProperty="Color"
+                                                To="#FFFFF176"
+                                                Duration="0:0:0.4"/>
+
+                                        <ColorAnimation Storyboard.TargetName="IndicatorGradientStop2"
+                                                Storyboard.TargetProperty="Color"
+                                                To="#FFFFB74D"
+                                                Duration="0:0:0.4"/>
+
+                                        <!-- Анимация тени индикатора -->
+                                        <ColorAnimation Storyboard.TargetName="IndicatorShadow"
+                                                Storyboard.TargetProperty="Color"
+                                                To="#FF000000"
+                                                Duration="0:0:0.4"/>
+
+                                        <!-- Анимация свечения солнца -->
+                                        <ColorAnimation Storyboard.TargetName="SunGlowEffect"
+                                                Storyboard.TargetProperty="Color"
+                                                To="#FFFF9800"
+                                                BeginTime="0:0:0.3"
+                                                Duration="0:0:0.3"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunGlowEffect"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 To="0.7"
+                                                 BeginTime="0:0:0.3"
+                                                 Duration="0:0:0.3"/>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
                         </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Стиль для заголовка "Spectrum Analyser" -->
+    <Style x:Key="SpectrumAnalyserTitleStyle" TargetType="ContentControl">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Grid>
+                        <!-- Эффект свечения за текстом -->
+                        <TextBlock Text="{TemplateBinding Content}"
+                               FontSize="22"
+                               FontWeight="Bold"
+                               FontFamily="Segoe UI"
+                               Foreground="{DynamicResource TitleGlowBrush}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Margin="0,1,0,0">
+                            <TextBlock.Effect>
+                                <BlurEffect Radius="5"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+
+                        <!-- Основной текст с градиентом -->
+                        <TextBlock x:Name="MainText"
+                               Text="{TemplateBinding Content}"
+                               FontSize="22"
+                               FontWeight="Bold"
+                               FontFamily="Segoe UI"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center">
+                            <TextBlock.Foreground>
+                                <LinearGradientBrush x:Name="TextGradient" StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop x:Name="GradientStop1" Color="{DynamicResource TitleGradientColor1}" Offset="0"/>
+                                    <GradientStop x:Name="GradientStop2" Color="{DynamicResource TitleGradientColor2}" Offset="0.5"/>
+                                    <GradientStop x:Name="GradientStop3" Color="{DynamicResource TitleGradientColor3}" Offset="1"/>
+                                </LinearGradientBrush>
+                            </TextBlock.Foreground>
+                            <TextBlock.Effect>
+                                <DropShadowEffect ShadowDepth="1" 
+                                              BlurRadius="3" 
+                                              Opacity="0.5" 
+                                              Color="{DynamicResource TitleShadowColor}"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+
+                        <!-- Тонкая подчеркивающая линия -->
+                        <Border x:Name="Underline"
+                            Height="1" 
+                            Margin="0,28,0,0" 
+                            HorizontalAlignment="Center" 
+                            Width="0">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="{DynamicResource TitleUnderlineTransparent}" Offset="0"/>
+                                    <GradientStop Color="{DynamicResource TitleUnderlineSolid}" Offset="0.5"/>
+                                    <GradientStop Color="{DynamicResource TitleUnderlineTransparent}" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <EventTrigger RoutedEvent="ContentControl.Loaded">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <!-- Анимация градиента текста -->
+                                    <PointAnimation 
+                                    Storyboard.TargetName="TextGradient"
+                                    Storyboard.TargetProperty="StartPoint"
+                                    From="0,0" To="1,0" Duration="0:0:5" 
+                                    RepeatBehavior="Forever" 
+                                    AutoReverse="True"/>
+                                    <PointAnimation 
+                                    Storyboard.TargetName="TextGradient"
+                                    Storyboard.TargetProperty="EndPoint"
+                                    From="1,1" To="0,1" Duration="0:0:5" 
+                                    RepeatBehavior="Forever" 
+                                    AutoReverse="True"/>
+
+                                    <!-- Анимация появления линии -->
+                                    <DoubleAnimation 
+                                    Storyboard.TargetName="Underline"
+                                    Storyboard.TargetProperty="Width"
+                                    From="0" To="180" Duration="0:0:0.5"
+                                    BeginTime="0:0:0.2">
+                                        <DoubleAnimation.EasingFunction>
+                                            <CubicEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -296,7 +1048,7 @@
 
     <!-- Стиль современного слайдера -->
     <Style x:Key="ModernSliderStyle" TargetType="Slider">
-        <Setter Property="Height" Value="8"/>
+        <Setter Property="Height" Value="20"/>
         <Setter Property="Foreground" Value="{DynamicResource SliderForegroundBrush}"/>
         <Setter Property="Background" Value="{DynamicResource SliderBackgroundBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource SliderBorderBrush}"/>
@@ -305,46 +1057,565 @@
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
         <Setter Property="TickPlacement" Value="BottomRight"/>
         <Setter Property="Margin" Value="0,4,0,4"/>
+        <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Slider">
                     <Grid>
-                        <Border Background="{TemplateBinding Background}"
-                                Height="4"
-                                VerticalAlignment="Center"
-                                CornerRadius="2"/>
+                        <!-- Фоновая дорожка -->
+                        <Border x:Name="TrackBackground"
+                            Background="{TemplateBinding Background}"
+                            Height="6"
+                            VerticalAlignment="Center"
+                            CornerRadius="3"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1">
+                            <!-- Блик на дорожке -->
+                            <Border Height="3"
+                                VerticalAlignment="Top"
+                                CornerRadius="2,2,0,0"
+                                Margin="0,0,0,0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#20FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                        </Border>
+
+                        <!-- Метки делений -->
+                        <TickBar x:Name="TopTick" 
+                             Visibility="Collapsed"
+                             Fill="{DynamicResource TextSecondaryBrush}"
+                             Placement="Top"
+                             Height="4"
+                             Margin="0,-10,0,0"
+                             SnapsToDevicePixels="True"/>
+
+                        <TickBar x:Name="BottomTick"
+                             Visibility="Collapsed"
+                             Fill="{DynamicResource TextSecondaryBrush}"
+                             Placement="Bottom"
+                             Height="4"
+                             Margin="0,0,0,-10"
+                             SnapsToDevicePixels="True"/>
+
+                        <!-- Дорожка с бегунком -->
                         <Track Name="PART_Track"
-                               Minimum="{TemplateBinding Minimum}"
-                               Maximum="{TemplateBinding Maximum}"
-                               Value="{TemplateBinding Value}"
-                               IsDirectionReversed="False">
+                           Minimum="{TemplateBinding Minimum}"
+                           Maximum="{TemplateBinding Maximum}"
+                           Value="{TemplateBinding Value}"
+                           IsDirectionReversed="False">
                             <Track.DecreaseRepeatButton>
-                                <RepeatButton Style="{x:Null}"
-                                              Height="4"
-                                              VerticalAlignment="Center"
-                                              Background="{TemplateBinding Foreground}" />
+                                <RepeatButton x:Name="DecreaseButton"
+                                          Style="{x:Null}"
+                                          Height="6"
+                                          VerticalAlignment="Center"
+                                          Focusable="False"
+                                          Background="{TemplateBinding Foreground}">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border x:Name="DecreaseTrack"
+                                                Background="{TemplateBinding Background}"
+                                                CornerRadius="3,0,0,3"
+                                                Height="6">
+                                                <!-- Блик на активной части дорожки -->
+                                                <Border Height="3"
+                                                    VerticalAlignment="Top"
+                                                    CornerRadius="2,0,0,0"
+                                                    Margin="0,0,0,0">
+                                                    <Border.Background>
+                                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                            <GradientStop Color="#40FFFFFF" Offset="0"/>
+                                                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                        </LinearGradientBrush>
+                                                    </Border.Background>
+                                                </Border>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
                             </Track.DecreaseRepeatButton>
                             <Track.IncreaseRepeatButton>
-                                <RepeatButton Style="{x:Null}"
-                                              Height="4"
-                                              VerticalAlignment="Center"
-                                              Background="{TemplateBinding Background}" />
+                                <RepeatButton x:Name="IncreaseButton"
+                                          Style="{x:Null}"
+                                          Height="6"
+                                          VerticalAlignment="Center"
+                                          Focusable="False"
+                                          Background="Transparent">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent" CornerRadius="0,3,3,0"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
                             </Track.IncreaseRepeatButton>
                             <Track.Thumb>
-                                <Thumb Width="12" Height="12" Background="{TemplateBinding Foreground}">
+                                <Thumb x:Name="SliderThumb" 
+                                   Width="16" 
+                                   Height="16" 
+                                   Cursor="Hand"
+                                   Focusable="False">
                                     <Thumb.Template>
                                         <ControlTemplate TargetType="Thumb">
-                                            <Ellipse Fill="{TemplateBinding Background}" Width="12" Height="12"/>
+                                            <Grid>
+                                                <!-- Внешний круг бегунка -->
+                                                <Ellipse x:Name="ThumbBackground"
+                                                     Fill="{DynamicResource SliderForegroundBrush}" 
+                                                     Width="16" 
+                                                     Height="16"/>
+
+                                                <!-- Внутренний круг (блик) -->
+                                                <Ellipse x:Name="ThumbHighlight"
+                                                     Fill="White" 
+                                                     Opacity="0.3"
+                                                     Width="8" 
+                                                     Height="8"/>
+
+                                                <!-- Кольцо при наведении/фокусе -->
+                                                <Ellipse x:Name="FocusRing"
+                                                     Stroke="{DynamicResource FocusedBorderBrush}"
+                                                     StrokeThickness="1"
+                                                     Width="20"
+                                                     Height="20"
+                                                     Opacity="0"/>
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <!-- При наведении -->
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="18"/>
+                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="18"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="9"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="9"/>
+                                                </Trigger>
+
+                                                <!-- При нажатии -->
+                                                <Trigger Property="IsMouseCaptured" Value="True">
+                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="14"/>
+                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="14"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="7"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="7"/>
+                                                </Trigger>
+
+                                                <!-- При фокусе -->
+                                                <Trigger Property="IsFocused" Value="True">
+                                                    <Setter TargetName="FocusRing" Property="Opacity" Value="1"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+
+                        <!-- Всплывающее значение при перетаскивании -->
+                        <Popup x:Name="ValuePopup" 
+                           PlacementTarget="{Binding ElementName=SliderThumb}"
+                           Placement="Top"
+                           AllowsTransparency="True"
+                           PopupAnimation="Fade"
+                           IsOpen="False">
+                            <Border Background="{DynamicResource AccentBrush}"
+                                CornerRadius="4"
+                                Padding="6,2">
+                                <TextBlock x:Name="ValueText"
+                                       Text="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, StringFormat='{}{0:F1}'}"
+                                       Foreground="White"
+                                       FontWeight="SemiBold"
+                                       FontSize="12"
+                                       HorizontalAlignment="Center"/>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Показ делений в зависимости от настроек -->
+                        <Trigger Property="TickPlacement" Value="TopLeft">
+                            <Setter TargetName="TopTick" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="TickPlacement" Value="BottomRight">
+                            <Setter TargetName="BottomTick" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="TickPlacement" Value="Both">
+                            <Setter TargetName="TopTick" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="BottomTick" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+
+                        <!-- Показ всплывающего значения при перетаскивании -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TrackBackground" Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                        </Trigger>
+                        <EventTrigger RoutedEvent="Thumb.DragStarted" SourceName="SliderThumb">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <BooleanAnimationUsingKeyFrames Storyboard.TargetName="ValuePopup"
+                                                               Storyboard.TargetProperty="IsOpen">
+                                        <DiscreteBooleanKeyFrame KeyTime="0:0:0" Value="True"/>
+                                    </BooleanAnimationUsingKeyFrames>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                        <EventTrigger RoutedEvent="Thumb.DragCompleted" SourceName="SliderThumb">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <BooleanAnimationUsingKeyFrames Storyboard.TargetName="ValuePopup"
+                                                               Storyboard.TargetProperty="IsOpen">
+                                        <DiscreteBooleanKeyFrame KeyTime="0:0:0.5" Value="False"/>
+                                    </BooleanAnimationUsingKeyFrames>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+
+                        <!-- Стиль для отключенного состояния -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="TrackBackground" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="PART_Track" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <EventSetter Event="PreviewMouseWheel" Handler="Slider_MouseWheelScroll"/>
+    </Style>
+
+    <!-- Стиль для вертикального слайдера -->
+    <Style x:Key="VerticalModernSliderStyle" TargetType="Slider" BasedOn="{StaticResource ModernSliderStyle}">
+        <Setter Property="Orientation" Value="Vertical"/>
+        <Setter Property="Width" Value="20"/>
+        <Setter Property="Height" Value="Auto"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid>
+                        <!-- Фоновая дорожка -->
+                        <Border x:Name="TrackBackground"
+                            Background="{TemplateBinding Background}"
+                            Width="6"
+                            HorizontalAlignment="Center"
+                            CornerRadius="3"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1">
+                            <!-- Блик на дорожке -->
+                            <Border Width="3"
+                                HorizontalAlignment="Left"
+                                CornerRadius="2,0,0,2"
+                                Margin="0,0,0,0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="#20FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                        </Border>
+
+                        <!-- Метки делений -->
+                        <TickBar x:Name="LeftTick" 
+                             Visibility="Collapsed"
+                             Fill="{DynamicResource TextSecondaryBrush}"
+                             Placement="Left"
+                             Width="4"
+                             Margin="-10,0,0,0"
+                             SnapsToDevicePixels="True"/>
+
+                        <TickBar x:Name="RightTick"
+                             Visibility="Collapsed"
+                             Fill="{DynamicResource TextSecondaryBrush}"
+                             Placement="Right"
+                             Width="4"
+                             Margin="0,0,-10,0"
+                             SnapsToDevicePixels="True"/>
+
+                        <!-- Дорожка с бегунком -->
+                        <Track Name="PART_Track"
+                           Orientation="Vertical"
+                           Minimum="{TemplateBinding Minimum}"
+                           Maximum="{TemplateBinding Maximum}"
+                           Value="{TemplateBinding Value}"
+                           IsDirectionReversed="True">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton x:Name="DecreaseButton"
+                                          Style="{x:Null}"
+                                          Width="6"
+                                          HorizontalAlignment="Center"
+                                          Focusable="False"
+                                          Background="{TemplateBinding Foreground}">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border x:Name="DecreaseTrack"
+                                                Background="{TemplateBinding Background}"
+                                                CornerRadius="3,3,0,0"
+                                                Width="6">
+                                                <!-- Блик на активной части дорожки -->
+                                                <Border Width="3"
+                                                    HorizontalAlignment="Left"
+                                                    CornerRadius="2,0,0,2"
+                                                    Margin="0,0,0,0">
+                                                    <Border.Background>
+                                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                            <GradientStop Color="#40FFFFFF" Offset="0"/>
+                                                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                        </LinearGradientBrush>
+                                                    </Border.Background>
+                                                </Border>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton x:Name="IncreaseButton"
+                                          Style="{x:Null}"
+                                          Width="6"
+                                          HorizontalAlignment="Center"
+                                          Focusable="False"
+                                          Background="Transparent">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent" CornerRadius="0,0,3,3"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb x:Name="SliderThumb" 
+                                   Width="16" 
+                                   Height="16" 
+                                   Cursor="Hand"
+                                   Focusable="False">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Grid>
+                                                <!-- Внешний круг бегунка -->
+                                                <Ellipse x:Name="ThumbBackground"
+                                                     Fill="{DynamicResource SliderForegroundBrush}" 
+                                                     Width="16" 
+                                                     Height="16"/>
+
+                                                <!-- Внутренний круг (блик) -->
+                                                <Ellipse x:Name="ThumbHighlight"
+                                                     Fill="White" 
+                                                     Opacity="0.3"
+                                                     Width="8" 
+                                                     Height="8"/>
+
+                                                <!-- Кольцо при наведении/фокусе -->
+                                                <Ellipse x:Name="FocusRing"
+                                                     Stroke="{DynamicResource FocusedBorderBrush}"
+                                                     StrokeThickness="1"
+                                                     Width="20"
+                                                     Height="20"
+                                                     Opacity="0"/>
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <!-- При наведении -->
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="18"/>
+                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="18"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="9"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="9"/>
+                                                </Trigger>
+
+                                                <!-- При нажатии -->
+                                                <Trigger Property="IsMouseCaptured" Value="True">
+                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="10"/>
+                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="10"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="5"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="5"/>
+                                                </Trigger>
+
+                                                <!-- При фокусе -->
+                                                <Trigger Property="IsFocused" Value="True">
+                                                    <Setter TargetName="FocusRing" Property="Opacity" Value="1"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+
+                        <!-- Всплывающее значение при перетаскивании -->
+                        <Popup x:Name="ValuePopup" 
+                           PlacementTarget="{Binding ElementName=SliderThumb}"
+                           Placement="Left"
+                           AllowsTransparency="True"
+                           PopupAnimation="Fade"
+                           IsOpen="False">
+                            <Border Background="{DynamicResource AccentBrush}"
+                                CornerRadius="4"
+                                Padding="6,2">
+                                <TextBlock x:Name="ValueText"
+                                       Text="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, StringFormat='{}{0:F1}'}"
+                                       Foreground="White"
+                                       FontWeight="SemiBold"
+                                       FontSize="12"
+                                       HorizontalAlignment="Center"/>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Показ делений в зависимости от настроек -->
+                        <Trigger Property="TickPlacement" Value="TopLeft">
+                            <Setter TargetName="LeftTick" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="TickPlacement" Value="BottomRight">
+                            <Setter TargetName="RightTick" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="TickPlacement" Value="Both">
+                            <Setter TargetName="LeftTick" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="RightTick" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+
+                        <!-- Показ всплывающего значения при перетаскивании -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TrackBackground" Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                        </Trigger>
+                        <EventTrigger RoutedEvent="Thumb.DragStarted" SourceName="SliderThumb">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <BooleanAnimationUsingKeyFrames Storyboard.TargetName="ValuePopup"
+                                                               Storyboard.TargetProperty="IsOpen">
+                                        <DiscreteBooleanKeyFrame KeyTime="0:0:0" Value="True"/>
+                                    </BooleanAnimationUsingKeyFrames>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                        <EventTrigger RoutedEvent="Thumb.DragCompleted" SourceName="SliderThumb">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <BooleanAnimationUsingKeyFrames Storyboard.TargetName="ValuePopup"
+                                                               Storyboard.TargetProperty="IsOpen">
+                                        <DiscreteBooleanKeyFrame KeyTime="0:0:0.5" Value="False"/>
+                                    </BooleanAnimationUsingKeyFrames>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+
+                        <!-- Стиль для отключенного состояния -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="TrackBackground" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="PART_Track" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Компактный стиль слайдера -->
+    <Style x:Key="CompactSliderStyle" TargetType="Slider" BasedOn="{StaticResource ModernSliderStyle}">
+        <Setter Property="Height" Value="16"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid>
+                        <!-- Фоновая дорожка -->
+                        <Border x:Name="TrackBackground"
+                            Background="{TemplateBinding Background}"
+                            Height="4"
+                            VerticalAlignment="Center"
+                            CornerRadius="2"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1"/>
+
+                        <!-- Дорожка с бегунком -->
+                        <Track Name="PART_Track"
+                           Minimum="{TemplateBinding Minimum}"
+                           Maximum="{TemplateBinding Maximum}"
+                           Value="{TemplateBinding Value}"
+                           IsDirectionReversed="False">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton x:Name="DecreaseButton"
+                                          Style="{x:Null}"
+                                          Height="4"
+                                          VerticalAlignment="Center"
+                                          Focusable="False"
+                                          Background="{TemplateBinding Foreground}">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border x:Name="DecreaseTrack"
+                                                Background="{TemplateBinding Background}"
+                                                CornerRadius="2,0,0,2"
+                                                Height="4"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton x:Name="IncreaseButton"
+                                          Style="{x:Null}"
+                                          Height="4"
+                                          VerticalAlignment="Center"
+                                          Focusable="False"
+                                          Background="Transparent">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent" CornerRadius="0,2,2,0"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb x:Name="SliderThumb" 
+                                   Width="12" 
+                                   Height="12" 
+                                   Cursor="Hand"
+                                   Focusable="False">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Grid>
+                                                <!-- Внешний круг бегунка -->
+                                                <Ellipse x:Name="ThumbBackground"
+                                                     Fill="{DynamicResource SliderForegroundBrush}" 
+                                                     Width="12" 
+                                                     Height="12"/>
+
+                                                <!-- Внутренний круг (блик) -->
+                                                <Ellipse x:Name="ThumbHighlight"
+                                                     Fill="White" 
+                                                     Opacity="0.3"
+                                                     Width="6" 
+                                                     Height="6"/>
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <!-- При наведении -->
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="14"/>
+                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="14"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="7"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="7"/>
+                                                </Trigger>
+
+                                                <!-- При нажатии -->
+                                                <Trigger Property="IsMouseCaptured" Value="True">
+                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="10"/>
+                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="10"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="5"/>
+                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="5"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Thumb.Template>
                                 </Thumb>
                             </Track.Thumb>
                         </Track>
                     </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Показ всплывающего значения при перетаскивании -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TrackBackground" Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                        </Trigger>
+
+                        <!-- Стиль для отключенного состояния -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="TrackBackground" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="PART_Track" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
-        <EventSetter Event="PreviewMouseWheel" Handler="Slider_MouseWheelScroll"/>
     </Style>
 
     <!-- Стиль современного комбобокса -->
@@ -357,16 +1628,17 @@
         <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource ComboBoxForegroundBrush}"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">
                     <Grid>
                         <ToggleButton x:Name="ToggleButton"
-                                      BorderBrush="{TemplateBinding BorderBrush}"
-                                      BorderThickness="{TemplateBinding BorderThickness}"
-                                      Background="{TemplateBinding Background}"
-                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
-                                      ClickMode="Press">
+                                  BorderBrush="{TemplateBinding BorderBrush}"
+                                  BorderThickness="{TemplateBinding BorderThickness}"
+                                  Background="{TemplateBinding Background}"
+                                  IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                  ClickMode="Press">
                             <ToggleButton.Template>
                                 <ControlTemplate TargetType="ToggleButton">
                                     <Grid>
@@ -375,39 +1647,75 @@
                                             <ColumnDefinition Width="20"/>
                                         </Grid.ColumnDefinitions>
                                         <Border x:Name="ToggleBorder"
-                                                Background="{TemplateBinding Background}"
-                                                BorderBrush="{TemplateBinding BorderBrush}"
-                                                BorderThickness="{TemplateBinding BorderThickness}"
-                                                CornerRadius="6"/>
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="6"/>
+
+                                        <!-- Блик на верхней части комбобокса -->
+                                        <Border x:Name="HighlightBorder"
+                                           Grid.ColumnSpan="2"
+                                           CornerRadius="5,5,0,0"
+                                           Height="12"
+                                           VerticalAlignment="Top">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                    <GradientStop Color="#30FFFFFF" Offset="0"/>
+                                                    <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+
                                         <ContentPresenter HorizontalAlignment="Center" 
-                                                          VerticalAlignment="Center" Margin="2"/>
-                                        <Path x:Name="Arrow"
-                                              Grid.Column="1"
+                                                      VerticalAlignment="Center" 
+                                                      Margin="2"/>
+
+                                        <!-- Иконка стрелки с анимацией -->
+                                        <Border x:Name="ArrowBorder"
+                                           Grid.Column="1"
+                                           Width="20"
+                                           Height="20"
+                                           Background="Transparent"
+                                           CornerRadius="10"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center">
+                                            <Path x:Name="Arrow"
                                               Fill="{TemplateBinding Foreground}"
                                               HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
                                               Data="M 0 0 L 6 6 L 12 0 Z"
                                               RenderTransformOrigin="0.5,0.5">
-                                            <Path.RenderTransform>
-                                                <RotateTransform x:Name="ArrowRotation" Angle="0"/>
-                                            </Path.RenderTransform>
-                                        </Path>
+                                                <Path.RenderTransform>
+                                                    <RotateTransform x:Name="ArrowRotation" Angle="0"/>
+                                                </Path.RenderTransform>
+                                            </Path>
+                                        </Border>
                                     </Grid>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
                                             <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                                            <Setter TargetName="ArrowBorder" Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
+                                            <Setter TargetName="Arrow" Property="RenderTransform">
+                                                <Setter.Value>
+                                                    <TransformGroup>
+                                                        <RotateTransform Angle="{Binding Angle, ElementName=ArrowRotation}"/>
+                                                        <ScaleTransform ScaleX="1.2" ScaleY="1.2"/>
+                                                    </TransformGroup>
+                                                </Setter.Value>
+                                            </Setter>
                                         </Trigger>
                                         <Trigger Property="IsChecked" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>
                                             <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxPressedBorderBrush}"/>
+                                            <Setter TargetName="ArrowBorder" Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>
                                             <Trigger.EnterActions>
                                                 <BeginStoryboard>
                                                     <Storyboard>
                                                         <DoubleAnimation Storyboard.TargetName="ArrowRotation"
-                                                                           Storyboard.TargetProperty="Angle"
-                                                                           To="180"
-                                                                           Duration="0:0:0.2">
+                                                                       Storyboard.TargetProperty="Angle"
+                                                                       To="180"
+                                                                       Duration="0:0:0.2">
                                                             <DoubleAnimation.EasingFunction>
                                                                 <QuadraticEase EasingMode="EaseInOut"/>
                                                             </DoubleAnimation.EasingFunction>
@@ -419,9 +1727,9 @@
                                                 <BeginStoryboard>
                                                     <Storyboard>
                                                         <DoubleAnimation Storyboard.TargetName="ArrowRotation"
-                                                                           Storyboard.TargetProperty="Angle"
-                                                                           To="0"
-                                                                           Duration="0:0:0.2">
+                                                                       Storyboard.TargetProperty="Angle"
+                                                                       To="0"
+                                                                       Duration="0:0:0.2">
                                                             <DoubleAnimation.EasingFunction>
                                                                 <QuadraticEase EasingMode="EaseInOut"/>
                                                             </DoubleAnimation.EasingFunction>
@@ -434,12 +1742,610 @@
                                             <Setter Property="Foreground" Value="{DynamicResource ComboBoxDisabledForegroundBrush}"/>
                                             <Setter Property="Background" Value="{DynamicResource ComboBoxDisabledBackgroundBrush}"/>
                                             <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxDisabledBorderBrush}"/>
+                                            <Setter TargetName="HighlightBorder" Property="Opacity" Value="0.3"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </ToggleButton.Template>
                         </ToggleButton>
+
+                        <!-- Текст выбранного элемента -->
                         <ContentPresenter x:Name="ContentSite"
+                                      IsHitTestVisible="False"
+                                      Content="{TemplateBinding SelectionBoxItem}"
+                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                      ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                      Margin="12,0,0,0"
+                                      VerticalAlignment="Center"
+                                      HorizontalAlignment="Left"/>
+
+                        <!-- Текстовое поле для редактируемого комбобокса -->
+                        <TextBox x:Name="PART_EditableTextBox"
+                             Style="{x:Null}"
+                             HorizontalAlignment="Left"
+                             VerticalAlignment="Center"
+                             Margin="4,4,24,4"
+                             Focusable="True"
+                             Background="Transparent"
+                             Visibility="Hidden"
+                             IsReadOnly="{TemplateBinding IsReadOnly}"/>
+
+                        <!-- Выпадающий список -->
+                        <Popup x:Name="Popup"
+                           Placement="Bottom"
+                           IsOpen="{TemplateBinding IsDropDownOpen}"
+                           AllowsTransparency="True"
+                           Focusable="False"
+                           PopupAnimation="Slide">
+                            <Grid x:Name="DropDown"
+                              SnapsToDevicePixels="True"
+                              MinWidth="{TemplateBinding ActualWidth}"
+                              MaxHeight="{TemplateBinding MaxDropDownHeight}">
+
+                                <!-- Рамка выпадающего списка -->
+                                <Border x:Name="DropDownBorder"
+                                    Background="{DynamicResource ComboBoxPopupBackgroundBrush}"
+                                    BorderBrush="{DynamicResource ComboBoxPopupBorderBrush}"
+                                    BorderThickness="1.5"
+                                    CornerRadius="6"
+                                    Margin="0,4,0,0">
+
+                                    <!-- Декоративная стрелка вверху выпадающего списка -->
+                                    <Border.Resources>
+                                        <Style x:Key="DropdownArrowStyle" TargetType="Path">
+                                            <Setter Property="Data" Value="M 0 10 L 10 0 L 20 10 Z"/>
+                                            <Setter Property="Fill" Value="{Binding Background, ElementName=DropDownBorder}"/>
+                                            <Setter Property="Stroke" Value="{Binding BorderBrush, ElementName=DropDownBorder}"/>
+                                            <Setter Property="StrokeThickness" Value="1.5"/>
+                                            <Setter Property="Width" Value="20"/>
+                                            <Setter Property="Height" Value="10"/>
+                                            <Setter Property="Margin" Value="0,-10,0,0"/>
+                                            <Setter Property="HorizontalAlignment" Value="Left"/>
+                                            <Setter Property="VerticalAlignment" Value="Top"/>
+                                            <Setter Property="Canvas.Left" Value="20"/>
+                                        </Style>
+                                    </Border.Resources>
+
+                                    <Grid>
+                                        <!-- Стрелка выпадающего списка -->
+                                        <Canvas Height="10" VerticalAlignment="Top">
+                                            <Path Style="{StaticResource DropdownArrowStyle}"/>
+                                        </Canvas>
+
+                                        <!-- Контент выпадающего списка -->
+                                        <ScrollViewer Margin="4,6,4,6" SnapsToDevicePixels="True">
+                                            <StackPanel IsItemsHost="True" 
+                                                    KeyboardNavigation.DirectionalNavigation="Contained"
+                                                    Background="Transparent">
+                                                <StackPanel.Resources>
+                                                    <Style TargetType="ComboBoxItem">
+                                                        <Setter Property="Padding" Value="8,6"/>
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="ComboBoxItem">
+                                                                    <Border x:Name="ItemBorder"
+                                                                        Background="Transparent"
+                                                                        BorderThickness="0"
+                                                                        CornerRadius="4"
+                                                                        Padding="{TemplateBinding Padding}">
+                                                                        <!-- Контент элемента списка -->
+                                                                        <Grid>
+                                                                            <ContentPresenter x:Name="ItemContent"/>
+
+                                                                            <!-- Индикатор выбранного элемента (полоска слева) -->
+                                                                            <Border x:Name="SelectionIndicator"
+                                                                                Width="3"
+                                                                                HorizontalAlignment="Left"
+                                                                                Margin="-8,0,0,0"
+                                                                                Background="{DynamicResource AccentBrush}"
+                                                                                Opacity="0"/>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <!-- При наведении -->
+                                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                            <Setter TargetName="ItemBorder" Property="Background" 
+                                                                                Value="{DynamicResource ComboBoxItemHoverBackgroundBrush}"/>
+                                                                            <Setter TargetName="ItemContent" Property="RenderTransform">
+                                                                                <Setter.Value>
+                                                                                    <TranslateTransform X="2"/>
+                                                                                </Setter.Value>
+                                                                            </Setter>
+                                                                        </Trigger>
+
+                                                                        <!-- При выборе элемента -->
+                                                                        <Trigger Property="IsSelected" Value="True">
+                                                                            <Setter TargetName="ItemBorder" Property="Background" 
+                                                                                Value="{DynamicResource ComboBoxItemSelectedBackgroundBrush}"/>
+                                                                            <Setter TargetName="SelectionIndicator" Property="Opacity" Value="1"/>
+                                                                            <Setter TargetName="ItemContent" Property="RenderTransform">
+                                                                                <Setter.Value>
+                                                                                    <TranslateTransform X="2"/>
+                                                                                </Setter.Value>
+                                                                            </Setter>
+                                                                        </Trigger>
+
+                                                                        <!-- При нажатии -->
+                                                                        <MultiTrigger>
+                                                                            <MultiTrigger.Conditions>
+                                                                                <Condition Property="IsMouseOver" Value="True"/>
+                                                                            </MultiTrigger.Conditions>
+                                                                            <Setter TargetName="ItemBorder" Property="Background" 
+                                                                                    Value="{DynamicResource ButtonPressedBrush}"/>
+                                                                        </MultiTrigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Style>
+                                                </StackPanel.Resources>
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Для редактируемых комбобоксов -->
+                        <Trigger Property="IsEditable" Value="True">
+                            <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="ContentSite" Property="Visibility" Value="Hidden"/>
+                        </Trigger>
+
+                        <!-- При открытом выпадающем списке -->
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="ToggleButton" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform Y="-1"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- При наведении -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                            <Setter TargetName="ContentSite" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform X="2" Y="0"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- При фокусе -->
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource FocusedBorderBrush}"/>
+                            <Setter TargetName="ToggleButton" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+
+                        <!-- В отключенном состоянии -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ToggleButton" Property="Opacity" Value="0.6"/>
+                            <Setter TargetName="ContentSite" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Компактный стиль комбобокса -->
+    <Style x:Key="CompactComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource ModernComboBoxStyle}">
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Height" Value="30"/>
+    </Style>
+
+    <!-- Стиль комбобокса с иконкой -->
+    <Style x:Key="IconComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource ModernComboBoxStyle}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <ToggleButton x:Name="ToggleButton"
+                                  BorderBrush="{TemplateBinding BorderBrush}"
+                                  BorderThickness="{TemplateBinding BorderThickness}"
+                                  Background="{TemplateBinding Background}"
+                                  IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                  ClickMode="Press">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="20"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Основной фон -->
+                                        <Border x:Name="ToggleBorder"
+                                            Grid.ColumnSpan="3"
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="6"/>
+
+                                        <!-- Блик на верхней части комбобокса -->
+                                        <Border x:Name="HighlightBorder"
+                                           Grid.ColumnSpan="3"
+                                           CornerRadius="5,5,0,0"
+                                           Height="12"
+                                           VerticalAlignment="Top">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                    <GradientStop Color="#30FFFFFF" Offset="0"/>
+                                                    <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+
+                                        <!-- Место для иконки -->
+                                        <Border x:Name="IconContainer"
+                                            Grid.Column="0"
+                                            Width="36"
+                                            Height="36"
+                                            Background="Transparent"
+                                            CornerRadius="4"
+                                            Margin="4,0,0,0"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+                                            <ContentPresenter x:Name="IconPresenter"
+                                                         Content="{Binding Tag, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"/>
+                                        </Border>
+
+                                        <!-- Контент -->
+                                        <ContentPresenter Grid.Column="1"
+                                                     HorizontalAlignment="Left" 
+                                                     VerticalAlignment="Center" 
+                                                     Margin="8,0,0,0"/>
+
+                                        <!-- Иконка стрелки с анимацией -->
+                                        <Border x:Name="ArrowBorder"
+                                           Grid.Column="2"
+                                           Width="20"
+                                           Height="20"
+                                           Background="Transparent"
+                                           CornerRadius="10"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center">
+                                            <Path x:Name="Arrow"
+                                              Fill="{TemplateBinding Foreground}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Data="M 0 0 L 6 6 L 12 0 Z"
+                                              RenderTransformOrigin="0.5,0.5">
+                                                <Path.RenderTransform>
+                                                    <RotateTransform x:Name="ArrowRotation" Angle="0"/>
+                                                </Path.RenderTransform>
+                                            </Path>
+                                        </Border>
+                                    </Grid>
+                                    <ControlTemplate.Triggers>
+                                        <!-- Триггеры такие же, как в основном стиле -->
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                                            <Setter TargetName="ArrowBorder" Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
+                                            <Setter TargetName="Arrow" Property="RenderTransform">
+                                                <Setter.Value>
+                                                    <TransformGroup>
+                                                        <RotateTransform Angle="{Binding Angle, ElementName=ArrowRotation}"/>
+                                                        <ScaleTransform ScaleX="1.2" ScaleY="1.2"/>
+                                                    </TransformGroup>
+                                                </Setter.Value>
+                                            </Setter>
+                                            <Setter TargetName="IconContainer" Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
+                                            <Setter TargetName="IconPresenter" Property="RenderTransform">
+                                                <Setter.Value>
+                                                    <ScaleTransform ScaleX="1.1" ScaleY="1.1"/>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Trigger>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxPressedBorderBrush}"/>
+                                            <Setter TargetName="ArrowBorder" Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>
+                                            <Setter TargetName="IconContainer" Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>
+                                            <Trigger.EnterActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetName="ArrowRotation"
+                                                                       Storyboard.TargetProperty="Angle"
+                                                                       To="180"
+                                                                       Duration="0:0:0.2">
+                                                            <DoubleAnimation.EasingFunction>
+                                                                <QuadraticEase EasingMode="EaseInOut"/>
+                                                            </DoubleAnimation.EasingFunction>
+                                                        </DoubleAnimation>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </Trigger.EnterActions>
+                                            <Trigger.ExitActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetName="ArrowRotation"
+                                                                       Storyboard.TargetProperty="Angle"
+                                                                       To="0"
+                                                                       Duration="0:0:0.2">
+                                                            <DoubleAnimation.EasingFunction>
+                                                                <QuadraticEase EasingMode="EaseInOut"/>
+                                                            </DoubleAnimation.EasingFunction>
+                                                        </DoubleAnimation>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </Trigger.ExitActions>
+                                        </Trigger>
+                                        <Trigger Property="IsEnabled" Value="False">
+                                            <Setter Property="Foreground" Value="{DynamicResource ComboBoxDisabledForegroundBrush}"/>
+                                            <Setter Property="Background" Value="{DynamicResource ComboBoxDisabledBackgroundBrush}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxDisabledBorderBrush}"/>
+                                            <Setter TargetName="HighlightBorder" Property="Opacity" Value="0.3"/>
+                                            <Setter TargetName="IconPresenter" Property="Opacity" Value="0.4"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+
+                        <!-- Текст выбранного элемента -->
+                        <ContentPresenter x:Name="ContentSite"
+                                      IsHitTestVisible="False"
+                                      Content="{TemplateBinding SelectionBoxItem}"
+                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                      ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                      Margin="48,0,0,0"
+                                      VerticalAlignment="Center"
+                                      HorizontalAlignment="Left"/>
+
+                        <!-- Текстовое поле для редактируемого комбобокса -->
+                        <TextBox x:Name="PART_EditableTextBox"
+                             Style="{x:Null}"
+                             HorizontalAlignment="Left"
+                             VerticalAlignment="Center"
+                             Margin="48,4,24,4"
+                             Focusable="True"
+                             Background="Transparent"
+                             Visibility="Hidden"
+                             IsReadOnly="{TemplateBinding IsReadOnly}"/>
+
+                        <!-- Выпадающий список (такой же как в основном стиле) -->
+                        <Popup x:Name="Popup"
+                           Placement="Bottom"
+                           IsOpen="{TemplateBinding IsDropDownOpen}"
+                           AllowsTransparency="True"
+                           Focusable="False"
+                           PopupAnimation="Slide">
+                            <Grid x:Name="DropDown"
+                              SnapsToDevicePixels="True"
+                              MinWidth="{TemplateBinding ActualWidth}"
+                              MaxHeight="{TemplateBinding MaxDropDownHeight}">
+
+                                <!-- Рамка выпадающего списка -->
+                                <Border x:Name="DropDownBorder"
+                                    Background="{DynamicResource ComboBoxPopupBackgroundBrush}"
+                                    BorderBrush="{DynamicResource ComboBoxPopupBorderBrush}"
+                                    BorderThickness="1.5"
+                                    CornerRadius="6"
+                                    Margin="0,4,0,0">
+
+                                    <!-- Декоративная стрелка вверху выпадающего списка -->
+                                    <Border.Resources>
+                                        <Style x:Key="DropdownArrowStyle" TargetType="Path">
+                                            <Setter Property="Data" Value="M 0 10 L 10 0 L 20 10 Z"/>
+                                            <Setter Property="Fill" Value="{Binding Background, ElementName=DropDownBorder}"/>
+                                            <Setter Property="Stroke" Value="{Binding BorderBrush, ElementName=DropDownBorder}"/>
+                                            <Setter Property="StrokeThickness" Value="1.5"/>
+                                            <Setter Property="Width" Value="20"/>
+                                            <Setter Property="Height" Value="10"/>
+                                            <Setter Property="Margin" Value="0,-10,0,0"/>
+                                            <Setter Property="HorizontalAlignment" Value="Left"/>
+                                            <Setter Property="VerticalAlignment" Value="Top"/>
+                                            <Setter Property="Canvas.Left" Value="20"/>
+                                        </Style>
+                                    </Border.Resources>
+
+                                    <Grid>
+                                        <!-- Стрелка выпадающего списка -->
+                                        <Canvas Height="10" VerticalAlignment="Top">
+                                            <Path Style="{StaticResource DropdownArrowStyle}"/>
+                                        </Canvas>
+
+                                        <!-- Контент выпадающего списка -->
+                                        <ScrollViewer Margin="4,6,4,6" SnapsToDevicePixels="True">
+                                            <StackPanel IsItemsHost="True" 
+                                                    KeyboardNavigation.DirectionalNavigation="Contained"
+                                                    Background="Transparent"/>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Для редактируемых комбобоксов -->
+                        <Trigger Property="IsEditable" Value="True">
+                            <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="ContentSite" Property="Visibility" Value="Hidden"/>
+                        </Trigger>
+
+                        <!-- При открытом выпадающем списке -->
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="ToggleButton" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform Y="-1"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- При наведении -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                            <Setter TargetName="ContentSite" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform X="2" Y="0"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+
+                        <!-- При фокусе -->
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource FocusedBorderBrush}"/>
+                            <Setter TargetName="ToggleButton" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+
+                        <!-- В отключенном состоянии -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ToggleButton" Property="Opacity" Value="0.6"/>
+                            <Setter TargetName="ContentSite" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Стиль комбобокса с подписью сверху -->
+    <Style x:Key="LabeledComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource ModernComboBoxStyle}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Подпись сверху (используем Tag для хранения текста заголовка) -->
+                        <TextBlock x:Name="HeaderLabel"
+                                           Grid.Row="0"
+                                           Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           FontSize="12"
+                                           Margin="4,0,0,4"/>
+
+                        <!-- Сам комбобокс (используем тот же шаблон, что и в основном стиле) -->
+                        <Grid Grid.Row="1">
+                            <ToggleButton x:Name="ToggleButton"
+                                      BorderBrush="{TemplateBinding BorderBrush}"
+                                      BorderThickness="{TemplateBinding BorderThickness}"
+                                      Background="{TemplateBinding Background}"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                      ClickMode="Press">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="20"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border x:Name="ToggleBorder"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="6"/>
+
+                                            <!-- Блик на верхней части комбобокса -->
+                                            <Border x:Name="HighlightBorder"
+                                               Grid.ColumnSpan="2"
+                                               CornerRadius="5,5,0,0"
+                                               Height="12"
+                                               VerticalAlignment="Top">
+                                                <Border.Background>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                        <GradientStop Color="#30FFFFFF" Offset="0"/>
+                                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Border.Background>
+                                            </Border>
+
+                                            <ContentPresenter HorizontalAlignment="Center" 
+                                                          VerticalAlignment="Center" 
+                                                          Margin="2"/>
+
+                                            <!-- Иконка стрелки с анимацией -->
+                                            <Border x:Name="ArrowBorder"
+                                               Grid.Column="1"
+                                               Width="20"
+                                               Height="20"
+                                               Background="Transparent"
+                                               CornerRadius="10"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center">
+                                                <Path x:Name="Arrow"
+                                                  Fill="{TemplateBinding Foreground}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Data="M 0 0 L 6 6 L 12 0 Z"
+                                                  RenderTransformOrigin="0.5,0.5">
+                                                    <Path.RenderTransform>
+                                                        <RotateTransform x:Name="ArrowRotation" Angle="0"/>
+                                                    </Path.RenderTransform>
+                                                </Path>
+                                            </Border>
+                                        </Grid>
+                                        <ControlTemplate.Triggers>
+                                            <!-- Те же триггеры, что и в основном стиле -->
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
+                                                <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                                                <Setter TargetName="ArrowBorder" Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
+                                                <Setter TargetName="Arrow" Property="RenderTransform">
+                                                    <Setter.Value>
+                                                        <TransformGroup>
+                                                            <RotateTransform Angle="{Binding Angle, ElementName=ArrowRotation}"/>
+                                                            <ScaleTransform ScaleX="1.2" ScaleY="1.2"/>
+                                                        </TransformGroup>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>
+                                                <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxPressedBorderBrush}"/>
+                                                <Setter TargetName="ArrowBorder" Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>
+                                                <Trigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetName="ArrowRotation"
+                                                                           Storyboard.TargetProperty="Angle"
+                                                                           To="180"
+                                                                           Duration="0:0:0.2">
+                                                                <DoubleAnimation.EasingFunction>
+                                                                    <QuadraticEase EasingMode="EaseInOut"/>
+                                                                </DoubleAnimation.EasingFunction>
+                                                            </DoubleAnimation>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.EnterActions>
+                                                <Trigger.ExitActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetName="ArrowRotation"
+                                                                           Storyboard.TargetProperty="Angle"
+                                                                           To="0"
+                                                                           Duration="0:0:0.2">
+                                                                <DoubleAnimation.EasingFunction>
+                                                                    <QuadraticEase EasingMode="EaseInOut"/>
+                                                                </DoubleAnimation.EasingFunction>
+                                                            </DoubleAnimation>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.ExitActions>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False">
+                                                <Setter Property="Foreground" Value="{DynamicResource ComboBoxDisabledForegroundBrush}"/>
+                                                <Setter Property="Background" Value="{DynamicResource ComboBoxDisabledBackgroundBrush}"/>
+                                                <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxDisabledBorderBrush}"/>
+                                                <Setter TargetName="HighlightBorder" Property="Opacity" Value="0.3"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+
+                            <!-- Текст выбранного элемента -->
+                            <ContentPresenter x:Name="ContentSite"
                                           IsHitTestVisible="False"
                                           Content="{TemplateBinding SelectionBoxItem}"
                                           ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
@@ -447,7 +2353,9 @@
                                           Margin="12,0,0,0"
                                           VerticalAlignment="Center"
                                           HorizontalAlignment="Left"/>
-                        <TextBox x:Name="PART_EditableTextBox"
+
+                            <!-- Текстовое поле для редактируемого комбобокса -->
+                            <TextBox x:Name="PART_EditableTextBox"
                                  Style="{x:Null}"
                                  HorizontalAlignment="Left"
                                  VerticalAlignment="Center"
@@ -456,71 +2364,106 @@
                                  Background="Transparent"
                                  Visibility="Hidden"
                                  IsReadOnly="{TemplateBinding IsReadOnly}"/>
-                        <Popup x:Name="Popup"
+
+                            <!-- Выпадающий список -->
+                            <Popup x:Name="Popup"
                                Placement="Bottom"
                                IsOpen="{TemplateBinding IsDropDownOpen}"
                                AllowsTransparency="True"
                                Focusable="False"
                                PopupAnimation="Slide">
-                            <Grid x:Name="DropDown"
+                                <Grid x:Name="DropDown"
                                   SnapsToDevicePixels="True"
                                   MinWidth="{TemplateBinding ActualWidth}"
                                   MaxHeight="{TemplateBinding MaxDropDownHeight}">
-                                <Border x:Name="DropDownBorder"
+
+                                    <!-- Рамка выпадающего списка -->
+                                    <Border x:Name="DropDownBorder"
                                         Background="{DynamicResource ComboBoxPopupBackgroundBrush}"
                                         BorderBrush="{DynamicResource ComboBoxPopupBorderBrush}"
                                         BorderThickness="1.5"
-                                        CornerRadius="6"/>
-                                <ScrollViewer Margin="4,2" SnapsToDevicePixels="True">
-                                    <StackPanel IsItemsHost="True" 
-                                                KeyboardNavigation.DirectionalNavigation="Contained"
-                                                Background="Transparent">
-                                        <StackPanel.Resources>
-                                            <Style TargetType="ComboBoxItem">
-                                                <Setter Property="Padding" Value="8,6"/>
-                                                <Setter Property="Template">
-                                                    <Setter.Value>
-                                                        <ControlTemplate TargetType="ComboBoxItem">
-                                                            <Border x:Name="ItemBorder"
-                                                                    Background="Transparent"
-                                                                    BorderThickness="0"
-                                                                    CornerRadius="4"
-                                                                    Padding="{TemplateBinding Padding}">
-                                                                <ContentPresenter/>
-                                                            </Border>
-                                                            <ControlTemplate.Triggers>
-                                                                <Trigger Property="IsMouseOver" Value="True">
-                                                                    <Setter TargetName="ItemBorder" Property="Background" 
-                                                                            Value="{DynamicResource ComboBoxItemHoverBackgroundBrush}"/>
-                                                                </Trigger>
-                                                                <Trigger Property="IsSelected" Value="True">
-                                                                    <Setter TargetName="ItemBorder" Property="Background" 
-                                                                            Value="{DynamicResource ComboBoxItemSelectedBackgroundBrush}"/>
-                                                                </Trigger>
-                                                            </ControlTemplate.Triggers>
-                                                        </ControlTemplate>
-                                                    </Setter.Value>
-                                                </Setter>
+                                        CornerRadius="6"
+                                        Margin="0,4,0,0">
+
+                                        <!-- Декоративная стрелка вверху выпадающего списка -->
+                                        <Border.Resources>
+                                            <Style x:Key="DropdownArrowStyle" TargetType="Path">
+                                                <Setter Property="Data" Value="M 0 10 L 10 0 L 20 10 Z"/>
+                                                <Setter Property="Fill" Value="{Binding Background, ElementName=DropDownBorder}"/>
+                                                <Setter Property="Stroke" Value="{Binding BorderBrush, ElementName=DropDownBorder}"/>
+                                                <Setter Property="StrokeThickness" Value="1.5"/>
+                                                <Setter Property="Width" Value="20"/>
+                                                <Setter Property="Height" Value="10"/>
+                                                <Setter Property="Margin" Value="0,-10,0,0"/>
+                                                <Setter Property="HorizontalAlignment" Value="Left"/>
+                                                <Setter Property="VerticalAlignment" Value="Top"/>
+                                                <Setter Property="Canvas.Left" Value="20"/>
                                             </Style>
-                                        </StackPanel.Resources>
-                                    </StackPanel>
-                                </ScrollViewer>
-                            </Grid>
-                        </Popup>
+                                        </Border.Resources>
+
+                                        <Grid>
+                                            <!-- Стрелка выпадающего списка -->
+                                            <Canvas Height="10" VerticalAlignment="Top">
+                                                <Path Style="{StaticResource DropdownArrowStyle}"/>
+                                            </Canvas>
+
+                                            <!-- Контент выпадающего списка -->
+                                            <ScrollViewer Margin="4,6,4,6" SnapsToDevicePixels="True">
+                                                <StackPanel IsItemsHost="True" 
+                                                        KeyboardNavigation.DirectionalNavigation="Contained"
+                                                        Background="Transparent"/>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
                     </Grid>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="HasItems" Value="False">
-                            <Setter TargetName="DropDownBorder" Property="MinHeight" Value="95"/>
+                        <!-- Когда нет Header -->
+                        <Trigger Property="Tag" Value="{x:Null}">
+                            <Setter TargetName="HeaderLabel" Property="Visibility" Value="Collapsed"/>
                         </Trigger>
+
+                        <!-- Для редактируемых комбобоксов -->
+                        <Trigger Property="IsEditable" Value="True">
+                            <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="ContentSite" Property="Visibility" Value="Hidden"/>
+                        </Trigger>
+
+                        <!-- При открытом выпадающем списке -->
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="ToggleButton" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform Y="-1"/>
+                                </Setter.Value>
+                            </Setter>
+                            <Setter TargetName="HeaderLabel" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+
+                        <!-- При наведении -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                            <Setter TargetName="ContentSite" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform X="2" Y="0"/>
+                                </Setter.Value>
+                            </Setter>
+                            <Setter TargetName="HeaderLabel" Property="Foreground" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                        </Trigger>
+
+                        <!-- При фокусе -->
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource FocusedBorderBrush}"/>
+                            <Setter TargetName="ToggleButton" Property="BorderThickness" Value="2"/>
+                            <Setter TargetName="HeaderLabel" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+
+                        <!-- В отключенном состоянии -->
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{DynamicResource ComboBoxDisabledForegroundBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsGrouping" Value="True">
-                            <Setter Property="ScrollViewer.CanContentScroll" Value="False"/>
-                        </Trigger>
-                        <Trigger SourceName="Popup" Property="AllowsTransparency" Value="True">
-                            <Setter TargetName="DropDownBorder" Property="CornerRadius" Value="6"/>
-                            <Setter TargetName="DropDownBorder" Property="Margin" Value="0,2,0,0"/>
+                            <Setter TargetName="ToggleButton" Property="Opacity" Value="0.6"/>
+                            <Setter TargetName="ContentSite" Property="Opacity" Value="0.6"/>
+                            <Setter TargetName="HeaderLabel" Property="Opacity" Value="0.6"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

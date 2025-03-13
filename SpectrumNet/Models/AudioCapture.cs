@@ -1,7 +1,7 @@
 ﻿#nullable enable
 namespace SpectrumNet
 {
-    public sealed class AudioCaptureManager : IDisposable
+    public sealed class AudioCapture : IDisposable
     {
         private const string LogPrefix = "AudioCaptureManager";
 
@@ -22,36 +22,31 @@ namespace SpectrumNet
         private record CaptureState(
             SpectrumAnalyzer Analyzer,
             WasapiLoopbackCapture Capture,
-            CancellationTokenSource CTS);
+            CancellationTokenSource CTS
+        );
 
-        public AudioCaptureManager(IAudioVisualizationController controller)
+        public AudioCapture(IAudioVisualizationController controller)
         {
             _controller = controller ?? throw new ArgumentNullException(nameof(controller));
-            _deviceEnumerator = new MMDeviceEnumerator() ??
-                throw new InvalidOperationException("Failed to create MMDeviceEnumerator");
+            _deviceEnumerator = new MMDeviceEnumerator() ?? throw new InvalidOperationException("Failed to create MMDeviceEnumerator");
             _notificationHandler = new AudioEndpointNotificationHandler(OnDeviceChanged);
             RegisterDeviceNotifications();
         }
 
         private void RegisterDeviceNotifications() => SmartLogger.Safe(
-            () =>
-            {
+            () => {
                 _deviceEnumerator.RegisterEndpointNotificationCallback(_notificationHandler);
-                SmartLogger.Log(
-                    LogLevel.Information,
-                    LogPrefix,
-                    "Audio device notification handler registered successfully",
-                    forceLog: true);
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Audio device notification handler registered successfully", forceLog: true);
             },
             new SmartLogger.ErrorHandlingOptions
             {
                 Source = LogPrefix,
                 ErrorMessage = "Failed to register endpoint notification callback"
-            });
+            }
+        );
 
         private void OnDeviceChanged() => SmartLogger.Safe(
-            () =>
-            {
+            () => {
                 lock (_lock)
                 {
                     if (_isDisposed || _isReinitializing || _controller.IsTransitioning)
@@ -60,10 +55,7 @@ namespace SpectrumNet
                     var device = GetDefaultAudioDevice();
                     if (device == null)
                     {
-                        SmartLogger.Log(
-                            LogLevel.Warning,
-                            LogPrefix,
-                            "No default audio device available");
+                        SmartLogger.Log(LogLevel.Warning, LogPrefix, "No default audio device available");
 
                         if (_state != null && IsRecording)
                         {
@@ -73,21 +65,18 @@ namespace SpectrumNet
                                 {
                                     Source = LogPrefix,
                                     ErrorMessage = "Error stopping capture during device change"
-                                });
+                                }
+                            );
                         }
                         return;
                     }
 
                     if (device.ID != _lastDeviceId)
                     {
-                        SmartLogger.Log(
-                            LogLevel.Information,
-                            LogPrefix,
-                            $"Audio device changed from '{_lastDeviceId}' to '{device.ID}'",
-                            forceLog: true);
+                        SmartLogger.Log(LogLevel.Information, LogPrefix,
+                            $"Audio device changed from '{_lastDeviceId}' to '{device.ID}'", forceLog: true);
 
-                        _lastDeviceId = device.ID ??
-                            throw new InvalidOperationException("Device ID is null");
+                        _lastDeviceId = device.ID ?? throw new InvalidOperationException("Device ID is null");
 
                         if (IsRecording && !_isReinitializing)
                             Task.Run(ReinitializeCaptureAsync);
@@ -98,92 +87,79 @@ namespace SpectrumNet
             {
                 Source = LogPrefix,
                 ErrorMessage = "Unhandled exception in OnDeviceChanged"
-            });
+            }
+        );
 
-        public async Task ReinitializeCaptureAsync() => await SmartLogger.SafeAsync(async () =>
-        {
-            _isReinitializing = true;
-            try
-            {
-                SmartLogger.Log(
-                    LogLevel.Information,
-                    LogPrefix,
-                    "Starting capture reinitialization",
-                    forceLog: true);
-
-                await StopCaptureAsync(true);
-                await Task.Delay(500);
-
-                var device = GetDefaultAudioDevice();
-                if (device == null)
+        public async Task ReinitializeCaptureAsync() => await SmartLogger.SafeAsync(
+            async () => {
+                _isReinitializing = true;
+                try
                 {
-                    SmartLogger.Log(
-                        LogLevel.Warning,
-                        LogPrefix,
-                        "No default audio device available after reinitialization");
-                    return;
+                    SmartLogger.Log(LogLevel.Information, LogPrefix, "Starting capture reinitialization", forceLog: true);
+
+                    await StopCaptureAsync(true);
+                    await Task.Delay(500);
+
+                    var device = GetDefaultAudioDevice();
+                    if (device == null)
+                    {
+                        SmartLogger.Log(LogLevel.Warning, LogPrefix, "No default audio device available after reinitialization");
+                        return;
+                    }
+
+                    _lastDeviceId = device.ID ?? throw new InvalidOperationException("Device ID is null");
+
+                    DisposeCaptureState(_state);
+                    _state = null;
+
+                    await InitializeUIComponentsAsync();
+                    await StartCaptureAsync();
+
+                    SmartLogger.Log(LogLevel.Information, LogPrefix, "Capture successfully reinitialized", forceLog: true);
                 }
-
-                _lastDeviceId = device.ID ??
-                    throw new InvalidOperationException("Device ID is null");
-
-                DisposeCaptureState(_state);
-                _state = null;
-
-                await InitializeUIComponentsAsync();
-                await StartCaptureAsync();
-
-                SmartLogger.Log(
-                    LogLevel.Information,
-                    LogPrefix,
-                    "Capture successfully reinitialized",
-                    forceLog: true);
-            }
-            finally
+                finally
+                {
+                    _isReinitializing = false;
+                }
+            },
+            new SmartLogger.ErrorHandlingOptions
             {
-                _isReinitializing = false;
+                Source = LogPrefix,
+                ErrorMessage = "Error during capture reinitialization"
             }
-        },
-        new SmartLogger.ErrorHandlingOptions
-        {
-            Source = LogPrefix,
-            ErrorMessage = "Error during capture reinitialization"
+        );
+
+        private async Task InitializeUIComponentsAsync() => await _controller.Dispatcher.InvokeAsync(() => {
+            SmartLogger.SafeDispose(_controller.Renderer, "Renderer",
+                new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = LogPrefix,
+                    ErrorMessage = "Error disposing renderer"
+                }
+            );
+
+            SmartLogger.SafeDispose(_controller.Analyzer, "Analyzer",
+                new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = LogPrefix,
+                    ErrorMessage = "Error disposing analyzer"
+                }
+            );
+
+            _controller.Renderer = null;
+            _controller.Analyzer = CreateAnalyzer();
+
+            if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 })
+                _controller.Renderer = CreateRenderer(_controller.Analyzer);
         });
-
-        private async Task InitializeUIComponentsAsync() =>
-            await _controller.Dispatcher.InvokeAsync(() =>
-            {
-                SmartLogger.SafeDispose(
-                    _controller.Renderer,
-                    "Renderer",
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error disposing renderer"
-                    });
-
-                SmartLogger.SafeDispose(
-                    _controller.Analyzer,
-                    "Analyzer",
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error disposing analyzer"
-                    });
-
-                _controller.Renderer = null;
-                _controller.Analyzer = CreateAnalyzer();
-
-                if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 })
-                    _controller.Renderer = CreateRenderer(_controller.Analyzer);
-            });
 
         private SpectrumAnalyzer CreateAnalyzer()
         {
             var analyzer = new SpectrumAnalyzer(
                 new FftProcessor { WindowType = _controller.WindowType },
                 new SpectrumConverter(_controller.GainParameters),
-                SynchronizationContext.Current);
+                SynchronizationContext.Current
+            );
 
             analyzer.ScaleType = _controller.ScaleType;
             analyzer.UpdateSettings(_controller.WindowType, _controller.ScaleType);
@@ -197,7 +173,8 @@ namespace SpectrumNet
                 _controller.SpectrumStyles ?? new SpectrumBrushes(),
                 _controller,
                 analyzer,
-                _controller.SpectrumCanvas);
+                _controller.SpectrumCanvas
+            );
 
             renderer.SynchronizeWithController();
             return renderer;
@@ -205,25 +182,41 @@ namespace SpectrumNet
 
         public async Task StartCaptureAsync()
         {
-            CancellationToken token;
+            if (_isDisposed)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Cannot start capture: Manager is disposed");
+                return;
+            }
 
+            if (_isReinitializing || _controller.IsTransitioning)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Cannot start capture: Manager is reinitializing or transitioning");
+                return;
+            }
+
+            if (IsRecording)
+            {
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Capture already started");
+                return;
+            }
+
+            var device = GetDefaultAudioDevice();
+            if (device == null)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Cannot start capture: No audio device available");
+                return;
+            }
+
+            CancellationToken token;
             lock (_lock)
             {
                 if (_isDisposed)
-                    throw new ObjectDisposedException(nameof(AudioCaptureManager));
-
-                var device = GetDefaultAudioDevice();
-                if (device == null)
                 {
-                    SmartLogger.Log(
-                        LogLevel.Warning,
-                        LogPrefix,
-                        "Cannot start capture: No audio device available");
+                    SmartLogger.Log(LogLevel.Warning, LogPrefix, "Cannot start capture: Manager was disposed");
                     return;
                 }
 
-                _lastDeviceId = device.ID ??
-                    throw new InvalidOperationException("Device ID is null");
+                _lastDeviceId = device.ID ?? throw new InvalidOperationException("Device ID is null");
 
                 InitializeCapture();
                 token = _state!.CTS.Token;
@@ -234,6 +227,18 @@ namespace SpectrumNet
 
         public async Task StopCaptureAsync(bool updateUI = true)
         {
+            if (_isDisposed)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Cannot stop capture: Manager is disposed");
+                return;
+            }
+
+            if (!IsRecording && _state == null)
+            {
+                SmartLogger.Log(LogLevel.Information, LogPrefix, "Capture already stopped");
+                return;
+            }
+
             CaptureState? stateToDispose = null;
 
             lock (_lock)
@@ -248,54 +253,61 @@ namespace SpectrumNet
 
             if (stateToDispose != null)
             {
-                await SmartLogger.SafeAsync(async () =>
-                {
-                    await Task.Run(() =>
+                await SmartLogger.SafeAsync(
+                    async () => {
+                        await Task.Run(() => {
+                            stateToDispose.Capture.StopRecording();
+
+                            if (!_controller.IsTransitioning)
+                                stateToDispose.Analyzer.SafeReset();
+
+                            DisposeCaptureState(stateToDispose);
+                        });
+                    },
+                    new SmartLogger.ErrorHandlingOptions
                     {
-                        stateToDispose.Capture.StopRecording();
-
-                        if (!_controller.IsTransitioning)
-                            stateToDispose.Analyzer.SafeReset();
-
-                        DisposeCaptureState(stateToDispose);
-                    });
-                },
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Stop capture error"
-                });
+                        Source = LogPrefix,
+                        ErrorMessage = "Stop capture error"
+                    }
+                );
             }
 
             if (updateUI)
                 UpdateStatus(false);
         }
 
+        public async Task ToggleCaptureAsync()
+        {
+            if (_isDisposed)
+            {
+                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Cannot toggle capture: Manager is disposed");
+                return;
+            }
+
+            if (IsRecording)
+                await StopCaptureAsync();
+            else
+                await StartCaptureAsync();
+        }
+
         private MMDevice? GetDefaultAudioDevice()
         {
             try
             {
-                SmartLogger.SafeDispose(
-                    _currentDevice,
-                    "CurrentDevice",
+                SmartLogger.SafeDispose(_currentDevice, "CurrentDevice",
                     new SmartLogger.ErrorHandlingOptions
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error disposing current device"
-                    });
+                    }
+                );
 
-                _currentDevice = _deviceEnumerator.GetDefaultAudioEndpoint(
-                    DataFlow.Render,
-                    Role.Multimedia);
-
+                _currentDevice = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                 return _currentDevice;
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(
-                    LogLevel.Error,
-                    LogPrefix,
-                    $"Error getting default audio device: {ex.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error getting default audio device: {ex.Message}");
                 return null;
             }
         }
@@ -309,8 +321,8 @@ namespace SpectrumNet
             if (device == null)
                 return;
 
-            var capture = new WasapiLoopbackCapture(device) ??
-                throw new InvalidOperationException("Failed to initialize capture device");
+            var capture = new WasapiLoopbackCapture(device)
+                ?? throw new InvalidOperationException("Failed to initialize capture device");
 
             var analyzer = InitializeAnalyzer();
 
@@ -321,21 +333,15 @@ namespace SpectrumNet
             UpdateStatus(true);
             _state.Capture.StartRecording();
 
-            SmartLogger.Log(
-                LogLevel.Information,
-                LogPrefix,
-                $"Audio capture started on device: {device.FriendlyName}",
-                forceLog: true);
+            SmartLogger.Log(LogLevel.Information, LogPrefix,
+                $"Audio capture started on device: {device.FriendlyName}", forceLog: true);
         }
 
         private void OnRecordingStopped(object? sender, StoppedEventArgs e)
         {
             if (e.Exception != null)
             {
-                SmartLogger.Log(
-                    LogLevel.Error,
-                    LogPrefix,
-                    $"Recording stopped with error: {e.Exception.Message}");
+                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Recording stopped with error: {e.Exception.Message}");
 
                 if (!_isDisposed && IsRecording && !_isReinitializing && !_controller.IsTransitioning)
                     Task.Run(ReinitializeCaptureAsync);
@@ -343,27 +349,21 @@ namespace SpectrumNet
                 return;
             }
 
-            SmartLogger.Log(
-                LogLevel.Information,
-                LogPrefix,
-                "Recording stopped normally",
-                forceLog: true);
+            SmartLogger.Log(LogLevel.Information, LogPrefix, "Recording stopped normally", forceLog: true);
         }
 
-        private SpectrumAnalyzer InitializeAnalyzer() => _controller.Dispatcher.Invoke(() =>
-        {
+        private SpectrumAnalyzer InitializeAnalyzer() => _controller.Dispatcher.Invoke(() => {
             var analyzer = CreateAnalyzer();
 
             if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 })
             {
-                SmartLogger.SafeDispose(
-                    _controller.Renderer,
-                    "Renderer",
+                SmartLogger.SafeDispose(_controller.Renderer, "Renderer",
                     new SmartLogger.ErrorHandlingOptions
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error disposing renderer"
-                    });
+                    }
+                );
 
                 _controller.Renderer = CreateRenderer(analyzer);
             }
@@ -372,13 +372,12 @@ namespace SpectrumNet
         });
 
         private void OnDataAvailable(object? sender, WaveInEventArgs e) => SmartLogger.Safe(
-            () =>
-            {
+            () => {
                 if (e.BytesRecorded <= 0 || _state?.Analyzer == null)
                     return;
 
-                var waveFormat = _state.Capture.WaveFormat ??
-                    throw new InvalidOperationException("WaveFormat is null");
+                var waveFormat = _state.Capture.WaveFormat
+                    ?? throw new InvalidOperationException("WaveFormat is null");
 
                 int channels = waveFormat.Channels;
                 int frameCount = e.BytesRecorded / 4 / channels;
@@ -391,14 +390,10 @@ namespace SpectrumNet
             {
                 Source = LogPrefix,
                 ErrorMessage = "Error processing audio data"
-            });
+            }
+        );
 
-        private void ProcessAudioData(
-            byte[] buffer,
-            int bytesRecorded,
-            int channels,
-            int frameCount,
-            float[] monoSamples)
+        private void ProcessAudioData(byte[] buffer, int bytesRecorded, int channels, int frameCount, float[] monoSamples)
         {
             Span<byte> bufferSpan = new(buffer, 0, bytesRecorded);
 
@@ -414,9 +409,8 @@ namespace SpectrumNet
             }
         }
 
-        private async Task MonitorCaptureAsync(CancellationToken token) =>
-            await SmartLogger.SafeAsync(async () =>
-            {
+        private async Task MonitorCaptureAsync(CancellationToken token) => await SmartLogger.SafeAsync(
+            async () => {
                 try
                 {
                     while (!token.IsCancellationRequested)
@@ -433,55 +427,67 @@ namespace SpectrumNet
                 }
                 catch (TaskCanceledException)
                 {
-                    // ожидаемое исключение при отмене
+                    // Expected exception on cancellation
                 }
             },
             new SmartLogger.ErrorHandlingOptions
             {
                 Source = LogPrefix,
                 ErrorMessage = "Error in device monitoring"
-            });
+            }
+        );
 
-        private void UpdateStatus(bool isRecording) => _controller.Dispatcher.Invoke(() =>
-        {
+        private void UpdateStatus(bool isRecording) => _controller.Dispatcher.Invoke(() => {
             IsRecording = isRecording;
             _controller.IsRecording = isRecording;
             _controller.OnPropertyChanged(
                 nameof(_controller.IsRecording),
-                nameof(_controller.CanStartCapture));
+                nameof(_controller.CanStartCapture)
+            );
         });
 
         private void DisposeCaptureState(CaptureState? state)
         {
-            if (state == null) return;
+            if (state == null)
+                return;
 
             state.Capture.DataAvailable -= OnDataAvailable;
             state.Capture.RecordingStopped -= OnRecordingStopped;
 
-            SmartLogger.SafeDispose(state.Capture, "Capture", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing capture"
-            });
-            SmartLogger.SafeDispose(state.CTS, "CTS", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing CTS"
-            });
-            SmartLogger.SafeDispose(state.Analyzer, "Analyzer", new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing analyzer"
-            });
+            SmartLogger.SafeDispose(state.Capture, "Capture",
+                new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = LogPrefix,
+                    ErrorMessage = "Error disposing capture"
+                }
+            );
+
+            SmartLogger.SafeDispose(state.CTS, "CTS",
+                            new SmartLogger.ErrorHandlingOptions
+                            {
+                                Source = LogPrefix,
+                                ErrorMessage = "Error disposing CTS"
+                            }
+                        );
+
+            SmartLogger.SafeDispose(state.Analyzer, "Analyzer",
+                new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = LogPrefix,
+                    ErrorMessage = "Error disposing analyzer"
+                }
+            );
         }
 
         public void Dispose()
         {
-            if (_isDisposed) return;
+            if (_isDisposed)
+                return;
 
             lock (_lock)
             {
-                if (_isDisposed) return;
+                if (_isDisposed)
+                    return;
 
                 SmartLogger.Safe(
                     () => StopCaptureAsync().GetAwaiter().GetResult(),
@@ -489,7 +495,8 @@ namespace SpectrumNet
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error stopping capture during dispose"
-                    });
+                    }
+                );
 
                 SmartLogger.Safe(
                     () => _deviceEnumerator.UnregisterEndpointNotificationCallback(_notificationHandler),
@@ -497,25 +504,24 @@ namespace SpectrumNet
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error unregistering notification callback"
-                    });
+                    }
+                );
 
-                SmartLogger.SafeDispose(
-                    _currentDevice,
-                    "CurrentDevice",
+                SmartLogger.SafeDispose(_currentDevice, "CurrentDevice",
                     new SmartLogger.ErrorHandlingOptions
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error disposing current device"
-                    });
+                    }
+                );
 
-                SmartLogger.SafeDispose(
-                    _deviceEnumerator,
-                    "DeviceEnumerator",
+                SmartLogger.SafeDispose(_deviceEnumerator, "DeviceEnumerator",
                     new SmartLogger.ErrorHandlingOptions
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error disposing device enumerator"
-                    });
+                    }
+                );
 
                 _isDisposed = true;
             }
@@ -528,14 +534,9 @@ namespace SpectrumNet
             public AudioEndpointNotificationHandler(Action deviceChangeCallback) =>
                 _deviceChangeCallback = deviceChangeCallback ?? throw new ArgumentNullException(nameof(deviceChangeCallback));
 
-            public void OnDeviceStateChanged(string deviceId, DeviceState newState) =>
-                _deviceChangeCallback();
-
-            public void OnDeviceAdded(string pwstrDeviceId) =>
-                _deviceChangeCallback();
-
-            public void OnDeviceRemoved(string deviceId) =>
-                _deviceChangeCallback();
+            public void OnDeviceStateChanged(string deviceId, DeviceState newState) => _deviceChangeCallback();
+            public void OnDeviceAdded(string pwstrDeviceId) => _deviceChangeCallback();
+            public void OnDeviceRemoved(string deviceId) => _deviceChangeCallback();
 
             public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
             {
