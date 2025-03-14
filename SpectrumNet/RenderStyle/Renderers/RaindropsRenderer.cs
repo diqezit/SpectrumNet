@@ -43,7 +43,7 @@ namespace SpectrumNet
             public const float SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET = 0.8f;  // Offset for splash particle size based on intensity
 
             // Logger Settings
-            public const string LOGGER_PREFIX = "[RaindropsRenderer] "; // Prefix for logging messages
+            public const string LOGGER_PREFIX = "RaindropsRenderer"; // Prefix for logging messages
         }
         #endregion
 

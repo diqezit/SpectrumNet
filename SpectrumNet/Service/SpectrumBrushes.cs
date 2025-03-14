@@ -1,7 +1,9 @@
 ﻿#nullable enable 
 
+using System;
 using System.Globalization;
 using System.Windows.Data;
+using System.Windows.Media;
 
 namespace SpectrumNet
 {
@@ -407,15 +409,16 @@ namespace SpectrumNet
                 try
                 {
                     var (skColor, _) = BrushesProvider.GetColorAndBrush(paletteName);
-                    return new SolidColorBrush(Color.FromArgb(skColor.Alpha, skColor.Red, skColor.Green, skColor.Blue));
+                    return new System.Windows.Media.SolidColorBrush(
+                        System.Windows.Media.Color.FromArgb(
+                            skColor.Alpha, skColor.Red, skColor.Green, skColor.Blue));
                 }
                 catch (Exception)
                 {
-                    // If the palette is not found, return a transparent brush.
-                    return Brushes.Transparent;
+                    return System.Windows.Media.Brushes.Transparent;
                 }
             }
-            return Brushes.Transparent;
+            return System.Windows.Media.Brushes.Transparent;
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

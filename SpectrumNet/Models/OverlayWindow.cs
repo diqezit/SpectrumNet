@@ -14,9 +14,11 @@ namespace SpectrumNet
 
     public sealed class OverlayWindow : Window, IDisposable
     {
+        private const string LogSource = "OverlayWindow"; 
+
         private readonly record struct RenderContext(
-            IAudioVisualizationController Controller, 
-            SKElement SkElement, 
+            IAudioVisualizationController Controller,
+            SKGLElement SkElement,
             DispatcherTimer RenderTimer);
 
         private readonly OverlayConfiguration _configuration;
@@ -47,7 +49,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Failed to initialize overlay window");
+                SmartLogger.Error(LogSource, "Failed to initialize overlay window", ex);
                 throw;
             }
         }
@@ -65,10 +67,10 @@ namespace SpectrumNet
         {
             ConfigureWindowProperties();
 
-            var skElement = new SKElement
+            var skElement = new SKGLElement
             {
-                VerticalAlignment = VerticalAlignment.Stretch,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
                 SnapsToDevicePixels = true,
                 UseLayoutRounding = true
             };
@@ -160,7 +162,7 @@ namespace SpectrumNet
             _cacheBitmap = null;
         }
 
-        private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args)
+        private void HandlePaintSurface(object? sender, SKPaintGLSurfaceEventArgs args)
         {
             if (_isDisposed || _renderContext is null || !_renderLock.Wait(0)) return;
 
@@ -174,27 +176,41 @@ namespace SpectrumNet
 
                 if (_frameTimeWatch.ElapsedMilliseconds > _configuration.RenderInterval * 2)
                 {
-                    // Skip complex rendering if we're falling behind
                     _renderContext.Value.Controller.OnPaintSurface(sender, args);
                     return;
                 }
 
-                if (_cacheBitmap == null || _cacheBitmap.Width != info.Width || _cacheBitmap.Height != info.Height)
+                // наверное потом тут можно упростить код, убрав кэширование.
+                if (_configuration.EnableHardwareAcceleration)
                 {
-                    _cacheBitmap?.Dispose();
-                    _cacheBitmap = new SKBitmap(info.Width, info.Height, info.ColorType, info.AlphaType);
+                    // Прямой рендеринг без кэширования для GL
+                    _renderContext.Value.Controller.OnPaintSurface(sender, args);
                 }
-
-                using (var tempSurface = SKSurface.Create(info, _cacheBitmap.GetPixels(), _cacheBitmap.RowBytes))
+                else
                 {
-                    tempSurface.Canvas.Clear(SKColors.Transparent);
-                    var tempArgs = new SKPaintSurfaceEventArgs(tempSurface, info);
-                    _renderContext.Value.Controller.OnPaintSurface(sender, tempArgs);
-                }
+                    // Кэширование для случаев, когда аппаратное ускорение отключено
+                    if (_cacheBitmap == null || _cacheBitmap.Width != info.Width || _cacheBitmap.Height != info.Height)
+                    {
+                        _cacheBitmap?.Dispose();
+                        _cacheBitmap = new SKBitmap(info.Width, info.Height, info.ColorType, info.AlphaType);
+                    }
 
-                canvas.DrawBitmap(_cacheBitmap, 0, 0);
+                    using (var tempSurface = SKSurface.Create(info, _cacheBitmap.GetPixels(), _cacheBitmap.RowBytes))
+                    {
+                        tempSurface.Canvas.Clear(SKColors.Transparent);
+
+                        // Создам временный аргумент для передачи контроллеру
+                        // Лучше всего напрямую использовать GL-рендеринг без кэширования
+                        _renderContext.Value.Controller.OnPaintSurface(sender, args);
+                    }
+
+                    canvas.DrawBitmap(_cacheBitmap, 0, 0);
+                }
             }
-            catch (Exception ex) { Log.Error(ex, "Error during paint surface handling"); }
+            catch (Exception ex)
+            {
+                SmartLogger.Error(LogSource, "Error during paint surface handling", ex);
+            }
             finally { _renderLock.Release(); }
         }
 

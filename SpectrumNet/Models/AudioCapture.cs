@@ -4,7 +4,7 @@ namespace SpectrumNet
 {
     public sealed class AudioCapture : IDisposable
     {
-        private const string LogPrefix = "AudioCaptureManager";
+        private const string LogPrefix = "AudioCapture";
         private const int DefaultDeviceCheckIntervalMs = 500;
 
         private readonly IAudioVisualizationController _controller;
@@ -12,7 +12,7 @@ namespace SpectrumNet
         private readonly MMDeviceEnumerator _deviceEnumerator;
         private readonly AudioEndpointNotificationHandler _notificationHandler;
         private readonly int _deviceCheckIntervalMs;
-        private readonly object _stateLock = new object();
+        private readonly object _stateLock = new();
 
         private MMDevice? _currentDevice;
         private string _lastDeviceId = string.Empty;
@@ -38,24 +38,14 @@ namespace SpectrumNet
             RegisterDeviceNotifications();
         }
 
-        public SpectrumAnalyzer? GetAnalyzer()
-        {
-            lock (_stateLock)
-            {
-                return _state?.Analyzer;
-            }
-        }
+        public SpectrumAnalyzer? GetAnalyzer() => _state?.Analyzer;
 
         private void RegisterDeviceNotifications() => SmartLogger.Safe(
             () => {
                 _deviceEnumerator.RegisterEndpointNotificationCallback(_notificationHandler);
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Audio device notification handler registered successfully", forceLog: true);
             },
-            new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Failed to register endpoint notification callback"
-            }
+            new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Failed to register endpoint notification callback" }
         );
 
         private void OnDeviceChanged() => SmartLogger.Safe(
@@ -83,18 +73,13 @@ namespace SpectrumNet
                     }
                 }
             },
-            new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Unhandled exception in OnDeviceChanged"
-            }
+            new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Unhandled exception in OnDeviceChanged" }
         );
 
         private bool ShouldSkipDeviceChange() => _isDisposed || _isReinitializing || _controller.IsTransitioning;
 
         private void LogDeviceChange(string oldDeviceId, string? newDeviceId) =>
-            SmartLogger.Log(LogLevel.Information, LogPrefix,
-                $"Audio device changed from '{oldDeviceId}' to '{newDeviceId}'", forceLog: true);
+            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Audio device changed from '{oldDeviceId}' to '{newDeviceId}'", forceLog: true);
 
         private void StopCaptureIfNeeded()
         {
@@ -102,11 +87,7 @@ namespace SpectrumNet
             {
                 SmartLogger.Safe(
                     () => StopCaptureAsync(true).GetAwaiter().GetResult(),
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error stopping capture during device change"
-                    }
+                    new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error stopping capture during device change" }
                 );
             }
         }
@@ -119,11 +100,14 @@ namespace SpectrumNet
                 {
                     await StopCaptureAsync(true);
                     await Task.Delay(500);
+
                     var device = GetDefaultAudioDevice();
                     if (device == null) return;
+
                     _lastDeviceId = device.ID ?? throw new InvalidOperationException("Device ID is null");
                     DisposeCaptureState(_state);
                     _state = null;
+
                     await InitializeUIComponentsAsync();
                     await StartCaptureAsync();
                 }
@@ -159,17 +143,12 @@ namespace SpectrumNet
             return analyzer;
         }
 
-        private Renderer CreateRenderer(SpectrumAnalyzer analyzer)
-        {
-            var renderer = new Renderer(
-                _controller.SpectrumStyles,
-                _controller,
-                analyzer,
-                _controller.SpectrumCanvas
-            );
-
-            return renderer;
-        }
+        private Renderer CreateRenderer(SpectrumAnalyzer analyzer) => new(
+            _controller.SpectrumStyles,
+            _controller,
+            analyzer,
+            _controller.SpectrumCanvas
+        );
 
         public async Task StartCaptureAsync()
         {
@@ -263,11 +242,7 @@ namespace SpectrumNet
                             DisposeCaptureState(stateToDispose);
                         });
                     },
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Stop capture error"
-                    }
+                    new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Stop capture error" }
                 );
             }
 
@@ -291,11 +266,7 @@ namespace SpectrumNet
             try
             {
                 SmartLogger.SafeDispose(_currentDevice, "CurrentDevice",
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error disposing current device"
-                    }
+                    new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error disposing current device" }
                 );
 
                 _currentDevice = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
@@ -387,14 +358,10 @@ namespace SpectrumNet
                 ProcessAudioData(e.Buffer, e.BytesRecorded, channels, frameCount, monoSamples);
                 _ = analyzer.AddSamplesAsync(monoSamples, waveFormat.SampleRate);
             },
-            new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error processing audio data"
-            }
+            new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error processing audio data" }
         );
 
-        private void ProcessAudioData(byte[] buffer, int bytesRecorded, int channels, int frameCount, float[] monoSamples)
+        private static void ProcessAudioData(byte[] buffer, int bytesRecorded, int channels, int frameCount, float[] monoSamples)
         {
             Span<byte> bufferSpan = new(buffer, 0, bytesRecorded);
 
@@ -431,11 +398,7 @@ namespace SpectrumNet
                     // Expected exception on cancellation
                 }
             },
-            new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error in device monitoring"
-            }
+            new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error in device monitoring" }
         );
 
         private void UpdateStatus(bool isRecording) => _controller.Dispatcher.Invoke(() => {
@@ -456,27 +419,15 @@ namespace SpectrumNet
             state.Capture.RecordingStopped -= OnRecordingStopped;
 
             SmartLogger.SafeDispose(state.Capture, "Capture",
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing capture"
-                }
+                new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error disposing capture" }
             );
 
             SmartLogger.SafeDispose(state.CTS, "CTS",
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing CTS"
-                }
+                new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error disposing CTS" }
             );
 
             SmartLogger.SafeDispose(state.Analyzer, "Analyzer",
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing analyzer"
-                }
+                new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error disposing analyzer" }
             );
         }
 
@@ -499,36 +450,20 @@ namespace SpectrumNet
         {
             SmartLogger.Safe(
                 () => StopCaptureAsync().GetAwaiter().GetResult(),
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error stopping capture during dispose"
-                }
+                new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error stopping capture during dispose" }
             );
 
             SmartLogger.Safe(
                 () => _deviceEnumerator.UnregisterEndpointNotificationCallback(_notificationHandler),
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error unregistering notification callback"
-                }
+                new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error unregistering notification callback" }
             );
 
             SmartLogger.SafeDispose(_currentDevice, "CurrentDevice",
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing current device"
-                }
+                new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error disposing current device" }
             );
 
             SmartLogger.SafeDispose(_deviceEnumerator, "DeviceEnumerator",
-                new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing device enumerator"
-                }
+                new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error disposing device enumerator" }
             );
         }
 

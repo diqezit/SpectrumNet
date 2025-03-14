@@ -22,7 +22,8 @@ namespace SpectrumNet
                 [Key.F10] = () => _controller.RenderQuality = RenderQuality.Low,
                 [Key.F11] = () => _controller.RenderQuality = RenderQuality.Medium,
                 [Key.F12] = () => _controller.RenderQuality = RenderQuality.High,
-                [Key.Escape] = () => {
+                [Key.Escape] = () =>
+                {
                     if (_controller.IsPopupOpen) _controller.IsPopupOpen = false;
                     else if (_controller.IsOverlayActive) _controller.CloseOverlay();
                 }
@@ -30,7 +31,8 @@ namespace SpectrumNet
 
             _modifiedKeyActions = new Dictionary<(Key, ModifierKeys), Action>
             {
-                [(Key.O, ModifierKeys.Control)] = () => {
+                [(Key.O, ModifierKeys.Control)] = () =>
+                {
                     if (_controller.IsOverlayActive) _controller.CloseOverlay();
                     else _controller.OpenOverlay();
                 },
@@ -84,7 +86,7 @@ namespace SpectrumNet
         private AudioCapture? _captureManager;
         private CompositeDisposable? _disposables;
         private GainParameters? _gainParameters;
-        private SKElement? _renderElement;
+        private SKGLElement? _renderElement;
         private Window? _ownerWindow;
         private KeyboardManager? _keyboardManager;
 
@@ -97,7 +99,7 @@ namespace SpectrumNet
 
         private static SpectrumNet.Settings AppSettings => SpectrumNet.Settings.Instance;
 
-        public AudioVisualizationController(Window ownerWindow, SKElement renderElement)
+        public AudioVisualizationController(Window ownerWindow, SKGLElement renderElement)
         {
             _ownerWindow = ownerWindow ?? throw new ArgumentNullException(nameof(ownerWindow));
             _renderElement = renderElement ?? throw new ArgumentNullException(nameof(renderElement));
@@ -330,7 +332,7 @@ namespace SpectrumNet
             }
         }
 
-        public SKElement SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
+        public SKGLElement SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
 
         public SpectrumBrushes SpectrumStyles =>
             _spectrumStyles ?? throw new InvalidOperationException("Spectrum styles not initialized");
@@ -547,7 +549,7 @@ namespace SpectrumNet
         public void SynchronizeVisualization() =>
             SafeExecute(() => _renderer?.SynchronizeWithController(), "Error synchronizing visualization");
 
-        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
+        public void OnPaintSurface(object? sender, SKPaintGLSurfaceEventArgs? e)
         {
             if (e == null || _renderer == null)
             {

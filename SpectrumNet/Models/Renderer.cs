@@ -1,4 +1,6 @@
-﻿namespace SpectrumNet
+﻿#nullable enable
+
+namespace SpectrumNet
 {
     public sealed class Renderer : IDisposable
     {
@@ -14,7 +16,7 @@
         private readonly SpectrumAnalyzer _analyzer;
         private readonly CancellationTokenSource _disposalTokenSource = new();
 
-        private SKElement? _skElement;
+        private SKGLElement? _skElement;
         private RenderState _currentState = default!;
         private volatile bool _isDisposed, _isAnalyzerDisposed;
         private volatile bool _shouldShowPlaceholder = true;
@@ -35,7 +37,7 @@
             SpectrumBrushes styles,
             IAudioVisualizationController controller,
             SpectrumAnalyzer analyzer,
-            SKElement element)
+            SKGLElement element)
         {
             _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
             _controller = controller ?? throw new ArgumentNullException(nameof(controller));
@@ -52,7 +54,6 @@
             PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
         }
 
-        // Извлечён именованный обработчик вместо анонимного лямбда-выражения
         private void OnAnalyzerDisposed(object? sender, EventArgs e) => _isAnalyzerDisposed = true;
 
         private void InitializeRenderer()
@@ -91,16 +92,11 @@
             switch (e.PropertyName)
             {
                 case nameof(IAudioVisualizationController.IsRecording):
-                    if (_controller.IsRecording)
-                        CompositionTarget.Rendering += OnRendering;
-                    else
-                        CompositionTarget.Rendering -= OnRendering;
-                    _shouldShowPlaceholder = !_controller.IsRecording;
-                    RequestRender();
+                    UpdateRecordingState(_controller.IsRecording);
                     break;
 
                 case nameof(IAudioVisualizationController.IsOverlayActive):
-                    SpectrumRendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive, null);
+                    SpectrumRendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
                     RequestRender();
                     break;
 
@@ -109,11 +105,10 @@
                     break;
 
                 case nameof(IAudioVisualizationController.SelectedStyle) when !string.IsNullOrEmpty(_controller.SelectedStyle):
-                    {
-                        var (color, brush) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
-                        UpdateSpectrumStyle(_controller.SelectedStyle, color, brush);
-                        break;
-                    }
+                    var (color, brush) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
+                    UpdateSpectrumStyle(_controller.SelectedStyle, color, brush);
+                    break;
+
                 case nameof(IAudioVisualizationController.RenderQuality):
                     UpdateRenderQuality(_controller.RenderQuality);
                     break;
@@ -133,15 +128,26 @@
             }
         }
 
+        private void UpdateRecordingState(bool isRecording)
+        {
+            if (isRecording)
+                CompositionTarget.Rendering += OnRendering;
+            else
+                CompositionTarget.Rendering -= OnRendering;
+
+            _shouldShowPlaceholder = !isRecording;
+            RequestRender();
+        }
+
         private void OnElementLoaded(object? sender, RoutedEventArgs e) =>
             UpdateRenderDimensions((int)(_skElement?.ActualWidth ?? 0), (int)(_skElement?.ActualHeight ?? 0));
 
         private void OnElementUnloaded(object? sender, RoutedEventArgs e) =>
             CompositionTarget.Rendering -= OnRendering;
 
-        public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
+        public void RenderFrame(object? sender, SKPaintGLSurfaceEventArgs e)
         {
-            if (e is null)
+            if (e is null || _isDisposed)
                 return;
 
             if (_controller.IsOverlayActive && sender == _controller.SpectrumCanvas)
@@ -149,9 +155,6 @@
                 e.Surface.Canvas.Clear(SKColors.Transparent);
                 return;
             }
-
-            if (_isDisposed)
-                return;
 
             SmartLogger.Safe(() => RenderFrameInternal(e.Surface.Canvas, e.Info),
                 new SmartLogger.ErrorHandlingOptions
@@ -176,9 +179,7 @@
         private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
         {
             canvas.Clear(SKColors.Transparent);
-            var currentTime = DateTime.Now;
-            var deltaTime = (currentTime - _lastRenderTime).TotalSeconds;
-            _lastRenderTime = currentTime;
+            _lastRenderTime = DateTime.Now;
 
             if (_controller.IsTransitioning || ShouldRenderPlaceholder())
             {
@@ -232,8 +233,19 @@
 
         private void RenderSpectrum(SKCanvas canvas, SpectralData spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount)
         {
-            var renderer = SpectrumRendererFactory.CreateRenderer(_currentState.Style, _controller.IsOverlayActive, _currentState.Quality);
-            renderer.Render(canvas, spectrum.Spectrum, info, barWidth, barSpacing, barCount, _currentState.Paint,
+            var renderer = SpectrumRendererFactory.CreateRenderer(
+                _currentState.Style,
+                _controller.IsOverlayActive,
+                _currentState.Quality);
+
+            renderer.Render(
+                canvas,
+                spectrum.Spectrum,
+                info,
+                barWidth,
+                barSpacing,
+                barCount,
+                _currentState.Paint,
                 (c, i) => PerformanceMetricsManager.DrawPerformanceInfo(c, i, _controller.ShowPerformanceInfo));
         }
 
@@ -258,14 +270,17 @@
             if (canvas is null)
                 return;
 
+            using var font = new SKFont
+            {
+                Size = 50,
+            };
+
             using var paint = new SKPaint
             {
                 Color = SKColors.OrangeRed,
-                TextAlign = SKTextAlign.Left,
-                TextSize = 50,
                 IsAntialias = true
             };
-            canvas.DrawText(MESSAGE, 50, 100, paint);
+            canvas.DrawText(MESSAGE, 50, 100, SKTextAlign.Left, font, paint);
         }
 
         public void SynchronizeWithController()
@@ -321,7 +336,12 @@
                     StyleName = styleName
                 };
                 oldPaint?.Dispose();
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating spectrum style" });
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error updating spectrum style"
+            });
+
             RequestRender();
         }
 
@@ -368,6 +388,7 @@
                 return;
 
             _isDisposed = _isAnalyzerDisposed = true;
+
             SmartLogger.Safe(() =>
             {
                 _disposalTokenSource.Cancel();
@@ -380,19 +401,27 @@
                 UnsubscribeFromUIElementEvents();
                 _currentState.Paint?.Dispose();
 
-                SmartLogger.SafeDispose(_renderLock, "RenderLock", new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing render lock"
-                });
-                SmartLogger.SafeDispose(_disposalTokenSource, "DisposalTokenSource", new SmartLogger.ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing disposal token source"
-                });
+                SmartLogger.SafeDispose(_renderLock, "RenderLock",
+                    new SmartLogger.ErrorHandlingOptions
+                    {
+                        Source = LogPrefix,
+                        ErrorMessage = "Error disposing render lock"
+                    });
+
+                SmartLogger.SafeDispose(_disposalTokenSource, "DisposalTokenSource",
+                    new SmartLogger.ErrorHandlingOptions
+                    {
+                        Source = LogPrefix,
+                        ErrorMessage = "Error disposing disposal token source"
+                    });
+
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
             },
-            new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error during renderer disposal" });
+            new SmartLogger.ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error during renderer disposal"
+            });
         }
 
         private void UnsubscribeFromUIElementEvents()

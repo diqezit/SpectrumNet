@@ -8,6 +8,9 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            // Включаем аппаратное ускорение для SKGLElement
+            RenderOptions.ProcessRenderMode = RenderMode.Default;
+
             SmartLogger.Initialize();
 
             AppDomain.CurrentDomain.UnhandledException += (_, args) => {
