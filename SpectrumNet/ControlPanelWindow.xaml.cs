@@ -2,307 +2,182 @@
 
 namespace SpectrumNet
 {
-    public partial class ControlPanelWindow : System.Windows.Window, IDisposable
+    public partial class ControlPanelWindow : Window, IDisposable
     {
-        private readonly MainWindow _mainWindow;
+        private readonly IAudioVisualizationController _controller;
         private bool _isDisposed;
+        private readonly Dictionary<string, Action> _buttonActions;
+        private readonly Dictionary<string, Action<double>> _sliderActions;
+        private readonly Dictionary<(string Name, Type ItemType), Action<object>> _comboBoxActions;
+        private readonly Dictionary<string, Action<bool>> _checkBoxActions;
         private const string LogPrefix = "ControlPanelWindow";
 
-        public ControlPanelWindow(MainWindow mainWindow)
+        public ControlPanelWindow(IAudioVisualizationController controller)
         {
-            _mainWindow = mainWindow ?? throw new ArgumentNullException(nameof(mainWindow));
+            _controller = controller ?? throw new ArgumentNullException(nameof(controller));
             InitializeComponent();
-            Loaded += OnLoaded;
+
+            _buttonActions = CreateButtonActionsMap();
+            _sliderActions = CreateSliderActionsMap();
+            _comboBoxActions = CreateComboBoxActionsMap();
+            _checkBoxActions = CreateCheckBoxActionsMap();
+            DataContext = _controller;
+
             MouseDoubleClick += OnWindowMouseDoubleClick;
             KeyDown += OnKeyDown;
+            SetupGainControlsPopup();
         }
 
-        private void OnLoaded(object sender, RoutedEventArgs e)
-        {
-            DataContext = _mainWindow;
-        }
+        private void SetupGainControlsPopup() =>
+            SmartLogger.Safe(() =>
+            {
+                if (GainControlsPopup == null) return;
+                GainControlsPopup.Opened += (_, _) => Mouse.Capture(GainControlsPopup, CaptureMode.SubTree);
+                GainControlsPopup.Closed += (_, _) => Mouse.Capture(null);
+                GainControlsPopup.MouseDown += OnGainControlsPopupMouseDown;
+            }, GetLoggerOptions("Error setting up gain controls popup"));
 
-        private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e)
-        {
-            SmartLogger.Safe(() => {
-                if (e.ChangedButton == MouseButton.Left)
+        private void OnGainControlsPopupMouseDown(object sender, MouseButtonEventArgs e) =>
+            SmartLogger.Safe(() =>
+            {
+                if (e.OriginalSource is FrameworkElement element && element.Name == "GainControlsPopup")
                 {
-                    if (e.OriginalSource is DependencyObject element)
-                    {
-                        if (IsControlOrChild(element, typeof(Slider)) ||
-                            IsControlOrChild(element, typeof(ComboBox)) ||
-                            IsControlOrChild(element, typeof(CheckBox)) ||
-                            IsControlOrChild(element, typeof(Button)))
-                        {
-                            return;
-                        }
-                    }
-
-                    WindowState = WindowState == WindowState.Maximized
-                        ? WindowState.Normal
-                        : WindowState.Maximized;
-
+                    _controller.IsPopupOpen = false;
                     e.Handled = true;
                 }
-            }, GetLoggerOptions("Error handling double click"));
-        }
+            }, GetLoggerOptions("Error handling gain controls popup mouse down"));
 
-        private bool IsControlOrChild(DependencyObject element, Type controlType)
+        private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e) =>
+            SmartLogger.Safe(() =>
+            {
+                if (e.ChangedButton != MouseButton.Left) return;
+                if (e.OriginalSource is DependencyObject element &&
+                    (IsControlOfType<Slider>(element) ||
+                     IsControlOfType<ComboBox>(element) ||
+                     IsControlOfType<CheckBox>(element) ||
+                     IsControlOfType<Button>(element)))
+                    return;
+
+                WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+                e.Handled = true;
+            }, GetLoggerOptions("Error handling double click"));
+
+        private void OnButtonClick(object sender, RoutedEventArgs e) =>
+            SmartLogger.Safe(() =>
+            {
+                if (sender is Button btn && _buttonActions.TryGetValue(btn.Name, out var action))
+                    action();
+            }, GetLoggerOptions("Error handling button click"));
+
+        private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
+            SmartLogger.Safe(() =>
+            {
+                if (!IsLoaded || sender is not Slider slider) return;
+                if (_sliderActions.TryGetValue(slider.Name, out var action))
+                    action(slider.Value);
+            }, GetLoggerOptions("Error handling slider change"));
+
+        private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+                    SmartLogger.Safe(() =>
+                    {
+                        if (sender is not ComboBox cb || cb.SelectedItem == null) return;
+                        var key = (cb.Name, cb.SelectedItem.GetType());
+                        if (_comboBoxActions.TryGetValue(key, out var action))
+                            action(cb.SelectedItem);
+                    }, GetLoggerOptions("Error handling selection change"));
+
+        private void OnKeyDown(object sender, KeyEventArgs e) =>
+            SmartLogger.Safe(() =>
+            {
+                if (!IsActive) return;
+
+                if (_controller.HandleKeyDown(e, Keyboard.FocusedElement))
+                {
+                    e.Handled = true;
+                    return;
+                }
+
+                if (e.Key == Key.Escape)
+                {
+                    Close();
+                    e.Handled = true;
+                }
+            }, GetLoggerOptions("Error handling key down"));
+
+        private void OnCheckBoxChanged(object sender, RoutedEventArgs e) =>
+            SmartLogger.Safe(() =>
+            {
+                if (sender is CheckBox cb && _checkBoxActions.TryGetValue(cb.Name, out var action))
+                    action(cb.IsChecked == true);
+            }, GetLoggerOptions("Error handling checkbox change"));
+
+        private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+            SmartLogger.Safe(() =>
+            {
+                if (e.ChangedButton != MouseButton.Left) return;
+                var mousePos = e.GetPosition(TitleBar);
+                var closeButtonBounds = CloseButton.TransformToAncestor(TitleBar)
+                    .TransformBounds(new Rect(0, 0, CloseButton.ActualWidth, CloseButton.ActualHeight));
+                if (!closeButtonBounds.Contains(mousePos))
+                    DragMove();
+            }, GetLoggerOptions("Error handling window drag"));
+
+        private bool IsControlOfType<T>(DependencyObject element) where T : DependencyObject
         {
             while (element != null)
             {
-                if (controlType.IsInstanceOfType(element))
-                    return true;
-
+                if (element is T) return true;
                 element = VisualTreeHelper.GetParent(element);
             }
             return false;
         }
 
-        private void OnButtonClick(object sender, RoutedEventArgs e)
-        {
-            SmartLogger.Safe(() => {
-                if (sender is not Button btn) return;
-
-                switch (btn.Name)
-                {
-                    case "CloseButton":
-                        Close();
-                        break;
-                    case "MinimizeButton":
-                        WindowState = WindowState.Minimized;
-                        break;
-                    case "MaximizeButton":
-                        WindowState = WindowState == WindowState.Maximized
-                            ? WindowState.Normal
-                            : WindowState.Maximized;
-                        break;
-
-                    case "StartCaptureButton":
-                        _ = _mainWindow.StartCaptureAsync();
-                        break;
-                    case "StopCaptureButton":
-                        _ = _mainWindow.StopCaptureAsync();
-                        break;
-                    case "ToggleCaptureButton":
-                        _ = _mainWindow.ToggleCaptureAsync();
-                        break;
-
-                    case "OverlayButton":
-                        ToggleOverlay();
-                        break;
-                    case "OverlayTopmostButton":
-                        _mainWindow.IsOverlayTopmost = !_mainWindow.IsOverlayTopmost;
-                        break;
-                    case "OpenPopupButton":
-                        _mainWindow.IsPopupOpen = true;
-                        break;
-                    case "OpenSettingsButton":
-                        OpenSettings();
-                        break;
-                    case "ShowPerformanceInfoButton":
-                        _mainWindow.ShowPerformanceInfo = !_mainWindow.ShowPerformanceInfo;
-                        break;
-                    case "ThemeToggleButton":
-                        ThemeManager.Instance?.ToggleTheme();
-                        break;
-
-                    default:
-                        _mainWindow.OnButtonClick(sender, e);
-                        break;
-                }
-            }, GetLoggerOptions("Error handling button click"));
-        }
-
-        private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            SmartLogger.Safe(() => {
-                if (!IsLoaded || _mainWindow == null) return;
-                if (sender is not Slider slider) return;
-
-                switch (slider.Name)
-                {
-                    case "barSpacingSlider":
-                        _mainWindow.BarSpacing = slider.Value;
-                        break;
-                    case "barCountSlider":
-                        _mainWindow.BarCount = (int)slider.Value;
-                        break;
-                    case "minDbLevelSlider":
-                        _mainWindow.MinDbLevel = (float)slider.Value;
-                        break;
-                    case "maxDbLevelSlider":
-                        _mainWindow.MaxDbLevel = (float)slider.Value;
-                        break;
-                    case "amplificationFactorSlider":
-                        _mainWindow.AmplificationFactor = (float)slider.Value;
-                        break;
-                    default:
-                        _mainWindow.OnSliderValueChanged(sender, e);
-                        break;
-                }
-            }, GetLoggerOptions("Error handling slider change"));
-        }
-
-        private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            SmartLogger.Safe(() => {
-                if (sender is not ComboBox cb) return;
-
-                switch (cb.Name)
-                {
-                    case "RenderStyleComboBox" when cb.SelectedItem is RenderStyle rs:
-                        _mainWindow.SelectedDrawingType = rs;
-                        break;
-                    case "FftWindowTypeComboBox" when cb.SelectedItem is FftWindowType wt:
-                        _mainWindow.WindowType = wt;
-                        break;
-                    case "ScaleTypeComboBox" when cb.SelectedItem is SpectrumScale scale:
-                        _mainWindow.ScaleType = scale;
-                        break;
-                    case "RenderQualityComboBox" when cb.SelectedItem is RenderQuality quality:
-                        _mainWindow.RenderQuality = quality;
-                        break;
-                    case "PaletteComboBox" when cb.SelectedItem is Palette palette:
-                        _mainWindow.SelectedPalette = palette;
-                        break;
-                    default:
-                        _mainWindow.OnComboBoxSelectionChanged(sender, e);
-                        break;
-                }
-            }, GetLoggerOptions("Error handling selection change"));
-        }
-
-        private void OnKeyDown(object sender, KeyEventArgs e)
-        {
-            SmartLogger.Safe(() => {
-                if (!IsActive) return;
-
-                switch (e.Key)
-                {
-                    case Key.Space:
-                        if (!(Keyboard.FocusedElement is TextBox ||
-                              Keyboard.FocusedElement is PasswordBox ||
-                              Keyboard.FocusedElement is ComboBox))
-                        {
-                            _ = _mainWindow.ToggleCaptureAsync();
-                            e.Handled = true;
-                        }
-                        break;
-                    case Key.F10:
-                        _mainWindow.RenderQuality = RenderQuality.Low;
-                        e.Handled = true;
-                        break;
-                    case Key.F11:
-                        _mainWindow.RenderQuality = RenderQuality.Medium;
-                        e.Handled = true;
-                        break;
-                    case Key.F12:
-                        _mainWindow.RenderQuality = RenderQuality.High;
-                        e.Handled = true;
-                        break;
-                    case Key.Escape:
-                        Close();
-                        e.Handled = true;
-                        break;
-                }
-            }, GetLoggerOptions("Error handling key down"));
-        }
-
-        private void OnCheckBoxChanged(object sender, RoutedEventArgs e)
-        {
-            SmartLogger.Safe(() => {
-                if (sender is not CheckBox cb) return;
-
-                switch (cb.Name)
-                {
-                    case "ShowPerformanceInfoCheckBox":
-                        _mainWindow.ShowPerformanceInfo = cb.IsChecked == true;
-                        break;
-                    case "OverlayTopmostCheckBox":
-                        _mainWindow.IsOverlayTopmost = cb.IsChecked == true;
-                        break;
-                }
-            }, GetLoggerOptions("Error handling checkbox change"));
-        }
-
-        private void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e)
-        {
+        private void ToggleOverlay() =>
             SmartLogger.Safe(() =>
             {
-                if (sender is not Slider slider)
-                    return;
+                if (_controller.IsOverlayActive) _controller.CloseOverlay();
+                else _controller.OpenOverlay();
+            }, GetLoggerOptions("Error toggling overlay"));
 
-                // Определяем шаг изменения в зависимости от диапазона слайдера
-                double range = slider.Maximum - slider.Minimum;
-                double step = range / 100.0; // Базовый шаг - 1% от диапазона
-
-                // Если нажат Ctrl - более точное управление (шаг / 5)
-                if (Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl))
-                    step /= 5.0;
-                // Если нажат Shift - более быстрое управление (шаг * 5)
-                else if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift))
-                    step *= 5.0;
-
-                // Увеличиваем или уменьшаем значение в зависимости от направления прокрутки
-                double newValue = slider.Value + (e.Delta > 0 ? step : -step);
-
-                // Ограничиваем значение в пределах допустимого диапазона
-                newValue = Math.Max(slider.Minimum, Math.Min(slider.Maximum, newValue));
-
-                // Применяем новое значение
-                slider.Value = newValue;
-
-                // Вызываем событие изменения значения для обработки
-                OnSliderValueChanged(slider, new RoutedPropertyChangedEventArgs<double>(slider.Value - step, slider.Value));
-
-                // Отмечаем событие как обработанное
-                e.Handled = true;
-            }, GetLoggerOptions("Error handling slider mouse wheel"));
-        }
-
-        private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            SmartLogger.Safe(() => {
-                if (e.ChangedButton == MouseButton.Left)
-                {
-                    var mousePos = e.GetPosition(TitleBar);
-                    var closeButtonBounds = CloseButton.TransformToAncestor(TitleBar)
-                        .TransformBounds(new Rect(0, 0, CloseButton.ActualWidth, CloseButton.ActualHeight));
-
-                    if (!closeButtonBounds.Contains(mousePos))
-                    {
-                        DragMove();
-                    }
-                }
-            }, GetLoggerOptions("Error handling window drag"));
-        }
-
-        private void ToggleOverlay()
-        {
-            if (_mainWindow.IsOverlayActive)
-            {
-                _mainWindow.CloseOverlay();
-            }
-            else
-            {
-                _mainWindow.OpenOverlay();
-            }
-        }
-
-        private void OpenSettings()
-        {
-            SmartLogger.Safe(() => {
-                new SettingsWindow().ShowDialog();
-            }, GetLoggerOptions("Error opening settings"));
-        }
+        private void OpenSettings() =>
+            SmartLogger.Safe(() => new SettingsWindow().ShowDialog(),
+                GetLoggerOptions("Error opening settings"));
 
         private SmartLogger.ErrorHandlingOptions GetLoggerOptions(string errorMessage) =>
-            new SmartLogger.ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = errorMessage
-            };
+            new() { Source = LogPrefix, ErrorMessage = errorMessage };
+
+        private Dictionary<string, Action> CreateButtonActionsMap() => new()
+        {
+            ["CloseButton"] = Close,
+            ["StartCaptureButton"] = () => _ = _controller.StartCaptureAsync(),
+            ["StopCaptureButton"] = () => _ = _controller.StopCaptureAsync(),
+            ["OverlayButton"] = ToggleOverlay,
+            ["OpenPopupButton"] = () => _controller.IsPopupOpen = true,
+            ["OpenSettingsButton"] = OpenSettings
+        };
+
+        private Dictionary<string, Action<double>> CreateSliderActionsMap() => new()
+        {
+            ["barSpacingSlider"] = value => _controller.BarSpacing = value,
+            ["barCountSlider"] = value => _controller.BarCount = (int)value,
+            ["minDbLevelSlider"] = value => _controller.MinDbLevel = (float)value,
+            ["maxDbLevelSlider"] = value => _controller.MaxDbLevel = (float)value,
+            ["amplificationFactorSlider"] = value => _controller.AmplificationFactor = (float)value
+        };
+
+        private Dictionary<(string Name, Type ItemType), Action<object>> CreateComboBoxActionsMap() => new()
+        {
+            [("RenderStyleComboBox", typeof(RenderStyle))] = item => _controller.SelectedDrawingType = (RenderStyle)item,
+            [("FftWindowTypeComboBox", typeof(FftWindowType))] = item => _controller.WindowType = (FftWindowType)item,
+            [("ScaleTypeComboBox", typeof(SpectrumScale))] = item => _controller.ScaleType = (SpectrumScale)item,
+            [("RenderQualityComboBox", typeof(RenderQuality))] = item => _controller.RenderQuality = (RenderQuality)item
+        };
+
+        private Dictionary<string, Action<bool>> CreateCheckBoxActionsMap() => new()
+        {
+            ["ShowPerformanceInfoCheckBox"] = value => _controller.ShowPerformanceInfo = value,
+            ["OverlayTopmostCheckBox"] = value => _controller.IsOverlayTopmost = value
+        };
 
         public void Dispose()
         {
@@ -313,20 +188,15 @@ namespace SpectrumNet
         protected virtual void Dispose(bool disposing)
         {
             if (_isDisposed) return;
-
             if (disposing)
             {
                 MouseDoubleClick -= OnWindowMouseDoubleClick;
                 KeyDown -= OnKeyDown;
-                Loaded -= OnLoaded;
+                GainControlsPopup?.Apply(p => p.MouseDown -= OnGainControlsPopupMouseDown);
             }
-
             _isDisposed = true;
         }
 
-        ~ControlPanelWindow()
-        {
-            Dispose(false);
-        }
+        ~ControlPanelWindow() => Dispose(false);
     }
 }

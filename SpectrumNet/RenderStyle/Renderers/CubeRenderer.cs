@@ -2,7 +2,10 @@
 
 namespace SpectrumNet
 {
-    public sealed class CubeRenderer : ISpectrumRenderer, IDisposable
+    /// <summary>
+    /// Renderer that creates a 3D cube that reacts to audio spectrum data.
+    /// </summary>
+    public sealed class CubeRenderer : BaseSpectrumRenderer
     {
         #region Structures
         private readonly record struct Vertex(float X, float Y, float Z);
@@ -38,6 +41,9 @@ namespace SpectrumNet
         #region Constants
         private static class Constants
         {
+            // Logging
+            public const string LOG_PREFIX = "CubeRenderer";
+
             // Cube properties
             public const float BaseCubeSize = 0.5f;       // Базовый размер куба
             public const float MinCubeSize = 0.2f;        // Минимальный размер куба
@@ -70,7 +76,7 @@ namespace SpectrumNet
         #endregion
 
         #region Fields
-        private static readonly Lazy<CubeRenderer> LazyInstance = new(() => new CubeRenderer(), LazyThreadSafetyMode.ExecutionAndPublication);
+        private static readonly Lazy<CubeRenderer> _instance = new(() => new CubeRenderer());
         private readonly Vertex[] _vertices;
         private readonly Face[] _faces;
         private readonly Vector3[] _faceNormalVectors;
@@ -84,10 +90,10 @@ namespace SpectrumNet
         private float[] _spectrum = Array.Empty<float>();
         private float _currentCubeSize = Constants.BaseCubeSize;
         private int _currentBarCount;
-        private readonly Thread _processingThread;
-        private readonly CancellationTokenSource _cts = new();
-        private readonly AutoResetEvent _spectrumDataAvailable = new(false);
-        private readonly AutoResetEvent _processingComplete = new(false);
+        private Thread? _processingThread;
+        private CancellationTokenSource? _cts;
+        private AutoResetEvent? _spectrumDataAvailable;
+        private AutoResetEvent? _processingComplete;
         private readonly object _renderDataLock = new();
         private float[]? _spectrumToProcess;
         private int _barCountToProcess;
@@ -95,22 +101,14 @@ namespace SpectrumNet
         private RenderData? _currentRenderData;
         private SKImageInfo _lastImageInfo;
         private bool _dataReady;
-        private bool _isDisposed;
         private readonly SKPaint[] _facePaints;
         private readonly SKPaint _edgePaint;
         private DateTime _lastUpdateTime = DateTime.Now;
-
-        // RenderQuality fields
-        private RenderQuality _quality = RenderQuality.Medium;
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
-
-        private const string LogPrefix = "[CubeRenderer] ";
+        private bool _useGlowEffects = true;
         #endregion
 
         #region Initialization
-        public static CubeRenderer GetInstance() => LazyInstance.Value;
+        public static CubeRenderer GetInstance() => _instance.Value;
 
         private CubeRenderer()
         {
@@ -144,10 +142,30 @@ namespace SpectrumNet
             _rotationSpeedX = Constants.BaseRotationSpeed * 0.8f;
             _rotationSpeedY = Constants.BaseRotationSpeed * 1.2f;
             _rotationSpeedZ = Constants.BaseRotationSpeed * 0.6f;
-            _processingThread = new Thread(ProcessSpectrumThreadFunc) { IsBackground = true, Name = "CubeProcessor" };
-            _processingRunning = true;
-            _processingThread.Start();
         }
+
+        public override void Initialize() => SmartLogger.Safe(() =>
+        {
+            base.Initialize();
+
+            _cts = new CancellationTokenSource();
+            _spectrumDataAvailable = new AutoResetEvent(false);
+            _processingComplete = new AutoResetEvent(false);
+            _processingRunning = true;
+
+            _processingThread = new Thread(ProcessSpectrumThreadFunc)
+            {
+                IsBackground = true,
+                Name = "CubeProcessor"
+            };
+            _processingThread.Start();
+
+            SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.Initialize",
+            ErrorMessage = "Failed to initialize renderer"
+        });
 
         private static Vertex[] CreateCubeVertices() => new Vertex[]
         {
@@ -178,47 +196,27 @@ namespace SpectrumNet
         }
         #endregion
 
-        #region Public Methods
-        public void Initialize() { }
-
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        #region Public Interface
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium) => SmartLogger.Safe(() =>
         {
-            Quality = quality;
-        }
-
-        public RenderQuality Quality
+            base.Configure(isOverlayActive, quality);
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            get => _quality;
-            set
+            Source = $"{Constants.LOG_PREFIX}.Configure",
+            ErrorMessage = "Failed to configure renderer"
+        });
+
+        protected override void ApplyQualitySettings() => SmartLogger.Safe(() =>
+        {
+            base.ApplyQualitySettings();
+
+            _useGlowEffects = _quality switch
             {
-                if (_quality != value)
-                {
-                    _quality = value;
-                    ApplyQualitySettings();
-                }
-            }
-        }
-
-        private void ApplyQualitySettings()
-        {
-            switch (_quality)
-            {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
-                    break;
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
-                    break;
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
-                    break;
-            }
+                RenderQuality.Low => false,
+                RenderQuality.Medium => true,
+                RenderQuality.High => true,
+                _ => true
+            };
 
             foreach (var paint in _facePaints)
             {
@@ -228,60 +226,102 @@ namespace SpectrumNet
 
             _edgePaint.IsAntialias = _useAntiAlias;
             _edgePaint.FilterQuality = _filterQuality;
-        }
-
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, float barWidth,
-            float barSpacing, int barCount, SKPaint? paint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            if (!ValidateRenderParameters(canvas, spectrum, paint, info)) return;
-            _lastImageInfo = info;
-            SubmitSpectrumForProcessing(spectrum, barCount);
+            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+            ErrorMessage = "Failed to apply quality settings"
+        });
 
-            DateTime now = DateTime.Now;
-            float deltaTime = (float)(now - _lastUpdateTime).TotalSeconds;
-            _lastUpdateTime = now;
+        public override void Render(
+            SKCanvas? canvas,
+            float[]? spectrum,
+            SKImageInfo info,
+            float barWidth,
+            float barSpacing,
+            int barCount,
+            SKPaint? paint,
+            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        {
+            if (!QuickValidate(canvas, spectrum, info, paint))
+            {
+                drawPerformanceInfo?.Invoke(canvas!, info);
+                return;
+            }
 
-            _rotationAngleX = (_rotationAngleX + _rotationSpeedX * deltaTime) % MathF.Tau;
-            _rotationAngleY = (_rotationAngleY + _rotationSpeedY * deltaTime) % MathF.Tau;
-            _rotationAngleZ = (_rotationAngleZ + _rotationSpeedZ * deltaTime) % MathF.Tau;
+            SmartLogger.Safe(() =>
+            {
+                _lastImageInfo = info;
+                SubmitSpectrumForProcessing(spectrum, barCount);
 
-            if (_dataReady) RenderCube(canvas!, info, paint!);
+                DateTime now = DateTime.Now;
+                float deltaTime = (float)(now - _lastUpdateTime).TotalSeconds;
+                _lastUpdateTime = now;
+
+                _rotationAngleX = (_rotationAngleX + _rotationSpeedX * deltaTime) % MathF.Tau;
+                _rotationAngleY = (_rotationAngleY + _rotationSpeedY * deltaTime) % MathF.Tau;
+                _rotationAngleZ = (_rotationAngleZ + _rotationSpeedZ * deltaTime) % MathF.Tau;
+
+                if (_dataReady) RenderCube(canvas!, info, paint!);
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Render",
+                ErrorMessage = "Error during rendering"
+            });
+
             drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
-        public void Dispose()
+        public override void Dispose()
         {
-            if (_isDisposed) return;
-            _processingRunning = false;
-            _cts.Cancel();
-            _spectrumDataAvailable.Set();
-            _processingThread.Join(100);
+            if (!_disposed)
+            {
+                SmartLogger.Safe(() =>
+                {
+                    _processingRunning = false;
+                    _cts?.Cancel();
+                    _spectrumDataAvailable?.Set();
+                    _processingThread?.Join(100);
 
-            foreach (var paint in _facePaints) paint.Dispose();
-            _edgePaint.Dispose();
+                    foreach (var paint in _facePaints) paint.Dispose();
+                    _edgePaint.Dispose();
 
-            _cts.Dispose();
-            _spectrumDataAvailable.Dispose();
-            _processingComplete.Dispose();
-            _isDisposed = true;
-            GC.SuppressFinalize(this);
+                    _cts?.Dispose();
+                    _spectrumDataAvailable?.Dispose();
+                    _processingComplete?.Dispose();
+
+                    _cts = null;
+                    _spectrumDataAvailable = null;
+                    _processingComplete = null;
+                    _processingThread = null;
+
+                    base.Dispose();
+                }, new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = $"{Constants.LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during disposal"
+                });
+            }
         }
         #endregion
 
         #region Processing
-        private void SubmitSpectrumForProcessing(float[]? spectrum, int barCount)
+        private void SubmitSpectrumForProcessing(float[]? spectrum, int barCount) => SmartLogger.Safe(() =>
         {
-            if (spectrum == null) return;
+            if (spectrum == null || _spectrumDataAvailable == null || _processingComplete == null) return;
             lock (_renderDataLock) { _spectrumToProcess = spectrum; _barCountToProcess = barCount; }
             _spectrumDataAvailable.Set();
             _processingComplete.WaitOne(5);
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.SubmitSpectrumForProcessing",
+            ErrorMessage = "Failed to submit spectrum for processing"
+        });
 
         private void ProcessSpectrumThreadFunc()
         {
             try
             {
-                while (_processingRunning && !_cts.Token.IsCancellationRequested)
+                while (_processingRunning && _cts != null && !_cts.Token.IsCancellationRequested && _spectrumDataAvailable != null && _processingComplete != null)
                 {
                     _spectrumDataAvailable.WaitOne();
                     float[]? spectrumCopy;
@@ -297,55 +337,52 @@ namespace SpectrumNet
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Console.WriteLine($"{LogPrefix}Error in cube processing thread: {ex.Message}"); }
-        }
-
-        private void ComputeCubeData(float[] spectrum, int barCount, SKImageInfo info)
-        {
-            try
+            catch (Exception ex)
             {
-                if (_cts.Token.IsCancellationRequested) return;
-                _spectrum = spectrum;
-                _currentBarCount = barCount;
-
-                UpdateCubeSize();
-                UpdateRotationSpeeds();
-                _rotationMatrix = CreateRotationMatrix();
-
-                float centerX = info.Width * 0.5f;
-                float centerY = info.Height * 0.5f;
-                float barCountScale = 1.0f + MathF.Log10(Math.Max(1, _currentBarCount)) * 0.3f;
-                barCountScale = Math.Clamp(barCountScale, 1.0f, 2.5f);
-                float scale = MathF.Min(centerX, centerY) * _currentCubeSize * barCountScale;
-
-                ProjectVertices(scale, centerX, centerY);
-                if (_cts.Token.IsCancellationRequested) return;
-                CalculateFaceDepthsAndNormals();
-                SortFacesByDepth();
-
-                float maxSpectrumValue = 0f;
-                foreach (var val in _spectrum) if (val > maxSpectrumValue) maxSpectrumValue = val;
-
-                lock (_renderDataLock)
-                {
-                    _currentRenderData = new RenderData(
-                        _projectedVertices, _faces, _faceDepths, _faceNormals, _faceLightIntensities,
-                        maxSpectrumValue, _currentCubeSize, _currentBarCount);
-                    _dataReady = true;
-                }
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, $"Error in cube processing thread: {ex.Message}");
             }
-            catch (OperationCanceledException) { }
-            catch (Exception ex) { Console.WriteLine($"{LogPrefix}Error computing cube data: {ex.Message}"); }
         }
+
+        private void ComputeCubeData(float[] spectrum, int barCount, SKImageInfo info) => SmartLogger.Safe(() =>
+        {
+            if (_cts == null || _cts.Token.IsCancellationRequested) return;
+            _spectrum = spectrum;
+            _currentBarCount = barCount;
+
+            UpdateCubeSize();
+            UpdateRotationSpeeds();
+            _rotationMatrix = CreateRotationMatrix();
+
+            float centerX = info.Width * 0.5f;
+            float centerY = info.Height * 0.5f;
+            float barCountScale = 1.0f + MathF.Log10(Math.Max(1, _currentBarCount)) * 0.3f;
+            barCountScale = Math.Clamp(barCountScale, 1.0f, 2.5f);
+            float scale = MathF.Min(centerX, centerY) * _currentCubeSize * barCountScale;
+
+            ProjectVertices(scale, centerX, centerY);
+            if (_cts.Token.IsCancellationRequested) return;
+            CalculateFaceDepthsAndNormals();
+            SortFacesByDepth();
+
+            float maxSpectrumValue = 0f;
+            foreach (var val in _spectrum) if (val > maxSpectrumValue) maxSpectrumValue = val;
+
+            lock (_renderDataLock)
+            {
+                _currentRenderData = new RenderData(
+                    _projectedVertices, _faces, _faceDepths, _faceNormals, _faceLightIntensities,
+                    maxSpectrumValue, _currentCubeSize, _currentBarCount);
+                _dataReady = true;
+            }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.ComputeCubeData",
+            ErrorMessage = "Error computing cube data"
+        });
         #endregion
 
         #region Rendering
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? paint, SKImageInfo info) =>
-            !_isDisposed && canvas != null && spectrum != null && spectrum.Length > 0 &&
-            paint != null && info.Width > 0 && info.Height > 0;
-
-        private void RenderCube(SKCanvas canvas, SKImageInfo info, SKPaint paint)
+        private void RenderCube(SKCanvas canvas, SKImageInfo info, SKPaint paint) => SmartLogger.Safe(() =>
         {
             RenderData renderData;
             lock (_renderDataLock)
@@ -385,17 +422,21 @@ namespace SpectrumNet
 
                 canvas.DrawPath(path, facePaint);
 
-                if (_useAdvancedEffects)
+                if (_useGlowEffects)
                 {
                     _edgePaint.Color = SKColors.White.WithAlpha((byte)(alpha * Constants.EdgeAlphaMultiplier));
                     canvas.DrawPath(path, _edgePaint);
                 }
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.RenderCube",
+            ErrorMessage = "Error rendering cube"
+        });
         #endregion
 
         #region Computation Methods
-        private void UpdateCubeSize()
+        private void UpdateCubeSize() => SmartLogger.Safe(() =>
         {
             if (_spectrum.Length == 0) return;
             float avgIntensity = 0f;
@@ -405,9 +446,13 @@ namespace SpectrumNet
             float targetSize = Constants.BaseCubeSize + (avgIntensity * Constants.CubeSizeResponseFactor);
             targetSize = Math.Clamp(targetSize, Constants.MinCubeSize, Constants.MaxCubeSize);
             _currentCubeSize = _currentCubeSize * 0.9f + targetSize * 0.1f;
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.UpdateCubeSize",
+            ErrorMessage = "Error updating cube size"
+        });
 
-        private void UpdateRotationSpeeds()
+        private void UpdateRotationSpeeds() => SmartLogger.Safe(() =>
         {
             if (_spectrum.Length < 3) return;
             float lowFreq = _spectrum.Length > 0 ? _spectrum[0] : 0;
@@ -421,7 +466,11 @@ namespace SpectrumNet
             _rotationSpeedX = Math.Min(_rotationSpeedX, Constants.MaxRotationSpeed);
             _rotationSpeedY = Math.Min(_rotationSpeedY, Constants.MaxRotationSpeed);
             _rotationSpeedZ = Math.Min(_rotationSpeedZ, Constants.MaxRotationSpeed);
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.UpdateRotationSpeeds",
+            ErrorMessage = "Error updating rotation speeds"
+        });
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Matrix4x4 CreateRotationMatrix() =>
@@ -430,7 +479,7 @@ namespace SpectrumNet
             Matrix4x4.CreateRotationZ(_rotationAngleZ);
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        private void ProjectVertices(float scale, float centerX, float centerY)
+        private void ProjectVertices(float scale, float centerX, float centerY) => SmartLogger.Safe(() =>
         {
             float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
             float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
@@ -450,9 +499,13 @@ namespace SpectrumNet
                     Depth = rz
                 };
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.ProjectVertices",
+            ErrorMessage = "Error projecting vertices"
+        });
 
-        private void CalculateFaceDepthsAndNormals()
+        private void CalculateFaceDepthsAndNormals() => SmartLogger.Safe(() =>
         {
             for (int i = 0; i < _faces.Length; i++)
             {
@@ -470,9 +523,13 @@ namespace SpectrumNet
                 lightIntensity = Constants.AmbientLight + Constants.DiffuseLight * Math.Max(0, lightIntensity);
                 _faceLightIntensities[i] = lightIntensity;
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.CalculateFaceDepthsAndNormals",
+            ErrorMessage = "Error calculating face depths and normals"
+        });
 
-        private void SortFacesByDepth()
+        private void SortFacesByDepth() => SmartLogger.Safe(() =>
         {
             int[] indices = new int[_faces.Length];
             for (int i = 0; i < indices.Length; i++) indices[i] = i;
@@ -496,7 +553,11 @@ namespace SpectrumNet
             Array.Copy(sortedDepths, _faceDepths, _faceDepths.Length);
             Array.Copy(sortedNormals, _faceNormals, _faceNormals.Length);
             Array.Copy(sortedLightIntensities, _faceLightIntensities, _faceLightIntensities.Length);
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.SortFacesByDepth",
+            ErrorMessage = "Error sorting faces by depth"
+        });
         #endregion
     }
 }

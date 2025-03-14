@@ -781,5 +781,10 @@ namespace SpectrumNet
 
         public static T? AsOrNull<T>(this object obj) where T : class =>
             obj as T;
+
+        public static void Apply<T>(this T? obj, Action<T> action) where T : class
+        {
+            if (obj != null) action(obj);
+        }
     }
 }

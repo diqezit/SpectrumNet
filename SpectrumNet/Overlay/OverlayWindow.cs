@@ -14,7 +14,10 @@ namespace SpectrumNet
 
     public sealed class OverlayWindow : Window, IDisposable
     {
-        private readonly record struct RenderContext(MainWindow MainWindow, SKElement SkElement, DispatcherTimer RenderTimer);
+        private readonly record struct RenderContext(
+            IAudioVisualizationController Controller, 
+            SKElement SkElement, 
+            DispatcherTimer RenderTimer);
 
         private readonly OverlayConfiguration _configuration;
         private readonly CancellationTokenSource _disposalTokenSource = new();
@@ -26,9 +29,9 @@ namespace SpectrumNet
 
         public new bool IsInitialized => _renderContext != null && !_isDisposed;
 
-        public OverlayWindow(MainWindow mainWindow, OverlayConfiguration? configuration = null)
+        public OverlayWindow(IAudioVisualizationController controller, OverlayConfiguration? configuration = null)
         {
-            if (mainWindow == null) throw new ArgumentNullException(nameof(mainWindow));
+            if (controller == null) throw new ArgumentNullException(nameof(controller));
             _configuration = configuration ?? new();
 
             try
@@ -39,7 +42,7 @@ namespace SpectrumNet
                     SetValue(RenderOptions.BitmapScalingModeProperty, BitmapScalingMode.NearestNeighbor);
                 }
 
-                InitializeOverlay(mainWindow);
+                InitializeOverlay(controller);
                 _frameTimeWatch.Start();
             }
             catch (Exception ex)
@@ -58,7 +61,7 @@ namespace SpectrumNet
             }
         }
 
-        private void InitializeOverlay(MainWindow mainWindow)
+        private void InitializeOverlay(IAudioVisualizationController controller)
         {
             ConfigureWindowProperties();
 
@@ -75,7 +78,7 @@ namespace SpectrumNet
                 Interval = TimeSpan.FromMilliseconds(_configuration.RenderInterval)
             };
 
-            _renderContext = new(mainWindow, skElement, renderTimer);
+            _renderContext = new(controller, skElement, renderTimer);
             Content = skElement;
 
             SubscribeToEvents();
@@ -172,7 +175,7 @@ namespace SpectrumNet
                 if (_frameTimeWatch.ElapsedMilliseconds > _configuration.RenderInterval * 2)
                 {
                     // Skip complex rendering if we're falling behind
-                    _renderContext.Value.MainWindow.OnPaintSurface(sender, args);
+                    _renderContext.Value.Controller.OnPaintSurface(sender, args);
                     return;
                 }
 
@@ -186,7 +189,7 @@ namespace SpectrumNet
                 {
                     tempSurface.Canvas.Clear(SKColors.Transparent);
                     var tempArgs = new SKPaintSurfaceEventArgs(tempSurface, info);
-                    _renderContext.Value.MainWindow.OnPaintSurface(sender, tempArgs);
+                    _renderContext.Value.Controller.OnPaintSurface(sender, tempArgs);
                 }
 
                 canvas.DrawBitmap(_cacheBitmap, 0, 0);

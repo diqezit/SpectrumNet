@@ -158,11 +158,12 @@ namespace SpectrumNet
         private readonly ArrayPool<float> _floatArrayPool = ArrayPool<float>.Shared;
         private SpectralData? _lastData;
         private SpectrumScale _scaleType = SpectrumScale.Linear;
-        private bool _disposed;
+        private bool _disposed; 
 
         public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
         public event EventHandler? Disposed;
         public ISite? Site { get; set; }
+        public bool IsDisposed => _disposed;
 
         public SpectrumAnalyzer(
             IFftProcessor fftProcessor,
@@ -278,6 +279,7 @@ namespace SpectrumNet
         {
             if (_disposed)
                 return;
+            _disposed = true;
             _fftProcessor.FftCalculated -= OnFftCalculated;
             _cts.Cancel();
             _processingChannel.Writer.Complete();
@@ -289,7 +291,6 @@ namespace SpectrumNet
                         Source = LogSource,
                         ErrorMessage = "Error disposing processor"
                     });
-            _disposed = true;
             SmartLogger.SafeExecute(() => {
                 if (_context != null)
                     _context.Post(_ => Disposed?.Invoke(this, EventArgs.Empty),

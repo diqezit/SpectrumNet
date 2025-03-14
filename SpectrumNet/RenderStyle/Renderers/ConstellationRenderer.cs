@@ -1,18 +1,17 @@
 ﻿#nullable enable
-using System;
-using System.Numerics;
-using System.Threading;
-using System.Threading.Tasks;
-using SkiaSharp;
 
 namespace SpectrumNet
 {
-    public sealed class ConstellationRenderer : ISpectrumRenderer, IDisposable
+    /// <summary>
+    /// Renderer that creates a dynamic constellation of stars that react to audio spectrum data.
+    /// </summary>
+    public sealed class ConstellationRenderer : BaseSpectrumRenderer
     {
         #region Constants
         private static class Constants
         {
             // Star properties
+            public const string LOG_PREFIX = "ConstellationRenderer";
             public const int DEFAULT_STAR_COUNT = 120;    // Default number of stars
             public const int OVERLAY_STAR_COUNT = 80;     // Number of stars in overlay mode
             public const int MIN_STAR_X = 100;            // Minimum initial X position
@@ -68,11 +67,8 @@ namespace SpectrumNet
         #endregion
 
         #region Fields
-        private static ConstellationRenderer? _instance;
-        private bool _isInitialized, _isOverlayActive;
-        private volatile bool _disposed;
-        private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
-
+        private static readonly Lazy<ConstellationRenderer> _instance = new(() => new ConstellationRenderer());
+        private bool _isOverlayActive;
         private float _lowSpectrum, _midSpectrum, _highSpectrum, _processedSpectrum;
         private float _spectrumEnergy, _spawnAccumulator, _lastSpectrumUpdateTime, _timeSinceLastSpectrum;
         private bool _hasActiveSpectrum; // Indicates if spectrum data is active
@@ -85,49 +81,38 @@ namespace SpectrumNet
         private int _starCount;
         private SKImageInfo _lastRenderInfo;
         private readonly object _starsLock = new();
-        private readonly CancellationTokenSource _updateTokenSource = new();
+        private CancellationTokenSource _updateTokenSource = new();
         private Task? _updateTask;
         private volatile bool _needsUpdate;
         private SKSurface? _renderSurface;
-
-        // RenderQuality fields
-        private RenderQuality _quality = RenderQuality.Medium;
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
-
-        private const string LogPrefix = "[ConstellationRenderer] ";
+        private bool _useGlowEffects = true;
         #endregion
 
         #region Initialization
         private ConstellationRenderer()
         {
-            InitializeShadersAndPaints();
-            StartUpdateLoop();
+            // Private constructor for singleton pattern
         }
 
-        ~ConstellationRenderer() => Dispose(false);
+        public static ConstellationRenderer GetInstance() => _instance.Value;
 
-        public static ConstellationRenderer GetInstance() => _instance ??= new ConstellationRenderer();
-
-        public void Initialize()
+        public override void Initialize() => SmartLogger.Safe(() =>
         {
-            if (_isInitialized) return;
+            base.Initialize();
             _starCount = _isOverlayActive ? Constants.OVERLAY_STAR_COUNT : Constants.DEFAULT_STAR_COUNT;
             InitializeStars(_starCount);
-            _isInitialized = true;
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, "ConstellationRenderer initialized");
-        }
-
-        private void InitializeShadersAndPaints()
+            InitializeShadersAndPaints();
+            StartUpdateLoop();
+            SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            _starPaint = new SKPaint
-            {
-                IsAntialias = true,
-                Style = SKPaintStyle.Fill,
-                FilterQuality = SKFilterQuality.High,
-                BlendMode = SKBlendMode.SrcOver,
-            };
+            Source = $"{Constants.LOG_PREFIX}.Initialize",
+            ErrorMessage = "Failed to initialize renderer"
+        });
+
+        private void InitializeShadersAndPaints() => SmartLogger.Safe(() =>
+        {
+            _starPaint = CreateBasicPaint(SKColors.White);
 
             _glowShader = SKShader.CreateRadialGradient(
                 new SKPoint(0, 0), Constants.UNIT_RADIUS,
@@ -135,62 +120,40 @@ namespace SpectrumNet
                 new float[] { 0.0f, 1.0f },
                 SKShaderTileMode.Clamp);
 
-            _glowPaint = new SKPaint
-            {
-                IsAntialias = true,
-                Style = SKPaintStyle.Fill,
-                FilterQuality = SKFilterQuality.High,
-                BlendMode = SKBlendMode.Plus,
-                Shader = _glowShader,
-                ImageFilter = SKImageFilter.CreateBlur(Constants.GLOW_RADIUS, Constants.GLOW_RADIUS)
-            };
-        }
+            _glowPaint = CreateGlowPaint(SKColors.White, Constants.GLOW_RADIUS, 128);
+            _glowPaint.BlendMode = SKBlendMode.Plus;
+            _glowPaint.Shader = _glowShader;
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.InitializeShadersAndPaints",
+            ErrorMessage = "Failed to initialize shaders and paints"
+        });
         #endregion
 
         #region Public Interface
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium) => SmartLogger.Safe(() =>
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(ConstellationRenderer));
-            if (_isOverlayActive == isOverlayActive && _quality == quality) return;
+            base.Configure(isOverlayActive, quality);
+            if (_isOverlayActive == isOverlayActive && Quality == quality) return;
             _isOverlayActive = isOverlayActive;
             _starCount = _isOverlayActive ? Constants.OVERLAY_STAR_COUNT : Constants.DEFAULT_STAR_COUNT;
-            Quality = quality;
             InitializeStars(_starCount);
-        }
-
-        public RenderQuality Quality
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            get => _quality;
-            set
-            {
-                if (_quality != value)
-                {
-                    _quality = value;
-                    ApplyQualitySettings();
-                }
-            }
-        }
+            Source = $"{Constants.LOG_PREFIX}.Configure",
+            ErrorMessage = "Failed to configure renderer"
+        });
 
-        private void ApplyQualitySettings()
+        protected override void ApplyQualitySettings() => SmartLogger.Safe(() =>
         {
-            switch (_quality)
+            base.ApplyQualitySettings();
+            _useGlowEffects = _quality switch
             {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
-                    break;
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
-                    break;
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
-                    break;
-            }
+                RenderQuality.Low => false,
+                RenderQuality.Medium => true,
+                RenderQuality.High => true,
+                _ => true
+            };
 
             if (_starPaint != null)
             {
@@ -203,53 +166,79 @@ namespace SpectrumNet
                 _glowPaint.IsAntialias = _useAntiAlias;
                 _glowPaint.FilterQuality = _filterQuality;
             }
-        }
-
-        public void Render(SKCanvas? canvas, float[]? spectrum, SKImageInfo info,
-                           float barWidth, float barSpacing, int barCount, SKPaint? paint,
-                           Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            if (!ValidateRenderParams(canvas, info, paint)) return;
-            bool semaphoreAcquired = false;
-            try
+            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+            ErrorMessage = "Failed to apply quality settings"
+        });
+
+        public override void Render(
+            SKCanvas? canvas,
+            float[]? spectrum,
+            SKImageInfo info,
+            float barWidth,
+            float barSpacing,
+            int barCount,
+            SKPaint? paint,
+            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        {
+            if (!QuickValidate(canvas, spectrum, info, paint))
             {
-                semaphoreAcquired = _spectrumSemaphore.Wait(0);
-                if (semaphoreAcquired)
-                {
-                    _timeSinceLastSpectrum += Constants.TIME_STEP;
-                    bool hasNewSpectrumData = spectrum != null && spectrum.Length >= 2;
-                    if (hasNewSpectrumData)
-                    {
-                        ProcessSpectrum(spectrum!);
-                        _hasActiveSpectrum = true;
-                        _lastSpectrumUpdateTime = _time;
-                        _timeSinceLastSpectrum = 0;
-                    }
-                    else
-                    {
-                        _spectrumEnergy = 0;
-                        if (_time - _lastSpectrumUpdateTime > Constants.SPECTRUM_TIMEOUT)
-                        {
-                            _hasActiveSpectrum = false;
-                            _processedSpectrum = 0;
-                        }
-                    }
-                    if (info.Width != _lastRenderInfo.Width || info.Height != _lastRenderInfo.Height || _renderSurface == null)
-                        UpdateRenderSurfaces(info);
-                    _needsUpdate = true;
-                    if (_timeSinceLastSpectrum > Constants.FORCE_CLEAR_TIMEOUT) ClearAllStars();
-                }
-                RenderStarField(canvas!, info);
                 drawPerformanceInfo?.Invoke(canvas!, info);
+                return;
             }
-            catch (Exception ex)
+
+            SKRect renderBounds = new(0, 0, info.Width, info.Height);
+            if (canvas!.QuickReject(renderBounds))
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error in ConstellationRenderer.Render: {ex.Message}");
+                drawPerformanceInfo?.Invoke(canvas, info);
+                return;
             }
-            finally { if (semaphoreAcquired) _spectrumSemaphore.Release(); }
+
+            SmartLogger.Safe(() =>
+            {
+                bool semaphoreAcquired = false;
+                try
+                {
+                    semaphoreAcquired = _spectrumSemaphore.Wait(0);
+                    if (semaphoreAcquired)
+                    {
+                        _timeSinceLastSpectrum += Constants.TIME_STEP;
+                        bool hasNewSpectrumData = spectrum != null && spectrum.Length >= 2;
+                        if (hasNewSpectrumData)
+                        {
+                            ProcessSpectrum(spectrum!);
+                            _hasActiveSpectrum = true;
+                            _lastSpectrumUpdateTime = _time;
+                            _timeSinceLastSpectrum = 0;
+                        }
+                        else
+                        {
+                            _spectrumEnergy = 0;
+                            if (_time - _lastSpectrumUpdateTime > Constants.SPECTRUM_TIMEOUT)
+                            {
+                                _hasActiveSpectrum = false;
+                                _processedSpectrum = 0;
+                            }
+                        }
+                        if (info.Width != _lastRenderInfo.Width || info.Height != _lastRenderInfo.Height || _renderSurface == null)
+                            UpdateRenderSurfaces(info);
+                        _needsUpdate = true;
+                        if (_timeSinceLastSpectrum > Constants.FORCE_CLEAR_TIMEOUT) ClearAllStars();
+                    }
+                    RenderStarField(canvas!, info);
+                }
+                finally { if (semaphoreAcquired) _spectrumSemaphore.Release(); }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Render",
+                ErrorMessage = "Error during rendering"
+            });
+
+            drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
-        private void ClearAllStars()
+        private void ClearAllStars() => SmartLogger.Safe(() =>
         {
             if (_stars == null) return;
             lock (_starsLock)
@@ -257,61 +246,87 @@ namespace SpectrumNet
                 for (int i = 0; i < _stars.Length; i++)
                     _stars[i] = _stars[i] with { IsActive = false, Opacity = 0 };
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.ClearAllStars",
+            ErrorMessage = "Failed to clear stars"
+        });
         #endregion
 
         #region Rendering Pipeline
-        private void UpdateRenderSurfaces(SKImageInfo info)
+        private void UpdateRenderSurfaces(SKImageInfo info) => SmartLogger.Safe(() =>
         {
             _lastRenderInfo = info;
             _renderSurface?.Dispose();
             _renderSurface = SKSurface.Create(info);
-        }
-
-        private void RenderStarField(SKCanvas canvas, SKImageInfo info)
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            if (_stars == null || _starPaint == null || _glowPaint == null || _renderSurface == null) return;
-            _renderSurface.Canvas.Clear(SKColors.Transparent);
-            SKCanvas renderCanvas = _renderSurface.Canvas;
-            lock (_starsLock)
+            Source = $"{Constants.LOG_PREFIX}.UpdateRenderSurfaces",
+            ErrorMessage = "Failed to update render surfaces"
+        });
+
+        private void RenderStarField(SKCanvas canvas, SKImageInfo info) => SmartLogger.Safe(() =>
+        {
+        if (_stars == null || _starPaint == null || _glowPaint == null || _renderSurface == null) return;
+        _renderSurface.Canvas.Clear(SKColors.Transparent);
+        SKCanvas renderCanvas = _renderSurface.Canvas;
+        lock (_starsLock)
+        {
+            foreach (var star in _stars)
             {
-                foreach (var star in _stars)
+                if (!star.IsActive || star.Lifetime <= 0 || star.Opacity <= 0.01f) continue;
+                if (star.X < -10 || star.X > info.Width + 10 || star.Y < -10 || star.Y > info.Height + 10) continue;
+                float lifetimeRatio = star.Lifetime / star.MaxLifetime;
+                float fadeEffect = lifetimeRatio < 0.2f ? lifetimeRatio / 0.2f : 1.0f;
+                float finalOpacity = star.Opacity * fadeEffect;
+                if (finalOpacity < 0.01f) continue;
+                byte alpha = (byte)Clamp((int)(255 * star.Brightness * finalOpacity), 0, 255);
+                float dynamicSize = star.Size * (0.7f + lifetimeRatio * 0.3f);
+                if (_useGlowEffects && (star.Brightness > Constants.DEFAULT_BRIGHTNESS || _spectrumEnergy > 0.45f))
                 {
-                    if (!star.IsActive || star.Lifetime <= 0 || star.Opacity <= 0.01f) continue;
-                    if (star.X < -10 || star.X > info.Width + 10 || star.Y < -10 || star.Y > info.Height + 10) continue;
-                    float lifetimeRatio = star.Lifetime / star.MaxLifetime;
-                    float fadeEffect = lifetimeRatio < 0.2f ? lifetimeRatio / 0.2f : 1.0f;
-                    float finalOpacity = star.Opacity * fadeEffect;
-                    if (finalOpacity < 0.01f) continue;
-                    byte alpha = (byte)Clamp((int)(255 * star.Brightness * finalOpacity), 0, 255);
-                    float dynamicSize = star.Size * (0.7f + lifetimeRatio * 0.3f);
-                    if (_useAdvancedEffects && (star.Brightness > Constants.DEFAULT_BRIGHTNESS || _spectrumEnergy > 0.45f))
-                    {
-                        float glowSize = dynamicSize * (2.2f + _spectrumEnergy * 1.2f) * finalOpacity;
-                        byte glowAlpha = (byte)(alpha * 0.6f);
-                        _glowPaint.Color = star.Color.WithAlpha(glowAlpha);
-                        renderCanvas.Save();
-                        renderCanvas.Translate(star.X, star.Y);
-                        renderCanvas.Scale(glowSize, glowSize);
-                        renderCanvas.DrawCircle(0, 0, Constants.UNIT_RADIUS, _glowPaint);
-                        renderCanvas.Restore();
-                    }
-                    _starPaint.Color = star.Color.WithAlpha(alpha);
+                    float glowSize = dynamicSize * (2.2f + _spectrumEnergy * 1.2f) * finalOpacity;
+                    byte glowAlpha = (byte)(alpha * 0.6f);
+                    _glowPaint.Color = star.Color.WithAlpha(glowAlpha);
                     renderCanvas.Save();
                     renderCanvas.Translate(star.X, star.Y);
-                    renderCanvas.Scale(dynamicSize, dynamicSize);
-                    renderCanvas.DrawCircle(0, 0, Constants.UNIT_RADIUS, _starPaint);
+                    renderCanvas.Scale(glowSize, glowSize);
+                    renderCanvas.DrawCircle(0, 0, Constants.UNIT_RADIUS, _glowPaint);
                     renderCanvas.Restore();
                 }
+                _starPaint.Color = star.Color.WithAlpha(alpha);
+                renderCanvas.Save();
+                renderCanvas.Translate(star.X, star.Y);
+                renderCanvas.Scale(dynamicSize, dynamicSize);
+                renderCanvas.DrawCircle(0, 0, Constants.UNIT_RADIUS, _starPaint);
+                renderCanvas.Restore();
             }
+        }
             using SKImage finalSnapshot = _renderSurface.Snapshot();
             canvas.DrawImage(finalSnapshot, 0, 0);
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.RenderStarField",
+            ErrorMessage = "Error rendering star field"
+        });
         #endregion
 
         #region Physics and Simulation
-        private void StartUpdateLoop()
+        private void StartUpdateLoop() => SmartLogger.Safe(() =>
         {
+            if (_updateTokenSource != null && !_updateTokenSource.IsCancellationRequested)
+                _updateTokenSource.Cancel();
+
+            if (_updateTask != null)
+            {
+                try { _updateTask.Wait(500); } catch { }
+            }
+
+            if (_updateTokenSource != null)
+            {
+                _updateTokenSource.Dispose();
+                _updateTokenSource = new CancellationTokenSource();
+            }
+
             _updateTask = Task.Run(async () =>
             {
                 float accumulatedTime = 0;
@@ -334,9 +349,13 @@ namespace SpectrumNet
                     await Task.Delay(Constants.UPDATE_INTERVAL, _updateTokenSource.Token);
                 }
             }, _updateTokenSource.Token);
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.StartUpdateLoop",
+            ErrorMessage = "Failed to start update loop"
+        });
 
-        private void FadeOutStars()
+        private void FadeOutStars() => SmartLogger.Safe(() =>
         {
             if (_stars == null) return;
             lock (_starsLock)
@@ -364,9 +383,13 @@ namespace SpectrumNet
                     }
                 }
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.FadeOutStars",
+            ErrorMessage = "Error fading out stars"
+        });
 
-        private void UpdateStars(SKImageInfo info)
+        private void UpdateStars(SKImageInfo info) => SmartLogger.Safe(() =>
         {
             if (_stars == null) return;
             float screenWidth = info.Width, screenHeight = info.Height;
@@ -451,7 +474,11 @@ namespace SpectrumNet
                     }
                 }
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.UpdateStars",
+            ErrorMessage = "Error updating stars"
+        });
 
         private void CalculateEdgeRepulsion(in Star star, float screenWidth, float screenHeight, ref float forceX, ref float forceY)
         {
@@ -465,7 +492,7 @@ namespace SpectrumNet
             forceY += edgeForceY;
         }
 
-        private void SpawnNewStars(float screenWidth, float screenHeight)
+        private void SpawnNewStars(float screenWidth, float screenHeight) => SmartLogger.Safe(() =>
         {
             if (_stars == null || _midSpectrum < Constants.SPAWN_THRESHOLD) return;
             int starsToSpawn = (int)_spawnAccumulator;
@@ -521,26 +548,34 @@ namespace SpectrumNet
                     };
                 }
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.SpawnNewStars",
+            ErrorMessage = "Error spawning new stars"
+        });
         #endregion
 
         #region Spectrum Processing
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        private void ProcessSpectrum(float[] spectrum)
+        private void ProcessSpectrum(float[] spectrum) => SmartLogger.Safe(() =>
         {
-            if (spectrum == null || spectrum.Length < 3) return;
-            int totalLength = spectrum.Length, bandLength = totalLength / 3;
-            float lowSum = 0, midSum = 0, highSum = 0;
-            for (int i = 0; i < bandLength; i++) lowSum += spectrum[i];
-            for (int i = bandLength; i < 2 * bandLength; i++) midSum += spectrum[i];
-            for (int i = 2 * bandLength; i < totalLength; i++) highSum += spectrum[i];
-            float avgLow = lowSum / bandLength, avgMid = midSum / bandLength, avgHigh = highSum / (totalLength - 2 * bandLength);
-            _lowSpectrum = _lowSpectrum + (avgLow - _lowSpectrum) * Constants.SMOOTHING_FACTOR;
+        if (spectrum == null || spectrum.Length < 3) return;
+        int totalLength = spectrum.Length, bandLength = totalLength / 3;
+        float lowSum = 0, midSum = 0, highSum = 0;
+        for (int i = 0; i < bandLength; i++) lowSum += spectrum[i];
+        for (int i = bandLength; i < 2 * bandLength; i++) midSum += spectrum[i];
+        for (int i = 2 * bandLength; i < totalLength; i++) highSum += spectrum[i];
+        float avgLow = lowSum / bandLength, avgMid = midSum / bandLength, avgHigh = highSum / (totalLength - 2 * bandLength);
+        _lowSpectrum = _lowSpectrum + (avgLow - _lowSpectrum) * Constants.SMOOTHING_FACTOR;
             _midSpectrum = _midSpectrum + (avgMid - _midSpectrum) * Constants.SMOOTHING_FACTOR;
             _highSpectrum = _highSpectrum + (avgHigh - _highSpectrum) * Constants.SMOOTHING_FACTOR;
             _processedSpectrum = Math.Min(_midSpectrum * Constants.SPECTRUM_AMPLIFICATION, Constants.MAX_BRIGHTNESS);
             _spectrumEnergy = _processedSpectrum;
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.ProcessSpectrum",
+            ErrorMessage = "Error processing spectrum data"
+        });
         #endregion
 
         #region Helper Methods
@@ -549,14 +584,10 @@ namespace SpectrumNet
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool ValidateRenderParams(SKCanvas? canvas, SKImageInfo info, SKPaint? paint)
-            => !_disposed && _isInitialized && canvas is not null && paint is not null && info.Width > 0 && info.Height > 0;
         #endregion
 
         #region Star Initialization
-        private void InitializeStars(int count)
+        private void InitializeStars(int count) => SmartLogger.Safe(() =>
         {
             if (_disposed) throw new ObjectDisposedException(nameof(ConstellationRenderer));
             lock (_starsLock)
@@ -588,35 +619,42 @@ namespace SpectrumNet
                     };
                 }
             }
-        }
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.InitializeStars",
+            ErrorMessage = "Failed to initialize stars"
+        });
         #endregion
 
         #region Disposal
-        public void Dispose()
+        public override void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        private void Dispose(bool disposing)
-        {
-            if (_disposed) return;
-            if (disposing)
+            if (!_disposed)
             {
-                _updateTokenSource.Cancel();
-                try { _updateTask?.Wait(500); } catch { }
-                _updateTokenSource.Dispose();
-                _spectrumSemaphore.Dispose();
-                _starPaint?.Dispose();
-                _glowPaint?.Dispose();
-                _renderSurface?.Dispose();
+                SmartLogger.Safe(() =>
+                {
+                    _updateTokenSource.Cancel();
+                    try { _updateTask?.Wait(500); } catch { }
+                    _updateTokenSource.Dispose();
+                    _updateTask?.Dispose();
+                    _starPaint?.Dispose();
+                    _glowPaint?.Dispose();
+                    _renderSurface?.Dispose();
+                    _glowShader?.Dispose();
+                    _starShader?.Dispose();
+
+                    _starPaint = null;
+                    _glowPaint = null;
+                    _renderSurface = null;
+                    _stars = null;
+
+                    base.Dispose();
+                }, new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = $"{Constants.LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during disposal"
+                });
             }
-            _starPaint = null;
-            _glowPaint = null;
-            _renderSurface = null;
-            _stars = null;
-            _disposed = true;
-            _isInitialized = false;
         }
         #endregion
 

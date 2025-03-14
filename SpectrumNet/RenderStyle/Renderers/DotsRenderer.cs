@@ -2,36 +2,17 @@
 
 namespace SpectrumNet
 {
-    public class DotsRenderer : ISpectrumRenderer, IDisposable
+    /// <summary>
+    /// Renderer that visualizes spectrum data as dots with various optimizations.
+    /// </summary>
+    public sealed class DotsRenderer : BaseSpectrumRenderer
     {
-        #region Singleton and Fields
-
-        private static DotsRenderer? _instance;
-        private bool _isInitialized;
-        private volatile bool _disposed;
-        private readonly object _lockObject = new();
-
-        private RenderQuality _quality = RenderQuality.Medium;
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
-        private bool _useHardwareAcceleration = true;
-        private bool _useVectorization = true;
-
-        // Cached objects
-        private SKPaint? _dotPaint;
-        private SKPicture? _cachedBackground;
-        private float[]? _previousSpectrum;
-        private Task? _backgroundCalculationTask;
-
-        private const string LogPrefix = "[DotsRenderer] ";
-
-        #endregion
-
         #region Constants
-
         private static class Constants
         {
+            // Logging
+            public const string LOG_PREFIX = "DotsRenderer";
+
             // Rendering thresholds and limits
             public const float MIN_INTENSITY_THRESHOLD = 0.01f;  // Minimum intensity to render a dot
             public const float MIN_DOT_RADIUS = 2.0f;           // Minimum dot radius in pixels
@@ -41,10 +22,6 @@ namespace SpectrumNet
             public const float ALPHA_MULTIPLIER = 255.0f;       // Multiplier for alpha calculation
             public const int ALPHA_BINS = 16;                   // Number of alpha bins for batching
 
-            // Smoothing parameters
-            public const float SMOOTHING_FACTOR_NORMAL = 0.3f;  // Smoothing for normal mode
-            public const float SMOOTHING_FACTOR_OVERLAY = 0.5f; // Smoothing for overlay mode
-
             // Dot size parameters
             public const float NORMAL_DOT_MULTIPLIER = 1.0f;    // Normal dot size multiplier
             public const float OVERLAY_DOT_MULTIPLIER = 1.5f;   // Overlay dot size multiplier
@@ -53,98 +30,99 @@ namespace SpectrumNet
             public const int VECTOR_SIZE = 4;                   // Size for SIMD vectorization
             public const int MIN_BATCH_SIZE = 32;               // Minimum batch size for parallel processing
         }
+        #endregion
 
+        #region Fields
+        private static readonly Lazy<DotsRenderer> _instance = new(() => new DotsRenderer());
+        private readonly object _lockObject = new();
+
+        // Cached objects
+        private SKPaint? _dotPaint;
+        private SKPicture? _cachedBackground;
+        private Task? _backgroundCalculationTask;
+
+        // Rendering state
+        private float _dotRadiusMultiplier = Constants.NORMAL_DOT_MULTIPLIER;
+        private bool _useHardwareAcceleration = true;
+        private bool _useVectorization = true;
+        private bool _batchProcessing = true;
+        #endregion
+
+        #region Structures
+        private struct CircleData
+        {
+            public float X;
+            public float Y;
+            public float Radius;
+            public float Intensity;
+        }
         #endregion
 
         #region Constructor and Initialization
-
         private DotsRenderer() { }
 
-        public static DotsRenderer GetInstance() => _instance ??= new DotsRenderer();
+        public static DotsRenderer GetInstance() => _instance.Value;
 
-        public void Initialize()
+        public override void Initialize() => SmartLogger.Safe(() =>
         {
-            if (!_isInitialized)
-            {
-                lock (_lockObject)
-                {
-                    if (!_isInitialized)
-                    {
-                        _isInitialized = true;
-                        _previousSpectrum = null;
-                        InitializePaints();
-                        SmartLogger.Log(LogLevel.Debug, LogPrefix, "Initialized");
-                    }
-                }
-            }
-        }
+            base.Initialize();
+            InitializePaints();
+            SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.Initialize",
+            ErrorMessage = "Failed to initialize renderer"
+        });
 
-        private void InitializePaints()
+        private void InitializePaints() => SmartLogger.Safe(() =>
         {
+            _dotPaint?.Dispose();
             _dotPaint = new SKPaint
             {
                 IsAntialias = _useAntiAlias,
                 FilterQuality = _filterQuality,
                 Style = SKPaintStyle.Fill
             };
-        }
-
+        }, new SmartLogger.ErrorHandlingOptions
+        {
+            Source = $"{Constants.LOG_PREFIX}.InitializePaints",
+            ErrorMessage = "Failed to initialize paints"
+        });
         #endregion
 
         #region Configuration
-
-        public RenderQuality Quality
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium) => SmartLogger.Safe(() =>
         {
-            get => _quality;
-            set
-            {
-                if (_quality != value)
-                {
-                    _quality = value;
-                    ApplyQualitySettings();
-                }
-            }
-        }
+            base.Configure(isOverlayActive, quality);
 
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-        {
             _dotRadiusMultiplier = isOverlayActive ?
                 Constants.OVERLAY_DOT_MULTIPLIER :
                 Constants.NORMAL_DOT_MULTIPLIER;
-
-            _smoothingFactor = isOverlayActive ?
-                Constants.SMOOTHING_FACTOR_OVERLAY :
-                Constants.SMOOTHING_FACTOR_NORMAL;
-
-            Quality = quality;
-        }
-
-        private void ApplyQualitySettings()
+        }, new SmartLogger.ErrorHandlingOptions
         {
+            Source = $"{Constants.LOG_PREFIX}.Configure",
+            ErrorMessage = "Failed to configure renderer"
+        });
+
+        protected override void ApplyQualitySettings() => SmartLogger.Safe(() =>
+        {
+            base.ApplyQualitySettings();
+
             switch (_quality)
             {
                 case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
                     _useHardwareAcceleration = true;
                     _useVectorization = false;
                     _batchProcessing = false;
                     break;
 
                 case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
                     _useHardwareAcceleration = true;
                     _useVectorization = true;
                     _batchProcessing = true;
                     break;
 
                 case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
                     _useHardwareAcceleration = true;
                     _useVectorization = true;
                     _batchProcessing = true;
@@ -157,85 +135,63 @@ namespace SpectrumNet
                 _dotPaint.FilterQuality = _filterQuality;
             }
 
-            // Invalidate cached objects that depend on quality
+            _cachedBackground?.Dispose();
             _cachedBackground = null;
-        }
-
-        #endregion
-
-        #region Rendering State
-
-        private float _dotRadiusMultiplier = Constants.NORMAL_DOT_MULTIPLIER;
-        private float _smoothingFactor = Constants.SMOOTHING_FACTOR_NORMAL;
-        private bool _batchProcessing = true;
-
-        private struct CircleData
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            public float X;
-            public float Y;
-            public float Radius;
-            public float Intensity;
-        }
-
+            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+            ErrorMessage = "Failed to apply quality settings"
+        });
         #endregion
 
         #region Rendering Methods
-
-        public void Render(
+        public override void Render(
             SKCanvas? canvas,
             float[]? spectrum,
             SKImageInfo info,
             float barWidth,
             float barSpacing,
             int barCount,
-            SKPaint? basePaint,
-            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+            SKPaint? paint,
+            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            if (!ValidateRenderParameters(canvas, spectrum, basePaint, info))
+            if (!QuickValidate(canvas, spectrum, info, paint))
             {
+                drawPerformanceInfo?.Invoke(canvas!, info);
                 return;
             }
 
-            UpdatePaint(basePaint);
+            SmartLogger.Safe(() =>
+            {
+                UpdatePaint(paint!);
 
-            int spectrumLength = spectrum!.Length;
-            int actualBarCount = Math.Min(spectrumLength, barCount);
-            float canvasHeight = info.Height;
-            float calculatedBarWidth = barWidth * Constants.MAX_DOT_MULTIPLIER * _dotRadiusMultiplier;
-            float totalWidth = barWidth + barSpacing;
+                int spectrumLength = spectrum!.Length;
+                int actualBarCount = Math.Min(spectrumLength, barCount);
+                float canvasHeight = info.Height;
+                float calculatedBarWidth = barWidth * Constants.MAX_DOT_MULTIPLIER * _dotRadiusMultiplier;
+                float totalWidth = barWidth + barSpacing;
 
-            // Scale and smooth spectrum data
-            float[] processedSpectrum = ProcessSpectrum(spectrum, actualBarCount, spectrumLength);
+                float[] processedSpectrum = PrepareSpectrum(spectrum, actualBarCount, spectrumLength);
 
-            // Calculate circle data 
-            List<CircleData> circles = CalculateCircleData(
-                processedSpectrum,
-                calculatedBarWidth,
-                totalWidth,
-                canvasHeight);
+                List<CircleData> circles = CalculateCircleData(
+                    processedSpectrum,
+                    calculatedBarWidth,
+                    totalWidth,
+                    canvasHeight);
 
-            // Group circles by alpha for efficient rendering
-            List<List<CircleData>> circleBins = GroupCirclesByAlphaBin(circles);
+                List<List<CircleData>> circleBins = GroupCirclesByAlphaBin(circles);
 
-            // Draw all circles with minimal state changes
-            DrawCircles(canvas!, circleBins);
+                DrawCircles(canvas!, circleBins);
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Render",
+                ErrorMessage = "Error during rendering"
+            });
 
-            // Draw performance info if requested
             drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? basePaint, SKImageInfo info)
-        {
-            if (!_isInitialized || canvas == null || spectrum == null || spectrum.Length < 2 ||
-                basePaint == null || info.Width <= 0 || info.Height <= 0)
-            {
-                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Invalid render parameters or renderer not initialized");
-                return false;
-            }
-            return true;
-        }
-
-        private void UpdatePaint(SKPaint basePaint)
+        private void UpdatePaint(SKPaint basePaint) => SmartLogger.Safe(() =>
         {
             if (_dotPaint == null)
             {
@@ -245,81 +201,34 @@ namespace SpectrumNet
             _dotPaint!.Color = basePaint.Color;
             _dotPaint.IsAntialias = _useAntiAlias;
             _dotPaint.FilterQuality = _filterQuality;
-        }
-
-        private float[] ProcessSpectrum(float[] spectrum, int targetCount, int spectrumLength)
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            float[] scaledSpectrum = ScaleSpectrum(spectrum, targetCount, spectrumLength);
-            return SmoothSpectrum(scaledSpectrum, targetCount);
-        }
-
+            Source = $"{Constants.LOG_PREFIX}.UpdatePaint",
+            ErrorMessage = "Failed to update paint"
+        });
         #endregion
 
         #region Circle Calculation and Drawing
-
         private List<CircleData> CalculateCircleData(
             float[] smoothedSpectrum,
             float multiplier,
             float totalWidth,
             float canvasHeight)
         {
-            var circles = new List<CircleData>(smoothedSpectrum.Length);
-
-            if (_useVectorization && Vector.IsHardwareAccelerated && smoothedSpectrum.Length >= 4)
+            var result = SmartLogger.Safe(() =>
             {
-                return CalculateCircleDataOptimized(smoothedSpectrum, multiplier, totalWidth, canvasHeight);
-            }
-
-            for (int i = 0; i < smoothedSpectrum.Length; i++)
-            {
-                float intensity = smoothedSpectrum[i];
-                if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
-
-                float dotRadius = multiplier * intensity;
-                if (dotRadius < Constants.MIN_DOT_RADIUS)
-                    dotRadius = Constants.MIN_DOT_RADIUS;
-
-                float x = i * totalWidth + dotRadius;
-                float y = canvasHeight - (intensity * canvasHeight);
-
-                circles.Add(new CircleData
+                var circles = new List<CircleData>(smoothedSpectrum.Length);
+                if (_useVectorization && Vector.IsHardwareAccelerated && smoothedSpectrum.Length >= 4)
                 {
-                    X = x,
-                    Y = y,
-                    Radius = dotRadius,
-                    Intensity = intensity
-                });
-            }
-
-            return circles;
-        }
-
-        private List<CircleData> CalculateCircleDataOptimized(
-            float[] smoothedSpectrum,
-            float multiplier,
-            float totalWidth,
-            float canvasHeight)
-        {
-            var circles = new List<CircleData>(smoothedSpectrum.Length);
-
-            // Process in chunks for better cache locality
-            const int chunkSize = 16; // Process 16 elements at a time
-            int chunks = smoothedSpectrum.Length / chunkSize;
-
-            for (int chunk = 0; chunk < chunks; chunk++)
-            {
-                int startIdx = chunk * chunkSize;
-                int endIdx = startIdx + chunkSize;
-
-                for (int i = startIdx; i < endIdx; i++)
+                    return CalculateCircleDataOptimized(smoothedSpectrum, multiplier, totalWidth, canvasHeight);
+                }
+                for (int i = 0; i < smoothedSpectrum.Length; i++)
                 {
                     float intensity = smoothedSpectrum[i];
                     if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
-
                     float dotRadius = Math.Max(multiplier * intensity, Constants.MIN_DOT_RADIUS);
                     float x = i * totalWidth + dotRadius;
                     float y = canvasHeight - (intensity * canvasHeight);
-
                     circles.Add(new CircleData
                     {
                         X = x,
@@ -328,55 +237,102 @@ namespace SpectrumNet
                         Intensity = intensity
                     });
                 }
-            }
-
-            // Process remaining elements
-            for (int i = chunks * chunkSize; i < smoothedSpectrum.Length; i++)
+                return circles;
+            }, new List<CircleData>(), new SmartLogger.ErrorHandlingOptions
             {
-                float intensity = smoothedSpectrum[i];
-                if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
+                Source = $"{Constants.LOG_PREFIX}.CalculateCircleData",
+                ErrorMessage = "Error calculating circle data"
+            });
 
-                float dotRadius = Math.Max(multiplier * intensity, Constants.MIN_DOT_RADIUS);
-                float x = i * totalWidth + dotRadius;
-                float y = canvasHeight - (intensity * canvasHeight);
+            return result.Result ?? new List<CircleData>();
+        }
 
-                circles.Add(new CircleData
+        private List<CircleData> CalculateCircleDataOptimized(
+           float[] smoothedSpectrum,
+           float multiplier,
+           float totalWidth,
+           float canvasHeight)
+        {
+            var result = SmartLogger.Safe(() =>
+            {
+                var circles = new List<CircleData>(smoothedSpectrum.Length);
+                const int chunkSize = 16;
+                int chunks = smoothedSpectrum.Length / chunkSize;
+                for (int chunk = 0; chunk < chunks; chunk++)
                 {
-                    X = x,
-                    Y = y,
-                    Radius = dotRadius,
-                    Intensity = intensity
-                });
-            }
+                    int startIdx = chunk * chunkSize;
+                    int endIdx = startIdx + chunkSize;
+                    for (int i = startIdx; i < endIdx; i++)
+                    {
+                        float intensity = smoothedSpectrum[i];
+                        if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
+                        float dotRadius = Math.Max(multiplier * intensity, Constants.MIN_DOT_RADIUS);
+                        float x = i * totalWidth + dotRadius;
+                        float y = canvasHeight - (intensity * canvasHeight);
+                        circles.Add(new CircleData
+                        {
+                            X = x,
+                            Y = y,
+                            Radius = dotRadius,
+                            Intensity = intensity
+                        });
+                    }
+                }
+                for (int i = chunks * chunkSize; i < smoothedSpectrum.Length; i++)
+                {
+                    float intensity = smoothedSpectrum[i];
+                    if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
+                    float dotRadius = Math.Max(multiplier * intensity, Constants.MIN_DOT_RADIUS);
+                    float x = i * totalWidth + dotRadius;
+                    float y = canvasHeight - (intensity * canvasHeight);
+                    circles.Add(new CircleData
+                    {
+                        X = x,
+                        Y = y,
+                        Radius = dotRadius,
+                        Intensity = intensity
+                    });
+                }
+                return circles;
+            }, new List<CircleData>(), new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.CalculateCircleDataOptimized",
+                ErrorMessage = "Error calculating optimized circle data"
+            });
 
-            return circles;
+            return result.Result ?? new List<CircleData>();
         }
 
         private List<List<CircleData>> GroupCirclesByAlphaBin(List<CircleData> circles)
         {
-            // Pre-allocate all bins
-            List<List<CircleData>> circleBins = new List<List<CircleData>>(Constants.ALPHA_BINS);
-            for (int i = 0; i < Constants.ALPHA_BINS; i++)
+            var result = SmartLogger.Safe(() =>
             {
-                circleBins.Add(new List<CircleData>(circles.Count / Constants.ALPHA_BINS + 1));
-            }
-
-            // Calculate bin step once
-            float binStep = 255f / (Constants.ALPHA_BINS - 1);
-
-            foreach (var circle in circles)
+                List<List<CircleData>> circleBins = new List<List<CircleData>>(Constants.ALPHA_BINS);
+                for (int i = 0; i < Constants.ALPHA_BINS; i++)
+                {
+                    circleBins.Add(new List<CircleData>(circles.Count / Constants.ALPHA_BINS + 1));
+                }
+                float binStep = 255f / (Constants.ALPHA_BINS - 1);
+                foreach (var circle in circles)
+                {
+                    byte alpha = (byte)Math.Min(circle.Intensity * Constants.ALPHA_MULTIPLIER, 255);
+                    int binIndex = Math.Min((int)(alpha / binStep), Constants.ALPHA_BINS - 1);
+                    circleBins[binIndex].Add(circle);
+                }
+                return circleBins;
+            }, new List<List<CircleData>>(), new SmartLogger.ErrorHandlingOptions
             {
-                byte alpha = (byte)Math.Min(circle.Intensity * Constants.ALPHA_MULTIPLIER, 255);
-                int binIndex = Math.Min((int)(alpha / binStep), Constants.ALPHA_BINS - 1);
-                circleBins[binIndex].Add(circle);
-            }
+                Source = $"{Constants.LOG_PREFIX}.GroupCirclesByAlphaBin",
+                ErrorMessage = "Error grouping circles by alpha bin"
+            });
 
-            return circleBins;
+            return result.Result ?? new List<List<CircleData>>();
         }
 
-        private void DrawCircles(SKCanvas canvas, List<List<CircleData>> circleBins)
+        private void DrawCircles(SKCanvas canvas, List<List<CircleData>> circleBins) => SmartLogger.Safe(() =>
         {
-            // Use quick reject to avoid drawing outside the canvas bounds
+            if (_dotPaint == null) return;
+
             SKRect canvasBounds = new SKRect(0, 0, canvas.DeviceClipBounds.Width, canvas.DeviceClipBounds.Height);
 
             float binStep = 255f / (Constants.ALPHA_BINS - 1);
@@ -388,10 +344,9 @@ namespace SpectrumNet
                     continue;
 
                 byte binAlpha = (byte)(binIndex * binStep);
-                _dotPaint!.Color = _dotPaint.Color.WithAlpha(binAlpha);
+                _dotPaint.Color = _dotPaint.Color.WithAlpha(binAlpha);
 
-                // For small numbers of circles, draw individually
-                if (bin.Count <= 5)
+                if (bin.Count <= 5 || !_batchProcessing)
                 {
                     foreach (var circle in bin)
                     {
@@ -410,12 +365,10 @@ namespace SpectrumNet
                 }
                 else
                 {
-                    // For larger numbers, batch draw with a path
                     using var path = new SKPath();
 
                     foreach (var circle in bin)
                     {
-                        // Skip circles outside the canvas
                         SKRect circleBounds = new SKRect(
                             circle.X - circle.Radius,
                             circle.Y - circle.Radius,
@@ -431,191 +384,19 @@ namespace SpectrumNet
                     canvas.DrawPath(path, _dotPaint);
                 }
             }
-        }
-
-        #endregion
-
-        #region Spectrum Processing
-
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
+        }, new SmartLogger.ErrorHandlingOptions
         {
-            float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)spectrumLength / targetCount;
-
-            // Process in chunks for better cache locality
-            const int chunkSize = 16; // Process 16 elements at a time
-            int chunks = targetCount / chunkSize;
-
-            // Process in chunks
-            for (int chunk = 0; chunk < chunks; chunk++)
-            {
-                int startIdx = chunk * chunkSize;
-                int endIdx = startIdx + chunkSize;
-
-                for (int i = startIdx; i < endIdx; i++)
-                {
-                    float startFloat = i * blockSize;
-                    float endFloat = (i + 1) * blockSize;
-
-                    int start = (int)Math.Floor(startFloat);
-                    int end = Math.Min((int)Math.Ceiling(endFloat), spectrumLength);
-
-                    if (start >= end)
-                    {
-                        scaledSpectrum[i] = 0f;
-                    }
-                    else
-                    {
-                        float sum = 0f;
-                        for (int j = start; j < end; j++)
-                        {
-                            sum += spectrum[j];
-                        }
-                        scaledSpectrum[i] = sum / (end - start);
-                    }
-                }
-            }
-
-            // Process remaining elements
-            for (int i = chunks * chunkSize; i < targetCount; i++)
-            {
-                float startFloat = i * blockSize;
-                float endFloat = (i + 1) * blockSize;
-
-                int start = (int)Math.Floor(startFloat);
-                int end = Math.Min((int)Math.Ceiling(endFloat), spectrumLength);
-
-                if (start >= end)
-                {
-                    scaledSpectrum[i] = 0f;
-                }
-                else
-                {
-                    float sum = 0f;
-                    for (int j = start; j < end; j++)
-                    {
-                        sum += spectrum[j];
-                    }
-                    scaledSpectrum[i] = sum / (end - start);
-                }
-            }
-
-            return scaledSpectrum;
-        }
-
-        private float[] SmoothSpectrum(float[] spectrum, int targetCount)
-        {
-            if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
-            {
-                _previousSpectrum = new float[targetCount];
-                Array.Copy(spectrum, _previousSpectrum, targetCount);
-                return spectrum;
-            }
-
-            var smoothedSpectrum = new float[targetCount];
-
-            if (_useVectorization && Vector.IsHardwareAccelerated && targetCount >= 4)
-            {
-                // Process in chunks for better cache locality
-                const int chunkSize = 16; // Process 16 elements at a time
-                int chunks = targetCount / chunkSize;
-
-                for (int chunk = 0; chunk < chunks; chunk++)
-                {
-                    int startIdx = chunk * chunkSize;
-                    int endIdx = startIdx + chunkSize;
-
-                    for (int i = startIdx; i < endIdx; i++)
-                    {
-                        float currentValue = spectrum[i];
-                        float previousValue = _previousSpectrum[i];
-                        float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
-
-                        smoothedSpectrum[i] = smoothedValue;
-                        _previousSpectrum[i] = smoothedValue;
-                    }
-                }
-
-                // Process remaining elements
-                for (int i = chunks * chunkSize; i < targetCount; i++)
-                {
-                    float currentValue = spectrum[i];
-                    float previousValue = _previousSpectrum[i];
-                    float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
-
-                    smoothedSpectrum[i] = smoothedValue;
-                    _previousSpectrum[i] = smoothedValue;
-                }
-            }
-            else
-            {
-                // Original implementation
-                for (int i = 0; i < targetCount; i++)
-                {
-                    float currentValue = spectrum[i];
-                    float previousValue = _previousSpectrum[i];
-                    float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
-
-                    smoothedSpectrum[i] = smoothedValue;
-                    _previousSpectrum[i] = smoothedValue;
-                }
-            }
-
-            return smoothedSpectrum;
-        }
-
-        #endregion
-
-        #region Background Processing
-
-        private void ProcessBackgroundTasks()
-        {
-            if (_backgroundCalculationTask != null && !_backgroundCalculationTask.IsCompleted)
-            {
-                return; // Already processing
-            }
-
-            // Example of offloading work to background thread
-            _backgroundCalculationTask = Task.Run(() => {
-                // Pre-calculate any resource-intensive operations here
-                // For example, generate lookup tables, prepare gradients, etc.
-            });
-        }
-
-        #endregion
-
-        #region GPU Acceleration
-
-        private void ConfigureHardwareAcceleration(SKCanvas canvas)
-        {
-            if (_useHardwareAcceleration && _useAdvancedEffects)
-            {
-                // Apply hardware-optimized settings when available
-                // This is a placeholder for specific SkiaSharp GPU optimizations
-
-                // Example: Use high-quality filtering only when hardware acceleration is available
-                if (canvas.TotalMatrix.ScaleX > 1.5f || canvas.TotalMatrix.ScaleY > 1.5f)
-                {
-                    _dotPaint!.FilterQuality = SKFilterQuality.High;
-                }
-
-                // Example: Use hardware-optimized effects
-                if (_useAdvancedEffects)
-                {
-                    // Configure any hardware-accelerated effects here
-                }
-            }
-        }
-
+            Source = $"{Constants.LOG_PREFIX}.DrawCircles",
+            ErrorMessage = "Error drawing circles"
+        });
         #endregion
 
         #region Disposal
-
-        protected virtual void Dispose(bool disposing)
+        public override void Dispose()
         {
             if (!_disposed)
             {
-                if (disposing)
+                SmartLogger.Safe(() =>
                 {
                     _dotPaint?.Dispose();
                     _dotPaint = null;
@@ -623,23 +404,16 @@ namespace SpectrumNet
                     _cachedBackground?.Dispose();
                     _cachedBackground = null;
 
-                    _previousSpectrum = null;
+                    _backgroundCalculationTask?.Wait(100);
 
-                    // Wait for any background tasks to complete
-                    _backgroundCalculationTask?.Wait();
-                }
-
-                _disposed = true;
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+                    base.Dispose();
+                }, new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = $"{Constants.LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during disposal"
+                });
             }
         }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
         #endregion
     }
 }

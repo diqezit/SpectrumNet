@@ -11,24 +11,16 @@ namespace SpectrumNet
     /// </summary>
     public partial class SettingsWindow : Window
     {
-        #region Константы
         private const string LogPrefix = "SettingsWindow";
-        #endregion
-
-        #region Singleton
         private static readonly Lazy<SettingsWindow> _instance = new(() => new SettingsWindow());
         public static SettingsWindow Instance => _instance.Value;
-        #endregion
 
-        #region Поля
         private readonly Settings _settings;
         private Dictionary<string, object?>? _originalValues;
-        #endregion
 
-        #region Конструктор
         public SettingsWindow()
         {
-            InitialiseResources();
+            CommonResources.InitialiseResources();
             InitializeComponent();
             ThemeManager.Instance.RegisterWindow(this);
 
@@ -36,21 +28,17 @@ namespace SpectrumNet
             SaveOriginalSettings();
             DataContext = _settings;
         }
-        #endregion
 
-        #region Settings
         public void EnsureWindowVisible() => SmartLogger.Safe(() =>
         {
             bool isVisible = Screen.AllScreens.Any(screen =>
             {
                 var screenBounds = new System.Drawing.Rectangle(
                     screen.Bounds.X, screen.Bounds.Y,
-                    screen.Bounds.Width, screen.Bounds.Height
-                );
+                    screen.Bounds.Width, screen.Bounds.Height);
 
                 var windowRect = new System.Drawing.Rectangle(
-                    (int)Left, (int)Top, (int)Width, (int)Height
-                );
+                    (int)Left, (int)Top, (int)Width, (int)Height);
 
                 return screenBounds.IntersectsWith(windowRect);
             });
@@ -60,7 +48,7 @@ namespace SpectrumNet
                 WindowStartupLocation = WindowStartupLocation.CenterScreen;
                 SmartLogger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center (was outside visible area)");
             }
-        }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error ensuring window visibility" });
+        }, new() { Source = LogPrefix, ErrorMessage = "Error ensuring window visibility" });
 
         private void CopyPropertiesFrom(object source) => SmartLogger.Safe(() =>
         {
@@ -71,11 +59,9 @@ namespace SpectrumNet
                 {
                     var targetProp = _settings.GetType().GetProperty(prop.Name);
                     if (targetProp?.CanWrite == true)
-                    {
                         targetProp.SetValue(_settings, prop.GetValue(source));
-                    }
-                }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = $"Failed to copy property {prop.Name}" }));
-        }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error copying properties" });
+                }, new() { Source = LogPrefix, ErrorMessage = $"Failed to copy property {prop.Name}" }));
+        }, new() { Source = LogPrefix, ErrorMessage = "Error copying properties" });
 
         public void LoadSettings() => SmartLogger.Safe(() =>
         {
@@ -108,7 +94,7 @@ namespace SpectrumNet
             UpdateAllRenderers();
 
             SmartLogger.Log(LogLevel.Information, LogPrefix, $"Settings loaded from {settingsPath}");
-        }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error loading settings" });
+        }, new() { Source = LogPrefix, ErrorMessage = "Error loading settings" });
 
         public void SaveSettings() => SmartLogger.Safe(() =>
         {
@@ -135,7 +121,7 @@ namespace SpectrumNet
             File.WriteAllText("settings.json", json);
 
             SmartLogger.Log(LogLevel.Information, LogPrefix, $"Settings saved to {settingsPath}");
-        }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error saving settings" });
+        }, new() { Source = LogPrefix, ErrorMessage = "Error saving settings" });
 
         public void ResetToDefaults() => SmartLogger.Safe(() =>
         {
@@ -143,8 +129,7 @@ namespace SpectrumNet
                 "Are you sure you want to reset all settings to defaults?",
                 "Reset Settings",
                 MessageBoxButton.YesNo,
-                MessageBoxImage.Question
-            );
+                MessageBoxImage.Question);
 
             if (result != MessageBoxResult.Yes)
                 return;
@@ -158,18 +143,13 @@ namespace SpectrumNet
                 MessageBoxButton.OK, MessageBoxImage.Information);
 
             SmartLogger.Log(LogLevel.Information, LogPrefix, "Settings reset to defaults");
-        }, new SmartLogger.ErrorHandlingOptions
+        }, new()
         {
             Source = LogPrefix,
             ErrorMessage = "Error resetting settings",
             ExceptionHandler = ex => MessageBox.Show($"Error resetting settings: {ex.Message}", "Error",
                 MessageBoxButton.OK, MessageBoxImage.Error)
         });
-        #endregion
-
-        #region Приватные методы
-        private static void InitialiseResources() =>
-            CommonResources.InitialiseResources();
 
         private void SaveOriginalSettings() =>
             _originalValues = _settings.GetType().GetProperties()
@@ -196,14 +176,9 @@ namespace SpectrumNet
             var field = renderer.GetType().GetField("_isOverlayActive",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
 
-            bool isOverlayActive = false;
-            if (field?.GetValue(renderer) is bool boolValue)
-            {
-                isOverlayActive = boolValue;
-            }
-
+            bool isOverlayActive = field?.GetValue(renderer) is bool boolValue && boolValue;
             renderer.Configure(isOverlayActive);
-        }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating renderer" });
+        }, new() { Source = LogPrefix, ErrorMessage = "Error updating renderer" });
 
         private void UpdateAllRenderers() => SmartLogger.Safe(() =>
         {
@@ -219,12 +194,10 @@ namespace SpectrumNet
                         isOverlayActive = boolValue;
 
                     renderer.Configure(isOverlayActive, _settings.SelectedRenderQuality);
-                }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = $"Failed to update renderer {renderer.GetType().Name}" });
+                }, new() { Source = LogPrefix, ErrorMessage = $"Failed to update renderer {renderer.GetType().Name}" });
             }
-        }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating renderers" });
-        #endregion
+        }, new() { Source = LogPrefix, ErrorMessage = "Error updating renderers" });
 
-        #region Обработчики событий
         private void OnWindowDrag(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton == MouseButton.Left)
@@ -235,7 +208,7 @@ namespace SpectrumNet
         {
             SaveSettings();
             ThemeManager.Instance.UnregisterWindow(this);
-        }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error closing window" });
+        }, new() { Source = LogPrefix, ErrorMessage = "Error closing window" });
 
         private void OnCloseButton_Click(object sender, RoutedEventArgs e)
         {
@@ -251,7 +224,7 @@ namespace SpectrumNet
 
             MessageBox.Show("Settings applied successfully!", "Settings",
                 MessageBoxButton.OK, MessageBoxImage.Information);
-        }, new SmartLogger.ErrorHandlingOptions
+        }, new()
         {
             Source = LogPrefix,
             ErrorMessage = "Error applying settings",
@@ -259,8 +232,6 @@ namespace SpectrumNet
                 MessageBoxButton.OK, MessageBoxImage.Error)
         });
 
-        private void OnResetButton_Click(object sender, RoutedEventArgs e) =>
-            ResetToDefaults();
-        #endregion
+        private void OnResetButton_Click(object sender, RoutedEventArgs e) => ResetToDefaults();
     }
 }
