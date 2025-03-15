@@ -5,7 +5,6 @@ namespace SpectrumNet
     public sealed class Renderer : IDisposable
     {
         private const string DEFAULT_STYLE = "Solid";
-        private const string MESSAGE = "Push SPACE to begin...";
         private const string LogPrefix = "Renderer";
 
         private record RenderState(SKPaint Paint, RenderStyle Style, string StyleName, RenderQuality Quality);
@@ -15,6 +14,7 @@ namespace SpectrumNet
         private readonly IAudioVisualizationController _controller;
         private readonly SpectrumAnalyzer _analyzer;
         private readonly CancellationTokenSource _disposalTokenSource = new();
+        private readonly RendererPlaceholder _placeholder = new() { CanvasSize = new SKSize(1, 1) };
 
         private SKGLElement? _skElement;
         private RenderState _currentState = default!;
@@ -170,7 +170,7 @@ namespace SpectrumNet
                         }
                         else
                         {
-                            RenderPlaceholder(e.Surface.Canvas);
+                            RenderPlaceholder(e.Surface.Canvas, e.Info);
                         }
                     }
                 });
@@ -183,7 +183,7 @@ namespace SpectrumNet
 
             if (_controller.IsTransitioning || ShouldRenderPlaceholder())
             {
-                RenderPlaceholder(canvas);
+                RenderPlaceholder(canvas, info);
                 return;
             }
 
@@ -191,13 +191,13 @@ namespace SpectrumNet
             if (spectrum is null)
             {
                 if (!_controller.IsRecording)
-                    RenderPlaceholder(canvas);
+                    RenderPlaceholder(canvas, info);
                 return;
             }
 
             if (!TryCalcRenderParams(info, out float barWidth, out float barSpacing, out int barCount))
             {
-                RenderPlaceholder(canvas);
+                RenderPlaceholder(canvas, info);
                 return;
             }
 
@@ -265,11 +265,12 @@ namespace SpectrumNet
             return true;
         }
 
-        private static void RenderPlaceholder(SKCanvas? canvas)
+        private void RenderPlaceholder(SKCanvas? canvas, SKImageInfo info)
         {
             if (canvas is null)
                 return;
 
+<<<<<<< HEAD
             using var font = new SKFont
             {
                 Size = 50,
@@ -281,6 +282,10 @@ namespace SpectrumNet
                 IsAntialias = true
             };
             canvas.DrawText(MESSAGE, 50, 100, SKTextAlign.Left, font, paint);
+=======
+            _placeholder.CanvasSize = new SKSize(info.Width, info.Height);
+            _placeholder.Render(canvas, info);
+>>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
         }
 
         public void SynchronizeWithController()
@@ -400,6 +405,7 @@ namespace SpectrumNet
 
                 UnsubscribeFromUIElementEvents();
                 _currentState.Paint?.Dispose();
+                _placeholder.Dispose();
 
                 SmartLogger.SafeDispose(_renderLock, "RenderLock",
                     new SmartLogger.ErrorHandlingOptions
@@ -415,6 +421,23 @@ namespace SpectrumNet
                         ErrorMessage = "Error disposing disposal token source"
                     });
 
+<<<<<<< HEAD
+                SmartLogger.SafeDispose(_renderLock, "RenderLock",
+                    new SmartLogger.ErrorHandlingOptions
+                    {
+                        Source = LogPrefix,
+                        ErrorMessage = "Error disposing render lock"
+                    });
+
+                SmartLogger.SafeDispose(_disposalTokenSource, "DisposalTokenSource",
+                    new SmartLogger.ErrorHandlingOptions
+                    {
+                        Source = LogPrefix,
+                        ErrorMessage = "Error disposing disposal token source"
+                    });
+
+=======
+>>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
             },
             new SmartLogger.ErrorHandlingOptions

@@ -59,30 +59,21 @@ namespace SpectrumNet
             set
             {
                 if (_globalQuality == value) return;
-
                 _globalQuality = value;
-                try
-                {
-                    ConfigureAllRenderers(isOverlayActive: null, _globalQuality);
-                }
+                try { ConfigureAllRenderers(null, _globalQuality); }
                 catch (Exception ex)
                 {
                     SmartLogger.Log(LogLevel.Error, LogPrefix,
                         $"Failed to apply global quality {value}: {ex.Message}", forceLog: true);
                 }
-
-                SmartLogger.Log(LogLevel.Information, LogPrefix, $"Global quality changed to {value}", forceLog: true);
+                SmartLogger.Log(LogLevel.Information, LogPrefix,
+                    $"Global quality changed to {value}", forceLog: true);
             }
         }
 
         /// <summary>
         /// Creates or retrieves a spectrum renderer instance of the specified style.
         /// </summary>
-        /// <param name="style">Rendering style.</param>
-        /// <param name="isOverlayActive">Whether overlay mode is active.</param>
-        /// <param name="quality">Rendering quality level.</param>
-        /// <param name="cancellationToken">Token to cancel the operation.</param>
-        /// <returns>Renderer instance.</returns>
         public static ISpectrumRenderer CreateRenderer(
             RenderStyle style,
             bool isOverlayActive,
@@ -90,144 +81,97 @@ namespace SpectrumNet
             CancellationToken cancellationToken = default)
         {
             var actualQuality = quality ?? _globalQuality;
-            ISpectrumRenderer? renderer = null;
 
             if (_rendererCache.TryGetValue(style, out var cachedRenderer))
-            {
-                try
-                {
-                    cachedRenderer.Configure(isOverlayActive, actualQuality);
-                    return cachedRenderer;
-                }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix,
-                        $"Error configuring cached renderer {style}: {ex.Message}", forceLog: true);
-                    return GetFallbackRenderer(style, isOverlayActive, actualQuality);
-                }
-            }
+                return ConfigureOrFallback(cachedRenderer, style, isOverlayActive, actualQuality);
 
             lock (_lock)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
                 if (_rendererCache.TryGetValue(style, out cachedRenderer))
+                    return ConfigureOrFallback(cachedRenderer, style, isOverlayActive, actualQuality);
+
+                var renderer = GetRendererInstance(style);
+                if (!_initializedRenderers.Contains(style))
                 {
-                    try
-                    {
-                        cachedRenderer.Configure(isOverlayActive, actualQuality);
-                        return cachedRenderer;
-                    }
+                    renderer.Initialize();
+                    _initializedRenderers.Add(style);
+                }
+                renderer.Configure(isOverlayActive, actualQuality);
+                _rendererCache[style] = renderer;
+                return renderer;
+            }
+        }
+
+        /// <summary>
+        /// Disposes all cached renderers and clears the cache.
+        /// </summary>
+        public static void DisposeAllRenderers()
+        {
+            lock (_lock)
+            {
+                foreach (var renderer in _rendererCache.Values)
+                {
+                    try { renderer.Dispose(); }
                     catch (Exception ex)
                     {
                         SmartLogger.Log(LogLevel.Error, LogPrefix,
-                            $"Error configuring cached renderer {style} after lock: {ex.Message}", forceLog: true);
-                        return GetFallbackRenderer(style, isOverlayActive, actualQuality);
+                            $"Error disposing renderer: {ex.Message}", forceLog: true);
                     }
                 }
-
-                try
-                {
-                    renderer = GetRendererInstance(style);
-
-                    if (!_initializedRenderers.Contains(style))
-                    {
-                        renderer.Initialize();
-                        _initializedRenderers.Add(style);
-                    }
-
-                    renderer.Configure(isOverlayActive, actualQuality);
-                    _rendererCache[style] = renderer;
-                    return renderer;
-                }
-                catch (Exception ex)
-                {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix,
-                        $"Failed to create renderer {style}: {ex.Message}", forceLog: true);
-                    return GetFallbackRenderer(style, isOverlayActive, actualQuality);
-                }
+                _rendererCache.Clear();
+                _initializedRenderers.Clear();
             }
         }
 
         /// <summary>
         /// Returns a collection of all cached renderers.
         /// </summary>
-        /// <returns>Collection of renderers.</returns>
         public static IEnumerable<ISpectrumRenderer> GetAllRenderers()
         {
-            lock (_lock) return _rendererCache.Values.ToList();
+            lock (_lock)
+            {
+                return _rendererCache.Values.ToList();
+            }
         }
 
         /// <summary>
         /// Returns a cached renderer for the specified style.
         /// </summary>
-        /// <param name="style">Rendering style.</param>
-        /// <returns>Renderer or null.</returns>
         public static ISpectrumRenderer? GetCachedRenderer(RenderStyle style)
         {
-            try
+            lock (_lock)
             {
-                lock (_lock)
-                    return _rendererCache.TryGetValue(style, out var renderer) ? renderer : null;
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
-                    $"Error retrieving cached renderer {style}: {ex.Message}", forceLog: true);
-                return null;
+                return _rendererCache.TryGetValue(style, out var renderer) ? renderer : null;
             }
         }
 
         /// <summary>
         /// Configures all cached renderers for overlay mode and quality.
         /// </summary>
-        /// <param name="isOverlayActive">Whether overlay mode is active (null to keep current).</param>
-        /// <param name="quality">Rendering quality level (null to keep current).</param>
         public static void ConfigureAllRenderers(bool? isOverlayActive, RenderQuality? quality = null)
         {
-            try
+            lock (_lock)
             {
-                lock (_lock)
-                {
-                    foreach (var renderer in _rendererCache.Values)
-                    {
-                        ConfigureRenderer(renderer, isOverlayActive, quality);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
-                    $"Error configuring all renderers: {ex.Message}", forceLog: true);
+                foreach (var renderer in _rendererCache.Values)
+                    ConfigureRenderer(renderer, isOverlayActive, quality);
             }
         }
 
         /// <summary>
         /// Sets the quality for a specific renderer style.
         /// </summary>
-        /// <param name="style">Rendering style.</param>
-        /// <param name="quality">Rendering quality level.</param>
         public static void SetRendererQuality(RenderStyle style, RenderQuality quality)
         {
-            try
+            lock (_lock)
             {
-                lock (_lock)
-                {
-                    if (_rendererCache.TryGetValue(style, out var renderer))
-                    {
-                        renderer.Quality = quality;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
-                    $"Error setting quality for renderer {style}: {ex.Message}", forceLog: true);
+                if (_rendererCache.TryGetValue(style, out var renderer))
+                    renderer.Quality = quality;
             }
         }
 
         /// <summary>
-        /// Creates a renderer instance for the specified style.
+        /// Creates a renderer instance for the specified style using C# 12.0 switch expression.
         /// </summary>
         private static ISpectrumRenderer GetRendererInstance(RenderStyle style) => style switch
         {
@@ -260,27 +204,36 @@ namespace SpectrumNet
         };
 
         /// <summary>
-        /// Configures a single renderer with specified settings
+        /// Configures a renderer or returns a fallback on failure.
         /// </summary>
-        private static void ConfigureRenderer(
-            ISpectrumRenderer renderer,
-            bool? isOverlayActive,
-            RenderQuality? quality)
+        private static ISpectrumRenderer ConfigureOrFallback(
+            ISpectrumRenderer renderer, RenderStyle style, bool isOverlayActive, RenderQuality quality)
+        {
+            try
+            {
+                renderer.Configure(isOverlayActive, quality);
+                return renderer;
+            }
+            catch (Exception ex)
+            {
+                SmartLogger.Log(LogLevel.Error, LogPrefix,
+                    $"Error configuring renderer {style}: {ex.Message}", forceLog: true);
+                return GetFallbackRenderer(style, isOverlayActive, quality);
+            }
+        }
+
+        /// <summary>
+        /// Configures a single renderer with specified settings.
+        /// </summary>
+        private static void ConfigureRenderer(ISpectrumRenderer renderer, bool? isOverlayActive, RenderQuality? quality)
         {
             try
             {
                 switch (isOverlayActive, quality)
                 {
-                    case (bool overlay, RenderQuality q):
-                        renderer.Configure(overlay, q);
-                        break;
-                    case (bool overlay, null):
-                        renderer.Configure(overlay, renderer.Quality);
-                        break;
-                    case (null, RenderQuality q):
-                        renderer.Configure(isOverlayActive: false, q);
-                        renderer.Quality = q;
-                        break;
+                    case (bool overlay, RenderQuality q): renderer.Configure(overlay, q); break;
+                    case (bool overlay, null): renderer.Configure(overlay, renderer.Quality); break;
+                    case (null, RenderQuality q): renderer.Configure(false, q); renderer.Quality = q; break;
                 }
             }
             catch (Exception ex)
@@ -291,21 +244,11 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Returns a fallback renderer when the primary one fails
+        /// Returns a fallback renderer when the primary one fails.
         /// </summary>
-        private static ISpectrumRenderer GetFallbackRenderer(
-            RenderStyle style,
-            bool isOverlayActive,
-            RenderQuality quality)
+        private static ISpectrumRenderer GetFallbackRenderer(RenderStyle style, bool isOverlayActive, RenderQuality quality)
         {
-            // Log fallback usage
-            SmartLogger.Log(
-                LogLevel.Warning,
-                LogPrefix,
-                $"Using fallback renderer for {style}",
-                forceLog: true);
-
-            // Attempt to create basic renderer as fallback
+            SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Using fallback renderer for {style}", forceLog: true);
             try
             {
                 var fallback = BarsRenderer.GetInstance();
@@ -315,11 +258,8 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(
-                    LogLevel.Error,
-                    LogPrefix,
-                    $"Critical: Even fallback renderer failed: {ex.Message}",
-                    forceLog: true);
+                SmartLogger.Log(LogLevel.Error, LogPrefix,
+                    $"Critical: Even fallback renderer failed: {ex.Message}", forceLog: true);
                 throw new InvalidOperationException("Could not create any renderer", ex);
             }
         }

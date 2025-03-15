@@ -640,19 +640,27 @@ namespace SpectrumNet
             {
                 _saveSettingsTimer.Stop();
 
-                // Освобождение ресурсов в обратном порядке их создания
-                await DisposeResourceSafely(_captureManager,
-                    async (cm) => await cm.StopCaptureAsync(),
-                    "Audio capture manager");
+                // Асинхронное освобождение AudioCapture
+                await DisposeResourceSafelyAsync(async () =>
+                {
+                    if (_captureManager != null)
+                    {
+                        await _captureManager.StopCaptureAsync();
+                        _captureManager.Dispose();
+                    }
+                }, "Audio capture manager");
 
-                DisposeResourceSafely(_overlayWindow, "Overlay window");
-                DisposeResourceSafely(_controlPanelWindow as IDisposable, "Control panel window");
-                DisposeResourceSafely(_renderer, "Renderer");
-                DisposeResourceSafely(_analyzer, "Analyzer");
-                DisposeResourceSafely(_disposables, "Disposables");
-                DisposeResourceSafely(_transitionSemaphore, "Transition semaphore");
-                DisposeResourceSafely(_cleanupCts, "Cleanup CTS");
+                // Синхронное освобождение остальных ресурсов
+                DisposeResourceSafely(() => _overlayWindow?.Dispose(), "Overlay window");
+                DisposeResourceSafely(() => _controlPanelWindow?.Dispose(), "Control panel window");
+                DisposeResourceSafely(() => _renderer?.Dispose(), "Renderer");
+                DisposeResourceSafely(() => _analyzer?.Dispose(), "Analyzer");
+                DisposeResourceSafely(() => _disposables?.Dispose(), "Disposables");
+                DisposeResourceSafely(() => _transitionSemaphore?.Dispose(), "Transition semaphore");
+                DisposeResourceSafely(() => _cleanupCts?.Dispose(), "Cleanup CTS");
+                DisposeResourceSafely(() => SpectrumRendererFactory.DisposeAllRenderers(), "Renderer factory");
 
+                // Очистка ссылок
                 _keyboardManager = null;
                 _spectrumStyles = null;
                 _ownerWindow = null;
@@ -665,14 +673,11 @@ namespace SpectrumNet
             }
         }
 
-        private async Task DisposeResourceSafely<T>(T? resource, Func<T, Task> asyncAction, string resourceName) where T : IDisposable
+        private void DisposeResourceSafely(Action action, string resourceName)
         {
-            if (resource == null) return;
-
             try
             {
-                await asyncAction(resource);
-                resource.Dispose();
+                action();
                 SmartLogger.Log(LogLevel.Information, LogPrefix, $"{resourceName} disposed");
             }
             catch (Exception ex)
@@ -681,13 +686,11 @@ namespace SpectrumNet
             }
         }
 
-        private void DisposeResourceSafely<T>(T? resource, string resourceName) where T : IDisposable
+        private async Task DisposeResourceSafelyAsync(Func<Task> asyncAction, string resourceName)
         {
-            if (resource == null) return;
-
             try
             {
-                resource.Dispose();
+                await asyncAction();
                 SmartLogger.Log(LogLevel.Information, LogPrefix, $"{resourceName} disposed");
             }
             catch (Exception ex)

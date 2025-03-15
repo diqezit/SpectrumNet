@@ -43,7 +43,7 @@ namespace SpectrumNet
         private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
         private bool _useAdvancedEffects = true;
 
-        private const string LogPrefix = "[WaveformRenderer] ";
+        private const string LogPrefix = "WaveformRenderer";
         #endregion
 
         #region Constructor and Initialization
