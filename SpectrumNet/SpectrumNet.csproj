@@ -24,11 +24,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.3" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.3" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.3" />
-<<<<<<< HEAD
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.3" />
-=======
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.3" Condition="'$(Configuration)' != 'Release'" />
->>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
     <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.3" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

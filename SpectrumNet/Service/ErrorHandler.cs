@@ -65,13 +65,7 @@ namespace SpectrumNet
                 DeleteLatestLogIfExists();
 
                 builder.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Debug)
-<<<<<<< HEAD
-                       .AddConsole()
-                       .AddDebug();
-
-=======
                        .AddConsole();
->>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
                 builder.AddFile(Path.Combine(LogDirectoryPath, LatestLogFileName), fileOptions =>
                 {
                     fileOptions.FileSizeLimitBytes = MaxFileSizeMB * 1024 * 1024;
@@ -80,11 +74,7 @@ namespace SpectrumNet
                 });
             });
 
-<<<<<<< HEAD
         #endregion
-=======
-#endregion
->>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
 
         #region Logging Methods
 
@@ -818,12 +808,7 @@ namespace SpectrumNet
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
-<<<<<<< HEAD
-                    System.IO.File.AppendAllText(_filePath, logEntry + Environment.NewLine);
-
-=======
                     System.IO.File.AppendAllText(_filePath, logEntry);
->>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
                     RotateLogFileIfNeeded();
                 }
                 catch

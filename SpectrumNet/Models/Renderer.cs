@@ -270,22 +270,8 @@ namespace SpectrumNet
             if (canvas is null)
                 return;
 
-<<<<<<< HEAD
-            using var font = new SKFont
-            {
-                Size = 50,
-            };
-
-            using var paint = new SKPaint
-            {
-                Color = SKColors.OrangeRed,
-                IsAntialias = true
-            };
-            canvas.DrawText(MESSAGE, 50, 100, SKTextAlign.Left, font, paint);
-=======
             _placeholder.CanvasSize = new SKSize(info.Width, info.Height);
             _placeholder.Render(canvas, info);
->>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
         }
 
         public void SynchronizeWithController()
@@ -421,23 +407,6 @@ namespace SpectrumNet
                         ErrorMessage = "Error disposing disposal token source"
                     });
 
-<<<<<<< HEAD
-                SmartLogger.SafeDispose(_renderLock, "RenderLock",
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error disposing render lock"
-                    });
-
-                SmartLogger.SafeDispose(_disposalTokenSource, "DisposalTokenSource",
-                    new SmartLogger.ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error disposing disposal token source"
-                    });
-
-=======
->>>>>>> 3c9d6b3 (Move on SKGLElement rendering and NET 8.0)
                 SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
             },
             new SmartLogger.ErrorHandlingOptions
