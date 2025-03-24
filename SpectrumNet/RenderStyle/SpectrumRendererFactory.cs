@@ -138,17 +138,6 @@ namespace SpectrumNet
         }
 
         /// <summary>
-        /// Returns a cached renderer for the specified style.
-        /// </summary>
-        public static ISpectrumRenderer? GetCachedRenderer(RenderStyle style)
-        {
-            lock (_lock)
-            {
-                return _rendererCache.TryGetValue(style, out var renderer) ? renderer : null;
-            }
-        }
-
-        /// <summary>
         /// Configures all cached renderers for overlay mode and quality.
         /// </summary>
         public static void ConfigureAllRenderers(bool? isOverlayActive, RenderQuality? quality = null)
@@ -157,18 +146,6 @@ namespace SpectrumNet
             {
                 foreach (var renderer in _rendererCache.Values)
                     ConfigureRenderer(renderer, isOverlayActive, quality);
-            }
-        }
-
-        /// <summary>
-        /// Sets the quality for a specific renderer style.
-        /// </summary>
-        public static void SetRendererQuality(RenderStyle style, RenderQuality quality)
-        {
-            lock (_lock)
-            {
-                if (_rendererCache.TryGetValue(style, out var renderer))
-                    renderer.Quality = quality;
             }
         }
 

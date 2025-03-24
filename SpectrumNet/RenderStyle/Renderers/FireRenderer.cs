@@ -2,222 +2,326 @@
 
 namespace SpectrumNet
 {
-    public sealed class FireRenderer : ISpectrumRenderer, IDisposable
+    /// <summary>
+    /// Renderer that visualizes spectrum data as animated fire effect.
+    /// </summary>
+    public sealed class FireRenderer : BaseSpectrumRenderer
     {
+        #region Constants
+        private static class Constants
+        {
+            // Logging
+            public const string LOG_PREFIX = "FireRenderer";
+
+            // Time and animation
+            public const float TIME_STEP = 0.016f;              // Time increment per frame (~60 FPS)
+            public const float DECAY_RATE = 0.08f;              // How quickly frequencies decrease when no longer present
+
+            // Flame shape parameters
+            public const float CONTROL_POINT_PROPORTION = 0.4f;  // Controls flame curvature 
+            public const float RANDOM_OFFSET_PROPORTION = 0.5f;  // How much randomness in flame shape
+            public const float RANDOM_OFFSET_CENTER = 0.25f;     // Center point for random distribution
+            public const float FLAME_BOTTOM_PROPORTION = 0.25f;  // Height of flame base relative to total height
+            public const float FLAME_BOTTOM_MAX = 6f;            // Maximum pixel height for flame base
+            public const float MIN_BOTTOM_ALPHA = 0.3f;          // Minimum opacity for flame base
+
+            // Wave animation parameters  
+            public const float WAVE_SPEED = 2.0f;               // Speed of wave animation
+            public const float WAVE_AMPLITUDE = 0.2f;           // Height of wave animation
+            public const float HORIZONTAL_WAVE_FACTOR = 0.15f;   // Horizontal movement factor
+
+            // Bezier curve control points
+            public const float CUBIC_CONTROL_POINT1 = 0.33f;     // First control point position (x-axis)
+            public const float CUBIC_CONTROL_POINT2 = 0.66f;     // Second control point position (x-axis)
+
+            // Opacity animation parameters
+            public const float OPACITY_WAVE_SPEED = 3.0f;        // Speed of opacity pulsing
+            public const float OPACITY_PHASE_SHIFT = 0.2f;       // Phase offset between flames
+            public const float OPACITY_WAVE_AMPLITUDE = 0.1f;    // Amount of opacity variation
+            public const float OPACITY_BASE = 0.9f;              // Base opacity level
+
+            // Positioning
+            public const float POSITION_PHASE_SHIFT = 0.5f;      // Offset between flame positions
+            public const int MIN_BAR_COUNT = 10;                 // Minimum number of flame columns
+
+            // Effects
+            public const float GLOW_INTENSITY = 0.3f;            // Intensity of glow effect
+            public const float HIGH_INTENSITY_THRESHOLD = 0.7f;  // Threshold to trigger glow effects
+
+            // Quality settings (Low)
+            public const float GLOW_RADIUS_LOW = 1.5f;           // Blur radius for glow in low quality
+            public const int MAX_DETAIL_LEVEL_LOW = 2;           // Detail level for low quality
+
+            // Quality settings (Medium)
+            public const float GLOW_RADIUS_MEDIUM = 3f;          // Blur radius for glow in medium quality
+            public const int MAX_DETAIL_LEVEL_MEDIUM = 4;        // Detail level for medium quality
+
+            // Quality settings (High) 
+            public const float GLOW_RADIUS_HIGH = 5f;            // Blur radius for glow in high quality
+            public const int MAX_DETAIL_LEVEL_HIGH = 8;          // Detail level for high quality
+
+            // Performance optimization
+            public const int SPECTRUM_PROCESSING_CHUNK_SIZE = 128; // Batch size for parallel processing
+        }
+        #endregion
+
         #region Fields
         private static readonly Lazy<FireRenderer> _instance = new(() => new FireRenderer());
-        private bool _isInitialized;
+
+        // Object pools for efficient resource management
+        private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 10);
+        private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 5);
+
+        // Rendering state
+        private bool _isOverlayActive;
+        private float _time;
         private float[] _previousSpectrum = Array.Empty<float>();
         private float[]? _processedSpectrum;
         private readonly Random _random = new();
-        private float _time;
-        private readonly object _spectrumLock = new();
-        private bool _disposed;
-        private RenderQuality _quality = RenderQuality.Medium;
-        private bool _isOverlayActive;
 
         // Quality-dependent settings
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
+        private new bool _useAntiAlias = true;
+        private SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+        private new bool _useAdvancedEffects = true;
         private int _sampleCount = 2;
         private float _pathSimplification = 0.2f;
         private int _maxDetailLevel = 4;
 
-        // Object pools
-        private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 10);
-        private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 5);
-
         // Cached resources
         private SKPicture? _cachedBasePicture;
         private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
-
-        // Immutable settings
-        private const string LogPrefix = "FireRenderer";
+        private readonly object _spectrumLock = new();
+        private new bool _disposed;
         #endregion
 
-        #region Configuration
-        private static class Config
-        {
-            // Time and animation
-            public const float TimeStep = 0.016f;              // Time increment per frame (~60 FPS)
-            public const float DecayRate = 0.08f;              // How quickly frequencies decrease when no longer present
-
-            // Flame shape parameters
-            public const float ControlPointProportion = 0.4f;  // Controls flame curvature 
-            public const float RandomOffsetProportion = 0.5f;  // How much randomness in flame shape
-            public const float RandomOffsetCenter = 0.25f;     // Center point for random distribution
-            public const float FlameBottomProportion = 0.25f;  // Height of flame base relative to total height
-            public const float FlameBottomMax = 6f;            // Maximum pixel height for flame base
-            public const float MinBottomAlpha = 0.3f;          // Minimum opacity for flame base
-
-            // Wave animation parameters  
-            public const float WaveSpeed = 2.0f;               // Speed of wave animation
-            public const float WaveAmplitude = 0.2f;           // Height of wave animation
-            public const float HorizontalWaveFactor = 0.15f;   // Horizontal movement factor
-
-            // Bezier curve control points
-            public const float CubicControlPoint1 = 0.33f;     // First control point position (x-axis)
-            public const float CubicControlPoint2 = 0.66f;     // Second control point position (x-axis)
-
-            // Opacity animation parameters
-            public const float OpacityWaveSpeed = 3.0f;        // Speed of opacity pulsing
-            public const float OpacityPhaseShift = 0.2f;       // Phase offset between flames
-            public const float OpacityWaveAmplitude = 0.1f;    // Amount of opacity variation
-            public const float OpacityBase = 0.9f;             // Base opacity level
-
-            // Positioning
-            public const float PositionPhaseShift = 0.5f;      // Offset between flame positions
-            public const int MinBarCount = 10;                 // Minimum number of flame columns
-
-            // Effects
-            public const float GlowIntensity = 0.3f;           // Intensity of glow effect
-            public const float HighIntensityThreshold = 0.7f;  // Threshold to trigger glow effects
-
-            // Quality settings (Low)
-            public const float GlowRadiusLow = 1.5f;           // Blur radius for glow in low quality
-            public const int MaxDetailLevelLow = 2;            // Detail level for low quality
-
-            // Quality settings (Medium)
-            public const float GlowRadiusMedium = 3f;          // Blur radius for glow in medium quality
-            public const int MaxDetailLevelMedium = 4;         // Detail level for medium quality
-
-            // Quality settings (High) 
-            public const float GlowRadiusHigh = 5f;            // Blur radius for glow in high quality
-            public const int MaxDetailLevelHigh = 8;           // Detail level for high quality
-
-            // Performance optimization
-            public const int SpectrumProcessingChunkSize = 128; // Batch size for parallel processing
-        }
-        #endregion
-
-        #region Constructors and Instance Management
-        private FireRenderer() { /*Private constructor for singleton pattern*/ }
-
+        #region Singleton Pattern
+        private FireRenderer() { }
         public static FireRenderer GetInstance() => _instance.Value;
         #endregion
 
-        #region Public Methods
-        public void Initialize()
+        #region Initialization and Configuration
+        /// <summary>
+        /// Initializes the fire renderer and prepares resources for rendering.
+        /// </summary>
+        public override void Initialize()
         {
-            try
+            SmartLogger.Safe(() =>
             {
-                _renderSemaphore.Wait();
-
-                if (_isInitialized)
-                    return;
-
-                _isInitialized = true;
+                base.Initialize();
                 _time = 0f;
 
                 // Initial quality settings
                 ApplyQualitySettings();
 
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "FireRenderer initialized");
-            }
-            catch (Exception ex)
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+            }, new SmartLogger.ErrorHandlingOptions
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error initializing FireRenderer: {ex.Message}");
-            }
-            finally
-            {
-                _renderSemaphore.Release();
-            }
+                Source = $"{Constants.LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            });
         }
 
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        /// <summary>
+        /// Configures the renderer with overlay status and quality settings.
+        /// </summary>
+        /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
+        /// <param name="quality">The rendering quality level.</param>
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
-            bool configChanged = _isOverlayActive != isOverlayActive || _quality != quality;
-
-            // Update overlay mode
-            _isOverlayActive = isOverlayActive;
-
-            // Update quality if needed
-            if (_quality != quality)
+            SmartLogger.Safe(() =>
             {
-                _quality = quality;
-                ApplyQualitySettings();
-            }
+                base.Configure(isOverlayActive, quality);
 
-            // If config changed, invalidate cached resources
-            if (configChanged)
-            {
-                InvalidateCachedResources();
-            }
-        }
+                bool configChanged = _isOverlayActive != isOverlayActive || _quality != quality;
 
-        public void Configure(bool isOverlayActive) => Configure(isOverlayActive, _quality);
+                // Update overlay mode
+                _isOverlayActive = isOverlayActive;
 
-        public RenderQuality Quality
-        {
-            get => _quality;
-            set
-            {
-                if (_quality != value)
+                // Update quality if needed
+                if (_quality != quality)
                 {
-                    _quality = value;
+                    _quality = quality;
                     ApplyQualitySettings();
-
-                    SmartLogger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {_quality}");
                 }
-            }
+
+                // If config changed, invalidate cached resources
+                if (configChanged)
+                {
+                    InvalidateCachedResources();
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Configure",
+                ErrorMessage = "Failed to configure renderer"
+            });
         }
 
-        public void Render(
+        /// <summary>
+        /// Applies quality settings based on the current quality level.
+        /// </summary>
+        protected override void ApplyQualitySettings()
+        {
+            SmartLogger.Safe(() =>
+            {
+                base.ApplyQualitySettings();
+
+                switch (_quality)
+                {
+                    case RenderQuality.Low:
+                        _useAntiAlias = false;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+                        _useAdvancedEffects = false;
+                        _sampleCount = 1;
+                        _pathSimplification = 0.5f;
+                        _maxDetailLevel = Constants.MAX_DETAIL_LEVEL_LOW;
+                        break;
+
+                    case RenderQuality.Medium:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = true;
+                        _sampleCount = 2;
+                        _pathSimplification = 0.2f;
+                        _maxDetailLevel = Constants.MAX_DETAIL_LEVEL_MEDIUM;
+                        break;
+
+                    case RenderQuality.High:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = true;
+                        _sampleCount = 4;
+                        _pathSimplification = 0.0f;
+                        _maxDetailLevel = Constants.MAX_DETAIL_LEVEL_HIGH;
+                        break;
+                }
+
+                // Invalidate caches dependent on quality
+                InvalidateCachedResources();
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+                ErrorMessage = "Failed to apply quality settings"
+            });
+        }
+
+        /// <summary>
+        /// Invalidates cached resources when configuration changes.
+        /// </summary>
+        private void InvalidateCachedResources()
+        {
+            SmartLogger.Safe(() =>
+            {
+                _cachedBasePicture?.Dispose();
+                _cachedBasePicture = null;
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.InvalidateCachedResources",
+                ErrorMessage = "Failed to invalidate cached resources"
+            });
+        }
+        #endregion
+
+        #region Rendering
+        /// <summary>
+        /// Renders the fire visualization on the canvas using spectrum data.
+        /// </summary>
+        public override void Render(
             SKCanvas? canvas,
             float[]? spectrum,
             SKImageInfo info,
             float barWidth,
             float barSpacing,
             int barCount,
-            SKPaint? basePaint,
-            Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+            SKPaint? paint,
+            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            if (!ValidateRenderParameters(canvas, spectrum, info, basePaint))
+            if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+            {
+                drawPerformanceInfo?.Invoke(canvas!, info);
                 return;
+            }
 
             // Quick reject if canvas area is not visible
-            if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+            if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+            {
+                drawPerformanceInfo?.Invoke(canvas, info);
                 return;
-
-            bool semaphoreAcquired = false;
-            try
-            {
-                semaphoreAcquired = _renderSemaphore.Wait(0);
-
-                if (semaphoreAcquired)
-                {
-                    _time += Config.TimeStep;
-                    ProcessSpectrumData(spectrum!, barCount);
-                }
-
-                float[] renderSpectrum;
-                lock (_spectrumLock)
-                {
-                    renderSpectrum = _processedSpectrum ??
-                                     ProcessSpectrumSynchronously(spectrum!, barCount);
-                }
-
-                using var renderScope = new RenderScope(
-                    this, canvas!, renderSpectrum, info, barWidth, barSpacing, barCount, basePaint!);
-                renderScope.Execute(drawPerformanceInfo);
             }
-            catch (Exception ex)
+
+            SmartLogger.Safe(() =>
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering flames: {ex.Message}");
-            }
-            finally
-            {
-                if (semaphoreAcquired)
+                bool semaphoreAcquired = false;
+                try
                 {
-                    _renderSemaphore.Release();
+                    semaphoreAcquired = _renderSemaphore.Wait(0);
+
+                    if (semaphoreAcquired)
+                    {
+                        _time += Constants.TIME_STEP;
+                        ProcessSpectrumData(spectrum!, barCount);
+                    }
+
+                    float[] renderSpectrum;
+                    lock (_spectrumLock)
+                    {
+                        renderSpectrum = _processedSpectrum ??
+                                        ProcessSpectrumSynchronously(spectrum!, barCount);
+                    }
+
+                    using var renderScope = new RenderScope(
+                        this, canvas!, renderSpectrum, info, barWidth, barSpacing, barCount, paint!);
+                    renderScope.Execute(drawPerformanceInfo);
                 }
-            }
+                finally
+                {
+                    if (semaphoreAcquired)
+                    {
+                        _renderSemaphore.Release();
+                    }
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Render",
+                ErrorMessage = "Error during rendering"
+            });
+
+            drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
+        /// <summary>
+        /// Validates all render parameters before processing.
+        /// </summary>
+        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint)
+        {
+            if (canvas == null || spectrum == null || paint == null)
+            {
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, "Invalid render parameters: null values");
+                return false;
+            }
+
+            if (info.Width <= 0 || info.Height <= 0)
+            {
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+                return false;
+            }
+
+            if (spectrum.Length == 0)
+            {
+                SmartLogger.Log(LogLevel.Warning, Constants.LOG_PREFIX, "Empty spectrum data");
+                return false;
+            }
+
+            return true;
+        }
+        #endregion
+
+        #region Spectrum Processing
+        /// <summary>
+        /// Processes spectrum data for visualization in a thread-safe manner.
+        /// </summary>
         private void ProcessSpectrumData(float[] spectrum, int barCount)
         {
-            try
+            SmartLogger.Safe(() =>
             {
                 EnsureSpectrumBuffer(spectrum.Length);
 
@@ -233,13 +337,16 @@ namespace SpectrumNet
                 {
                     _processedSpectrum = scaledSpectrum;
                 }
-            }
-            catch (Exception ex)
+            }, new SmartLogger.ErrorHandlingOptions
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing spectrum data: {ex.Message}");
-            }
+                Source = $"{Constants.LOG_PREFIX}.ProcessSpectrumData",
+                ErrorMessage = "Error processing spectrum data"
+            });
         }
 
+        /// <summary>
+        /// Processes spectrum data synchronously when async processing isn't available.
+        /// </summary>
         private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
         {
             int spectrumLength = spectrum.Length;
@@ -247,23 +354,37 @@ namespace SpectrumNet
             return ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
         }
 
+        /// <summary>
+        /// Ensures the spectrum buffer is of the correct size.
+        /// </summary>
         private void EnsureSpectrumBuffer(int length)
         {
-            if (_previousSpectrum.Length != length)
+            SmartLogger.Safe(() =>
             {
-                _previousSpectrum = new float[length];
-            }
+                if (_previousSpectrum.Length != length)
+                {
+                    _previousSpectrum = new float[length];
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.EnsureSpectrumBuffer",
+                ErrorMessage = "Error ensuring spectrum buffer"
+            });
         }
 
+        /// <summary>
+        /// Scales the spectrum data to the target count of bars.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
             float blockSize = (float)spectrumLength / targetCount;
             float[] localSpectrum = spectrum;
 
-            if (System.Numerics.Vector.IsHardwareAccelerated && spectrumLength >= System.Numerics.Vector<float>.Count)
+            if (Vector.IsHardwareAccelerated && spectrumLength >= Vector<float>.Count)
             {
-                int chunkSize = Math.Min(Config.SpectrumProcessingChunkSize, targetCount);
+                int chunkSize = Math.Min(Constants.SPECTRUM_PROCESSING_CHUNK_SIZE, targetCount);
 
                 Parallel.For(0, (targetCount + chunkSize - 1) / chunkSize, chunkIndex =>
                 {
@@ -277,17 +398,17 @@ namespace SpectrumNet
                         int end = (int)((i + 1) * blockSize);
                         end = Math.Min(end, spectrumLength);
 
-                        if (end - start >= System.Numerics.Vector<float>.Count)
+                        if (end - start >= Vector<float>.Count)
                         {
-                            int vectorizableEnd = start + ((end - start) / System.Numerics.Vector<float>.Count) * System.Numerics.Vector<float>.Count;
+                            int vectorizableEnd = start + ((end - start) / Vector<float>.Count) * Vector<float>.Count;
 
-                            System.Numerics.Vector<float> sumVector = System.Numerics.Vector<float>.Zero;
-                            for (int j = start; j < vectorizableEnd; j += System.Numerics.Vector<float>.Count)
+                            Vector<float> sumVector = Vector<float>.Zero;
+                            for (int j = start; j < vectorizableEnd; j += Vector<float>.Count)
                             {
-                                sumVector += new System.Numerics.Vector<float>(localSpectrum, j);
+                                sumVector += new Vector<float>(localSpectrum, j);
                             }
 
-                            for (int j = 0; j < System.Numerics.Vector<float>.Count; j++)
+                            for (int j = 0; j < Vector<float>.Count; j++)
                             {
                                 sum += sumVector[j];
                             }
@@ -328,65 +449,33 @@ namespace SpectrumNet
             return scaledSpectrum;
         }
 
+        /// <summary>
+        /// Updates the previous spectrum with decay for smooth transitions.
+        /// </summary>
         private void UpdatePreviousSpectrum(float[] spectrum)
         {
-            for (int i = 0; i < spectrum.Length; i++)
+            SmartLogger.Safe(() =>
             {
-                _previousSpectrum[i] = Math.Max(
-                    spectrum[i],
-                    _previousSpectrum[i] - Config.DecayRate
-                );
-            }
-        }
-        #endregion
-
-        #region Quality Settings
-
-        private void ApplyQualitySettings()
-        {
-            switch (_quality)
+                for (int i = 0; i < spectrum.Length; i++)
+                {
+                    _previousSpectrum[i] = Math.Max(
+                        spectrum[i],
+                        _previousSpectrum[i] - Constants.DECAY_RATE
+                    );
+                }
+            }, new SmartLogger.ErrorHandlingOptions
             {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
-                    _sampleCount = 1;
-                    _pathSimplification = 0.5f;
-                    _maxDetailLevel = Config.MaxDetailLevelLow;
-                    break;
-
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
-                    _sampleCount = 2;
-                    _pathSimplification = 0.2f;
-                    _maxDetailLevel = Config.MaxDetailLevelMedium;
-                    break;
-
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
-                    _sampleCount = 4;
-                    _pathSimplification = 0.0f;
-                    _maxDetailLevel = Config.MaxDetailLevelHigh;
-                    break;
-            }
-
-            // Invalidate caches dependent on quality
-            InvalidateCachedResources();
-        }
-
-        private void InvalidateCachedResources()
-        {
-            _cachedBasePicture?.Dispose();
-            _cachedBasePicture = null;
+                Source = $"{Constants.LOG_PREFIX}.UpdatePreviousSpectrum",
+                ErrorMessage = "Error updating previous spectrum"
+            });
         }
         #endregion
 
         #region Rendering Implementation
-        private readonly struct RenderScope : IDisposable
+        /// <summary>
+        /// Encapsulates a rendering operation for a single frame.
+        /// </summary>
+        private class RenderScope : IDisposable
         {
             private readonly FireRenderer _renderer;
             private readonly SKCanvas _canvas;
@@ -421,62 +510,61 @@ namespace SpectrumNet
                 _barCount = barCount;
                 _basePaint = basePaint;
 
-                // Инициализация рабочей кисти
+                // Initialize working paint
                 _workingPaint = renderer._paintPool.Get();
                 _workingPaint.Color = basePaint.Color;
                 _workingPaint.Style = basePaint.Style;
                 _workingPaint.StrokeWidth = basePaint.StrokeWidth;
                 _workingPaint.IsStroke = basePaint.IsStroke;
                 _workingPaint.IsAntialias = renderer._useAntiAlias;
-                _workingPaint.FilterQuality = renderer._filterQuality;
-                _workingPaint.Shader = basePaint.Shader; // Прямое присваивание вместо CreateCopy
+                _workingPaint.ImageFilter = basePaint.ImageFilter;
+                _workingPaint.Shader = basePaint.Shader;
 
-                // Инициализация кисти для свечения
+                // Initialize glow paint
                 _glowPaint = renderer._paintPool.Get();
                 _glowPaint.Color = basePaint.Color;
                 _glowPaint.Style = basePaint.Style;
                 _glowPaint.StrokeWidth = basePaint.StrokeWidth;
                 _glowPaint.IsStroke = basePaint.IsStroke;
                 _glowPaint.IsAntialias = renderer._useAntiAlias;
-                _glowPaint.FilterQuality = renderer._filterQuality;
 
-                // Настройка радиуса свечения в зависимости от качества
+                // Configure glow radius based on quality
                 switch (renderer._quality)
                 {
                     case RenderQuality.Low:
-                        _glowRadius = Config.GlowRadiusLow;
+                        _glowRadius = Constants.GLOW_RADIUS_LOW;
                         break;
                     case RenderQuality.Medium:
-                        _glowRadius = Config.GlowRadiusMedium;
+                        _glowRadius = Constants.GLOW_RADIUS_MEDIUM;
                         break;
                     case RenderQuality.High:
-                        _glowRadius = Config.GlowRadiusHigh;
+                        _glowRadius = Constants.GLOW_RADIUS_HIGH;
                         break;
                     default:
-                        _glowRadius = Config.GlowRadiusMedium;
+                        _glowRadius = Constants.GLOW_RADIUS_MEDIUM;
                         break;
                 }
 
-                _glowPaint.ImageFilter = SKImageFilter.CreateBlur(_glowRadius, _glowRadius);
+                _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _glowRadius);
                 _maxDetailLevel = renderer._maxDetailLevel;
                 _useAdvancedEffects = renderer._useAdvancedEffects;
             }
 
-            public void Execute(Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
+            public void Execute(Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
             {
                 var actualBarCount = _spectrum.Length;
                 var totalBarWidth = CalculateTotalBarWidth(actualBarCount);
 
                 RenderFlames(actualBarCount, totalBarWidth);
 
-                drawPerformanceInfo(_canvas, _info);
+                drawPerformanceInfo?.Invoke(_canvas, _info);
             }
 
             private float CalculateTotalBarWidth(int actualBarCount)
             {
                 float totalBarWidth = _barWidth + _barSpacing;
-                return actualBarCount < Config.MinBarCount
-                    ? totalBarWidth * (float)Config.MinBarCount / actualBarCount
+                return actualBarCount < Constants.MIN_BAR_COUNT
+                    ? totalBarWidth * (float)Constants.MIN_BAR_COUNT / actualBarCount
                     : totalBarWidth;
             }
 
@@ -526,8 +614,8 @@ namespace SpectrumNet
             private FlameParameters CalculateFlameParameters(int index, float totalBarWidth, float spectrumValue)
             {
                 float x = index * totalBarWidth;
-                float waveOffset = (float)Math.Sin(_renderer._time * Config.WaveSpeed + index * Config.PositionPhaseShift)
-                    * Config.WaveAmplitude;
+                float waveOffset = (float)Math.Sin(_renderer._time * Constants.WAVE_SPEED + index * Constants.POSITION_PHASE_SHIFT)
+                    * Constants.WAVE_AMPLITUDE;
                 float currentHeight = spectrumValue * _info.Height * (1 + waveOffset);
                 float previousHeight = _renderer._previousSpectrum.Length > index ?
                                       _renderer._previousSpectrum[index] * _info.Height : 0;
@@ -536,7 +624,7 @@ namespace SpectrumNet
                 return new FlameParameters(
                     x, currentHeight, previousHeight,
                     _barWidth, _info.Height, index,
-                    baselinePosition  
+                    baselinePosition
                 );
             }
 
@@ -544,42 +632,46 @@ namespace SpectrumNet
             {
                 var path = _renderer._pathPool.Get();
 
-                var (flameTop, flameBottom) = CalculateFlameVerticalPositions(parameters);
-                var x = CalculateHorizontalPosition(parameters);
+                try
+                {
+                    var (flameTop, flameBottom) = CalculateFlameVerticalPositions(parameters);
+                    var x = CalculateHorizontalPosition(parameters);
 
-                // Skip rendering if the flame would be too small to be visible
-                if (flameBottom - flameTop < 1)
+                    // Skip rendering if the flame would be too small to be visible
+                    if (flameBottom - flameTop < 1)
+                    {
+                        return;
+                    }
+
+                    // Only render glow for high intensity flames and when advanced effects are enabled
+                    if (_useAdvancedEffects &&
+                        parameters.CurrentHeight / parameters.CanvasHeight > Constants.HIGH_INTENSITY_THRESHOLD)
+                    {
+                        RenderFlameGlow(path, x, flameTop, flameBottom, parameters);
+                    }
+
+                    RenderFlameBase(path, x, flameBottom);
+                    RenderFlameBody(path, x, flameTop, flameBottom, parameters);
+                }
+                finally
                 {
                     _renderer._pathPool.Return(path);
-                    return;
                 }
-
-                // Only render glow for high intensity flames and when advanced effects are enabled
-                if (_useAdvancedEffects &&
-                    parameters.CurrentHeight / parameters.CanvasHeight > Config.HighIntensityThreshold)
-                {
-                    RenderFlameGlow(path, x, flameTop, flameBottom, parameters);
-                }
-
-                RenderFlameBase(path, x, flameBottom);
-                RenderFlameBody(path, x, flameTop, flameBottom, parameters);
-
-                _renderer._pathPool.Return(path);
             }
 
             private (float flameTop, float flameBottom) CalculateFlameVerticalPositions(FlameParameters parameters)
             {
                 float flameTop = parameters.CanvasHeight - Math.Max(parameters.CurrentHeight, parameters.PreviousHeight);
-                float flameBottom = parameters.CanvasHeight - Config.FlameBottomMax;
+                float flameBottom = parameters.CanvasHeight - Constants.FLAME_BOTTOM_MAX;
 
                 return (flameTop, flameBottom);
             }
 
             private float CalculateHorizontalPosition(FlameParameters parameters)
             {
-                float waveOffset = (float)Math.Sin(_renderer._time * Config.WaveSpeed +
-                    parameters.Index * Config.PositionPhaseShift) *
-                    (parameters.BarWidth * Config.HorizontalWaveFactor);
+                float waveOffset = (float)Math.Sin(_renderer._time * Constants.WAVE_SPEED +
+                    parameters.Index * Constants.POSITION_PHASE_SHIFT) *
+                    (parameters.BarWidth * Constants.HORIZONTAL_WAVE_FACTOR);
                 return parameters.X + waveOffset;
             }
 
@@ -590,13 +682,13 @@ namespace SpectrumNet
                 path.LineTo(x + _barWidth, flameBottom);
 
                 using var bottomPaint = _renderer._paintPool.Get();
-                bottomPaint.Color = _workingPaint.Color.WithAlpha((byte)(255 * Config.MinBottomAlpha));
+                bottomPaint.Color = _workingPaint.Color.WithAlpha((byte)(255 * Constants.MIN_BOTTOM_ALPHA));
                 bottomPaint.Style = _workingPaint.Style;
                 bottomPaint.StrokeWidth = _workingPaint.StrokeWidth;
                 bottomPaint.IsStroke = _workingPaint.IsStroke;
                 bottomPaint.IsAntialias = _workingPaint.IsAntialias;
-                bottomPaint.FilterQuality = _workingPaint.FilterQuality;
-                bottomPaint.Shader = _workingPaint.Shader; 
+                bottomPaint.ImageFilter = _workingPaint.ImageFilter;
+                bottomPaint.Shader = _workingPaint.Shader;
 
                 _canvas.DrawPath(path, bottomPaint);
             }
@@ -616,7 +708,7 @@ namespace SpectrumNet
                 );
 
                 float intensity = parameters.CurrentHeight / parameters.CanvasHeight;
-                byte glowAlpha = (byte)(255 * intensity * Config.GlowIntensity);
+                byte glowAlpha = (byte)(255 * intensity * Constants.GLOW_INTENSITY);
                 _glowPaint.Color = _glowPaint.Color.WithAlpha(glowAlpha);
 
                 _canvas.DrawPath(path, _glowPaint);
@@ -643,33 +735,33 @@ namespace SpectrumNet
             private (float cp1X, float cp1Y, float cp2X, float cp2Y) CalculateControlPoints(
                 float x, float flameBottom, float height, float barWidth)
             {
-                float cp1Y = flameBottom - height * Config.CubicControlPoint1;
-                float cp2Y = flameBottom - height * Config.CubicControlPoint2;
+                float cp1Y = flameBottom - height * Constants.CUBIC_CONTROL_POINT1;
+                float cp2Y = flameBottom - height * Constants.CUBIC_CONTROL_POINT2;
 
                 // Add randomness based on quality level and detail
-                float detailFactor = (float)_maxDetailLevel / Config.MaxDetailLevelHigh;
-                float randomnessFactor = detailFactor * Config.RandomOffsetProportion;
+                float detailFactor = (float)_maxDetailLevel / Constants.MAX_DETAIL_LEVEL_HIGH;
+                float randomnessFactor = detailFactor * Constants.RANDOM_OFFSET_PROPORTION;
 
                 float randomOffset1 = (float)(_renderer._random.NextDouble() *
                     barWidth * randomnessFactor -
-                    barWidth * Config.RandomOffsetCenter);
+                    barWidth * Constants.RANDOM_OFFSET_CENTER);
                 float randomOffset2 = (float)(_renderer._random.NextDouble() *
                     barWidth * randomnessFactor -
-                    barWidth * Config.RandomOffsetCenter);
+                    barWidth * Constants.RANDOM_OFFSET_CENTER);
 
                 return (
-                    x + barWidth * Config.CubicControlPoint1 + randomOffset1,
+                    x + barWidth * Constants.CUBIC_CONTROL_POINT1 + randomOffset1,
                     cp1Y,
-                    x + barWidth * Config.CubicControlPoint2 + randomOffset2,
+                    x + barWidth * Constants.CUBIC_CONTROL_POINT2 + randomOffset2,
                     cp2Y
                 );
             }
 
             private void UpdatePaintForFlame(FlameParameters parameters)
             {
-                float opacityWave = (float)Math.Sin(_renderer._time * Config.OpacityWaveSpeed +
-                    parameters.Index * Config.OpacityPhaseShift) *
-                    Config.OpacityWaveAmplitude + Config.OpacityBase;
+                float opacityWave = (float)Math.Sin(_renderer._time * Constants.OPACITY_WAVE_SPEED +
+                    parameters.Index * Constants.OPACITY_PHASE_SHIFT) *
+                    Constants.OPACITY_WAVE_AMPLITUDE + Constants.OPACITY_BASE;
 
                 byte alpha = (byte)(255 * Math.Min(
                     parameters.CurrentHeight / parameters.CanvasHeight * opacityWave, 1.0f));
@@ -684,6 +776,9 @@ namespace SpectrumNet
             }
         }
 
+        /// <summary>
+        /// Parameters for a single flame in the visualization.
+        /// </summary>
         private readonly record struct FlameParameters(
             float X,
             float CurrentHeight,
@@ -695,96 +790,34 @@ namespace SpectrumNet
         );
         #endregion
 
-        #region Object Pooling
-        private class ObjectPool<T> where T : class
+        #region Disposal
+        /// <summary>
+        /// Disposes of resources used by the renderer.
+        /// </summary>
+        public override void Dispose()
         {
-            private readonly Func<T> _factory;
-            private readonly Action<T>? _reset;
-            private readonly ConcurrentQueue<T> _objects = new();
-            private readonly int _initialSize;
-
-            public ObjectPool(Func<T> factory, Action<T>? reset = null, int initialSize = 0)
+            if (!_disposed)
             {
-                _factory = factory;
-                _reset = reset;
-                _initialSize = initialSize;
-
-                // Pre-populate pool
-                for (int i = 0; i < initialSize; i++)
+                SmartLogger.Safe(() =>
                 {
-                    _objects.Enqueue(factory());
-                }
-            }
+                    _cachedBasePicture?.Dispose();
+                    _cachedBasePicture = null;
 
-            public T Get()
-            {
-                if (_objects.TryDequeue(out var item))
+                    _pathPool?.Dispose();
+                    _paintPool?.Dispose();
+
+                    _renderSemaphore?.Dispose();
+
+                    base.Dispose();
+                }, new SmartLogger.ErrorHandlingOptions
                 {
-                    return item;
-                }
+                    Source = $"{Constants.LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during disposal"
+                });
 
-                return _factory();
+                _disposed = true;
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
             }
-
-            public void Return(T item)
-            {
-                _reset?.Invoke(item);
-                _objects.Enqueue(item);
-            }
-
-            public void Clear()
-            {
-                while (_objects.TryDequeue(out var item))
-                {
-                    if (item is IDisposable disposable)
-                    {
-                        disposable.Dispose();
-                    }
-                }
-            }
-        }
-        #endregion
-
-        #region Validation
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? basePaint)
-        {
-            if (canvas == null || spectrum == null || basePaint == null)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Invalid render parameters: null values");
-                return false;
-            }
-
-            if (info.Width <= 0 || info.Height <= 0)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Invalid image dimensions: {info.Width}x{info.Height}");
-                return false;
-            }
-
-            if (spectrum.Length == 0)
-            {
-                SmartLogger.Log(LogLevel.Warning, LogPrefix, "Empty spectrum data");
-                return false;
-            }
-
-            return true;
-        }
-        #endregion
-
-        #region Dispose Implementation
-        public void Dispose()
-        {
-            if (_disposed)
-                return;
-
-            _disposed = true;
-
-            _cachedBasePicture?.Dispose();
-            _cachedBasePicture = null;
-
-            _pathPool.Clear();
-            _paintPool.Clear();
-
-            _renderSemaphore.Dispose();
         }
         #endregion
     }

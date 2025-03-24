@@ -3,182 +3,207 @@
 namespace SpectrumNet
 {
     /// <summary>
-    /// Renders spectrum data as a circular wave with rotation and glow effects.
+    /// Renderer that visualizes spectrum data as animated circular waves.
     /// </summary>
     public sealed class CircularWaveRenderer : BaseSpectrumRenderer
     {
         #region Constants
         private static class Constants
         {
+            // Logging
             public const string LOG_PREFIX = "CircularWaveRenderer";
-            public const float ROTATION_SPEED = 0.5f;
-            public const float RADIUS_PROPORTION = 0.4f;
-            public const float AMPLITUDE_SCALE = 0.5f;
-            public const float MIN_MAGNITUDE_THRESHOLD = 0.01f;
-            public const int MAX_POINT_COUNT = 180;
-            public const int MIN_POINT_COUNT = 12;
-            public const float GLOW_INTENSITY = 0.5f;
-            public const float HIGH_INTENSITY_THRESHOLD = 0.7f;
-            public const float WAVE_ALPHA_MULTIPLIER = 1.2f;
-            public const float INNER_GLOW_ALPHA = 0.3f;
-            public const float FILL_ALPHA_RATIO = 0.4f;
-            public const float RADIUS_SCALE_FACTOR = 0.1f;
-            public const float AMPLITUDE_SCALE_FACTOR = 0.2f;
-            public const float BAR_COUNT_NORMALIZATION = 100f;
-            public const float MIN_BLUR_RADIUS = 4f;
-            public const float MAX_BLUR_RADIUS = 12f;
-            public const float BLUR_WIDTH_RATIO = 0.8f;
-            public const float OUTLINE_WIDTH_RATIO = 0.2f;
 
-            // Performance settings by quality
-            public const int LOW_QUALITY_POINTS = 60;
-            public const int MEDIUM_QUALITY_POINTS = 120;
-            public const int HIGH_QUALITY_POINTS = 180;
+            // Animation parameters
+            public const float TIME_STEP = 0.016f;                // Time increment per frame (~60 FPS)
+            public const float ROTATION_SPEED = 0.5f;             // Base rotation speed in radians per second
+            public const float SPECTRUM_ROTATION_INFLUENCE = 0.3f; // How much spectrum affects rotation
+            public const float WAVE_SPEED = 2.0f;                 // Speed of wave animation
+            public const float PHASE_OFFSET = 0.1f;               // Phase offset between rings
+
+            // Rendering properties
+            public const float CENTER_CIRCLE_RADIUS = 30.0f;      // Radius of the center circle
+            public const float MIN_RADIUS_INCREMENT = 15.0f;      // Minimum spacing between rings
+            public const float MAX_RADIUS_INCREMENT = 40.0f;      // Maximum spacing between rings
+            public const float MIN_MAGNITUDE_THRESHOLD = 0.01f;   // Minimum magnitude to render
+            public const int MAX_RING_COUNT = 32;                 // Maximum number of rings to render
+            public const float MIN_STROKE_WIDTH = 1.5f;           // Minimum stroke width
+            public const float MAX_STROKE_WIDTH = 8.0f;           // Maximum stroke width
+            public const float STROKE_WIDTH_FACTOR = 6.0f;        // Factor for calculating stroke width
+            public const float ALPHA_MULTIPLIER = 255.0f;         // Multiplier for alpha calculation
+            public const float MIN_ALPHA_FACTOR = 0.3f;           // Minimum alpha factor for distant rings
+
+            // Quality-specific settings
+            public const int POINTS_PER_CIRCLE_LOW = 32;          // Point count for low quality
+            public const int POINTS_PER_CIRCLE_MEDIUM = 64;       // Point count for medium quality
+            public const int POINTS_PER_CIRCLE_HIGH = 128;        // Point count for high quality
+            public const float GLOW_RADIUS_LOW = 1.5f;            // Glow radius for low quality
+            public const float GLOW_RADIUS_MEDIUM = 3.0f;         // Glow radius for medium quality
+            public const float GLOW_RADIUS_HIGH = 5.0f;           // Glow radius for high quality
         }
-        #endregion
-
-        #region Configuration Records
-        public record RenderConfig(
-            float RotationSpeed = Constants.ROTATION_SPEED,
-            float RadiusProportion = Constants.RADIUS_PROPORTION,
-            float AmplitudeScale = Constants.AMPLITUDE_SCALE,
-            float MinMagnitudeThreshold = Constants.MIN_MAGNITUDE_THRESHOLD,
-            int MaxPointCount = Constants.MAX_POINT_COUNT);
         #endregion
 
         #region Fields
         private static readonly Lazy<CircularWaveRenderer> _instance = new(() => new CircularWaveRenderer());
-        private float _rotation;
+
+        // Object pools for efficient resource management
+        private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 5);
+        private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
+
+        // Rendering state
+        private float _time;
+        private float _angle;
         private float _rotationSpeed = Constants.ROTATION_SPEED;
-        private float _radiusProportion = Constants.RADIUS_PROPORTION;
-        private float _amplitudeScale = Constants.AMPLITUDE_SCALE;
-        private float _minMagnitudeThreshold = Constants.MIN_MAGNITUDE_THRESHOLD;
-        private int _maxPointCount = Constants.MAX_POINT_COUNT;
-        private readonly SKPath _wavePath = new();
-        private SKPaint? _glowPaint, _innerGlowPaint, _outlinePaint, _fillPaint;
-        private SKPoint[]? _wavePoints;
-        private bool _useGlowEffects = true;
-        private bool _useInnerGlow = true;
+
+        // Calculated and cached data
+        private float[]? _ringMagnitudes;
+        private SKPoint[]? _circlePoints;
+        private SKPoint _center;
+
+        // Quality-dependent settings
+        private new bool _useAntiAlias = true;
+        private SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+        private new bool _useAdvancedEffects = true;
+        private int _pointsPerCircle = Constants.POINTS_PER_CIRCLE_MEDIUM;
+        private float _glowRadius = Constants.GLOW_RADIUS_MEDIUM;
+
+        // Thread safety
+        private readonly object _renderLock = new();
+        private DateTime _lastUpdateTime = DateTime.Now;
+        private new bool _disposed;
         #endregion
 
-        #region Constructor and Initialization
+        #region Singleton Pattern
         private CircularWaveRenderer() { }
 
+        /// <summary>
+        /// Gets the singleton instance of the circular wave renderer.
+        /// </summary>
         public static CircularWaveRenderer GetInstance() => _instance.Value;
-
-        public override void Initialize() => SmartLogger.Safe(() =>
-        {
-            base.Initialize();
-            InitializeRenderResources();
-            SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-        }, new SmartLogger.ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
         #endregion
 
-        #region Configuration
-        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium) =>
+        #region Initialization and Configuration
+        /// <summary>
+        /// Initializes the circular wave renderer and prepares rendering resources.
+        /// </summary>
+        public override void Initialize()
+        {
+            SmartLogger.Safe(() =>
+            {
+                base.Initialize();
+
+                // Initialize animation state
+                _time = 0f;
+                _angle = 0f;
+
+                // Create initial circle points cache
+                CreateCirclePointsCache();
+
+                // Apply initial quality settings
+                ApplyQualitySettings();
+
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            });
+        }
+
+        /// <summary>
+        /// Configures the renderer with overlay status and quality settings.
+        /// </summary>
+        /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
+        /// <param name="quality">The rendering quality level.</param>
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        {
             SmartLogger.Safe(() =>
             {
                 base.Configure(isOverlayActive, quality);
-                ApplyQualitySettings();
+
+                // Apply quality settings if changed
+                if (_quality != quality)
+                {
+                    ApplyQualitySettings();
+                }
             }, new SmartLogger.ErrorHandlingOptions
             {
                 Source = $"{Constants.LOG_PREFIX}.Configure",
                 ErrorMessage = "Failed to configure renderer"
             });
+        }
 
-        public void ConfigureAdvanced(RenderConfig config) => SmartLogger.Safe(() =>
-        {
-            (_rotationSpeed, _radiusProportion, _amplitudeScale, _minMagnitudeThreshold) =
-                (config.RotationSpeed, config.RadiusProportion, config.AmplitudeScale,
-                 config.MinMagnitudeThreshold);
-
-            // Apply quality-based point count limitation
-            _maxPointCount = LimitPointCountByQuality(config.MaxPointCount);
-
-            SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Advanced configuration applied");
-        }, new SmartLogger.ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.ConfigureAdvanced",
-            ErrorMessage = "Failed to apply advanced configuration"
-        });
-
-        private int LimitPointCountByQuality(int requestedCount) => _quality switch
-        {
-            RenderQuality.Low => Math.Min(requestedCount, Constants.LOW_QUALITY_POINTS),
-            RenderQuality.Medium => Math.Min(requestedCount, Constants.MEDIUM_QUALITY_POINTS),
-            RenderQuality.High => Math.Min(requestedCount, Constants.HIGH_QUALITY_POINTS),
-            _ => requestedCount
-        };
-
-        private void InitializeRenderResources() => SmartLogger.Safe(() =>
-        {
-            DisposeRenderPaints();
-
-            _glowPaint = new SKPaint { IsAntialias = _useAntiAlias, FilterQuality = _filterQuality, Style = SKPaintStyle.Fill };
-            _innerGlowPaint = new SKPaint { IsAntialias = _useAntiAlias, FilterQuality = _filterQuality, Style = SKPaintStyle.Fill, Color = SKColors.White };
-            _outlinePaint = new SKPaint { IsAntialias = _useAntiAlias, FilterQuality = _filterQuality, Style = SKPaintStyle.Stroke };
-            _fillPaint = new SKPaint { IsAntialias = _useAntiAlias, FilterQuality = _filterQuality, Style = SKPaintStyle.Fill };
-        }, new SmartLogger.ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.InitializeRenderResources",
-            ErrorMessage = "Failed to initialize render resources"
-        });
-
-        private void DisposeRenderPaints() => SmartLogger.Safe(() =>
-        {
-            SmartLogger.SafeDispose(_glowPaint, "glowPaint");
-            SmartLogger.SafeDispose(_innerGlowPaint, "innerGlowPaint");
-            SmartLogger.SafeDispose(_outlinePaint, "outlinePaint");
-            SmartLogger.SafeDispose(_fillPaint, "fillPaint");
-
-            _glowPaint = _innerGlowPaint = _outlinePaint = _fillPaint = null;
-        }, new SmartLogger.ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.DisposeRenderPaints",
-            ErrorMessage = "Failed to dispose render paints"
-        });
-        #endregion
-
-        #region Quality Settings
+        /// <summary>
+        /// Applies quality settings based on the current quality level.
+        /// </summary>
         protected override void ApplyQualitySettings()
         {
-            base.ApplyQualitySettings();
-
-            // Key performance optimizations based on quality level
-            switch (_quality)
+            SmartLogger.Safe(() =>
             {
-                case RenderQuality.Low:
-                    _useGlowEffects = false;
-                    _useInnerGlow = false;
-                    _maxPointCount = Constants.LOW_QUALITY_POINTS;
-                    break;
+                base.ApplyQualitySettings();
 
-                case RenderQuality.Medium:
-                    _useGlowEffects = true;
-                    _useInnerGlow = false; // Disable inner glow for medium as it's expensive
-                    _maxPointCount = Constants.MEDIUM_QUALITY_POINTS;
-                    break;
+                switch (_quality)
+                {
+                    case RenderQuality.Low:
+                        _useAntiAlias = false;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+                        _useAdvancedEffects = false;
+                        _pointsPerCircle = Constants.POINTS_PER_CIRCLE_LOW;
+                        _glowRadius = Constants.GLOW_RADIUS_LOW;
+                        break;
 
-                case RenderQuality.High:
-                    _useGlowEffects = true;
-                    _useInnerGlow = true;
-                    _maxPointCount = Constants.HIGH_QUALITY_POINTS;
-                    break;
+                    case RenderQuality.Medium:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = true;
+                        _pointsPerCircle = Constants.POINTS_PER_CIRCLE_MEDIUM;
+                        _glowRadius = Constants.GLOW_RADIUS_MEDIUM;
+                        break;
 
-                default:
-                    _useGlowEffects = true;
-                    _useInnerGlow = false;
-                    break;
-            }
-            InitializeRenderResources();
+                    case RenderQuality.High:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = true;
+                        _pointsPerCircle = Constants.POINTS_PER_CIRCLE_HIGH;
+                        _glowRadius = Constants.GLOW_RADIUS_HIGH;
+                        break;
+                }
+
+                // Recreate circle points cache with new point density
+                CreateCirclePointsCache();
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+                ErrorMessage = "Failed to apply quality settings"
+            });
+        }
+
+        /// <summary>
+        /// Creates a cache of circle points to avoid recalculation on each frame.
+        /// </summary>
+        private void CreateCirclePointsCache()
+        {
+            SmartLogger.Safe(() =>
+            {
+                _circlePoints = new SKPoint[_pointsPerCircle];
+                float angleStep = 2 * MathF.PI / _pointsPerCircle;
+
+                for (int i = 0; i < _pointsPerCircle; i++)
+                {
+                    float angle = i * angleStep;
+                    _circlePoints[i] = new SKPoint(MathF.Cos(angle), MathF.Sin(angle));
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.CreateCirclePointsCache",
+                ErrorMessage = "Failed to create circle points cache"
+            });
         }
         #endregion
 
         #region Rendering
+        /// <summary>
+        /// Renders the circular wave visualization on the canvas using spectrum data.
+        /// </summary>
         public override void Render(
             SKCanvas? canvas,
             float[]? spectrum,
@@ -195,27 +220,8 @@ namespace SpectrumNet
                 return;
             }
 
-            // Limit point count based on quality
-            int pointCount = Math.Max(Constants.MIN_POINT_COUNT,
-                Math.Min(Math.Min(spectrum!.Length, _maxPointCount), barCount));
-
-            float centerX = info.Width / 2f, centerY = info.Height / 2f;
-
-            float normalizationFactor = 1f - Math.Min(barCount, Constants.BAR_COUNT_NORMALIZATION) /
-                                                        Constants.BAR_COUNT_NORMALIZATION;
-            float radius = MathF.Min(info.Width, info.Height) * _radiusProportion *
-                                            (1f + Constants.RADIUS_SCALE_FACTOR * normalizationFactor);
-            float amplitudeScale = _amplitudeScale *
-                                                (1f + Constants.AMPLITUDE_SCALE_FACTOR * normalizationFactor);
-
-            float maxRadius = radius * (1f + amplitudeScale);
-            SKRect renderBounds = new(
-                centerX - maxRadius,
-                centerY - maxRadius,
-                centerX + maxRadius,
-                centerY + maxRadius
-            );
-
+            // Define render bounds and quick reject if not visible
+            SKRect renderBounds = new(0, 0, info.Width, info.Height);
             if (canvas!.QuickReject(renderBounds))
             {
                 drawPerformanceInfo?.Invoke(canvas, info);
@@ -224,197 +230,259 @@ namespace SpectrumNet
 
             SmartLogger.Safe(() =>
             {
-                _rotation = (_rotation + _rotationSpeed) % 360f;
+                lock (_renderLock)
+                {
+                    // Update animation state
+                    DateTime now = DateTime.Now;
+                    float deltaTime = (float)(now - _lastUpdateTime).TotalSeconds;
+                    _lastUpdateTime = now;
 
-                float[] processedSpectrum = PrepareSpectrum(spectrum, pointCount, spectrum.Length);
+                    _time += Constants.TIME_STEP;
+                    UpdateRotation(deltaTime, spectrum!);
 
-                RenderCircularWave(canvas, processedSpectrum, pointCount, radius, centerX, centerY, paint!, amplitudeScale, barWidth);
+                    // Calculate center point
+                    _center = new SKPoint(info.Width * 0.5f, info.Height * 0.5f);
+
+                    // Prepare and process spectrum data
+                    int ringCount = Math.Min(barCount, Constants.MAX_RING_COUNT);
+                    float[] processedSpectrum = PrepareSpectrum(spectrum!, ringCount, spectrum!.Length);
+                    PrepareRingMagnitudes(processedSpectrum, ringCount);
+
+                    // Render circular waves
+                    RenderCircularWaves(canvas, info, paint!, ringCount);
+                }
             }, new SmartLogger.ErrorHandlingOptions
             {
                 Source = $"{Constants.LOG_PREFIX}.Render",
                 ErrorMessage = "Error during rendering"
             });
 
-            drawPerformanceInfo?.Invoke(canvas, info);
+            drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
-        private void RenderCircularWave(
-            SKCanvas canvas,
-            float[] spectrum,
-            int pointCount,
-            float radius,
-            float centerX,
-            float centerY,
-            SKPaint basePaint,
-            float amplitudeScale,
-            float barWidth) => SmartLogger.Safe(() =>
+        /// <summary>
+        /// Updates the rotation angle based on spectrum data.
+        /// </summary>
+        private void UpdateRotation(float deltaTime, float[] spectrum)
+        {
+            if (spectrum.Length == 0) return;
+
+            // Calculate average spectrum intensity to influence rotation speed
+            float avgIntensity = 0f;
+            for (int i = 0; i < spectrum.Length; i++)
             {
-                if (canvas == null || spectrum == null || basePaint == null || _disposed)
-                    return;
+                avgIntensity += spectrum[i];
+            }
+            avgIntensity /= spectrum.Length;
 
-                if (_wavePoints == null || _wavePoints.Length != pointCount)
-                    _wavePoints = new SKPoint[pointCount];
+            // Update rotation speed and angle
+            _rotationSpeed = Constants.ROTATION_SPEED * (1f + avgIntensity * Constants.SPECTRUM_ROTATION_INFLUENCE);
+            _angle = (_angle + _rotationSpeed * deltaTime) % MathF.Tau;
+        }
 
-                float rad = _rotation * MathF.PI / 180f;
-                float cosDelta = MathF.Cos(rad), sinDelta = MathF.Sin(rad);
+        /// <summary>
+        /// Prepares ring magnitudes from spectrum data.
+        /// </summary>
+        private void PrepareRingMagnitudes(float[] spectrum, int ringCount)
+        {
+            if (_ringMagnitudes == null || _ringMagnitudes.Length != ringCount)
+            {
+                _ringMagnitudes = new float[ringCount];
+            }
 
-                int validPointCount = 0;
-                float maxAmplitude = 0f;
+            // Group spectrum data into rings
+            int spectrumLength = spectrum.Length;
 
-                // Performance-optimized point preparation
-                PrepareWavePoints(
-                    spectrum, pointCount, radius, centerX, centerY,
-                    cosDelta, sinDelta, amplitudeScale,
-                    ref validPointCount, ref maxAmplitude);
+            for (int i = 0; i < ringCount; i++)
+            {
+                int startIdx = i * spectrumLength / ringCount;
+                int endIdx = (i + 1) * spectrumLength / ringCount;
+                endIdx = Math.Min(endIdx, spectrumLength);
 
-                if (validPointCount == 0)
-                    return;
-
-                _wavePath.Reset();
-                if (validPointCount > 0)
+                float sum = 0f;
+                for (int j = startIdx; j < endIdx; j++)
                 {
-                    // Use AddPoly for efficient GPU-friendly path creation
-                    SKPoint[] validPoints = new SKPoint[validPointCount];
-                    Array.Copy(_wavePoints!, 0, validPoints, 0, validPointCount);
-                    _wavePath.AddPoly(validPoints, true);
+                    sum += spectrum[j];
                 }
 
-                // Optimized rendering with reduced effects for better performance
-                RenderSimplifiedWaveEffects(canvas, _wavePath, basePaint, maxAmplitude, barWidth);
-            }, new SmartLogger.ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.RenderCircularWave",
-                ErrorMessage = "Error rendering circular wave"
-            });
-
-        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        private void PrepareWavePoints(
-            float[] spectrum, int pointCount, float radius, float centerX, float centerY,
-            float cosDelta, float sinDelta, float amplitudeScale,
-            ref int validPointCount, ref float maxAmplitude)
-        {
-            validPointCount = 0;
-            maxAmplitude = 0f;
-            float angleStep = 2 * MathF.PI / pointCount;
-
-            // Skip points for low quality to improve performance
-            int step = _quality == RenderQuality.Low ? 2 : 1;
-
-            for (int i = 0; i < pointCount; i += step)
-            {
-                float amplitude = spectrum[i];
-                maxAmplitude = Math.Max(maxAmplitude, amplitude);
-
-                if (amplitude < _minMagnitudeThreshold)
-                    continue;
-
-                float angle = i * angleStep;
-                float baseCos = MathF.Cos(angle), baseSin = MathF.Sin(angle);
-
-                float r = radius * (1f + amplitude * amplitudeScale);
-                float rotatedCos = baseCos * cosDelta - baseSin * sinDelta;
-                float rotatedSin = baseSin * cosDelta + baseCos * sinDelta;
-
-                _wavePoints![validPointCount++] = new SKPoint(
-                    centerX + r * rotatedCos,
-                    centerY + r * rotatedSin
-                );
+                _ringMagnitudes[i] = sum / (endIdx - startIdx);
             }
         }
 
-        // Simplified rendering with fewer effects for better performance
-        private void RenderSimplifiedWaveEffects(
-            SKCanvas canvas,
-            SKPath path,
-            SKPaint basePaint,
-            float maxAmplitude,
-            float barWidth) => SmartLogger.Safe(() =>
+        /// <summary>
+        /// Renders circular waves based on spectrum data.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private void RenderCircularWaves(SKCanvas canvas, SKImageInfo info, SKPaint basePaint, int ringCount)
+        {
+            if (_ringMagnitudes == null || _circlePoints == null) return;
+
+            float smallerDimension = Math.Min(info.Width, info.Height);
+            float maxRadius = smallerDimension * 0.45f;  // Leave some margin
+            float radiusIncrement = (maxRadius - Constants.CENTER_CIRCLE_RADIUS) / ringCount;
+
+            // Prepare base paint
+            using var mainPaint = _paintPool.Get();
+            mainPaint.Color = basePaint.Color;
+            mainPaint.IsAntialias = _useAntiAlias;
+            mainPaint.Style = SKPaintStyle.Stroke;
+
+            // Draw from outer rings to inner for proper layering
+            for (int i = ringCount - 1; i >= 0; i--)
             {
-                byte alpha = (byte)(basePaint.Color.Alpha * Math.Min(maxAmplitude * Constants.WAVE_ALPHA_MULTIPLIER, 1.0f));
+                float magnitude = _ringMagnitudes[i];
+                if (magnitude < Constants.MIN_MAGNITUDE_THRESHOLD) continue;
 
-                // Reduce blur radius significantly for better performance
-                float blurRadius = _quality switch
+                // Calculate ring properties
+                float baseRadius = Constants.CENTER_CIRCLE_RADIUS + i * radiusIncrement;
+                float waveOffset = MathF.Sin(_time * Constants.WAVE_SPEED + i * Constants.PHASE_OFFSET) * magnitude * radiusIncrement;
+                float radius = baseRadius + waveOffset;
+
+                // Skip if ring would be outside canvas
+                if (radius > maxRadius ||
+                    _center.X + radius < 0 || _center.X - radius > info.Width ||
+                    _center.Y + radius < 0 || _center.Y - radius > info.Height)
                 {
-                    RenderQuality.Low => 2f,
-                    RenderQuality.Medium => 3f,
-                    RenderQuality.High => 4f,
-                    _ => 3f
-                };
-
-                // Render in optimal order for GPU (fill first, then outline, then effects)
-
-                // 1. Fill (most efficient)
-                if (_fillPaint != null)
-                {
-                    _fillPaint.Color = basePaint.Color.WithAlpha((byte)(alpha * Constants.FILL_ALPHA_RATIO));
-                    canvas.DrawPath(path, _fillPaint);
+                    continue;
                 }
 
-                // 2. Outline
-                if (_outlinePaint != null)
+                // Calculate alpha based on magnitude and distance from center
+                float distanceFactor = 1.0f - (radius / maxRadius);
+                float alphaFactor = Constants.MIN_ALPHA_FACTOR + (1.0f - Constants.MIN_ALPHA_FACTOR) * distanceFactor;
+                byte alpha = (byte)Math.Min(magnitude * Constants.ALPHA_MULTIPLIER * alphaFactor, 255);
+
+                // Calculate stroke width based on magnitude
+                float strokeWidth = Constants.MIN_STROKE_WIDTH + magnitude * Constants.STROKE_WIDTH_FACTOR;
+                strokeWidth = Math.Clamp(strokeWidth, Constants.MIN_STROKE_WIDTH, Constants.MAX_STROKE_WIDTH);
+
+                mainPaint.StrokeWidth = strokeWidth;
+                mainPaint.Color = basePaint.Color.WithAlpha(alpha);
+
+                // Draw glow effect for high magnitude rings
+                if (_useAdvancedEffects && magnitude > 0.5f)
                 {
-                    _outlinePaint.Color = basePaint.Color.WithAlpha(alpha);
-                    // Reduce outline width for better performance
-                    _outlinePaint.StrokeWidth = Math.Max(1f, barWidth * (_quality == RenderQuality.High ?
-                        Constants.OUTLINE_WIDTH_RATIO : Constants.OUTLINE_WIDTH_RATIO * 0.7f));
-                    canvas.DrawPath(path, _outlinePaint);
+                    RenderRingWithGlow(canvas, radius, magnitude, mainPaint);
                 }
-
-                // 3. Glow effects - only if needed and performance allows
-                if (_useGlowEffects && _useAdvancedEffects && _glowPaint != null)
+                else
                 {
-                    _glowPaint.Color = basePaint.Color.WithAlpha((byte)(alpha * Constants.GLOW_INTENSITY));
-
-                    // Use ImageFilter for high quality, MaskFilter for medium (more efficient)
-                    if (_quality == RenderQuality.High)
-                    {
-                        _glowPaint.ImageFilter = SKImageFilter.CreateBlur(blurRadius, blurRadius);
-                        _glowPaint.MaskFilter = null;
-                    }
-                    else
-                    {
-                        _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius);
-                        _glowPaint.ImageFilter = null;
-                    }
-
-                    canvas.DrawPath(path, _glowPaint);
+                    RenderRing(canvas, radius, mainPaint);
                 }
+            }
+        }
 
-                // 4. Inner glow - only for high quality and high intensity
-                if (_useInnerGlow && _useAdvancedEffects &&
-                    maxAmplitude > Constants.HIGH_INTENSITY_THRESHOLD &&
-                    _innerGlowPaint != null && _quality == RenderQuality.High)
-                {
-                    _innerGlowPaint.Color = _innerGlowPaint.Color.WithAlpha((byte)(alpha * Constants.INNER_GLOW_ALPHA));
-                    _innerGlowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius * 0.5f);
-                    canvas.DrawPath(path, _innerGlowPaint);
-                }
-            }, new SmartLogger.ErrorHandlingOptions
+        /// <summary>
+        /// Renders a single ring with the specified radius and paint.
+        /// </summary>
+        private void RenderRing(SKCanvas canvas, float radius, SKPaint paint)
+        {
+            if (_circlePoints == null) return;
+
+            using var path = _pathPool.Get();
+            path.Reset();
+
+            bool firstPoint = true;
+            foreach (var point in _circlePoints)
             {
-                Source = $"{Constants.LOG_PREFIX}.RenderSimplifiedWaveEffects",
-                ErrorMessage = "Error rendering wave effects"
-            });
+                float x = _center.X + point.X * radius;
+                float y = _center.Y + point.Y * radius;
+
+                if (firstPoint)
+                {
+                    path.MoveTo(x, y);
+                    firstPoint = false;
+                }
+                else
+                {
+                    path.LineTo(x, y);
+                }
+            }
+
+            path.Close();
+            canvas.DrawPath(path, paint);
+        }
+
+        /// <summary>
+        /// Renders a ring with additional glow effect.
+        /// </summary>
+        private void RenderRingWithGlow(SKCanvas canvas, float radius, float magnitude, SKPaint paint)
+        {
+            if (_circlePoints == null) return;
+
+            // Create glow effect paint
+            using var glowPaint = _paintPool.Get();
+            glowPaint.Color = paint.Color.WithAlpha((byte)(paint.Color.Alpha * 0.7f));
+            glowPaint.IsAntialias = paint.IsAntialias;
+            glowPaint.Style = paint.Style;
+            glowPaint.StrokeWidth = paint.StrokeWidth * 1.5f;
+            glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _glowRadius * magnitude);
+
+            // Draw the glow effect
+            using var path = _pathPool.Get();
+            path.Reset();
+
+            bool firstPoint = true;
+            foreach (var point in _circlePoints)
+            {
+                float x = _center.X + point.X * radius;
+                float y = _center.Y + point.Y * radius;
+
+                if (firstPoint)
+                {
+                    path.MoveTo(x, y);
+                    firstPoint = false;
+                }
+                else
+                {
+                    path.LineTo(x, y);
+                }
+            }
+
+            path.Close();
+
+            // Draw glow first, then the main ring
+            canvas.DrawPath(path, glowPaint);
+            canvas.DrawPath(path, paint);
+        }
+        #endregion
+
+        #region Helper Methods
+        /// <summary>
+        /// Determines if the magnitude is significant enough to render.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool IsSignificantMagnitude(float magnitude) =>
+            magnitude >= Constants.MIN_MAGNITUDE_THRESHOLD;
+
+        /// <summary>
+        /// Calculates the alpha value based on magnitude and a factor.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private byte CalculateAlpha(float magnitude, float factor) =>
+            (byte)Math.Min(magnitude * Constants.ALPHA_MULTIPLIER * factor, 255);
         #endregion
 
         #region Disposal
+        /// <summary>
+        /// Disposes of resources used by the renderer.
+        /// </summary>
         public override void Dispose()
         {
             if (!_disposed)
             {
                 SmartLogger.Safe(() =>
                 {
-                    SmartLogger.SafeDispose(_wavePath, "wavePath");
-                    DisposeRenderPaints();
-                    _wavePoints = null;
+                    _pathPool?.Dispose();
+                    _paintPool?.Dispose();
+
                     base.Dispose();
+
+                    _disposed = true;
+                    SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
                 }, new SmartLogger.ErrorHandlingOptions
                 {
                     Source = $"{Constants.LOG_PREFIX}.Dispose",
-                    ErrorMessage = "Error disposing renderer"
+                    ErrorMessage = "Error during disposal"
                 });
-
-                _disposed = true;
-                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
             }
         }
         #endregion

@@ -158,13 +158,11 @@ namespace SpectrumNet
             if (_starPaint != null)
             {
                 _starPaint.IsAntialias = _useAntiAlias;
-                _starPaint.FilterQuality = _filterQuality;
             }
 
             if (_glowPaint != null)
             {
                 _glowPaint.IsAntialias = _useAntiAlias;
-                _glowPaint.FilterQuality = _filterQuality;
             }
         }, new SmartLogger.ErrorHandlingOptions
         {

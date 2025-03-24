@@ -14,66 +14,129 @@ namespace SpectrumNet
             public const string LOG_PREFIX = "CubesRenderer";
 
             // Rendering constants
-            public const float CubeTopWidthProportion = 0.75f;   // Proportion of bar width for cube top
-            public const float CubeTopHeightProportion = 0.25f;  // Proportion of bar width for cube top height
-            public const float AlphaMultiplier = 255f;           // Multiplier for alpha calculation
-            public const float TopAlphaFactor = 0.8f;            // Alpha factor for cube top
-            public const float SideFaceAlphaFactor = 0.6f;       // Alpha factor for cube side face
-            public const float MIN_MAGNITUDE_THRESHOLD = 0.01f;  // Minimum magnitude threshold for rendering
+            public const float CUBE_TOP_WIDTH_PROPORTION = 0.75f;   // Proportion of bar width for cube top
+            public const float CUBE_TOP_HEIGHT_PROPORTION = 0.25f;  // Proportion of bar width for cube top height
+            public const float ALPHA_MULTIPLIER = 255f;             // Multiplier for alpha calculation
+            public const float TOP_ALPHA_FACTOR = 0.8f;             // Alpha factor for cube top
+            public const float SIDE_FACE_ALPHA_FACTOR = 0.6f;       // Alpha factor for cube side face
+            public const float MIN_MAGNITUDE_THRESHOLD = 0.01f;     // Minimum magnitude threshold for rendering
+
+            // Performance settings
+            public const int BATCH_SIZE = 32;                       // Batch size for operations
         }
         #endregion
 
         #region Fields
         private static readonly Lazy<CubesRenderer> _instance = new(() => new CubesRenderer());
+
+        // Object pools for efficient resource management
+        private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 5);
+        private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
+
+        // Rendering state
         private readonly SKPath _cubeTopPath = new();
+
+        // Quality-dependent settings
+        private new bool _useAntiAlias = true;
+        private SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
         private bool _useGlowEffects = true;
+
+        // Thread safety
+        private readonly object _renderLock = new();
+        private new bool _disposed;
         #endregion
 
-        #region Constructor and Initialization
+        #region Singleton Pattern
         private CubesRenderer() { }
 
+        /// <summary>
+        /// Gets the singleton instance of the cubes renderer.
+        /// </summary>
         public static CubesRenderer GetInstance() => _instance.Value;
-
-        public override void Initialize() => SmartLogger.Safe(() =>
-        {
-            base.Initialize();
-            SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-        }, new SmartLogger.ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
         #endregion
 
-        #region Configuration
-        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium) => SmartLogger.Safe(() =>
+        #region Initialization and Configuration
+        /// <summary>
+        /// Initializes the cubes renderer and prepares rendering resources.
+        /// </summary>
+        public override void Initialize()
         {
-            base.Configure(isOverlayActive, quality);
-        }, new SmartLogger.ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Configure",
-            ErrorMessage = "Failed to configure renderer"
-        });
-
-        protected override void ApplyQualitySettings() => SmartLogger.Safe(() =>
-        {
-            base.ApplyQualitySettings();
-
-            _useGlowEffects = _quality switch
+            SmartLogger.Safe(() =>
             {
-                RenderQuality.Low => false,
-                RenderQuality.Medium => true,
-                RenderQuality.High => true,
-                _ => true
-            };
-        }, new SmartLogger.ErrorHandlingOptions
+                base.Initialize();
+
+                // Apply initial quality settings
+                ApplyQualitySettings();
+
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            });
+        }
+
+        /// <summary>
+        /// Configures the renderer with overlay status and quality settings.
+        /// </summary>
+        /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
+        /// <param name="quality">The rendering quality level.</param>
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
-            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
-            ErrorMessage = "Failed to apply quality settings"
-        });
+            SmartLogger.Safe(() =>
+            {
+                base.Configure(isOverlayActive, quality);
+
+                // Apply quality settings if changed
+                if (_quality != quality)
+                {
+                    ApplyQualitySettings();
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Configure",
+                ErrorMessage = "Failed to configure renderer"
+            });
+        }
+
+        /// <summary>
+        /// Applies quality settings based on the current quality level.
+        /// </summary>
+        protected override void ApplyQualitySettings()
+        {
+            SmartLogger.Safe(() =>
+            {
+                base.ApplyQualitySettings();
+
+                _useGlowEffects = _quality switch
+                {
+                    RenderQuality.Low => false,
+                    RenderQuality.Medium => true,
+                    RenderQuality.High => true,
+                    _ => true
+                };
+
+                _useAntiAlias = _quality != RenderQuality.Low;
+
+                _samplingOptions = _quality switch
+                {
+                    RenderQuality.Low => new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None),
+                    RenderQuality.Medium => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
+                    RenderQuality.High => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
+                    _ => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear)
+                };
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+                ErrorMessage = "Failed to apply quality settings"
+            });
+        }
         #endregion
 
         #region Rendering
+        /// <summary>
+        /// Renders the 3D cubes visualization on the canvas using spectrum data.
+        /// </summary>
         public override void Render(
             SKCanvas? canvas,
             float[]? spectrum,
@@ -90,13 +153,21 @@ namespace SpectrumNet
                 return;
             }
 
+            // Define render bounds and quick reject if not visible
+            SKRect renderBounds = new(0, 0, info.Width, info.Height);
+            if (canvas!.QuickReject(renderBounds))
+            {
+                drawPerformanceInfo?.Invoke(canvas, info);
+                return;
+            }
+
             SmartLogger.Safe(() =>
             {
                 int spectrumLength = spectrum!.Length;
                 int actualBarCount = Math.Min(spectrumLength, barCount);
                 float[] processedSpectrum = PrepareSpectrum(spectrum, actualBarCount, spectrumLength);
 
-                RenderSpectrum(canvas!, processedSpectrum, info, barWidth, barSpacing, paint!);
+                RenderSpectrum(canvas, processedSpectrum, info, barWidth, barSpacing, paint!);
             }, new SmartLogger.ErrorHandlingOptions
             {
                 Source = $"{Constants.LOG_PREFIX}.Render",
@@ -106,19 +177,25 @@ namespace SpectrumNet
             drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
+        /// <summary>
+        /// Renders the spectrum as 3D cubes.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private void RenderSpectrum(
             SKCanvas canvas,
             float[] spectrum,
             SKImageInfo info,
             float barWidth,
             float barSpacing,
-            SKPaint basePaint) => SmartLogger.Safe(() =>
+            SKPaint basePaint)
+        {
+            SmartLogger.Safe(() =>
             {
                 float canvasHeight = info.Height;
 
-                using var cubePaint = basePaint.Clone();
+                using var cubePaint = _paintPool.Get();
+                cubePaint.Color = basePaint.Color;
                 cubePaint.IsAntialias = _useAntiAlias;
-                cubePaint.FilterQuality = _filterQuality;
 
                 for (int i = 0; i < spectrum.Length; i++)
                 {
@@ -130,10 +207,14 @@ namespace SpectrumNet
                     float x = i * (barWidth + barSpacing);
                     float y = canvasHeight - height;
 
+                    // Skip rendering if the cube is outside the visible area
                     if (canvas.QuickReject(new SKRect(x, y, x + barWidth, y + height)))
                         continue;
 
-                    cubePaint.Color = basePaint.Color.WithAlpha((byte)(magnitude * Constants.AlphaMultiplier));
+                    // Set the alpha value based on magnitude
+                    cubePaint.Color = basePaint.Color.WithAlpha((byte)(magnitude * Constants.ALPHA_MULTIPLIER));
+
+                    // Render the cube
                     RenderCube(canvas, x, y, barWidth, height, magnitude, cubePaint);
                 }
             }, new SmartLogger.ErrorHandlingOptions
@@ -141,7 +222,11 @@ namespace SpectrumNet
                 Source = $"{Constants.LOG_PREFIX}.RenderSpectrum",
                 ErrorMessage = "Error rendering spectrum"
             });
+        }
 
+        /// <summary>
+        /// Renders a single 3D cube at the specified position.
+        /// </summary>
         private void RenderCube(
             SKCanvas canvas,
             float x,
@@ -149,39 +234,50 @@ namespace SpectrumNet
             float barWidth,
             float height,
             float magnitude,
-            SKPaint paint) => SmartLogger.Safe(() =>
+            SKPaint paint)
+        {
+            SmartLogger.Safe(() =>
             {
-                // Front face rendering with DrawRect
+                // Front face rendering
                 canvas.DrawRect(x, y, barWidth, height, paint);
 
+                // Only render 3D effects if enabled
                 if (_useGlowEffects)
                 {
                     float topRightX = x + barWidth;
-                    float topOffsetX = barWidth * Constants.CubeTopWidthProportion;
-                    float topOffsetY = barWidth * Constants.CubeTopHeightProportion;
+                    float topOffsetX = barWidth * Constants.CUBE_TOP_WIDTH_PROPORTION;
+                    float topOffsetY = barWidth * Constants.CUBE_TOP_HEIGHT_PROPORTION;
 
                     // Top face rendering
-                    _cubeTopPath.Reset();
-                    _cubeTopPath.MoveTo(x, y);
-                    _cubeTopPath.LineTo(topRightX, y);
-                    _cubeTopPath.LineTo(x + topOffsetX, y - topOffsetY);
-                    _cubeTopPath.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
-                    _cubeTopPath.Close();
+                    using var topPath = _pathPool.Get();
+                    topPath.Reset();
+                    topPath.MoveTo(x, y);
+                    topPath.LineTo(topRightX, y);
+                    topPath.LineTo(x + topOffsetX, y - topOffsetY);
+                    topPath.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
+                    topPath.Close();
 
-                    using var topPaint = paint.Clone();
-                    topPaint.Color = paint.Color.WithAlpha((byte)(magnitude * Constants.AlphaMultiplier * Constants.TopAlphaFactor));
-                    canvas.DrawPath(_cubeTopPath, topPaint);
+                    using var topPaint = _paintPool.Get();
+                    topPaint.Color = paint.Color.WithAlpha(
+                        (byte)(magnitude * Constants.ALPHA_MULTIPLIER * Constants.TOP_ALPHA_FACTOR));
+                    topPaint.IsAntialias = paint.IsAntialias;
+                    topPaint.Style = paint.Style;
+                    canvas.DrawPath(topPath, topPaint);
 
                     // Side face rendering
-                    using var sidePath = new SKPath();
+                    using var sidePath = _pathPool.Get();
+                    sidePath.Reset();
                     sidePath.MoveTo(topRightX, y);
                     sidePath.LineTo(topRightX, y + height);
                     sidePath.LineTo(x + topOffsetX, y - topOffsetY + height);
                     sidePath.LineTo(x + topOffsetX, y - topOffsetY);
                     sidePath.Close();
 
-                    using var sidePaint = paint.Clone();
-                    sidePaint.Color = paint.Color.WithAlpha((byte)(magnitude * Constants.AlphaMultiplier * Constants.SideFaceAlphaFactor));
+                    using var sidePaint = _paintPool.Get();
+                    sidePaint.Color = paint.Color.WithAlpha(
+                        (byte)(magnitude * Constants.ALPHA_MULTIPLIER * Constants.SIDE_FACE_ALPHA_FACTOR));
+                    sidePaint.IsAntialias = paint.IsAntialias;
+                    sidePaint.Style = paint.Style;
                     canvas.DrawPath(sidePath, sidePaint);
                 }
             }, new SmartLogger.ErrorHandlingOptions
@@ -189,9 +285,29 @@ namespace SpectrumNet
                 Source = $"{Constants.LOG_PREFIX}.RenderCube",
                 ErrorMessage = "Error rendering cube"
             });
+        }
+        #endregion
+
+        #region Helper Methods
+        /// <summary>
+        /// Determines if the magnitude is significant enough to render.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool IsSignificantMagnitude(float magnitude) =>
+            magnitude >= Constants.MIN_MAGNITUDE_THRESHOLD;
+
+        /// <summary>
+        /// Calculates the alpha value based on magnitude and a factor.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private byte CalculateAlpha(float magnitude, float factor) =>
+            (byte)Math.Min(magnitude * Constants.ALPHA_MULTIPLIER * factor, 255);
         #endregion
 
         #region Disposal
+        /// <summary>
+        /// Disposes of resources used by the renderer.
+        /// </summary>
         public override void Dispose()
         {
             if (!_disposed)
@@ -199,7 +315,13 @@ namespace SpectrumNet
                 SmartLogger.Safe(() =>
                 {
                     _cubeTopPath?.Dispose();
+                    _pathPool?.Dispose();
+                    _paintPool?.Dispose();
+
                     base.Dispose();
+
+                    _disposed = true;
+                    SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
                 }, new SmartLogger.ErrorHandlingOptions
                 {
                     Source = $"{Constants.LOG_PREFIX}.Dispose",

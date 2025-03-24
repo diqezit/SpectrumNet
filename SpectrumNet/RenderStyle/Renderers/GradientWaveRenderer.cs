@@ -1,155 +1,222 @@
 ﻿#nullable enable
 
+using System.Numerics;
+using System.Runtime.CompilerServices;
+
 namespace SpectrumNet
 {
-    public class GradientWaveRenderer : ISpectrumRenderer, IDisposable
+    /// <summary>
+    /// Renderer that visualizes spectrum data as gradient-colored waves with smooth transitions.
+    /// </summary>
+    public sealed class GradientWaveRenderer : BaseSpectrumRenderer
     {
-        #region Constants
-        private const string LogPrefix = "[GradientWaveRenderer] ";
+        #region Singleton Pattern
+        private static readonly Lazy<GradientWaveRenderer> _instance = new(() => new GradientWaveRenderer());
+        private GradientWaveRenderer() { } // Приватный конструктор
+        public static GradientWaveRenderer GetInstance() => _instance.Value;
+        #endregion
 
+        #region Constants
         private static class Constants
         {
+            // Logging
+            public const string LOG_PREFIX = "GradientWaveRenderer";
+
             // Layout constants
-            public const float Offset = 10f;                  // Edge offset for drawing
-            public const float BaselineOffset = 2f;           // Y-offset for the wave baseline
-            public const int ExtraPointsCount = 4;            // Number of extra points to add to the wave path
+            public const float EDGE_OFFSET = 10f;               // Edge offset for drawing
+            public const float BASELINE_OFFSET = 2f;            // Y-offset for the wave baseline
+            public const int EXTRA_POINTS_COUNT = 4;            // Number of extra points to add to the wave path
 
             // Wave smoothing factors
-            public const float SmoothingFactorNormal = 0.3f;  // Normal smoothing factor
-            public const float SmoothingFactorOverlay = 0.5f; // More aggressive smoothing for overlay mode
-            public const float MinMagnitudeThreshold = 0.01f; // Minimum magnitude to render
-            public const float MaxSpectrumValue = 1.5f;       // Maximum spectrum value cap
+            public const float SMOOTHING_FACTOR_NORMAL = 0.3f;  // Normal smoothing factor
+            public const float SMOOTHING_FACTOR_OVERLAY = 0.5f; // More aggressive smoothing for overlay mode
+            public const float MIN_MAGNITUDE_THRESHOLD = 0.01f; // Minimum magnitude to render
+            public const float MAX_SPECTRUM_VALUE = 1.5f;       // Maximum spectrum value cap
 
             // Rendering properties
-            public const float DefaultLineWidth = 3f;         // Width of main spectrum line
-            public const float GlowIntensity = 0.3f;          // Intensity of glow effect
-            public const float HighMagnitudeThreshold = 0.7f; // Threshold for extra effects
-            public const float FillOpacity = 0.2f;            // Opacity of gradient fill
+            public const float DEFAULT_LINE_WIDTH = 3f;         // Width of main spectrum line
+            public const float GLOW_INTENSITY = 0.3f;           // Intensity of glow effect
+            public const float HIGH_MAGNITUDE_THRESHOLD = 0.7f; // Threshold for extra effects
+            public const float FILL_OPACITY = 0.2f;             // Opacity of gradient fill
 
             // Color properties
-            public const float LineGradientSaturation = 100f; // Saturation for normal mode
-            public const float LineGradientLightness = 50f;   // Lightness for normal mode
-            public const float OverlayGradientSaturation = 100f; // Saturation for overlay mode
-            public const float OverlayGradientLightness = 55f;   // Lightness for overlay mode
-            public const float MaxBlurRadius = 6f;            // Maximum blur for glow effect
+            public const float LINE_GRADIENT_SATURATION = 100f; // Saturation for normal mode
+            public const float LINE_GRADIENT_LIGHTNESS = 50f;   // Lightness for normal mode
+            public const float OVERLAY_GRADIENT_SATURATION = 100f; // Saturation for overlay mode
+            public const float OVERLAY_GRADIENT_LIGHTNESS = 55f;   // Lightness for overlay mode
+            public const float MAX_BLUR_RADIUS = 6f;            // Maximum blur for glow effect
+
+            // Quality settings (Low)
+            public const int POINT_COUNT_LOW = 20;              // Number of points in low quality
+            public const int SMOOTHING_PASSES_LOW = 1;          // Smoothing passes in low quality
+
+            // Quality settings (Medium)
+            public const int POINT_COUNT_MEDIUM = 40;           // Number of points in medium quality
+            public const int SMOOTHING_PASSES_MEDIUM = 2;       // Smoothing passes in medium quality
+
+            // Quality settings (High)
+            public const int POINT_COUNT_HIGH = 80;             // Number of points in high quality
+            public const int SMOOTHING_PASSES_HIGH = 3;         // Smoothing passes in high quality
+
+            // Performance optimization
+            public const int BATCH_SIZE = 128;                  // Batch size for parallel processing
         }
         #endregion
 
         #region Fields
-        private static readonly Lazy<GradientWaveRenderer> _instance =
-            new Lazy<GradientWaveRenderer>(() => new GradientWaveRenderer());
-        private bool _isInitialized;
-        private bool _disposed = false;
+        // Object pools for efficient resource management
+        private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 2);
+        private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
+
+        // Rendering state
         private bool _isOverlayActive;
-        private float[]? _previousSpectrum;
-        private float[]? _processedSpectrum;
         private List<SKPoint>? _cachedPoints;
-        private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
-        private readonly object _spectrumLock = new();
         private readonly SKPath _wavePath = new();
         private readonly SKPath _fillPath = new();
         private SKPicture? _cachedBackground;
-        private SKRect _previousRect;
-        private RenderQuality _quality = RenderQuality.Medium;
 
-        // Quality-related fields
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
-        private bool _useGpuAcceleration = true;
-        private bool _useHighPrecisionColors = true;
+        // Quality-dependent settings
+        private new bool _useAntiAlias = true;
+        private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+        private new bool _useAdvancedEffects = true;
         private int _smoothingPasses = 2;
+        private int _pointCount = Constants.POINT_COUNT_MEDIUM;
 
-        private float _smoothingFactor = Constants.SmoothingFactorNormal;
+        // Synchronization and state
+        private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
+        private readonly object _spectrumLock = new();
+        private new bool _disposed;
         #endregion
 
-        #region Constructor and Initialization
-        private GradientWaveRenderer() { }
-
-        public static GradientWaveRenderer GetInstance() => _instance.Value;
-
-        public void Initialize()
+        #region Initialization and Configuration
+        /// <summary>
+        /// Initializes the gradient wave renderer and prepares resources for rendering.
+        /// </summary>
+        public override void Initialize()
         {
-            if (_disposed)
+            SmartLogger.Safe(() =>
             {
-                throw new ObjectDisposedException(nameof(GradientWaveRenderer));
-            }
+                base.Initialize();
 
-            if (_isInitialized) return;
+                _smoothingFactor = Constants.SMOOTHING_FACTOR_NORMAL;
 
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Initialized");
-            _isInitialized = true;
+                // Apply initial quality settings
+                ApplyQualitySettings();
+
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            });
         }
-        #endregion
 
-        #region Configuration
-        public RenderQuality Quality
+        /// <summary>
+        /// Configures the renderer with overlay status and quality settings.
+        /// </summary>
+        /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
+        /// <param name="quality">The rendering quality level.</param>
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
-            get => _quality;
-            set
+            SmartLogger.Safe(() =>
             {
-                if (_quality != value)
+                base.Configure(isOverlayActive, quality);
+
+                bool configChanged = _isOverlayActive != isOverlayActive || _quality != quality;
+
+                // Update overlay mode
+                _isOverlayActive = isOverlayActive;
+                _smoothingFactor = isOverlayActive ?
+                    Constants.SMOOTHING_FACTOR_OVERLAY :
+                    Constants.SMOOTHING_FACTOR_NORMAL;
+
+                // Update quality if needed
+                if (_quality != quality)
                 {
-                    _quality = value;
+                    _quality = quality;
                     ApplyQualitySettings();
                 }
-            }
+
+                // If config changed, invalidate cached resources
+                if (configChanged)
+                {
+                    InvalidateCachedResources();
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Configure",
+                ErrorMessage = "Failed to configure renderer"
+            });
         }
 
-        private void ApplyQualitySettings()
+        /// <summary>
+        /// Applies quality settings based on the current quality level.
+        /// </summary>
+        protected override void ApplyQualitySettings()
         {
-            switch (_quality)
+            SmartLogger.Safe(() =>
             {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
-                    _useGpuAcceleration = false;
-                    _useHighPrecisionColors = false;
-                    _smoothingPasses = 1;
-                    break;
+                base.ApplyQualitySettings();
 
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
-                    _useGpuAcceleration = true;
-                    _useHighPrecisionColors = true;
-                    _smoothingPasses = 2;
-                    break;
+                switch (_quality)
+                {
+                    case RenderQuality.Low:
+                        _useAntiAlias = false;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+                        _useAdvancedEffects = false;
+                        _smoothingPasses = Constants.SMOOTHING_PASSES_LOW;
+                        _pointCount = Constants.POINT_COUNT_LOW;
+                        break;
 
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
-                    _useGpuAcceleration = true;
-                    _useHighPrecisionColors = true;
-                    _smoothingPasses = 3;
-                    break;
-            }
+                    case RenderQuality.Medium:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = true;
+                        _smoothingPasses = Constants.SMOOTHING_PASSES_MEDIUM;
+                        _pointCount = Constants.POINT_COUNT_MEDIUM;
+                        break;
 
-            // Invalidate cached resources to rebuild with new quality settings
-            _cachedBackground?.Dispose();
-            _cachedBackground = null;
+                    case RenderQuality.High:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = true;
+                        _smoothingPasses = Constants.SMOOTHING_PASSES_HIGH;
+                        _pointCount = Constants.POINT_COUNT_HIGH;
+                        break;
+                }
+
+                // Invalidate caches dependent on quality
+                InvalidateCachedResources();
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+                ErrorMessage = "Failed to apply quality settings"
+            });
         }
 
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+        /// <summary>
+        /// Invalidates cached resources when configuration changes.
+        /// </summary>
+        private void InvalidateCachedResources()
         {
-            if (_disposed)
+            SmartLogger.Safe(() =>
             {
-                throw new ObjectDisposedException(nameof(GradientWaveRenderer));
-            }
-
-            _isOverlayActive = isOverlayActive;
-            _smoothingFactor = isOverlayActive ? Constants.SmoothingFactorOverlay : Constants.SmoothingFactorNormal;
-
-            // Apply quality settings
-            Quality = quality;
+                _cachedBackground?.Dispose();
+                _cachedBackground = null;
+                _cachedPoints = null;
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.InvalidateCachedResources",
+                ErrorMessage = "Failed to invalidate cached resources"
+            });
         }
         #endregion
 
         #region Rendering
-        public void Render(
+        /// <summary>
+        /// Renders the gradient wave visualization on the canvas using spectrum data.
+        /// </summary>
+        public override void Render(
             SKCanvas? canvas,
             float[]? spectrum,
             SKImageInfo info,
@@ -159,107 +226,260 @@ namespace SpectrumNet
             SKPaint? paint,
             Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
-            try
+            // Validate rendering parameters
+            if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             {
-                if (!ValidateRenderParameters(canvas, spectrum, paint))
-                    return;
+                drawPerformanceInfo?.Invoke(canvas!, info);
+                return;
+            }
 
-                // Fast path: if canvas can be quickly rejected from clipping, skip rendering
-                if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-                    return;
+            // Quick reject if canvas area is not visible
+            if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+            {
+                drawPerformanceInfo?.Invoke(canvas, info);
+                return;
+            }
 
-                float[] renderSpectrum;
-                List<SKPoint> renderPoints;
+            SmartLogger.Safe(() =>
+            {
                 bool semaphoreAcquired = false;
-                int actualBarCount = Math.Min(spectrum!.Length, barCount);
-
                 try
                 {
-                    // Try to acquire semaphore, but don't block if unavailable
-                    semaphoreAcquired = _spectrumSemaphore.Wait(0);
+                    // Try to acquire semaphore for updating animation state
+                    semaphoreAcquired = _renderSemaphore.Wait(0);
+
+                    float[] renderSpectrum;
+                    List<SKPoint> renderPoints;
 
                     if (semaphoreAcquired)
                     {
-                        // Process spectrum data in background thread when semaphore is acquired
-                        float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
-                        _processedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
-                        _cachedPoints = GenerateOptimizedPoints(_processedSpectrum, info);
+                        // Process spectrum data when semaphore is acquired
+                        ProcessSpectrumData(spectrum!, barCount);
                     }
 
+                    // Get processed spectrum and points for rendering
                     lock (_spectrumLock)
                     {
-                        if (_processedSpectrum != null && _cachedPoints != null)
-                        {
-                            renderSpectrum = _processedSpectrum;
-                            renderPoints = _cachedPoints;
-                        }
-                        else
-                        {
-                            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount);
-                            renderSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
-                            renderPoints = GenerateOptimizedPoints(renderSpectrum, info);
-                        }
+                        renderSpectrum = _processedSpectrum ??
+                                        ProcessSpectrumSynchronously(spectrum!, barCount);
+                        renderPoints = _cachedPoints ??
+                                      GenerateOptimizedPoints(renderSpectrum, info);
                     }
+
+                    // Execute rendering process
+                    RenderGradientWave(canvas!, renderPoints, renderSpectrum, info, paint!, barCount);
                 }
                 finally
                 {
+                    // Release semaphore if acquired
                     if (semaphoreAcquired)
                     {
-                        _spectrumSemaphore.Release();
+                        _renderSemaphore.Release();
                     }
                 }
-
-                // Perform actual rendering with obtained data
-                RenderOptimizedGradientWave(canvas!, renderPoints, renderSpectrum, info, paint!, barCount);
-
-                // Draw performance info if requested
-                drawPerformanceInfo?.Invoke(canvas!, info);
-            }
-            catch (ObjectDisposedException)
+            }, new SmartLogger.ErrorHandlingOptions
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error rendering gradient wave: {ex.Message}");
-            }
+                Source = $"{Constants.LOG_PREFIX}.Render",
+                ErrorMessage = "Error during rendering"
+            });
+
+            // Draw performance info
+            drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
-        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? paint)
+        /// <summary>
+        /// Validates all render parameters before processing.
+        /// </summary>
+        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint)
         {
-            if (_disposed)
+            if (canvas == null || spectrum == null || paint == null)
             {
-                throw new ObjectDisposedException(nameof(GradientWaveRenderer));
-            }
-
-            if (!_isInitialized)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Not initialized");
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, "Invalid render parameters: null values");
                 return false;
             }
 
-            if (canvas == null)
+            if (info.Width <= 0 || info.Height <= 0)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Canvas is null");
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
                 return false;
             }
 
-            if (spectrum == null || spectrum.Length == 0)
+            if (spectrum.Length == 0)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Spectrum is null or empty");
-                return false;
-            }
-
-            if (paint == null)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Paint is null");
+                SmartLogger.Log(LogLevel.Warning, Constants.LOG_PREFIX, "Empty spectrum data");
                 return false;
             }
 
             return true;
         }
 
-        private void RenderOptimizedGradientWave(
+        /// <summary>
+        /// Processes spectrum data for visualization.
+        /// </summary>
+        private void ProcessSpectrumData(float[] spectrum, int barCount)
+        {
+            SmartLogger.Safe(() =>
+            {
+                // Ensure spectrum buffer is initialized
+                EnsureSpectrumBuffer(spectrum.Length);
+
+                int spectrumLength = spectrum.Length;
+                int actualBarCount = Math.Min(spectrumLength, barCount);
+
+                // Scale spectrum data to target bar count
+                float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
+
+                // Apply smoothing for transitions
+                _processedSpectrum = SmoothSpectrumData(scaledSpectrum, actualBarCount);
+
+                lock (_spectrumLock)
+                {
+                    // Clear cached points to force regeneration with new spectrum
+                    _cachedPoints = null;
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.ProcessSpectrumData",
+                ErrorMessage = "Error processing spectrum data"
+            });
+        }
+
+        /// <summary>
+        /// Processes spectrum data synchronously when async processing isn't available.
+        /// </summary>
+        private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
+        {
+            int spectrumLength = spectrum.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
+            float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
+            return SmoothSpectrumData(scaledSpectrum, actualBarCount);
+        }
+
+        /// <summary>
+        /// Ensures the spectrum buffer is of the correct size.
+        /// </summary>
+        private void EnsureSpectrumBuffer(int length)
+        {
+            SmartLogger.Safe(() =>
+            {
+                if (_previousSpectrum == null || _previousSpectrum.Length != length)
+                {
+                    _previousSpectrum = new float[length];
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.EnsureSpectrumBuffer",
+                ErrorMessage = "Error ensuring spectrum buffer"
+            });
+        }
+        #endregion
+
+        #region Spectrum Processing
+        /// <summary>
+        /// Applies smoothing to the spectrum data.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private float[] SmoothSpectrumData(float[] spectrum, int targetCount)
+        {
+            // First apply temporal smoothing with previous frame data
+            float[] smoothedSpectrum = new float[targetCount];
+
+            for (int i = 0; i < targetCount; i++)
+            {
+                if (_previousSpectrum == null) break;
+
+                float currentValue = spectrum[i];
+                float previousValue = _previousSpectrum[i];
+                float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
+                smoothedSpectrum[i] = Math.Clamp(smoothedValue, Constants.MIN_MAGNITUDE_THRESHOLD, Constants.MAX_SPECTRUM_VALUE);
+                _previousSpectrum[i] = smoothedSpectrum[i];
+            }
+
+            // Apply additional spatial smoothing passes based on quality setting
+            for (int pass = 0; pass < _smoothingPasses; pass++)
+            {
+                var extraSmoothedSpectrum = new float[targetCount];
+
+                for (int i = 0; i < targetCount; i++)
+                {
+                    float sum = smoothedSpectrum[i];
+                    int count = 1;
+
+                    if (i > 0) { sum += smoothedSpectrum[i - 1]; count++; }
+                    if (i < targetCount - 1) { sum += smoothedSpectrum[i + 1]; count++; }
+
+                    extraSmoothedSpectrum[i] = sum / count;
+                }
+
+                // Swap buffers
+                smoothedSpectrum = extraSmoothedSpectrum;
+            }
+
+            return smoothedSpectrum;
+        }
+
+        /// <summary>
+        /// Generates optimized points for the wave visualization.
+        /// </summary>
+        private List<SKPoint> GenerateOptimizedPoints(float[] spectrum, SKImageInfo info)
+        {
+            float minY = Constants.EDGE_OFFSET;
+            float maxY = info.Height - Constants.EDGE_OFFSET;
+            int spectrumLength = spectrum.Length;
+
+            if (spectrumLength < 1)
+            {
+                return new List<SKPoint>();
+            }
+
+            // Calculate optimal number of points based on quality
+            int pointCount = Math.Min(_pointCount, spectrumLength);
+
+            // Pre-allocate list with exact capacity to avoid resizing
+            var points = new List<SKPoint>(pointCount + Constants.EXTRA_POINTS_COUNT);
+
+            // Add edge points at start
+            points.Add(new SKPoint(-Constants.EDGE_OFFSET, maxY));
+            points.Add(new SKPoint(0, maxY));
+
+            // Sample spectrum at optimal intervals
+            float step = (float)spectrumLength / pointCount;
+
+            for (int i = 0; i < pointCount; i++)
+            {
+                float position = i * step;
+                int index = Math.Min((int)position, spectrumLength - 1);
+                float remainder = position - index;
+
+                // Use linear interpolation between points for smoother curves
+                float value;
+                if (index < spectrumLength - 1 && remainder > 0)
+                {
+                    value = spectrum[index] * (1 - remainder) + spectrum[index + 1] * remainder;
+                }
+                else
+                {
+                    value = spectrum[index];
+                }
+
+                float x = (i / (float)(pointCount - 1)) * info.Width;
+                float y = maxY - (value * (maxY - minY));
+                points.Add(new SKPoint(x, y));
+            }
+
+            // Add edge points at end
+            points.Add(new SKPoint(info.Width, maxY));
+            points.Add(new SKPoint(info.Width + Constants.EDGE_OFFSET, maxY));
+
+            return points;
+        }
+        #endregion
+
+        #region Rendering Implementation
+        /// <summary>
+        /// Renders the gradient wave visualization with optimized paths and effects.
+        /// </summary>
+        private void RenderGradientWave(
             SKCanvas canvas,
             List<SKPoint> points,
             float[] spectrum,
@@ -267,36 +487,46 @@ namespace SpectrumNet
             SKPaint basePaint,
             int barCount)
         {
-            if (points.Count < 2)
-                return;
+            if (points.Count < 2) return;
 
-            // Calculate maximum magnitude only once
+            // Calculate maximum magnitude only once for effects
             float maxMagnitude = CalculateMaxMagnitude(spectrum);
+            float yBaseline = info.Height - Constants.EDGE_OFFSET + Constants.BASELINE_OFFSET;
+            bool shouldRenderGlow = maxMagnitude > Constants.HIGH_MAGNITUDE_THRESHOLD && _useAdvancedEffects;
 
-            float yBaseline = info.Height - Constants.Offset + Constants.BaselineOffset;
-            bool shouldRenderGlow = maxMagnitude > Constants.HighMagnitudeThreshold && _useAdvancedEffects;
+            using var wavePath = _pathPool.Get();
+            using var fillPath = _pathPool.Get();
 
-            // Prepare paths only once for multiple uses
-            PrepareWavePaths(points, info, yBaseline);
+            // Prepare paths for rendering
+            CreateWavePaths(points, info, yBaseline, wavePath, fillPath);
 
-            // Consolidated canvas operations to minimize state changes
+            // Save canvas state for all operations
             canvas.Save();
 
-            // Render fill with optimized gradient
-            RenderFillGradient(canvas, basePaint, maxMagnitude, info, yBaseline);
-
-            // Only render glow if needed and allowed by quality settings
-            if (shouldRenderGlow)
+            try
             {
-                RenderGlowEffect(canvas, basePaint, maxMagnitude, barCount);
+                // Render fill with gradient
+                RenderFillGradient(canvas, basePaint, maxMagnitude, info, yBaseline, fillPath);
+
+                // Render glow effect if needed
+                if (shouldRenderGlow)
+                {
+                    RenderGlowEffect(canvas, basePaint, maxMagnitude, barCount, wavePath);
+                }
+
+                // Render main line with optimized gradient
+                RenderLineGradient(canvas, points, basePaint, info, wavePath);
             }
-
-            // Render main line with optimized gradient
-            RenderLineGradient(canvas, points, basePaint, info);
-
-            canvas.Restore();
+            finally
+            {
+                canvas.Restore();
+            }
         }
 
+        /// <summary>
+        /// Calculates the maximum magnitude in the spectrum data.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private float CalculateMaxMagnitude(float[] spectrum)
         {
             // Use SIMD where available for bulk operations
@@ -342,15 +572,19 @@ namespace SpectrumNet
             }
         }
 
-        private void PrepareWavePaths(List<SKPoint> points, SKImageInfo info, float yBaseline)
+        /// <summary>
+        /// Creates smooth paths for the wave and its fill.
+        /// </summary>
+        private void CreateWavePaths(List<SKPoint> points, SKImageInfo info, float yBaseline, SKPath wavePath, SKPath fillPath)
         {
-            _wavePath.Reset();
-            _fillPath.Reset();
+            // Reset paths
+            wavePath.Reset();
+            fillPath.Reset();
 
-            // Build wave path with as few points as needed
-            _wavePath.MoveTo(points[0]);
+            // Build wave path with optimized number of points
+            wavePath.MoveTo(points[0]);
 
-            // Use quadratic Bezier curves for smoother appearance with fewer points
+            // Use quadratic Bezier curves for smoother appearance
             for (int i = 1; i < points.Count - 2; i += 1)
             {
                 float x1 = points[i].X;
@@ -360,90 +594,115 @@ namespace SpectrumNet
                 float xMid = (x1 + x2) / 2;
                 float yMid = (y1 + y2) / 2;
 
-                _wavePath.QuadTo(x1, y1, xMid, yMid);
+                wavePath.QuadTo(x1, y1, xMid, yMid);
             }
 
             if (points.Count >= 2)
             {
-                _wavePath.LineTo(points[points.Count - 1]);
+                wavePath.LineTo(points[points.Count - 1]);
             }
 
             // Build fill path by reusing wave path
-            _fillPath.AddPath(_wavePath);
-            _fillPath.LineTo(info.Width, yBaseline);
-            _fillPath.LineTo(0, yBaseline);
-            _fillPath.Close();
+            fillPath.AddPath(wavePath);
+            fillPath.LineTo(info.Width, yBaseline);
+            fillPath.LineTo(0, yBaseline);
+            fillPath.Close();
         }
 
-        private void RenderFillGradient(SKCanvas canvas, SKPaint basePaint, float maxMagnitude, SKImageInfo info, float yBaseline)
+        /// <summary>
+        /// Renders the gradient fill below the wave.
+        /// </summary>
+        private void RenderFillGradient(
+            SKCanvas canvas,
+            SKPaint basePaint,
+            float maxMagnitude,
+            SKImageInfo info,
+            float yBaseline,
+            SKPath fillPath)
         {
-            using (var fillPaint = new SKPaint
-            {
-                Style = SKPaintStyle.Fill,
-                IsAntialias = _useAntiAlias,
-                FilterQuality = _filterQuality
-            })
-            {
-                // Optimize gradient by using fewer color stops
-                SKColor[] colors = new SKColor[3];
-                colors[0] = basePaint.Color.WithAlpha((byte)(255 * Constants.FillOpacity * maxMagnitude));
-                colors[1] = basePaint.Color.WithAlpha((byte)(255 * Constants.FillOpacity * maxMagnitude * 0.5f));
-                colors[2] = SKColors.Transparent;
+            using var fillPaint = _paintPool.Get();
+            fillPaint.Style = SKPaintStyle.Fill;
+            fillPaint.IsAntialias = _useAntiAlias;
 
-                float[] colorPositions = { 0.0f, 0.7f, 1.0f };
+            // Optimize gradient by using fewer color stops
+            SKColor[] colors = new SKColor[3];
+            colors[0] = basePaint.Color.WithAlpha((byte)(255 * Constants.FILL_OPACITY * maxMagnitude));
+            colors[1] = basePaint.Color.WithAlpha((byte)(255 * Constants.FILL_OPACITY * maxMagnitude * 0.5f));
+            colors[2] = SKColors.Transparent;
 
-                fillPaint.Shader = SKShader.CreateLinearGradient(
-                    new SKPoint(0, Constants.Offset),
-                    new SKPoint(0, yBaseline),
-                    colors,
-                    colorPositions,
-                    SKShaderTileMode.Clamp);
+            float[] colorPositions = { 0.0f, 0.7f, 1.0f };
 
-                // Use single draw operation
-                canvas.DrawPath(_fillPath, fillPaint);
-            }
+            fillPaint.Shader = SKShader.CreateLinearGradient(
+                new SKPoint(0, Constants.EDGE_OFFSET),
+                new SKPoint(0, yBaseline),
+                colors,
+                colorPositions,
+                SKShaderTileMode.Clamp);
+
+            // Render path using simple Draw method - don't use specialized sampling
+            canvas.DrawPath(fillPath, fillPaint);
         }
 
-        private void RenderGlowEffect(SKCanvas canvas, SKPaint basePaint, float maxMagnitude, int barCount)
+        /// <summary>
+        /// Renders a glow effect for high intensity waves.
+        /// </summary>
+        private void RenderGlowEffect(
+            SKCanvas canvas,
+            SKPaint basePaint,
+            float maxMagnitude,
+            int barCount,
+            SKPath wavePath)
         {
+            if (!_useAdvancedEffects) return;
+
             // Optimize blur radius calculation
-            float blurRadius = Math.Min(Constants.MaxBlurRadius, 10f / MathF.Sqrt(barCount));
+            float blurRadius = Math.Min(Constants.MAX_BLUR_RADIUS, 10f / MathF.Sqrt(barCount));
 
-            using (var glowPaint = new SKPaint
-            {
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = Constants.DefaultLineWidth * 2.0f,
-                IsAntialias = _useAntiAlias,
-                FilterQuality = _filterQuality,
-                MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius),
-                Color = basePaint.Color.WithAlpha((byte)(255 * Constants.GlowIntensity * maxMagnitude))
-            })
-            {
-                canvas.DrawPath(_wavePath, glowPaint);
-            }
+            using var glowPaint = _paintPool.Get();
+            glowPaint.Style = SKPaintStyle.Stroke;
+            glowPaint.StrokeWidth = Constants.DEFAULT_LINE_WIDTH * 2.0f;
+            glowPaint.IsAntialias = _useAntiAlias;
+            glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius);
+            glowPaint.Color = basePaint.Color.WithAlpha((byte)(255 * Constants.GLOW_INTENSITY * maxMagnitude));
+
+            // Render path using simple Draw method
+            canvas.DrawPath(wavePath, glowPaint);
         }
 
-        private void RenderLineGradient(SKCanvas canvas, List<SKPoint> points, SKPaint basePaint, SKImageInfo info)
+        /// <summary>
+        /// Renders the main gradient line of the wave.
+        /// </summary>
+        private void RenderLineGradient(
+            SKCanvas canvas,
+            List<SKPoint> points,
+            SKPaint basePaint,
+            SKImageInfo info,
+            SKPath wavePath)
         {
-            float saturation = _isOverlayActive ? Constants.OverlayGradientSaturation : Constants.LineGradientSaturation;
-            float lightness = _isOverlayActive ? Constants.OverlayGradientLightness : Constants.LineGradientLightness;
+            float saturation = _isOverlayActive ?
+                Constants.OVERLAY_GRADIENT_SATURATION :
+                Constants.LINE_GRADIENT_SATURATION;
 
-            // Optimize color array allocation - use fewer color stops for low quality
+            float lightness = _isOverlayActive ?
+                Constants.OVERLAY_GRADIENT_LIGHTNESS :
+                Constants.LINE_GRADIENT_LIGHTNESS;
+
+            // Optimize color array allocation based on quality
             int colorSteps = _quality == RenderQuality.Low ?
                 Math.Max(2, points.Count / 4) :
-                points.Count;
+                Math.Min(points.Count, _pointCount);
 
-            SKColor[] lineColors = new SKColor[colorSteps];
-            float[] positions = new float[colorSteps];
+            var lineColors = new SKColor[colorSteps];
+            var positions = new float[colorSteps];
 
-            // Generate colors more efficiently
+            // Generate colors efficiently
             for (int i = 0; i < colorSteps; i++)
             {
                 float normalizedValue = (float)i / (colorSteps - 1);
                 int pointIndex = (int)(normalizedValue * (points.Count - 1));
 
-                float segmentMagnitude = 1.0f - (points[pointIndex].Y - Constants.Offset) /
-                    (info.Height - 2 * Constants.Offset);
+                float segmentMagnitude = 1.0f - (points[pointIndex].Y - Constants.EDGE_OFFSET) /
+                    (info.Height - 2 * Constants.EDGE_OFFSET);
 
                 lineColors[i] = SKColor.FromHsl(
                     normalizedValue * 360,
@@ -454,222 +713,65 @@ namespace SpectrumNet
                 positions[i] = normalizedValue;
             }
 
-            using (var gradientPaint = new SKPaint
-            {
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = Constants.DefaultLineWidth,
-                IsAntialias = _useAntiAlias,
-                FilterQuality = _filterQuality,
-                StrokeCap = SKStrokeCap.Round,
-                StrokeJoin = SKStrokeJoin.Round
-            })
-            {
-                gradientPaint.Shader = SKShader.CreateLinearGradient(
-                    new SKPoint(0, 0),
-                    new SKPoint(info.Width, 0),
-                    lineColors,
-                    positions,
-                    SKShaderTileMode.Clamp);
+            using var gradientPaint = _paintPool.Get();
+            gradientPaint.Style = SKPaintStyle.Stroke;
+            gradientPaint.StrokeWidth = Constants.DEFAULT_LINE_WIDTH;
+            gradientPaint.IsAntialias = _useAntiAlias;
+            gradientPaint.StrokeCap = SKStrokeCap.Round;
+            gradientPaint.StrokeJoin = SKStrokeJoin.Round;
+            gradientPaint.Shader = SKShader.CreateLinearGradient(
+                new SKPoint(0, 0),
+                new SKPoint(info.Width, 0),
+                lineColors,
+                positions,
+                SKShaderTileMode.Clamp);
 
-                canvas.DrawPath(_wavePath, gradientPaint);
-            }
-        }
-        #endregion
-
-        #region Spectrum Processing
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount)
-        {
-            int spectrumLength = spectrum.Length;
-            float[] scaledSpectrum = new float[targetCount];
-            float blockSize = (float)spectrumLength / targetCount;
-
-            // Use SIMD when appropriate and available
-            if (Vector.IsHardwareAccelerated && blockSize >= 2 && spectrumLength >= Vector<float>.Count)
-            {
-                Parallel.For(0, targetCount, i =>
-                {
-                    int start = (int)(i * blockSize);
-                    int end = Math.Min((int)((i + 1) * blockSize), spectrumLength);
-
-                    float sum = 0;
-                    int count = end - start;
-
-                    if (count == 0) return;
-
-                    for (int j = start; j < end; j++)
-                    {
-                        sum += spectrum[j];
-                    }
-
-                    scaledSpectrum[i] = sum / count;
-                });
-            }
-            else
-            {
-                // Fallback for small arrays or when SIMD not available
-                for (int i = 0; i < targetCount; i++)
-                {
-                    float sum = 0;
-                    int start = (int)(i * blockSize);
-                    int end = Math.Min((int)((i + 1) * blockSize), spectrumLength);
-                    int count = end - start;
-
-                    if (count == 0) continue;
-
-                    for (int j = start; j < end; j++)
-                    {
-                        sum += spectrum[j];
-                    }
-
-                    scaledSpectrum[i] = sum / count;
-                }
-            }
-
-            return scaledSpectrum;
-        }
-
-        private float[] SmoothSpectrum(float[] spectrum, int targetCount)
-        {
-            // Initialize previous spectrum if needed
-            if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
-                _previousSpectrum = new float[targetCount];
-
-            // Reuse arrays to reduce allocations
-            float[] smoothedSpectrum = new float[targetCount];
-
-            // Apply temporal smoothing with pre-defined smoothing factor
-            for (int i = 0; i < targetCount; i++)
-            {
-                float currentValue = spectrum[i];
-                float previousValue = _previousSpectrum[i];
-                float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
-                smoothedSpectrum[i] = Math.Clamp(smoothedValue, Constants.MinMagnitudeThreshold, Constants.MaxSpectrumValue);
-                _previousSpectrum[i] = smoothedSpectrum[i];
-            }
-
-            // Apply additional spatial smoothing based on quality setting
-            for (int pass = 0; pass < _smoothingPasses; pass++)
-            {
-                float[] extraSmoothedSpectrum = new float[targetCount];
-
-                for (int i = 0; i < targetCount; i++)
-                {
-                    float sum = smoothedSpectrum[i];
-                    int count = 1;
-
-                    if (i > 0) { sum += smoothedSpectrum[i - 1]; count++; }
-                    if (i < targetCount - 1) { sum += smoothedSpectrum[i + 1]; count++; }
-
-                    extraSmoothedSpectrum[i] = sum / count;
-                }
-
-                // Swap buffers
-                float[] temp = smoothedSpectrum;
-                smoothedSpectrum = extraSmoothedSpectrum;
-
-                // Don't need this buffer anymore for the final pass
-                if (pass < _smoothingPasses - 1)
-                {
-                    // Reuse the temp buffer for next iteration
-                    extraSmoothedSpectrum = temp;
-                }
-            }
-
-            return smoothedSpectrum;
-        }
-
-        private List<SKPoint> GenerateOptimizedPoints(float[] spectrum, SKImageInfo info)
-        {
-            float min_y = Constants.Offset;
-            float max_y = info.Height - Constants.Offset;
-            int spectrumLength = spectrum.Length;
-
-            if (spectrumLength < 1)
-            {
-                return new List<SKPoint>();
-            }
-
-            // Calculate the optimal number of points based on quality settings
-            int pointCount = _quality switch
-            {
-                RenderQuality.Low => Math.Max(20, spectrumLength / 4),
-                RenderQuality.Medium => Math.Max(40, spectrumLength / 2),
-                RenderQuality.High => spectrumLength,
-                _ => spectrumLength / 2
-            };
-
-            // Pre-allocate list with exact capacity to avoid resizing
-            List<SKPoint> points = new List<SKPoint>(pointCount + Constants.ExtraPointsCount);
-
-            // Add edge points
-            points.Add(new SKPoint(-Constants.Offset, max_y));
-            points.Add(new SKPoint(0, max_y));
-
-            // Sample spectrum at optimal intervals for the current quality level
-            float step = (float)spectrumLength / pointCount;
-
-            for (int i = 0; i < pointCount; i++)
-            {
-                float position = i * step;
-                int index = Math.Min((int)position, spectrumLength - 1);
-                float remainder = position - index;
-
-                // Use linear interpolation between points for smoother curves
-                float value;
-                if (index < spectrumLength - 1 && remainder > 0)
-                {
-                    value = spectrum[index] * (1 - remainder) + spectrum[index + 1] * remainder;
-                }
-                else
-                {
-                    value = spectrum[index];
-                }
-
-                float x = (i / (float)(pointCount - 1)) * info.Width;
-                float y = max_y - (value * (max_y - min_y));
-                points.Add(new SKPoint(x, y));
-            }
-
-            // Add final edge points
-            points.Add(new SKPoint(info.Width, max_y));
-            points.Add(new SKPoint(info.Width + Constants.Offset, max_y));
-
-            return points;
+            // Render path using simple Draw method
+            canvas.DrawPath(wavePath, gradientPaint);
         }
         #endregion
 
         #region Disposal
-        public void Dispose()
+        /// <summary>
+        /// Disposes of resources used by the renderer.
+        /// </summary>
+        public override void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (_disposed)
+            if (!_disposed)
             {
-                return;
+                SmartLogger.Safe(() =>
+                {
+                    // Dispose cached resources
+                    _cachedBackground?.Dispose();
+                    _cachedBackground = null;
+
+                    // Dispose paths
+                    _wavePath?.Dispose();
+                    _fillPath?.Dispose();
+
+                    // Dispose object pools
+                    _pathPool?.Dispose();
+                    _paintPool?.Dispose();
+
+                    // Dispose synchronization primitives
+                    _renderSemaphore?.Dispose();
+
+                    // Clean up cached data
+                    _previousSpectrum = null;
+                    _processedSpectrum = null;
+                    _cachedPoints = null;
+
+                    // Call base implementation
+                    base.Dispose();
+                }, new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = $"{Constants.LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during disposal"
+                });
+
+                _disposed = true;
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
             }
-
-            if (disposing)
-            {
-                _spectrumSemaphore?.Dispose();
-                _wavePath?.Dispose();
-                _fillPath?.Dispose();
-                _cachedBackground?.Dispose();
-                _previousSpectrum = null;
-                _processedSpectrum = null;
-                _cachedPoints = null;
-            }
-
-            _disposed = true;
-            SmartLogger.Log(LogLevel.Debug, LogPrefix, "Disposed");
-        }
-
-        ~GradientWaveRenderer()
-        {
-            Dispose(false);
         }
         #endregion
     }

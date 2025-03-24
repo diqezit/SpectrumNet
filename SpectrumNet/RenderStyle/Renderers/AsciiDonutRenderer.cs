@@ -530,7 +530,6 @@ namespace SpectrumNet
         private void RenderDonutInternal(SKCanvas canvas, SKImageInfo info, SKPaint paint, RenderData renderData) => SmartLogger.Safe(
             () => {
                 paint.IsAntialias = _useAntiAlias;
-                paint.FilterQuality = _filterQuality;
                 var originalColor = paint.Color;
 
                 // Clear and reuse dictionary for vertex grouping

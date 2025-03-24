@@ -1,123 +1,166 @@
 ﻿#nullable enable
 
+using System.Numerics;
+using System.Runtime.CompilerServices;
+
 namespace SpectrumNet
 {
-    public class WaveformRenderer : ISpectrumRenderer, IDisposable
+    /// <summary>
+    /// Renderer that visualizes spectrum data as a mirrored waveform with fill and glow effects.
+    /// </summary>
+    public sealed class WaveformRenderer : BaseSpectrumRenderer
     {
+        #region Singleton Pattern
+        private static readonly Lazy<WaveformRenderer> _instance = new(() => new WaveformRenderer());
+        private WaveformRenderer() { } // Приватный конструктор
+        public static WaveformRenderer GetInstance() => _instance.Value;
+        #endregion
+
         #region Constants
         private static class Constants
         {
+            // Logging
+            public const string LOG_PREFIX = "WaveformRenderer";
+
             // Spectrum processing constants
-            public const float SmoothingFactorNormal = 0.3f;  // Smoothing factor for normal mode
-            public const float SmoothingFactorOverlay = 0.5f;  // Smoothing factor for overlay mode
-            public const float MinMagnitudeThreshold = 0.01f; // Minimum magnitude threshold for rendering
-            public const float MaxSpectrumValue = 1.5f;  // Maximum spectrum value for clamping
+            public const float SMOOTHING_FACTOR_NORMAL = 0.3f;  // Smoothing factor for normal mode
+            public const float SMOOTHING_FACTOR_OVERLAY = 0.5f;  // Smoothing factor for overlay mode
+            public const float MIN_MAGNITUDE_THRESHOLD = 0.01f; // Minimum magnitude threshold for rendering
+            public const float MAX_SPECTRUM_VALUE = 1.5f;  // Maximum spectrum value for clamping
 
             // Rendering constants
-            public const float MinStrokeWidth = 2.0f;  // Minimum stroke width for waveform lines
-            public const byte FillAlpha = 64;    // Alpha value for waveform fill
-            public const float GlowIntensity = 0.4f;  // Intensity of glow effect
-            public const float GlowRadius = 3.0f;  // Blur radius for glow effect
-            public const float HighlightAlpha = 0.7f;  // Alpha value for highlight effect
-            public const float HighAmplitudeThreshold = 0.6f;  // Threshold for high amplitude effects
+            public const float MIN_STROKE_WIDTH = 2.0f;  // Minimum stroke width for waveform lines
+            public const byte FILL_ALPHA = 64;    // Alpha value for waveform fill
+            public const float GLOW_INTENSITY = 0.4f;  // Intensity of glow effect
+            public const float GLOW_RADIUS = 3.0f;  // Blur radius for glow effect
+            public const float HIGHLIGHT_ALPHA = 0.7f;  // Alpha value for highlight effect
+            public const float HIGH_AMPLITUDE_THRESHOLD = 0.6f;  // Threshold for high amplitude effects
+
+            // Quality settings
+            public static class Quality
+            {
+                // Low quality settings
+                public const bool LOW_USE_ADVANCED_EFFECTS = false;
+
+                // Medium quality settings
+                public const bool MEDIUM_USE_ADVANCED_EFFECTS = true;
+
+                // High quality settings
+                public const bool HIGH_USE_ADVANCED_EFFECTS = true;
+            }
         }
         #endregion
 
         #region Fields
-        private static WaveformRenderer? _instance;
-        private bool _isInitialized;
+        // Rendering resources
+        private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 3);
+        private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 4);
         private readonly SKPath _topPath = new();
         private readonly SKPath _bottomPath = new();
         private readonly SKPath _fillPath = new();
-        private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
-        private volatile bool _disposed;
 
-        private float _smoothingFactor = Constants.SmoothingFactorNormal;
-        private float[]? _previousSpectrum;
-        private float[]? _processedSpectrum;
-        private SKPaint? _glowPaint;
+        // Quality-dependent settings
+        private new bool _useAntiAlias = true;
+        private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+        private new bool _useAdvancedEffects = true;
 
-        // RenderQuality fields
-        private RenderQuality _quality = RenderQuality.Medium;
-        private bool _useAntiAlias = true;
-        private SKFilterQuality _filterQuality = SKFilterQuality.Medium;
-        private bool _useAdvancedEffects = true;
-
-        private const string LogPrefix = "WaveformRenderer";
+        // Synchronization and state
+        private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
+        private new bool _disposed;
         #endregion
 
-        #region Constructor and Initialization
-        private WaveformRenderer() { }
-
-        public static WaveformRenderer GetInstance() => _instance ??= new WaveformRenderer();
-
-        public void Initialize()
+        #region Initialization and Configuration
+        /// <summary>
+        /// Initializes the waveform renderer and prepares resources for rendering.
+        /// </summary>
+        public override void Initialize()
         {
-            if (!_isInitialized)
+            SmartLogger.Safe(() =>
             {
-                _isInitialized = true;
-                _glowPaint = new SKPaint
-                {
-                    IsAntialias = true,
-                    Style = SKPaintStyle.Stroke,
-                    ImageFilter = SKImageFilter.CreateBlur(Constants.GlowRadius, Constants.GlowRadius)
-                };
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "WaveformRenderer initialized");
-            }
-        }
-        #endregion
+                base.Initialize();
 
-        #region Configuration
-        public void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-        {
-            _smoothingFactor = isOverlayActive ? Constants.SmoothingFactorOverlay : Constants.SmoothingFactorNormal;
-            Quality = quality;
+                // Apply initial quality settings
+                ApplyQualitySettings();
+
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            });
         }
 
-        public RenderQuality Quality
+        /// <summary>
+        /// Configures the renderer with overlay status and quality settings.
+        /// </summary>
+        /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
+        /// <param name="quality">The rendering quality level.</param>
+        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
         {
-            get => _quality;
-            set
+            SmartLogger.Safe(() =>
             {
-                if (_quality != value)
+                base.Configure(isOverlayActive, quality);
+
+                // Update smoothing factor based on overlay mode
+                _smoothingFactor = isOverlayActive ?
+                    Constants.SMOOTHING_FACTOR_OVERLAY :
+                    Constants.SMOOTHING_FACTOR_NORMAL;
+
+                // Update quality if needed
+                if (_quality != quality)
                 {
-                    _quality = value;
+                    _quality = quality;
                     ApplyQualitySettings();
                 }
-            }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Configure",
+                ErrorMessage = "Failed to configure renderer"
+            });
         }
 
-        private void ApplyQualitySettings()
+        /// <summary>
+        /// Applies quality settings based on the current quality level.
+        /// </summary>
+        protected override void ApplyQualitySettings()
         {
-            switch (_quality)
+            SmartLogger.Safe(() =>
             {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _filterQuality = SKFilterQuality.Low;
-                    _useAdvancedEffects = false;
-                    break;
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.Medium;
-                    _useAdvancedEffects = true;
-                    break;
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _filterQuality = SKFilterQuality.High;
-                    _useAdvancedEffects = true;
-                    break;
-            }
+                base.ApplyQualitySettings();
 
-            if (_glowPaint != null)
+                switch (_quality)
+                {
+                    case RenderQuality.Low:
+                        _useAntiAlias = false;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+                        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+                        break;
+
+                    case RenderQuality.Medium:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+                        break;
+
+                    case RenderQuality.High:
+                        _useAntiAlias = true;
+                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+                        break;
+                }
+            }, new SmartLogger.ErrorHandlingOptions
             {
-                _glowPaint.IsAntialias = _useAntiAlias;
-                _glowPaint.FilterQuality = _filterQuality;
-            }
+                Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
+                ErrorMessage = "Failed to apply quality settings"
+            });
         }
         #endregion
 
         #region Rendering
-        public void Render(
+        /// <summary>
+        /// Renders the waveform visualization on the canvas using spectrum data.
+        /// </summary>
+        public override void Render(
             SKCanvas? canvas,
             float[]? spectrum,
             SKImageInfo info,
@@ -127,171 +170,305 @@ namespace SpectrumNet
             SKPaint? paint,
             Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
         {
+            // Validate rendering parameters
             if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             {
+                drawPerformanceInfo?.Invoke(canvas!, info);
                 return;
             }
 
-            float[] renderSpectrum;
-            bool semaphoreAcquired = false;
-            int spectrumLength = spectrum!.Length;
-            int actualBarCount = Math.Min(spectrumLength, barCount);
-
-            try
+            // Quick reject if canvas area is not visible
+            if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
             {
-                semaphoreAcquired = _spectrumSemaphore.Wait(0);
-
-                if (semaphoreAcquired)
-                {
-                    float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
-                    _processedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
-                }
-
-                renderSpectrum = _processedSpectrum ??
-                                 ProcessSynchronously(spectrum!, actualBarCount, spectrumLength);
-            }
-            catch (Exception ex)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error processing spectrum: {ex.Message}");
+                drawPerformanceInfo?.Invoke(canvas, info);
                 return;
             }
-            finally
-            {
-                if (semaphoreAcquired)
-                {
-                    _spectrumSemaphore.Release();
-                }
-            }
 
-            RenderWaveform(canvas!, renderSpectrum, info, paint!);
+            SmartLogger.Safe(() =>
+            {
+                float[] renderSpectrum;
+                bool semaphoreAcquired = false;
+                try
+                {
+                    // Try to acquire semaphore for updating spectrum data
+                    semaphoreAcquired = _renderSemaphore.Wait(0);
+                    if (semaphoreAcquired)
+                    {
+                        // Process spectrum data in background
+                        ProcessSpectrumData(spectrum!, barCount);
+                    }
+
+                    // Get spectrum data for rendering
+                    lock (_spectrumLock)
+                    {
+                        renderSpectrum = _processedSpectrum ??
+                                         ProcessSpectrumSynchronously(spectrum!, barCount);
+                    }
+
+                    // Render waveform using processed spectrum data
+                    RenderWaveform(canvas, renderSpectrum, info, paint!);
+                }
+                finally
+                {
+                    // Release semaphore if acquired
+                    if (semaphoreAcquired)
+                    {
+                        _renderSemaphore.Release();
+                    }
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.Render",
+                ErrorMessage = "Error during rendering"
+            });
+
+            // Draw performance info
             drawPerformanceInfo?.Invoke(canvas!, info);
         }
 
-        private bool ValidateRenderParameters(
-            SKCanvas? canvas,
-            float[]? spectrum,
-            SKImageInfo info,
-            SKPaint? paint)
+        /// <summary>
+        /// Validates all render parameters before processing.
+        /// </summary>
+        private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint)
         {
-            if (!_isInitialized)
+            if (canvas == null || spectrum == null || paint == null)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "WaveformRenderer not initialized before rendering");
-                return false;
-            }
-
-            if (canvas == null)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Canvas cannot be null");
-                return false;
-            }
-
-            if (spectrum == null || spectrum.Length < 2)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Spectrum cannot be null or have fewer than 2 elements");
-                return false;
-            }
-
-            if (paint == null)
-            {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Paint cannot be null");
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, "Invalid render parameters: null values");
                 return false;
             }
 
             if (info.Width <= 0 || info.Height <= 0)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, "Invalid canvas dimensions");
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+                return false;
+            }
+
+            if (spectrum.Length < 2)
+            {
+                SmartLogger.Log(LogLevel.Warning, Constants.LOG_PREFIX, "Spectrum must have at least 2 elements");
+                return false;
+            }
+
+            if (_disposed)
+            {
+                SmartLogger.Log(LogLevel.Error, Constants.LOG_PREFIX, "Renderer is disposed");
                 return false;
             }
 
             return true;
         }
 
-        private float[] ProcessSynchronously(float[] spectrum, int actualBarCount, int spectrumLength)
+        /// <summary>
+        /// Processes spectrum data for visualization.
+        /// </summary>
+        private void ProcessSpectrumData(float[] spectrum, int barCount)
         {
+            SmartLogger.Safe(() =>
+            {
+                // Ensure spectrum buffer is initialized
+                EnsureSpectrumBuffer(spectrum.Length);
+
+                int spectrumLength = spectrum.Length;
+                int actualBarCount = Math.Min(spectrumLength, barCount);
+
+                // Scale spectrum data to target bar count
+                float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
+
+                // Apply smoothing for transitions
+                _processedSpectrum = SmoothSpectrum(scaledSpectrum, actualBarCount);
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.ProcessSpectrumData",
+                ErrorMessage = "Error processing spectrum data"
+            });
+        }
+
+        /// <summary>
+        /// Processes spectrum data synchronously when async processing isn't available.
+        /// </summary>
+        private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
+        {
+            int spectrumLength = spectrum.Length;
+            int actualBarCount = Math.Min(spectrumLength, barCount);
             float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
             return SmoothSpectrum(scaledSpectrum, actualBarCount);
         }
 
+        /// <summary>
+        /// Ensures the spectrum buffer is of the correct size.
+        /// </summary>
+        private void EnsureSpectrumBuffer(int length)
+        {
+            SmartLogger.Safe(() =>
+            {
+                if (_previousSpectrum == null || _previousSpectrum.Length != length)
+                {
+                    _previousSpectrum = new float[length];
+                }
+            }, new SmartLogger.ErrorHandlingOptions
+            {
+                Source = $"{Constants.LOG_PREFIX}.EnsureSpectrumBuffer",
+                ErrorMessage = "Error ensuring spectrum buffer"
+            });
+        }
+        #endregion
+
+        #region Rendering Implementation
+        /// <summary>
+        /// Renders the waveform visualization using processed spectrum data.
+        /// </summary>
         private void RenderWaveform(
             SKCanvas canvas,
             float[] spectrum,
             SKImageInfo info,
             SKPaint basePaint)
         {
-            float midY = info.Height / 2;
-            float xStep = (float)info.Width / spectrum.Length;
-
-            using var waveformPaint = basePaint.Clone();
-            waveformPaint.Style = SKPaintStyle.Stroke;
-            waveformPaint.StrokeWidth = Math.Max(Constants.MinStrokeWidth, 50f / spectrum.Length);
-            waveformPaint.IsAntialias = _useAntiAlias;
-            waveformPaint.FilterQuality = _filterQuality;
-            waveformPaint.StrokeCap = SKStrokeCap.Round;
-            waveformPaint.StrokeJoin = SKStrokeJoin.Round;
-
-            using var fillPaint = basePaint.Clone();
-            fillPaint.Style = SKPaintStyle.Fill;
-            fillPaint.Color = fillPaint.Color.WithAlpha(Constants.FillAlpha);
-            fillPaint.IsAntialias = _useAntiAlias;
-            fillPaint.FilterQuality = _filterQuality;
-
-            using var highlightPaint = basePaint.Clone();
-            highlightPaint.Style = SKPaintStyle.Stroke;
-            highlightPaint.StrokeWidth = waveformPaint.StrokeWidth * 0.6f;
-            highlightPaint.Color = SKColors.White.WithAlpha((byte)(255 * Constants.HighlightAlpha));
-            highlightPaint.IsAntialias = _useAntiAlias;
-            highlightPaint.FilterQuality = _filterQuality;
-
-            if (_glowPaint != null && _useAdvancedEffects)
+            SmartLogger.Safe(() =>
             {
-                _glowPaint.Color = basePaint.Color;
-                _glowPaint.StrokeWidth = waveformPaint.StrokeWidth * 1.5f;
-            }
+                float midY = info.Height / 2;
+                float xStep = (float)info.Width / spectrum.Length;
 
-            CreateWavePaths(spectrum, midY, xStep);
-            CreateFillPath(spectrum, midY, xStep, info.Width);
+                // Create waveform paths
+                CreateWavePaths(spectrum, midY, xStep);
+                CreateFillPath(spectrum, midY, xStep, info.Width);
 
-            if (_glowPaint != null && _useAdvancedEffects)
-            {
-                bool hasHighAmplitude = false;
-                for (int i = 0; i < spectrum.Length; i++)
+                // Setup paints from pool
+                using var waveformPaint = _paintPool.Get();
+                using var fillPaint = _paintPool.Get();
+                using var glowPaint = _useAdvancedEffects ? _paintPool.Get() : null;
+                using var highlightPaint = _useAdvancedEffects ? _paintPool.Get() : null;
+
+                // Configure waveform paint
+                waveformPaint.Style = SKPaintStyle.Stroke;
+                waveformPaint.StrokeWidth = Math.Max(Constants.MIN_STROKE_WIDTH, 50f / spectrum.Length);
+                waveformPaint.IsAntialias = _useAntiAlias;
+                waveformPaint.StrokeCap = SKStrokeCap.Round;
+                waveformPaint.StrokeJoin = SKStrokeJoin.Round;
+                waveformPaint.Color = basePaint.Color;
+
+                // Configure fill paint
+                fillPaint.Style = SKPaintStyle.Fill;
+                fillPaint.Color = basePaint.Color.WithAlpha(Constants.FILL_ALPHA);
+                fillPaint.IsAntialias = _useAntiAlias;
+
+                // Configure glow paint if advanced effects are enabled
+                if (glowPaint != null && _useAdvancedEffects)
                 {
-                    if (spectrum[i] > Constants.HighAmplitudeThreshold)
+                    glowPaint.Style = SKPaintStyle.Stroke;
+                    glowPaint.StrokeWidth = waveformPaint.StrokeWidth * 1.5f;
+                    glowPaint.Color = basePaint.Color;
+                    glowPaint.IsAntialias = _useAntiAlias;
+                    glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, Constants.GLOW_RADIUS);
+                }
+
+                // Configure highlight paint if advanced effects are enabled
+                if (highlightPaint != null && _useAdvancedEffects)
+                {
+                    highlightPaint.Style = SKPaintStyle.Stroke;
+                    highlightPaint.StrokeWidth = waveformPaint.StrokeWidth * 0.6f;
+                    highlightPaint.Color = SKColors.White.WithAlpha((byte)(255 * Constants.HIGHLIGHT_ALPHA));
+                    highlightPaint.IsAntialias = _useAntiAlias;
+                }
+
+                // Render glow effect for high amplitude sections
+                if (glowPaint != null && _useAdvancedEffects)
+                {
+                    bool hasHighAmplitude = HasHighAmplitude(spectrum);
+                    if (hasHighAmplitude)
                     {
-                        hasHighAmplitude = true;
-                        break;
+                        glowPaint.Color = glowPaint.Color.WithAlpha((byte)(255 * Constants.GLOW_INTENSITY));
+                        canvas.DrawPath(_topPath, glowPaint);
+                        canvas.DrawPath(_bottomPath, glowPaint);
                     }
                 }
 
-                if (hasHighAmplitude)
+                // Render waveform fill and outlines
+                canvas.DrawPath(_fillPath, fillPaint);
+                canvas.DrawPath(_topPath, waveformPaint);
+                canvas.DrawPath(_bottomPath, waveformPaint);
+
+                // Render highlights for high amplitude points
+                if (highlightPaint != null && _useAdvancedEffects)
                 {
-                    _glowPaint.Color = _glowPaint.Color.WithAlpha((byte)(255 * Constants.GlowIntensity));
-                    canvas.DrawPath(_topPath, _glowPaint);
-                    canvas.DrawPath(_bottomPath, _glowPaint);
+                    RenderHighlights(canvas, spectrum, midY, xStep, highlightPaint);
                 }
-            }
-
-            canvas.DrawPath(_fillPath, fillPaint);
-            canvas.DrawPath(_topPath, waveformPaint);
-            canvas.DrawPath(_bottomPath, waveformPaint);
-
-            if (_useAdvancedEffects)
+            }, new SmartLogger.ErrorHandlingOptions
             {
+                Source = $"{Constants.LOG_PREFIX}.RenderWaveform",
+                ErrorMessage = "Failed to render waveform"
+            });
+        }
+
+        /// <summary>
+        /// Checks if spectrum contains high amplitude values that require special effects.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool HasHighAmplitude(float[] spectrum)
+        {
+            if (Vector.IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
+            {
+                // Use vectorization for faster checking
+                Vector<float> threshold = new Vector<float>(Constants.HIGH_AMPLITUDE_THRESHOLD);
+                int vectorSize = Vector<float>.Count;
+                int vectorizedLength = spectrum.Length - (spectrum.Length % vectorSize);
+
+                for (int i = 0; i < vectorizedLength; i += vectorSize)
+                {
+                    Vector<float> values = new Vector<float>(spectrum, i);
+                    if (Vector.GreaterThanAny(values, threshold))
+                    {
+                        return true;
+                    }
+                }
+
+                // Check remaining elements
+                for (int i = vectorizedLength; i < spectrum.Length; i++)
+                {
+                    if (spectrum[i] > Constants.HIGH_AMPLITUDE_THRESHOLD)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            else
+            {
+                // Standard approach for smaller arrays
                 for (int i = 0; i < spectrum.Length; i++)
                 {
-                    if (spectrum[i] > Constants.HighAmplitudeThreshold)
+                    if (spectrum[i] > Constants.HIGH_AMPLITUDE_THRESHOLD)
                     {
-                        float x = i * xStep;
-                        float topY = midY - (spectrum[i] * midY);
-                        float bottomY = midY + (spectrum[i] * midY);
-
-                        canvas.DrawPoint(x, topY, highlightPaint);
-                        canvas.DrawPoint(x, bottomY, highlightPaint);
+                        return true;
                     }
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Renders highlight points at high amplitude locations.
+        /// </summary>
+        private void RenderHighlights(SKCanvas canvas, float[] spectrum, float midY, float xStep, SKPaint highlightPaint)
+        {
+            for (int i = 0; i < spectrum.Length; i++)
+            {
+                if (spectrum[i] > Constants.HIGH_AMPLITUDE_THRESHOLD)
+                {
+                    float x = i * xStep;
+                    float topY = midY - (spectrum[i] * midY);
+                    float bottomY = midY + (spectrum[i] * midY);
+
+                    canvas.DrawPoint(x, topY, highlightPaint);
+                    canvas.DrawPoint(x, bottomY, highlightPaint);
                 }
             }
         }
 
+        /// <summary>
+        /// Creates the top and bottom wave paths for the waveform visualization.
+        /// </summary>
         private void CreateWavePaths(float[] spectrum, float midY, float xStep)
         {
             _topPath.Reset();
@@ -320,6 +497,9 @@ namespace SpectrumNet
             }
         }
 
+        /// <summary>
+        /// Creates the fill path for the waveform visualization.
+        /// </summary>
         private void CreateFillPath(float[] spectrum, float midY, float xStep, float width)
         {
             _fillPath.Reset();
@@ -361,51 +541,161 @@ namespace SpectrumNet
         #endregion
 
         #region Spectrum Processing
-        private static float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
+        /// <summary>
+        /// Scales the spectrum data to the target count of bars.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
         {
             float[] scaledSpectrum = new float[targetCount];
             float blockSize = (float)spectrumLength / targetCount;
 
-            for (int i = 0; i < targetCount; i++)
+            if (Vector.IsHardwareAccelerated && spectrumLength >= Vector<float>.Count)
             {
-                float sum = 0;
-                int start = (int)(i * blockSize);
-                int end = (int)((i + 1) * blockSize);
-                int actualEnd = Math.Min(end, spectrumLength);
-                int count = actualEnd - start;
+                int chunkSize = Math.Min(128, targetCount);
 
-                if (count <= 0)
+                // Parallel processing for large arrays
+                Parallel.For(0, (targetCount + chunkSize - 1) / chunkSize, chunkIndex =>
                 {
-                    scaledSpectrum[i] = 0;
-                    continue;
-                }
+                    int startIdx = chunkIndex * chunkSize;
+                    int endIdx = Math.Min(startIdx + chunkSize, targetCount);
 
-                for (int j = start; j < actualEnd; j++)
+                    for (int i = startIdx; i < endIdx; i++)
+                    {
+                        int start = (int)(i * blockSize);
+                        int end = (int)((i + 1) * blockSize);
+                        int actualEnd = Math.Min(end, spectrumLength);
+                        int count = actualEnd - start;
+
+                        if (count <= 0)
+                        {
+                            scaledSpectrum[i] = 0;
+                            continue;
+                        }
+
+                        // Vectorized sum calculation
+                        float sum = 0;
+                        if (count >= Vector<float>.Count)
+                        {
+                            Vector<float> sumVector = Vector<float>.Zero;
+                            int vectorizedCount = count - (count % Vector<float>.Count);
+
+                            for (int j = 0; j < vectorizedCount; j += Vector<float>.Count)
+                            {
+                                Vector<float> values = new Vector<float>(spectrum, start + j);
+                                sumVector += values;
+                            }
+
+                            for (int j = 0; j < Vector<float>.Count; j++)
+                            {
+                                sum += sumVector[j];
+                            }
+
+                            for (int j = start + vectorizedCount; j < actualEnd; j++)
+                            {
+                                sum += spectrum[j];
+                            }
+                        }
+                        else
+                        {
+                            for (int j = start; j < actualEnd; j++)
+                            {
+                                sum += spectrum[j];
+                            }
+                        }
+
+                        scaledSpectrum[i] = sum / count;
+                    }
+                });
+            }
+            else
+            {
+                // Sequential processing for small arrays
+                for (int i = 0; i < targetCount; i++)
                 {
-                    sum += spectrum[j];
-                }
+                    float sum = 0;
+                    int start = (int)(i * blockSize);
+                    int end = (int)((i + 1) * blockSize);
+                    int actualEnd = Math.Min(end, spectrumLength);
+                    int count = actualEnd - start;
 
-                scaledSpectrum[i] = sum / count;
+                    if (count <= 0)
+                    {
+                        scaledSpectrum[i] = 0;
+                        continue;
+                    }
+
+                    for (int j = start; j < actualEnd; j++)
+                    {
+                        sum += spectrum[j];
+                    }
+
+                    scaledSpectrum[i] = sum / count;
+                }
             }
 
             return scaledSpectrum;
         }
 
+        /// <summary>
+        /// Applies smoothing to the spectrum data.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private float[] SmoothSpectrum(float[] spectrum, int targetCount)
         {
             if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
             {
                 _previousSpectrum = new float[targetCount];
+                Array.Copy(spectrum, _previousSpectrum, targetCount);
+                return spectrum;
             }
 
             var smoothedSpectrum = new float[targetCount];
 
-            for (int i = 0; i < targetCount; i++)
+            if (Vector.IsHardwareAccelerated && targetCount >= Vector<float>.Count)
             {
-                float currentValue = spectrum[i];
-                float smoothedValue = _previousSpectrum[i] + (currentValue - _previousSpectrum[i]) * _smoothingFactor;
-                smoothedSpectrum[i] = Math.Clamp(smoothedValue, Constants.MinMagnitudeThreshold, Constants.MaxSpectrumValue);
-                _previousSpectrum[i] = smoothedSpectrum[i];
+                // Vectorized smoothing
+                Vector<float> smoothingFactor = new Vector<float>(_smoothingFactor);
+                int vectorizedLength = targetCount - (targetCount % Vector<float>.Count);
+
+                for (int i = 0; i < vectorizedLength; i += Vector<float>.Count)
+                {
+                    Vector<float> current = new Vector<float>(spectrum, i);
+                    Vector<float> previous = new Vector<float>(_previousSpectrum, i);
+                    Vector<float> diff = current - previous;
+                    Vector<float> smoothed = previous + diff * smoothingFactor;
+
+                    // Apply clamping
+                    Vector<float> minThreshold = new Vector<float>(Constants.MIN_MAGNITUDE_THRESHOLD);
+                    Vector<float> maxThreshold = new Vector<float>(Constants.MAX_SPECTRUM_VALUE);
+                    smoothed = Vector.Max(smoothed, minThreshold);
+                    smoothed = Vector.Min(smoothed, maxThreshold);
+
+                    smoothed.CopyTo(smoothedSpectrum, i);
+                    smoothed.CopyTo(_previousSpectrum, i);
+                }
+
+                // Process remaining elements
+                for (int i = vectorizedLength; i < targetCount; i++)
+                {
+                    float currentValue = spectrum[i];
+                    float previousValue = _previousSpectrum[i];
+                    float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
+                    smoothedSpectrum[i] = Math.Clamp(smoothedValue, Constants.MIN_MAGNITUDE_THRESHOLD, Constants.MAX_SPECTRUM_VALUE);
+                    _previousSpectrum[i] = smoothedSpectrum[i];
+                }
+            }
+            else
+            {
+                // Standard smoothing
+                for (int i = 0; i < targetCount; i++)
+                {
+                    float currentValue = spectrum[i];
+                    float previousValue = _previousSpectrum[i];
+                    float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
+                    smoothedSpectrum[i] = Math.Clamp(smoothedValue, Constants.MIN_MAGNITUDE_THRESHOLD, Constants.MAX_SPECTRUM_VALUE);
+                    _previousSpectrum[i] = smoothedSpectrum[i];
+                }
             }
 
             return smoothedSpectrum;
@@ -413,30 +703,42 @@ namespace SpectrumNet
         #endregion
 
         #region Disposal
-        protected virtual void Dispose(bool disposing)
+        /// <summary>
+        /// Disposes of resources used by the renderer.
+        /// </summary>
+        public override void Dispose()
         {
             if (!_disposed)
             {
-                if (disposing)
+                SmartLogger.Safe(() =>
                 {
-                    _spectrumSemaphore?.Dispose();
+                    // Dispose synchronization primitives
+                    _renderSemaphore?.Dispose();
+
+                    // Dispose paths
                     _topPath?.Dispose();
                     _bottomPath?.Dispose();
                     _fillPath?.Dispose();
-                    _glowPaint?.Dispose();
+
+                    // Dispose object pools
+                    _pathPool?.Dispose();
+                    _paintPool?.Dispose();
+
+                    // Clean up cached data
                     _previousSpectrum = null;
                     _processedSpectrum = null;
-                }
+
+                    // Call base implementation
+                    base.Dispose();
+                }, new SmartLogger.ErrorHandlingOptions
+                {
+                    Source = $"{Constants.LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during disposal"
+                });
 
                 _disposed = true;
-                SmartLogger.Log(LogLevel.Debug, LogPrefix, "WaveformRenderer disposed");
+                SmartLogger.Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
             }
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
         }
         #endregion
     }
