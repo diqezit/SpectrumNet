@@ -1,7 +1,6 @@
 ﻿#nullable enable
 
-using System.Globalization;
-using System.Windows.Data;
+using static SpectrumNet.SmartLogger;
 
 namespace SpectrumNet
 {
@@ -18,8 +17,13 @@ namespace SpectrumNet
 
         public ControlPanelWindow(IAudioVisualizationController controller)
         {
-            _controller = controller ?? throw new ArgumentNullException(nameof(controller));
+            ArgumentNullException.ThrowIfNull(controller);
+            _controller = controller;
             InitializeComponent();
+
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Creating control panel window");
+#endif
 
             _buttonActions = CreateButtonActionsMap();
             _sliderActions = CreateSliderActionsMap();
@@ -36,13 +40,16 @@ namespace SpectrumNet
         #region Event Setup
 
         private void SetupGainControlsPopup() =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                if (GainControlsPopup == null) return;
+                if (GainControlsPopup is null) return;
 
                 GainControlsPopup.Opened += OnGainControlsPopupOpened;
                 GainControlsPopup.Closed += OnGainControlsPopupClosed;
                 GainControlsPopup.MouseDown += OnGainControlsPopupMouseDown;
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Gain controls popup setup complete");
+#endif
             }, GetLoggerOptions("Error setting up gain controls popup"));
 
         private void OnGainControlsPopupOpened(object? sender, EventArgs e) =>
@@ -56,7 +63,7 @@ namespace SpectrumNet
         #region Event Handlers
 
         private void OnGainControlsPopupMouseDown(object sender, MouseButtonEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (e.OriginalSource is FrameworkElement { Name: "GainControlsPopup" })
                 {
@@ -66,7 +73,7 @@ namespace SpectrumNet
             }, GetLoggerOptions("Error handling gain controls popup mouse down"));
 
         private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (e.ChangedButton != MouseButton.Left) return;
                 if (e.OriginalSource is DependencyObject element &&
@@ -78,37 +85,56 @@ namespace SpectrumNet
 
                 WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
                 e.Handled = true;
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Window state changed to: {0}", WindowState);
+#endif
             }, GetLoggerOptions("Error handling double click"));
 
         private void OnButtonClick(object sender, RoutedEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                if (sender is Button { Name: var btnName } && _buttonActions.TryGetValue(btnName, out var action))
+                if (sender is Button { Name: var btnName } button && _buttonActions.TryGetValue(btnName, out var action))
+                {
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "Button clicked: {0}", btnName);
+#endif
                     action();
+                }
             }, GetLoggerOptions("Error handling button click"));
 
         private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (!IsLoaded || sender is not Slider slider) return;
 
                 if (_sliderActions.TryGetValue(slider.Name, out var action))
+                {
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "Slider changed: {0}, Value: {1}", slider.Name, slider.Value);
+#endif
                     action(slider.Value);
+                }
             }, GetLoggerOptions("Error handling slider change"));
 
         private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                if (sender is not ComboBox { SelectedItem: var selectedItem } || selectedItem == null)
+                if (sender is not ComboBox { SelectedItem: var selectedItem } comboBox || selectedItem is null)
                     return;
 
-                var key = (((ComboBox)sender).Name, selectedItem.GetType());
+                var key = (comboBox.Name, selectedItem.GetType());
                 if (_comboBoxActions.TryGetValue(key, out var action))
+                {
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "ComboBox selection changed: {0}, Selected: {1}", 
+                        comboBox.Name, selectedItem);
+#endif
                     action(selectedItem);
+                }
             }, GetLoggerOptions("Error handling selection change"));
 
         private void OnKeyDown(object sender, KeyEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (!IsActive) return;
 
@@ -120,23 +146,29 @@ namespace SpectrumNet
 
                 if (e.Key == Key.Escape)
                 {
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "Escape key pressed, closing window");
+#endif
                     Close();
                     e.Handled = true;
                 }
             }, GetLoggerOptions("Error handling key down"));
 
         private void OnCheckBoxChanged(object sender, RoutedEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                if (sender is CheckBox { Name: var cbName, IsChecked: var isChecked } &&
+                if (sender is CheckBox { Name: var cbName, IsChecked: var isChecked } checkbox &&
                     _checkBoxActions.TryGetValue(cbName, out var action))
                 {
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "CheckBox changed: {0}, Value: {1}", cbName, isChecked);
+#endif
                     action(isChecked == true);
                 }
             }, GetLoggerOptions("Error handling checkbox change"));
 
         private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (e.ChangedButton != MouseButton.Left) return;
 
@@ -154,7 +186,14 @@ namespace SpectrumNet
             if (sender is Button button && button.Tag is RenderStyle style)
             {
                 var favorites = Settings.Instance.FavoriteRenderers;
-                if (favorites.Contains(style))
+                bool isFavorite = favorites.Contains(style);
+
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "{0} render style {1} from favorites", 
+                    isFavorite ? "Removing" : "Adding", style);
+#endif
+
+                if (isFavorite)
                     favorites.Remove(style);
                 else
                     favorites.Add(style);
@@ -166,7 +205,7 @@ namespace SpectrumNet
 
         private bool IsControlOfType<T>(DependencyObject element) where T : DependencyObject
         {
-            while (element != null)
+            while (element is not null)
             {
                 if (element is T) return true;
                 element = VisualTreeHelper.GetParent(element);
@@ -175,8 +214,12 @@ namespace SpectrumNet
         }
 
         private void ToggleOverlay() =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Toggling overlay, current state: {0}", 
+                    _controller.IsOverlayActive ? "Active" : "Inactive");
+#endif
                 if (_controller.IsOverlayActive)
                     _controller.CloseOverlay();
                 else
@@ -184,10 +227,15 @@ namespace SpectrumNet
             }, GetLoggerOptions("Error toggling overlay"));
 
         private void OpenSettings() =>
-            SmartLogger.Safe(() => new SettingsWindow().ShowDialog(),
-                GetLoggerOptions("Error opening settings"));
+            Safe(() =>
+            {
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Opening settings window");
+#endif
+                new SettingsWindow().ShowDialog();
+            }, GetLoggerOptions("Error opening settings"));
 
-        private SmartLogger.ErrorHandlingOptions GetLoggerOptions(string errorMessage) =>
+        private ErrorHandlingOptions GetLoggerOptions(string errorMessage) =>
             new() { Source = LogPrefix, ErrorMessage = errorMessage };
 
         #endregion
@@ -243,11 +291,13 @@ namespace SpectrumNet
 
             if (disposing)
             {
-                // Отписка от событий
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Disposing control panel window");
+#endif
                 MouseDoubleClick -= OnWindowMouseDoubleClick;
                 KeyDown -= OnKeyDown;
 
-                if (GainControlsPopup != null)
+                if (GainControlsPopup is not null)
                 {
                     GainControlsPopup.Opened -= OnGainControlsPopupOpened;
                     GainControlsPopup.Closed -= OnGainControlsPopupClosed;
@@ -261,22 +311,5 @@ namespace SpectrumNet
         ~ControlPanelWindow() => Dispose(false);
 
         #endregion
-    }
-
-    public class IsFavoriteConverter : IValueConverter
-    {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value is RenderStyle style)
-            {
-                return Settings.Instance.FavoriteRenderers.Contains(style);
-            }
-            return false;
-        }
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            throw new NotImplementedException();
-        }
     }
 }

@@ -1,5 +1,11 @@
 ﻿#nullable enable
 
+using System.Timers;
+using static System.Environment;
+using static System.Windows.Media.Geometry;
+using static System.Windows.Media.VisualTreeHelper;
+using static SpectrumNet.SmartLogger;
+
 namespace SpectrumNet
 {
     public partial class MainWindow : Window
@@ -13,17 +19,16 @@ namespace SpectrumNet
         {
             InitializeComponent();
 
+            _controller = new AudioVisualizationController(this, spectrumCanvas);
+            DataContext = _controller;
+
             _windowButtonActions = new Dictionary<string, Action>
             {
-                ["MinimizeButton"] = () => _controller.MinimizeWindow(),
-                ["MaximizeButton"] = () => _controller.MaximizeWindow(),
-                ["CloseButton"] = () => _controller.CloseWindow(),
-                ["OpenControlPanelButton"] = () => _controller.ToggleControlPanel()
+                { "MinimizeButton", () => _controller.MinimizeWindow() },
+                { "MaximizeButton", () => _controller.MaximizeWindow() },
+                { "CloseButton", () => _controller.CloseWindow() },
+                { "OpenControlPanelButton", () => _controller.ToggleControlPanel() }
             };
-
-            _controller = new AudioVisualizationController(this, spectrumCanvas);
-
-            DataContext = _controller;
 
             InitEventHandlers();
             ConfigureTheme();
@@ -48,47 +53,46 @@ namespace SpectrumNet
             _controller.RequestRender();
 
         private void OnStateChanged(object? sender, EventArgs? e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                if (MaximizeButton != null && MaximizeIcon != null)
-                {
-                    MaximizeIcon.Data = Geometry.Parse(WindowState == WindowState.Maximized
-                        ? "M0,0 L20,0 L20,20 L0,20 Z"
-                        : "M2,2 H18 V18 H2 Z");
+                if (MaximizeButton is null || MaximizeIcon is null) return;
 
-                    SpectrumNet.Settings.Instance.WindowState = WindowState;
-                }
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error changing icon" });
+                MaximizeIcon.Data = Parse(WindowState == WindowState.Maximized
+                    ? "M0,0 L20,0 L20,20 L0,20 Z"
+                    : "M2,2 H18 V18 H2 Z");
+
+                Settings.Instance.WindowState = WindowState;
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error changing icon" });
 
         private void OnThemeToggleButtonChanged(object? sender, RoutedEventArgs? e) =>
             _controller.ToggleTheme();
 
         private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs? e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                if (e == null) return;
+                if (e is null) return;
 
                 _controller.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
                 if (WindowState == WindowState.Normal)
                 {
-                    var settings = SpectrumNet.Settings.Instance;
+                    var settings = Settings.Instance;
                     settings.WindowWidth = Width;
                     settings.WindowHeight = Height;
                 }
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating dimensions" });
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating dimensions" });
 
         public void OnButtonClick(object sender, RoutedEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (sender is Button btn && _windowButtonActions.TryGetValue(btn.Name, out var action))
                     action();
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling button click" });
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling button click" });
 
         private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs? e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                if (e == null) return;
+                if (e is null) return;
 
                 if (IsCheckBoxOrChild(e.OriginalSource as DependencyObject))
                 {
@@ -101,20 +105,20 @@ namespace SpectrumNet
                     e.Handled = true;
                     _controller.MaximizeWindow();
                 }
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling double click" });
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling double click" });
 
         private bool IsCheckBoxOrChild(DependencyObject? element)
         {
-            while (element != null)
+            while (element is not null)
             {
                 if (element is CheckBox) return true;
-                element = VisualTreeHelper.GetParent(element);
+                element = GetParent(element);
             }
             return false;
         }
 
         public void OnKeyDown(object sender, KeyEventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (!IsActive) return;
 
@@ -124,17 +128,15 @@ namespace SpectrumNet
                     return;
                 }
 
-                switch (e.Key)
+                if (e.Key == Key.Escape && WindowState == WindowState.Maximized)
                 {
-                    case Key.Escape when WindowState == WindowState.Maximized:
-                        WindowState = WindowState.Normal;
-                        e.Handled = true;
-                        break;
+                    WindowState = WindowState.Normal;
+                    e.Handled = true;
                 }
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling key down" });
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling key down" });
 
         private void OnWindowDrag(object? sender, MouseButtonEventArgs? e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (e?.ChangedButton == MouseButton.Left)
                 {
@@ -143,40 +145,40 @@ namespace SpectrumNet
                     if (WindowState == WindowState.Normal)
                         SaveWindowPosition();
                 }
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error moving window" });
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error moving window" });
 
         private void OnWindowLocationChanged(object? sender, EventArgs e) =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 if (WindowState == WindowState.Normal)
                     SaveWindowPosition();
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating window location" });
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating window location" });
 
         private void SaveWindowPosition() =>
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
-                var settings = SpectrumNet.Settings.Instance;
+                var settings = Settings.Instance;
                 settings.WindowLeft = Left;
                 settings.WindowTop = Top;
-            }, new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error saving window position" });
+            }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error saving window position" });
 
         private void OnWindowClosed(object? sender, EventArgs? e)
         {
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Window closed event received");
+            Log(LogLevel.Information, LogPrefix, "Window closed event received");
 
             try
             {
                 UnsubscribeFromEvents();
-                SmartLogger.Safe(() => SettingsWindow.Instance.SaveSettings(),
-                    new SmartLogger.ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error saving settings on window close" });
+                Safe(() => SettingsWindow.Instance.SaveSettings(),
+                    new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error saving settings on window close" });
 
                 StartForcedExitTimer();
                 DisposeControllerAsync();
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix, $"Error during window closing: {ex.Message}");
-                Environment.Exit(1);
+                Log(LogLevel.Error, LogPrefix, $"Error during window closing: {ex.Message}");
+                Exit(1);
             }
         }
 
@@ -188,15 +190,15 @@ namespace SpectrumNet
             exitTimer.Start();
         }
 
-        private void OnForceExitTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+        private void OnForceExitTimerElapsed(object? sender, ElapsedEventArgs e)
         {
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Forced exit timer triggered");
-            Environment.Exit(0);
+            Log(LogLevel.Information, LogPrefix, "Forced exit timer triggered");
+            Exit(0);
         }
 
         private void DisposeControllerAsync() =>
-            Task.Run(() => SmartLogger.SafeDispose(_controller, "controller",
-                new SmartLogger.ErrorHandlingOptions
+            Task.Run(() => SafeDispose(_controller, "controller",
+                new ErrorHandlingOptions
                 {
                     Source = LogPrefix,
                     ErrorMessage = "Error during controller disposal"
@@ -212,7 +214,7 @@ namespace SpectrumNet
             LocationChanged -= OnWindowLocationChanged;
             KeyDown -= OnKeyDown;
 
-            if (_themePropertyChangedHandler != null && ThemeManager.Instance != null)
+            if (_themePropertyChangedHandler is not null && ThemeManager.Instance is not null)
                 ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
         }
         #endregion
@@ -220,8 +222,7 @@ namespace SpectrumNet
         #region Theme Management
         private void ConfigureTheme()
         {
-            var tm = ThemeManager.Instance;
-            if (tm != null)
+            if (ThemeManager.Instance is { } tm)
             {
                 tm.RegisterWindow(this);
                 _themePropertyChangedHandler = OnThemePropertyChanged;
@@ -232,7 +233,7 @@ namespace SpectrumNet
 
         private void UpdateThemeToggleButtonState()
         {
-            if (ThemeToggleButton == null) return;
+            if (ThemeToggleButton is null) return;
 
             ThemeToggleButton.Checked -= OnThemeToggleButtonChanged;
             ThemeToggleButton.Unchecked -= OnThemeToggleButtonChanged;
@@ -247,7 +248,7 @@ namespace SpectrumNet
         {
             if (e?.PropertyName == nameof(ThemeManager.IsDarkTheme) && sender is ThemeManager tm)
             {
-                SpectrumNet.Settings.Instance.IsDarkTheme = tm.IsDarkTheme;
+                Settings.Instance.IsDarkTheme = tm.IsDarkTheme;
                 UpdateThemeToggleButtonState();
             }
         }

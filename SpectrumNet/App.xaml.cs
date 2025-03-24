@@ -30,7 +30,7 @@ public partial class App : System.Windows.Application
             Current.Exit += (_, args) => SmartLogger.Log(LogLevel.Information, "App",
                 "Application is shutting down normally", forceLog: true);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // При ошибке инициализации логирования
             Shutdown(-1);

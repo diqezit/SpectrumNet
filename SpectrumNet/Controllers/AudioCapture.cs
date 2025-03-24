@@ -32,11 +32,17 @@ namespace SpectrumNet
 
         public AudioCapture(IAudioVisualizationController controller, int deviceCheckIntervalMs = DefaultDeviceCheckIntervalMs)
         {
-            _controller = controller ?? throw new ArgumentNullException(nameof(controller));
-            _deviceEnumerator = new MMDeviceEnumerator() ?? throw new InvalidOperationException("Failed to create MMDeviceEnumerator");
+            ArgumentNullException.ThrowIfNull(controller);
+
+            _controller = controller;
+            _deviceEnumerator = new MMDeviceEnumerator() ??
+                throw new InvalidOperationException("Failed to create MMDeviceEnumerator");
             _notificationHandler = new AudioEndpointNotificationHandler(OnDeviceChanged);
             _deviceCheckIntervalMs = deviceCheckIntervalMs;
 
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Creating AudioCapture instance");
+#endif
             RegisterDeviceNotifications();
         }
 
@@ -45,6 +51,9 @@ namespace SpectrumNet
         private void RegisterDeviceNotifications() => Safe(
             () => {
                 _deviceEnumerator.RegisterEndpointNotificationCallback(_notificationHandler);
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Registered device notification callback");
+#endif
                 Log(LogLevel.Information, LogPrefix, "Audio device notification handler registered successfully", forceLog: true);
             },
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Failed to register endpoint notification callback" }
@@ -58,7 +67,7 @@ namespace SpectrumNet
                         return;
 
                     var device = GetDefaultAudioDevice();
-                    if (device == null)
+                    if (device is null)
                     {
                         Log(LogLevel.Warning, LogPrefix, "No default audio device available");
                         StopCaptureIfNeeded();
@@ -85,7 +94,7 @@ namespace SpectrumNet
 
         private void StopCaptureIfNeeded()
         {
-            if (_state != null && IsRecording)
+            if (_state is not null && IsRecording)
             {
                 Safe(
                     () => StopCaptureAsync(true).GetAwaiter().GetResult(),
@@ -97,6 +106,9 @@ namespace SpectrumNet
         public async Task ReinitializeCaptureAsync() => await SafeAsync(
             async () =>
             {
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Starting capture reinitialization");
+#endif
                 _controller.IsTransitioning = true;
                 try
                 {
@@ -104,7 +116,7 @@ namespace SpectrumNet
                     await Task.Delay(500);
 
                     var device = GetDefaultAudioDevice();
-                    if (device == null) return;
+                    if (device is null) return;
 
                     _lastDeviceId = device.ID ?? throw new InvalidOperationException("Device ID is null");
                     DisposeCaptureState(_state);
@@ -116,15 +128,21 @@ namespace SpectrumNet
                 finally
                 {
                     _controller.IsTransitioning = false;
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "Completed capture reinitialization");
+#endif
                 }
             },
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Ошибка переинициализации" }
         );
 
         private async Task InitializeUIComponentsAsync() => await _controller.Dispatcher.InvokeAsync(() => {
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Initializing UI components");
+#endif
             _controller.Analyzer = CreateAnalyzer();
 
-            if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 })
+            if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 } canvas)
             {
                 _controller.Renderer = CreateRenderer(_controller.Analyzer);
                 _controller.SynchronizeVisualization();
@@ -133,6 +151,10 @@ namespace SpectrumNet
 
         private SpectrumAnalyzer CreateAnalyzer()
         {
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Creating analyzer with WindowType: {0}, ScaleType: {1}", 
+                _controller.WindowType, _controller.ScaleType);
+#endif
             var analyzer = new SpectrumAnalyzer(
                 new FftProcessor { WindowType = _controller.WindowType },
                 new SpectrumConverter(_controller.GainParameters),
@@ -164,7 +186,7 @@ namespace SpectrumNet
             }
 
             var device = GetDefaultAudioDevice();
-            if (device == null)
+            if (device is null)
             {
                 Log(LogLevel.Warning, LogPrefix, "Cannot start capture: No audio device available");
                 return;
@@ -181,6 +203,9 @@ namespace SpectrumNet
 
                 _lastDeviceId = device.ID ?? throw new InvalidOperationException("Device ID is null");
 
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Initializing capture for device: {0}", device.FriendlyName);
+#endif
                 InitializeCapture();
                 token = _state!.CTS.Token;
             }
@@ -213,17 +238,21 @@ namespace SpectrumNet
                 return;
             }
 
-            if (!IsRecording && _state == null)
+            if (!IsRecording && _state is null)
             {
                 Log(LogLevel.Information, LogPrefix, "Capture already stopped");
                 return;
             }
 
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Stopping capture, updateUI: {0}", updateUI);
+#endif
+
             CaptureState? stateToDispose = null;
 
             lock (_stateLock)
             {
-                if (_state != null)
+                if (_state is not null)
                 {
                     _state.CTS.Cancel();
                     stateToDispose = _state;
@@ -231,7 +260,7 @@ namespace SpectrumNet
                 }
             }
 
-            if (stateToDispose != null)
+            if (stateToDispose is not null)
             {
                 await SafeAsync(
                     async () => {
@@ -260,6 +289,9 @@ namespace SpectrumNet
                 return;
             }
 
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Toggling capture, current state: {0}", IsRecording ? "Recording" : "Stopped");
+#endif
             await (IsRecording ? StopCaptureAsync() : StartCaptureAsync());
         }
 
@@ -272,6 +304,12 @@ namespace SpectrumNet
                 );
 
                 _currentDevice = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+#if DEBUG
+                if (_currentDevice is not null)
+                {
+                    Log(LogLevel.Debug, LogPrefix, "Got default audio device: {0}", _currentDevice.FriendlyName);
+                }
+#endif
                 return _currentDevice;
             }
             catch (Exception ex)
@@ -287,7 +325,7 @@ namespace SpectrumNet
             _state = null;
 
             var device = GetDefaultAudioDevice();
-            if (device == null)
+            if (device is null)
                 return;
 
             var capture = new WasapiLoopbackCapture(device)
@@ -312,7 +350,7 @@ namespace SpectrumNet
 
         private void OnRecordingStopped(object? sender, StoppedEventArgs e)
         {
-            if (e.Exception != null)
+            if (e.Exception is not null)
             {
                 Log(LogLevel.Error, LogPrefix, $"Recording stopped with error: {e.Exception.Message}");
 
@@ -328,7 +366,7 @@ namespace SpectrumNet
         private SpectrumAnalyzer InitializeAnalyzer() => _controller.Dispatcher.Invoke(() => {
             var analyzer = CreateAnalyzer();
 
-            if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 })
+            if (_controller.SpectrumCanvas is { ActualWidth: > 0, ActualHeight: > 0 } canvas)
             {
                 _controller.Renderer = CreateRenderer(analyzer);
                 _controller.SynchronizeVisualization();
@@ -346,7 +384,7 @@ namespace SpectrumNet
                 lock (_stateLock)
                 {
                     analyzer = _state?.Analyzer;
-                    if (analyzer == null || analyzer.IsDisposed)
+                    if (analyzer is null || analyzer.IsDisposed)
                         return;
                 }
 
@@ -357,6 +395,14 @@ namespace SpectrumNet
                 int frameCount = e.BytesRecorded / 4 / channels;
                 float[] monoSamples = new float[frameCount];
 
+#if DEBUG
+                if (frameCount > 0 && frameCount % 1000 == 0)
+                {
+                    Log(LogLevel.Debug, LogPrefix, "Processing audio data: {0} bytes, {1} frames, {2} channels", 
+                        e.BytesRecorded, frameCount, channels);
+                }
+#endif
+
                 ProcessAudioData(e.Buffer, e.BytesRecorded, channels, frameCount, monoSamples);
                 _ = analyzer.AddSamplesAsync(monoSamples, waveFormat.SampleRate);
             },
@@ -365,7 +411,7 @@ namespace SpectrumNet
 
         private static void ProcessAudioData(byte[] buffer, int bytesRecorded, int channels, int frameCount, float[] monoSamples)
         {
-            Span<byte> bufferSpan = new(buffer, 0, bytesRecorded);
+            Span<byte> bufferSpan = buffer.AsSpan(0, bytesRecorded);
 
             for (int frame = 0; frame < frameCount; frame++)
             {
@@ -373,7 +419,7 @@ namespace SpectrumNet
                 for (int ch = 0; ch < channels; ch++)
                 {
                     int sampleIndex = (frame * channels + ch) * 4;
-                    sum += BitConverter.ToSingle(bufferSpan.Slice(sampleIndex, 4).ToArray(), 0);
+                    sum += BitConverter.ToSingle(bufferSpan.Slice(sampleIndex, 4));
                 }
                 monoSamples[frame] = sum / channels;
             }
@@ -383,6 +429,9 @@ namespace SpectrumNet
             async () => {
                 try
                 {
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "Starting device monitoring with interval: {0}ms", _deviceCheckIntervalMs);
+#endif
                     while (!token.IsCancellationRequested)
                     {
                         await Task.Delay(_deviceCheckIntervalMs, token);
@@ -391,19 +440,25 @@ namespace SpectrumNet
                             continue;
 
                         var device = GetDefaultAudioDevice();
-                        if (device == null || device.ID != _lastDeviceId)
+                        if (device is null || device.ID != _lastDeviceId)
                             OnDeviceChanged();
                     }
                 }
                 catch (TaskCanceledException)
                 {
                     // Expected exception on cancellation
+#if DEBUG
+                    Log(LogLevel.Debug, LogPrefix, "Device monitoring canceled");
+#endif
                 }
             },
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error in device monitoring" }
         );
 
         private void UpdateStatus(bool isRecording) => _controller.Dispatcher.Invoke(() => {
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Updating recording status to: {0}", isRecording ? "Recording" : "Stopped");
+#endif
             IsRecording = isRecording;
             _controller.IsRecording = isRecording;
             _controller.OnPropertyChanged(
@@ -414,9 +469,12 @@ namespace SpectrumNet
 
         private void DisposeCaptureState(CaptureState? state)
         {
-            if (state == null)
+            if (state is null)
                 return;
 
+#if DEBUG
+            Log(LogLevel.Debug, LogPrefix, "Disposing capture state");
+#endif
             state.Capture.DataAvailable -= OnDataAvailable;
             state.Capture.RecordingStopped -= OnRecordingStopped;
 
@@ -443,6 +501,9 @@ namespace SpectrumNet
                 if (_isDisposed)
                     return;
 
+#if DEBUG
+                Log(LogLevel.Debug, LogPrefix, "Disposing AudioCapture");
+#endif
                 DisposeResources();
                 _isDisposed = true;
             }
@@ -473,8 +534,11 @@ namespace SpectrumNet
         {
             private readonly Action _deviceChangeCallback;
 
-            public AudioEndpointNotificationHandler(Action deviceChangeCallback) =>
-                _deviceChangeCallback = deviceChangeCallback ?? throw new ArgumentNullException(nameof(deviceChangeCallback));
+            public AudioEndpointNotificationHandler(Action deviceChangeCallback)
+            {
+                ArgumentNullException.ThrowIfNull(deviceChangeCallback);
+                _deviceChangeCallback = deviceChangeCallback;
+            }
 
             public void OnDeviceStateChanged(string deviceId, DeviceState newState) => _deviceChangeCallback();
             public void OnDeviceAdded(string pwstrDeviceId) => _deviceChangeCallback();
