@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using System.Collections.ObjectModel;
+
 namespace SpectrumNet
 {
     public interface ISettings
@@ -277,6 +279,13 @@ namespace SpectrumNet
 
         protected virtual void OnPropertyChanged(string propertyName) =>
             _propertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        // свойство для хранения списка избранных рендеров
+
+        private ObservableCollection<RenderStyle> _favoriteRenderers = new ObservableCollection<RenderStyle>();
+
+        public ObservableCollection<RenderStyle> FavoriteRenderers { get => _favoriteRenderers; set => SetProperty(ref _favoriteRenderers, value); }
+
 
         // Свойства для рендереров (с использованием выражений-методов)
         public float VelocityMultiplier { get => _velocityMultiplier; set => SetProperty(ref _velocityMultiplier, value); }

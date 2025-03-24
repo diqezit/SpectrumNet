@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using System.Collections.Specialized;
+
 namespace SpectrumNet
 {
     /// <summary>
@@ -128,6 +130,8 @@ namespace SpectrumNet
             SetupPaletteConverter();
 
             _keyboardManager = new KeyboardManager(this);
+
+            AppSettings.FavoriteRenderers.CollectionChanged += OnFavoriteRenderersChanged;
         }
 
         #region Initialization
@@ -198,6 +202,14 @@ namespace SpectrumNet
         public IEnumerable<SpectrumScale> AvailableScaleTypes => _availableScaleTypes;
         public IEnumerable<RenderQuality> AvailableRenderQualities => _availableRenderQualities;
 
+        public IEnumerable<RenderStyle> OrderedDrawingTypes
+        {
+            get
+            {
+                var favorites = AppSettings.FavoriteRenderers;
+                return favorites.Concat(_availableDrawingTypes.Except(favorites));
+            }
+        }
         public SpectrumAnalyzer Analyzer
         {
             get => _analyzer ?? throw new InvalidOperationException("Analyzer not initialized");
@@ -503,6 +515,12 @@ namespace SpectrumNet
         public void ToggleControlPanel() =>
             ToggleWindow(OpenControlPanel, CloseControlPanel, () => _controlPanelWindow?.IsVisible == true,
                 "Error toggling control panel window");
+
+        private void OnFavoriteRenderersChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            OnPropertyChanged(nameof(OrderedDrawingTypes));
+            RestartSettingsTimer();
+        }
         #endregion
 
         #region Audio Capture

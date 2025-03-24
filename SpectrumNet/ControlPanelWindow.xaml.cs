@@ -1,5 +1,8 @@
 ﻿#nullable enable
 
+using System.Globalization;
+using System.Windows.Data;
+
 namespace SpectrumNet
 {
     public partial class ControlPanelWindow : Window, IDisposable
@@ -145,6 +148,18 @@ namespace SpectrumNet
                     DragMove();
             }, GetLoggerOptions("Error handling window drag"));
 
+
+        private void OnFavoriteButtonClick(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.Tag is RenderStyle style)
+            {
+                var favorites = Settings.Instance.FavoriteRenderers;
+                if (favorites.Contains(style))
+                    favorites.Remove(style);
+                else
+                    favorites.Add(style);
+            }
+        }
         #endregion
 
         #region Helper Methods
@@ -246,5 +261,22 @@ namespace SpectrumNet
         ~ControlPanelWindow() => Dispose(false);
 
         #endregion
+    }
+
+    public class IsFavoriteConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is RenderStyle style)
+            {
+                return Settings.Instance.FavoriteRenderers.Contains(style);
+            }
+            return false;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

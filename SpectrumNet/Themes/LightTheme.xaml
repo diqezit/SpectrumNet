@@ -107,4 +107,9 @@
     <SolidColorBrush x:Key="TitleGlowBrush" Color="#40FFFFFF"/>
     <Color x:Key="TitleUnderlineTransparent">#00FFFFFF</Color>
     <Color x:Key="TitleUnderlineSolid">#FFFFFF</Color>
+    
+    <!--Кисти для заголовка приложения-->
+    <Color x:Key="LightTitleGradientColor1">#FFFF8E00</Color>
+    <Color x:Key="LightTitleGradientColor2">#FFFF6A00</Color>
+    <Color x:Key="LightTitleGradientColor3">#FFFFB74D</Color>
 </ResourceDictionary>

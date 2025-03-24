@@ -21,6 +21,9 @@
                 <Setter Property="UseLayoutRounding" Value="True"/>
             </Style>
 
+            <!-- Определение конвертера для списка избранных рендерингов -->
+            <local:IsFavoriteConverter x:Key="IsFavoriteConverter"/>
+
             <!-- Определение конвертера с установкой свойства BrushesProvider -->
             <local:PaletteNameToBrushConverter x:Key="PaletteNameToBrushConverter" />
         </ResourceDictionary>
