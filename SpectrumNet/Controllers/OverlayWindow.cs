@@ -1,4 +1,5 @@
 ﻿#nullable enable
+using static SpectrumNet.SmartLogger;
 
 namespace SpectrumNet
 {
@@ -14,7 +15,7 @@ namespace SpectrumNet
 
     public sealed class OverlayWindow : Window, IDisposable
     {
-        private const string LogSource = "OverlayWindow"; 
+        private const string LogSource = "OverlayWindow";
 
         private readonly record struct RenderContext(
             IAudioVisualizationController Controller,
@@ -49,7 +50,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Error(LogSource, "Failed to initialize overlay window", ex);
+                Error(LogSource, "Failed to initialize overlay window", ex);
                 throw;
             }
         }
@@ -209,7 +210,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Error(LogSource, "Error during paint surface handling", ex);
+                Error(LogSource, "Error during paint surface handling", ex);
             }
             finally { _renderLock.Release(); }
         }

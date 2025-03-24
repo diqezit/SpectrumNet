@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using static SpectrumNet.SmartLogger;
+
 namespace SpectrumNet
 {
     /// <summary>
@@ -63,10 +65,10 @@ namespace SpectrumNet
                 try { ConfigureAllRenderers(null, _globalQuality); }
                 catch (Exception ex)
                 {
-                    SmartLogger.Log(LogLevel.Error, LogPrefix,
+                    Log(LogLevel.Error, LogPrefix,
                         $"Failed to apply global quality {value}: {ex.Message}", forceLog: true);
                 }
-                SmartLogger.Log(LogLevel.Information, LogPrefix,
+                Log(LogLevel.Information, LogPrefix,
                     $"Global quality changed to {value}", forceLog: true);
             }
         }
@@ -115,7 +117,7 @@ namespace SpectrumNet
                     try { renderer.Dispose(); }
                     catch (Exception ex)
                     {
-                        SmartLogger.Log(LogLevel.Error, LogPrefix,
+                        Log(LogLevel.Error, LogPrefix,
                             $"Error disposing renderer: {ex.Message}", forceLog: true);
                     }
                 }
@@ -216,7 +218,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
+                Log(LogLevel.Error, LogPrefix,
                     $"Error configuring renderer {style}: {ex.Message}", forceLog: true);
                 return GetFallbackRenderer(style, isOverlayActive, quality);
             }
@@ -238,7 +240,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
+                Log(LogLevel.Error, LogPrefix,
                     $"Error configuring renderer: {ex.Message}", forceLog: true);
             }
         }
@@ -248,7 +250,7 @@ namespace SpectrumNet
         /// </summary>
         private static ISpectrumRenderer GetFallbackRenderer(RenderStyle style, bool isOverlayActive, RenderQuality quality)
         {
-            SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Using fallback renderer for {style}", forceLog: true);
+            Log(LogLevel.Warning, LogPrefix, $"Using fallback renderer for {style}", forceLog: true);
             try
             {
                 var fallback = BarsRenderer.GetInstance();
@@ -258,7 +260,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Error, LogPrefix,
+                Log(LogLevel.Error, LogPrefix,
                     $"Critical: Even fallback renderer failed: {ex.Message}", forceLog: true);
                 throw new InvalidOperationException("Could not create any renderer", ex);
             }

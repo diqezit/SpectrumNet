@@ -1,6 +1,12 @@
 ﻿#nullable enable
 
 using Parallel = System.Threading.Tasks.Parallel;
+using static System.Math;
+using static System.Numerics.Vector;
+using static System.Runtime.CompilerServices.MethodImplOptions;
+using static SkiaSharp.SKFilterQuality;
+using static SkiaSharp.SKPaintStyle;
+using static SkiaSharp.SKBlurStyle;
 
 namespace SpectrumNet
 {
@@ -53,7 +59,7 @@ namespace SpectrumNet
         /// <summary>
         /// Filter quality used for SkiaSharp rendering.
         /// </summary>
-        protected SKFilterQuality _filterQuality = SKFilterQuality.Medium;
+        protected SKFilterQuality _filterQuality = Medium;
         /// <summary>
         /// Semaphore to control access to spectrum processing for thread safety.
         /// </summary>
@@ -159,12 +165,12 @@ namespace SpectrumNet
             float[] scaledSpectrum = new float[targetCount];
             float blockSize = (float)spectrumLength / targetCount;
 
-            if (targetCount >= PARALLEL_BATCH_SIZE && Vector.IsHardwareAccelerated)
+            if (targetCount >= PARALLEL_BATCH_SIZE && IsHardwareAccelerated)
             {
                 Parallel.For(0, targetCount, i =>
                 {
                     int start = (int)(i * blockSize);
-                    int end = Math.Min((int)((i + 1) * blockSize), spectrumLength);
+                    int end = Min((int)((i + 1) * blockSize), spectrumLength);
                     scaledSpectrum[i] = CalculateBlockAverage(spectrum, start, end);
                 });
             }
@@ -173,7 +179,7 @@ namespace SpectrumNet
                 for (int i = 0; i < targetCount; i++)
                 {
                     int start = (int)(i * blockSize);
-                    int end = Math.Min((int)((i + 1) * blockSize), spectrumLength);
+                    int end = Min((int)((i + 1) * blockSize), spectrumLength);
                     scaledSpectrum[i] = CalculateBlockAverage(spectrum, start, end);
                 }
             }
@@ -188,7 +194,7 @@ namespace SpectrumNet
         /// <param name="start">Start index of the block.</param>
         /// <param name="end">End index of the block.</param>
         /// <returns>Average value of the block.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(AggressiveInlining)]
         private static float CalculateBlockAverage(float[] spectrum, int start, int end)
         {
             float sum = 0;
@@ -212,16 +218,16 @@ namespace SpectrumNet
 
             float[] smoothedSpectrum = new float[targetCount];
 
-            if (Vector.IsHardwareAccelerated && targetCount >= Vector<float>.Count)
+            if (IsHardwareAccelerated && targetCount >= System.Numerics.Vector<float>.Count)
             {
-                int vectorSize = Vector<float>.Count;
+                int vectorSize = System.Numerics.Vector<float>.Count;
                 int vectorizedLength = targetCount - (targetCount % vectorSize);
 
                 for (int i = 0; i < vectorizedLength; i += vectorSize)
                 {
-                    Vector<float> currentValues = new(spectrum, i);
-                    Vector<float> previousValues = new(_previousSpectrum, i);
-                    Vector<float> smoothedValues = previousValues * (1 - smoothing) + currentValues * smoothing;
+                    System.Numerics.Vector<float> currentValues = new(spectrum, i);
+                    System.Numerics.Vector<float> previousValues = new(_previousSpectrum, i);
+                    System.Numerics.Vector<float> smoothedValues = previousValues * (1 - smoothing) + currentValues * smoothing;
 
                     smoothedValues.CopyTo(smoothedSpectrum, i);
                     smoothedValues.CopyTo(_previousSpectrum, i);
@@ -246,7 +252,7 @@ namespace SpectrumNet
         /// <param name="smoothedSpectrum">Output smoothed spectrum data array.</param>
         /// <param name="i">Current index.</param>
         /// <param name="smoothing">Smoothing factor.</param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(AggressiveInlining)]
         protected void ProcessSingleSpectrumValue(float[] spectrum, float[] smoothedSpectrum, int i, float smoothing)
         {
             if (_previousSpectrum == null) return;
@@ -324,7 +330,7 @@ namespace SpectrumNet
         /// <param name="color">Color of the paint.</param>
         /// <param name="style">Paint style (Fill, Stroke, etc.). Default is Fill.</param>
         /// <returns>A new SKPaint object.</returns>
-        protected SKPaint CreateBasicPaint(SKColor color, SKPaintStyle style = SKPaintStyle.Fill) => new()
+        protected SKPaint CreateBasicPaint(SKColor color, SKPaintStyle style = Fill) => new()
         {
             Color = color,
             Style = style,
@@ -344,7 +350,7 @@ namespace SpectrumNet
             Color = color.WithAlpha(alpha),
             IsAntialias = _useAntiAlias,
             FilterQuality = _filterQuality,
-            MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius)
+            MaskFilter = SKMaskFilter.CreateBlur(Normal, blurRadius)
         };
         #endregion
 
@@ -366,7 +372,7 @@ namespace SpectrumNet
             SKPoint end,
             SKColor startColor,
             SKColor endColor,
-            SKPaintStyle style = SKPaintStyle.Fill)
+            SKPaintStyle style = Fill)
         {
             using var paint = new SKPaint
             {
@@ -417,7 +423,7 @@ namespace SpectrumNet
             }
 
             int spectrumLength = spectrum!.Length;
-            int actualBarCount = Math.Min(spectrumLength, barCount);
+            int actualBarCount = Min(spectrumLength, barCount);
             float[] processedSpectrum = PrepareSpectrum(spectrum, actualBarCount, spectrumLength);
 
             renderImplementation(canvas!, processedSpectrum, info, barWidth, barSpacing, paint!);
@@ -440,10 +446,10 @@ namespace SpectrumNet
         /// <returns>A tuple containing useAntiAlias, filterQuality, and useAdvancedEffects settings.</returns>
         protected virtual (bool useAntiAlias, SKFilterQuality filterQuality, bool useAdvancedEffects) QualityBasedSettings() => _quality switch
         {
-            RenderQuality.Low => (false, SKFilterQuality.Low, false),
-            RenderQuality.Medium => (true, SKFilterQuality.Medium, true),
-            RenderQuality.High => (true, SKFilterQuality.High, true),
-            _ => (true, SKFilterQuality.Medium, true)
+            RenderQuality.Low => (false, Low, false),
+            RenderQuality.Medium => (true, Medium, true),
+            RenderQuality.High => (true, High, true),
+            _ => (true, Medium, true)
         };
         #endregion
 

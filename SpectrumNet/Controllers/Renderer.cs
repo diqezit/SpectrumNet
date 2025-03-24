@@ -1,5 +1,8 @@
 ﻿#nullable enable
 
+using static SpectrumNet.SmartLogger;
+using static System.DateTime;
+
 namespace SpectrumNet
 {
     public sealed class Renderer : IDisposable
@@ -21,7 +24,7 @@ namespace SpectrumNet
         private volatile bool _isDisposed, _isAnalyzerDisposed;
         private volatile bool _shouldShowPlaceholder = true;
         private int _width, _height;
-        private DateTime _lastRenderTime = DateTime.Now;
+        private DateTime _lastRenderTime = Now;
 
         public string CurrentStyleName => _currentState.StyleName;
         public RenderQuality CurrentQuality => _currentState.Quality;
@@ -50,7 +53,7 @@ namespace SpectrumNet
             _shouldShowPlaceholder = !_controller.IsRecording;
             InitializeRenderer();
 
-            SmartLogger.Log(LogLevel.Information, LogPrefix, "Successfully initialized.", forceLog: true);
+            Log(LogLevel.Information, LogPrefix, "Successfully initialized.", forceLog: true);
             PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
         }
 
@@ -156,8 +159,8 @@ namespace SpectrumNet
                 return;
             }
 
-            SmartLogger.Safe(() => RenderFrameInternal(e.Surface.Canvas, e.Info),
-                new SmartLogger.ErrorHandlingOptions
+            Safe(() => RenderFrameInternal(e.Surface.Canvas, e.Info),
+                new ErrorHandlingOptions
                 {
                     Source = LogPrefix,
                     ErrorMessage = "Error rendering frame",
@@ -179,7 +182,7 @@ namespace SpectrumNet
         private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
         {
             canvas.Clear(SKColors.Transparent);
-            _lastRenderTime = DateTime.Now;
+            _lastRenderTime = Now;
 
             if (_controller.IsTransitioning || ShouldRenderPlaceholder())
             {
@@ -217,8 +220,8 @@ namespace SpectrumNet
                 return null;
             }
 
-            var result = SmartLogger.Safe<SpectralData?>(() => analyzer.GetCurrentSpectrum(),
-                options: new SmartLogger.ErrorHandlingOptions
+            var result = Safe<SpectralData?>(() => analyzer.GetCurrentSpectrum(),
+                options: new ErrorHandlingOptions
                 {
                     Source = LogPrefix,
                     ErrorMessage = "Error getting spectrum data",
@@ -319,7 +322,7 @@ namespace SpectrumNet
                 return;
 
             var oldPaint = _currentState.Paint;
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 _currentState = _currentState with
                 {
@@ -327,7 +330,7 @@ namespace SpectrumNet
                     StyleName = styleName
                 };
                 oldPaint?.Dispose();
-            }, new SmartLogger.ErrorHandlingOptions
+            }, new ErrorHandlingOptions
             {
                 Source = LogPrefix,
                 ErrorMessage = "Error updating spectrum style"
@@ -345,7 +348,7 @@ namespace SpectrumNet
             _currentState = _currentState with { Quality = quality };
             SpectrumRendererFactory.GlobalQuality = quality;
             RequestRender();
-            SmartLogger.Log(LogLevel.Information, LogPrefix, $"Render quality updated to {quality}", forceLog: true);
+            Log(LogLevel.Information, LogPrefix, $"Render quality updated to {quality}", forceLog: true);
         }
 
         public void RequestRender()
@@ -358,7 +361,7 @@ namespace SpectrumNet
         {
             if (width <= 0 || height <= 0)
             {
-                SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Invalid dimensions for renderer: {width}x{height}");
+                Log(LogLevel.Warning, LogPrefix, $"Invalid dimensions for renderer: {width}x{height}");
                 return;
             }
 
@@ -380,7 +383,7 @@ namespace SpectrumNet
 
             _isDisposed = _isAnalyzerDisposed = true;
 
-            SmartLogger.Safe(() =>
+            Safe(() =>
             {
                 _disposalTokenSource.Cancel();
                 CompositionTarget.Rendering -= OnRendering;
@@ -393,23 +396,23 @@ namespace SpectrumNet
                 _currentState.Paint?.Dispose();
                 _placeholder.Dispose();
 
-                SmartLogger.SafeDispose(_renderLock, "RenderLock",
-                    new SmartLogger.ErrorHandlingOptions
+                SafeDispose(_renderLock, "RenderLock",
+                    new ErrorHandlingOptions
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error disposing render lock"
                     });
 
-                SmartLogger.SafeDispose(_disposalTokenSource, "DisposalTokenSource",
-                    new SmartLogger.ErrorHandlingOptions
+                SafeDispose(_disposalTokenSource, "DisposalTokenSource",
+                    new ErrorHandlingOptions
                     {
                         Source = LogPrefix,
                         ErrorMessage = "Error disposing disposal token source"
                     });
 
-                SmartLogger.Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
+                Log(LogLevel.Information, LogPrefix, "Renderer disposed", forceLog: true);
             },
-            new SmartLogger.ErrorHandlingOptions
+            new ErrorHandlingOptions
             {
                 Source = LogPrefix,
                 ErrorMessage = "Error during renderer disposal"
@@ -432,7 +435,7 @@ namespace SpectrumNet
             }
             catch (Exception ex)
             {
-                SmartLogger.Log(LogLevel.Warning, LogPrefix, $"Error unsubscribing from UI events: {ex.Message}");
+                Log(LogLevel.Warning, LogPrefix, $"Error unsubscribing from UI events: {ex.Message}");
             }
 
             _skElement = null;
