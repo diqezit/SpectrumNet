@@ -93,7 +93,7 @@ namespace SpectrumNet
         private AudioCapture? _captureManager;
         private CompositeDisposable? _disposables;
         private GainParameters? _gainParameters;
-        private SKGLElement? _renderElement;
+        private SKElement? _renderElement; // Заменяем SKGLElement на SKElement
         private Window? _ownerWindow;
         private KeyboardManager? _keyboardManager;
 
@@ -106,7 +106,7 @@ namespace SpectrumNet
 
         private static SpectrumNet.Settings AppSettings => SpectrumNet.Settings.Instance;
 
-        public AudioVisualizationController(Window ownerWindow, SKGLElement renderElement)
+        public AudioVisualizationController(Window ownerWindow, SKElement renderElement) // Заменяем SKGLElement на SKElement
         {
             ArgumentNullException.ThrowIfNull(ownerWindow);
             ArgumentNullException.ThrowIfNull(renderElement);
@@ -348,7 +348,7 @@ namespace SpectrumNet
             }
         }
 
-        public SKGLElement SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized");
+        public SKElement SpectrumCanvas => _renderElement ?? throw new InvalidOperationException("Render element not initialized"); // Заменяем SKGLElement на SKElement
 
         public SpectrumBrushes SpectrumStyles =>
             _spectrumStyles ?? throw new InvalidOperationException("Spectrum styles not initialized");
@@ -573,7 +573,7 @@ namespace SpectrumNet
         public void SynchronizeVisualization() =>
             SafeExecute(() => _renderer?.SynchronizeWithController(), "Error synchronizing visualization");
 
-        public void OnPaintSurface(object? sender, SKPaintGLSurfaceEventArgs? e)
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e) // Заменяем SKPaintGLSurfaceEventArgs на SKPaintSurfaceEventArgs
         {
             if (e is null || _renderer is null)
             {

@@ -19,7 +19,7 @@ namespace SpectrumNet
 
         private readonly record struct RenderContext(
             IAudioVisualizationController Controller,
-            SKGLElement SkElement,
+            SKElement SkElement, // Заменяем SKGLElement на SKElement
             DispatcherTimer RenderTimer);
 
         private readonly OverlayConfiguration _configuration;
@@ -68,7 +68,7 @@ namespace SpectrumNet
         {
             ConfigureWindowProperties();
 
-            var skElement = new SKGLElement
+            var skElement = new SKElement // Заменяем SKGLElement на SKElement
             {
                 VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
@@ -163,7 +163,7 @@ namespace SpectrumNet
             _cacheBitmap = null;
         }
 
-        private void HandlePaintSurface(object? sender, SKPaintGLSurfaceEventArgs args)
+        private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args) // Заменяем SKPaintGLSurfaceEventArgs на SKPaintSurfaceEventArgs
         {
             if (_isDisposed || _renderContext is null || !_renderLock.Wait(0)) return;
 
@@ -181,10 +181,9 @@ namespace SpectrumNet
                     return;
                 }
 
-                // наверное потом тут можно упростить код, убрав кэширование.
                 if (_configuration.EnableHardwareAcceleration)
                 {
-                    // Прямой рендеринг без кэширования для GL
+                    // Прямой рендеринг без кэширования
                     _renderContext.Value.Controller.OnPaintSurface(sender, args);
                 }
                 else
@@ -199,9 +198,6 @@ namespace SpectrumNet
                     using (var tempSurface = SKSurface.Create(info, _cacheBitmap.GetPixels(), _cacheBitmap.RowBytes))
                     {
                         tempSurface.Canvas.Clear(SKColors.Transparent);
-
-                        // Создам временный аргумент для передачи контроллеру
-                        // Лучше всего напрямую использовать GL-рендеринг без кэширования
                         _renderContext.Value.Controller.OnPaintSurface(sender, args);
                     }
 

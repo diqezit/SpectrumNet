@@ -20,7 +20,11 @@ public interface IAudioVisualizationController : INotifyPropertyChanged, IDispos
     Dispatcher Dispatcher { get; }
     SpectrumAnalyzer Analyzer { get; set; }
     Renderer? Renderer { get; set; }
-    SKGLElement SpectrumCanvas { get; }
+
+    //SKGLElement SpectrumCanvas { get; }
+
+    SKElement SpectrumCanvas { get; } // Заменяем SKGLElement на SKElement
+
     SpectrumBrushes SpectrumStyles { get; }
     GainParameters GainParameters { get; }
 
@@ -69,7 +73,7 @@ public interface IAudioVisualizationController : INotifyPropertyChanged, IDispos
     void RequestRender();
     void UpdateRenderDimensions(int width, int height);
     void SynchronizeVisualization();
-    void OnPaintSurface(object? sender, SKPaintGLSurfaceEventArgs? e);
+    void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e); // Заменяем SKPaintGLSurfaceEventArgs на SKPaintSurfaceEventArgs
     SpectrumAnalyzer? GetCurrentAnalyzer();
 
     // Методы управления захватом

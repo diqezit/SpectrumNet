@@ -19,7 +19,7 @@ namespace SpectrumNet
         private readonly CancellationTokenSource _disposalTokenSource = new();
         private readonly RendererPlaceholder _placeholder = new() { CanvasSize = new SKSize(1, 1) };
 
-        private SKGLElement? _skElement;
+        private SKElement? _skElement; // Заменяем SKGLElement на SKElement
         private RenderState _currentState = default!;
         private volatile bool _isDisposed, _isAnalyzerDisposed;
         private volatile bool _shouldShowPlaceholder = true;
@@ -37,10 +37,10 @@ namespace SpectrumNet
         }
 
         public Renderer(
-            SpectrumBrushes styles,
-            IAudioVisualizationController controller,
-            SpectrumAnalyzer analyzer,
-            SKGLElement element)
+                SpectrumBrushes styles,
+                IAudioVisualizationController controller,
+                SpectrumAnalyzer analyzer,
+                SKElement element) // Заменяем SKGLElement на SKElement
         {
             _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
             _controller = controller ?? throw new ArgumentNullException(nameof(controller));
@@ -148,7 +148,7 @@ namespace SpectrumNet
         private void OnElementUnloaded(object? sender, RoutedEventArgs e) =>
             CompositionTarget.Rendering -= OnRendering;
 
-        public void RenderFrame(object? sender, SKPaintGLSurfaceEventArgs e)
+        public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e) // Заменяем SKPaintGLSurfaceEventArgs на SKPaintSurfaceEventArgs
         {
             if (e is null || _isDisposed)
                 return;

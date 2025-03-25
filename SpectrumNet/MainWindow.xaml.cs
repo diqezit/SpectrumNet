@@ -35,8 +35,8 @@ namespace SpectrumNet
             CompositionTarget.Rendering += OnRendering;
         }
 
-        public void OnPaintSurface(object? sender, SKPaintGLSurfaceEventArgs? e) =>
-            _controller.OnPaintSurface(sender, e);
+        public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e) // Заменяем SKPaintGLSurfaceEventArgs на SKPaintSurfaceEventArgs
+                => _controller.OnPaintSurface(sender, e);
 
         #region Event Handlers
         private void InitEventHandlers()
