@@ -86,7 +86,7 @@ namespace SpectrumNet
                 WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
                 e.Handled = true;
 #if DEBUG
-                Log(LogLevel.Debug, LogPrefix, "Window state changed to: {0}", WindowState);
+                Log(LogLevel.Debug, LogPrefix, string.Format("Window state changed to: {0}", WindowState));
 #endif
             }, GetLoggerOptions("Error handling double click"));
 
@@ -96,7 +96,7 @@ namespace SpectrumNet
                 if (sender is Button { Name: var btnName } button && _buttonActions.TryGetValue(btnName, out var action))
                 {
 #if DEBUG
-                    Log(LogLevel.Debug, LogPrefix, "Button clicked: {0}", btnName);
+                    Log(LogLevel.Debug, LogPrefix, string.Format("Button clicked: {0}", btnName));
 #endif
                     action();
                 }
@@ -110,7 +110,7 @@ namespace SpectrumNet
                 if (_sliderActions.TryGetValue(slider.Name, out var action))
                 {
 #if DEBUG
-                    Log(LogLevel.Debug, LogPrefix, "Slider changed: {0}, Value: {1}", slider.Name, slider.Value);
+                    Log(LogLevel.Debug, LogPrefix, string.Format("Slider changed: {0}, Value: {1}", slider.Name, slider.Value));
 #endif
                     action(slider.Value);
                 }
@@ -126,8 +126,7 @@ namespace SpectrumNet
                 if (_comboBoxActions.TryGetValue(key, out var action))
                 {
 #if DEBUG
-                    Log(LogLevel.Debug, LogPrefix, "ComboBox selection changed: {0}, Selected: {1}", 
-                        comboBox.Name, selectedItem);
+                    Log(LogLevel.Debug, LogPrefix, string.Format("ComboBox selection changed: {0}, Selected: {1}", comboBox.Name, selectedItem));
 #endif
                     action(selectedItem);
                 }
@@ -161,7 +160,7 @@ namespace SpectrumNet
                     _checkBoxActions.TryGetValue(cbName, out var action))
                 {
 #if DEBUG
-                    Log(LogLevel.Debug, LogPrefix, "CheckBox changed: {0}, Value: {1}", cbName, isChecked);
+                    Log(LogLevel.Debug, LogPrefix, string.Format("CheckBox changed: {0}, Value: {1}", cbName, isChecked));
 #endif
                     action(isChecked == true);
                 }
@@ -189,8 +188,8 @@ namespace SpectrumNet
                 bool isFavorite = favorites.Contains(style);
 
 #if DEBUG
-                Log(LogLevel.Debug, LogPrefix, "{0} render style {1} from favorites", 
-                    isFavorite ? "Removing" : "Adding", style);
+                Log(LogLevel.Debug, LogPrefix, string.Format("{0} render style {1} from favorites", 
+                    isFavorite ? "Removing" : "Adding", style));
 #endif
 
                 if (isFavorite)
@@ -217,8 +216,8 @@ namespace SpectrumNet
             Safe(() =>
             {
 #if DEBUG
-                Log(LogLevel.Debug, LogPrefix, "Toggling overlay, current state: {0}", 
-                    _controller.IsOverlayActive ? "Active" : "Inactive");
+                Log(LogLevel.Debug, LogPrefix, string.Format("Toggling overlay, current state: {0}",
+                    _controller.IsOverlayActive ? "Active" : "Inactive"));
 #endif
                 if (_controller.IsOverlayActive)
                     _controller.CloseOverlay();

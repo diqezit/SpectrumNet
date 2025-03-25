@@ -152,8 +152,8 @@ namespace SpectrumNet
         private SpectrumAnalyzer CreateAnalyzer()
         {
 #if DEBUG
-            Log(LogLevel.Debug, LogPrefix, "Creating analyzer with WindowType: {0}, ScaleType: {1}", 
-                _controller.WindowType, _controller.ScaleType);
+            Log(LogLevel.Debug, LogPrefix, string.Format("Creating analyzer with WindowType: {0}, ScaleType: {1}",
+                _controller.WindowType, _controller.ScaleType));
 #endif
             var analyzer = new SpectrumAnalyzer(
                 new FftProcessor { WindowType = _controller.WindowType },
@@ -204,7 +204,7 @@ namespace SpectrumNet
                 _lastDeviceId = device.ID ?? throw new InvalidOperationException("Device ID is null");
 
 #if DEBUG
-                Log(LogLevel.Debug, LogPrefix, "Initializing capture for device: {0}", device.FriendlyName);
+                Log(LogLevel.Debug, LogPrefix, string.Format("Initializing capture for device: {0}", device.FriendlyName));
 #endif
                 InitializeCapture();
                 token = _state!.CTS.Token;
@@ -290,7 +290,7 @@ namespace SpectrumNet
             }
 
 #if DEBUG
-            Log(LogLevel.Debug, LogPrefix, "Toggling capture, current state: {0}", IsRecording ? "Recording" : "Stopped");
+            Log(LogLevel.Debug, LogPrefix, string.Format("Toggling capture, current state: {0}", IsRecording ? "Recording" : "Stopped"));
 #endif
             await (IsRecording ? StopCaptureAsync() : StartCaptureAsync());
         }
@@ -307,7 +307,7 @@ namespace SpectrumNet
 #if DEBUG
                 if (_currentDevice is not null)
                 {
-                    Log(LogLevel.Debug, LogPrefix, "Got default audio device: {0}", _currentDevice.FriendlyName);
+                    Log(LogLevel.Debug, LogPrefix, string.Format("Got default audio device: {0}", _currentDevice.FriendlyName));
                 }
 #endif
                 return _currentDevice;
@@ -398,8 +398,8 @@ namespace SpectrumNet
 #if DEBUG
                 if (frameCount > 0 && frameCount % 1000 == 0)
                 {
-                    Log(LogLevel.Debug, LogPrefix, "Processing audio data: {0} bytes, {1} frames, {2} channels", 
-                        e.BytesRecorded, frameCount, channels);
+                    Log(LogLevel.Debug, LogPrefix, string.Format("Processing audio data: {0} bytes, {1} frames, {2} channels",
+                        e.BytesRecorded, frameCount, channels));
                 }
 #endif
 
@@ -430,7 +430,7 @@ namespace SpectrumNet
                 try
                 {
 #if DEBUG
-                    Log(LogLevel.Debug, LogPrefix, "Starting device monitoring with interval: {0}ms", _deviceCheckIntervalMs);
+                    Log(LogLevel.Debug, LogPrefix, string.Format("Starting device monitoring with interval: {0}ms", _deviceCheckIntervalMs));
 #endif
                     while (!token.IsCancellationRequested)
                     {
@@ -457,7 +457,7 @@ namespace SpectrumNet
 
         private void UpdateStatus(bool isRecording) => _controller.Dispatcher.Invoke(() => {
 #if DEBUG
-            Log(LogLevel.Debug, LogPrefix, "Updating recording status to: {0}", isRecording ? "Recording" : "Stopped");
+            Log(LogLevel.Debug, LogPrefix, string.Format("Updating recording status to: {0}", isRecording ? "Recording" : "Stopped"));
 #endif
             IsRecording = isRecording;
             _controller.IsRecording = isRecording;
