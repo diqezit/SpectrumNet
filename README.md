@@ -22,6 +22,23 @@ SpectrumNet is a powerful audio visualization application that transforms real-t
 - .NET 6.0 Runtime
 - DirectX 9 compatible GPU recommended
 
+## ⚠️ Known Issues
+
+### Transparency Issues on Integrated GPUs (Intel HD)
+**When using OpenGL hardware acceleration**, you might encounter:
+- Partial loss of window transparency
+- Rendering artifacts in overlay mode
+- Interface flickering
+
+**Most commonly occurs on:**  
+✔️ Older Intel HD Graphics  
+✔️ Outdated drivers (< 2021)  
+✔️ Systems with hybrid graphics
+
+**Workaround:**  
+Force dedicated GPU selection in your graphics driver settings.
+
+
 ## Quick Start
 
 1. **Launch** the application
