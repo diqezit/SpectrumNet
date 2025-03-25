@@ -1,77 +1,62 @@
-
-
 # SpectrumNet - Real-Time Audio Spectrum Visualizer
 
-SpectrumNet is a audio visualization application that transforms real-time audio input into captivating visual spectrums. Built with C# and WPF, it leverages advanced signal processing and modern rendering techniques to provide an immersive experience.
+[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![.NET 8.0](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com)
 
-## Key Features
+SpectrumNet transforms real-time audio input into dynamic visual spectrums using C#/WPF. Combines advanced signal processing with modern rendering for immersive audio visualization.
 
-- 🎤 **Real-Time Audio Capture**: Utilizes WASAPI loopback to capture system audio.
-- 📊 **FFT Processing**: Supports multiple window functions (Hann, Hamming, Blackman, etc.) for accurate frequency analysis.
-- 🎨 **Dynamic Visual Styles**: 20+ rendering styles including bars, waveforms, particles, and Voronoi diagrams.
-- ⚙️ **Customizable Visualization**:
-  - Adjustable spectrum scale (Linear/Logarithmic/Mel/Bark)
-  - Custom color palettes and gradient effects
-  - Quality presets (Low/Medium/High)
-- 🖥 **Flexible Display Modes**: Switch between windowed mode and always-on-top overlay.
-- ⌨ **Hotkey Support**: Quick control over recording, quality settings, and overlay.
+![Demo Visualization](https://github.com/user-attachments/assets/52eac8ad-b97c-4395-a998-2fb35c1ca5aa)
+![Overlay Mode](https://github.com/user-attachments/assets/bc2052b7-0294-4698-825d-6b2a27fc27d5)
+![Visual Settings](https://github.com/user-attachments/assets/b7e5397d-7de5-479f-b2ca-412f57cefa80)
+![Performance Settings](https://github.com/user-attachments/assets/260d3634-b1e9-4765-97a3-927aa06404a7)
 
-## System Requirements
+## ✨ Key Features
 
-- Windows 10/11 required
-- .NET 8.0 Runtime
-- DirectX 9 compatible GPU recommended
+### 🎧 Audio Processing
+- Real-time system audio capture via WASAPI loopback
+- Multi-window FFT analysis (Hann/Hamming/Blackman)
+- Flexible spectrum scaling: Linear/Logarithmic/Mel/Bark
+
+### 🎨 Visualization Engine
+- **20+ Render Styles**:
+  - Bars: Vertical, Circular, LED Meter
+  - Waveforms: Gradient, Heartbeat, Waterfall
+  - Particles: Fire, Raindrop, Text Effects
+  - Advanced: Voronoi diagrams, Spectrum fractals
+- Dynamic color palettes with gradient effects
+- Quality presets (Low/Medium/High) with manual override
+
+### ⚙️ Customization & Control
+- Display modes: Windowed/Always-on-Top overlay
+- Configurable hotkeys (Capture start/stop, Mode toggle)
+- Real-time adjustment of spectrum sensitivity/range
+
+## 🚀 Quick Start
+
+1. Launch SpectrumNet.exe
+2. Click **Start Capture** to begin audio analysis
+3. Use hotkeys:
+   - `Ctrl+O`: Toggle overlay mode
+   - `Space`: Start/stop visualization
+   - `Ctrl+P`: Open control panel
+4. Adjust settings via interactive preview
 
 ## ⚠️ Known Issues
 
-### Transparency Issues on Integrated GPUs (Intel HD) 
-**When using OpenGL hardware acceleration**, you might encounter:
+### Transparency Rendering Issues (Intel GPUs)
+**Symptoms**:
 - Partial loss of window transparency
-- Rendering artifacts in overlay mode
+- Visual artifacts in overlay mode
 - Interface flickering
 
-**Most commonly occurs on:**  
-✔️ Older Intel HD Graphics  
-✔️ Outdated drivers (< 2021)  
-✔️ Systems with hybrid graphics
+**Common Cases**:
+- Intel HD Graphics (pre-2021 models)
+- Hybrid graphics systems
+- Drivers older than 2021
 
-**Workaround:**  
-Force dedicated GPU selection in your graphics driver settings.
-
-- https://github.com/mono/SkiaSharp/issues/2837
-
-⚠️ So i replacing SKGLElement with SKElement in XAML and code.
-
-- Since SKElement doesn't support OpenGL hardware acceleration, rendering performance may decrease for some effects in renderers.
-- I'll leave it until the problems with black screen are solved below.
-
-## Quick Start
-
-1. **Launch** the application
-2. Click **Start Capture** to begin audio analysis
-3. Use **Control+O** to toggle overlay mode
-4. Press **Space** to start/stop visualization
-5. Adjust settings via **Control Panel** (Control+P)
-
-## Supported Render Styles
-
-| Bars           | Waveforms      | Particle Effects |
-|----------------|----------------|-------------------|
-| Vertical Bars  | Gradient Wave  | Fire Visualization|
-| Circular Bars  | Heartbeat      | Raindrop Effects  |
-| LED Meter      | Waterfall      | Text Particles    |
-
-And more...
-
-
-![Intro](https://github.com/user-attachments/assets/52eac8ad-b97c-4395-a998-2fb35c1ca5aa)
-
-![Working](https://github.com/user-attachments/assets/bc2052b7-0294-4698-825d-6b2a27fc27d5)
-
-![Settings](https://github.com/user-attachments/assets/b7e5397d-7de5-479f-b2ca-412f57cefa80)
-
-![Settings](https://github.com/user-attachments/assets/260d3634-b1e9-4765-97a3-927aa06404a7)
-
-## License
-
-MIT License - Free for personal and educational use. See [LICENSE](LICENSE) for details.
+**Workaround**:
+1. Force dedicated GPU usage via driver settings
+2. Disable OpenGL acceleration:
+   ```xaml
+   <!-- Replace in XAML -->
+   <skia:SKElement /> <!-- Instead of SKGLElement -->
