@@ -24,7 +24,7 @@ SpectrumNet is a powerful audio visualization application that transforms real-t
 
 ## ⚠️ Known Issues
 
-### Transparency Issues on Integrated GPUs (Intel HD)
+### Transparency Issues on Integrated GPUs (Intel HD) 
 **When using OpenGL hardware acceleration**, you might encounter:
 - Partial loss of window transparency
 - Rendering artifacts in overlay mode
@@ -37,6 +37,8 @@ SpectrumNet is a powerful audio visualization application that transforms real-t
 
 **Workaround:**  
 Force dedicated GPU selection in your graphics driver settings.
+
+- https://github.com/mono/SkiaSharp/issues/2837
 
 
 ## Quick Start
