@@ -19,7 +19,7 @@ SpectrumNet is a powerful audio visualization application that transforms real-t
 ## System Requirements
 
 - Windows 10/11 required
-- .NET 6.0 Runtime
+- .NET 8.0 Runtime
 - DirectX 9 compatible GPU recommended
 
 ## ⚠️ Known Issues
@@ -40,6 +40,9 @@ Force dedicated GPU selection in your graphics driver settings.
 
 - https://github.com/mono/SkiaSharp/issues/2837
 
+⚠️ So i replacing SKGLElement with SKElement in XAML and code. ⚠️
+Since SKElement doesn't support OpenGL hardware acceleration, rendering performance may decrease for some effects in renderers. 
+I'll leave it until the problems with black screen are solved below.
 
 ## Quick Start
 
@@ -56,6 +59,8 @@ Force dedicated GPU selection in your graphics driver settings.
 | Vertical Bars  | Gradient Wave  | Fire Visualization|
 | Circular Bars  | Heartbeat      | Raindrop Effects  |
 | LED Meter      | Waterfall      | Text Particles    |
+
+And more...
 
 
 ![Intro](https://github.com/user-attachments/assets/52eac8ad-b97c-4395-a998-2fb35c1ca5aa)
