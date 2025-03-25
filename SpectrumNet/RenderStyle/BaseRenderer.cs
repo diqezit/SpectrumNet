@@ -6,7 +6,7 @@ using static System.Numerics.Vector;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 using static SkiaSharp.SKPaintStyle;
 using static SkiaSharp.SKBlurStyle;
-
+ 
 namespace SpectrumNet
 {
     /// <summary>

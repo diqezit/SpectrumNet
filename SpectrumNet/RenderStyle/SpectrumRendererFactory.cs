@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.SmartLogger;
-
+ 
 namespace SpectrumNet
 {
     /// <summary>
