@@ -5,10 +5,11 @@
 
 SpectrumNet transforms real-time audio input into dynamic visual spectrums using C#/WPF. Combines advanced signal processing with modern rendering for immersive audio visualization.
 
-![Demo Visualization](https://github.com/user-attachments/assets/52eac8ad-b97c-4395-a998-2fb35c1ca5aa)
-![Overlay Mode](https://github.com/user-attachments/assets/bc2052b7-0294-4698-825d-6b2a27fc27d5)
-![Visual Settings](https://github.com/user-attachments/assets/b7e5397d-7de5-479f-b2ca-412f57cefa80)
-![Performance Settings](https://github.com/user-attachments/assets/260d3634-b1e9-4765-97a3-927aa06404a7)
+
+![Menu](https://github.com/user-attachments/assets/9e3159f3-09da-472f-a357-7beb663b69df)
+![Visualisation](https://github.com/user-attachments/assets/a480ce47-28a2-4462-a717-29fef8fcf029)
+![Intro](https://github.com/user-attachments/assets/82777947-28cb-4d22-a9e3-166294801efb)
+
 
 ## ✨ Key Features
 
@@ -60,3 +61,10 @@ SpectrumNet transforms real-time audio input into dynamic visual spectrums using
    ```xaml
    <!-- Replace in XAML -->
    <skia:SKElement /> <!-- Instead of SKGLElement -->
+
+   
+![Demo Visualization](https://github.com/user-attachments/assets/52eac8ad-b97c-4395-a998-2fb35c1ca5aa)
+![Overlay Mode](https://github.com/user-attachments/assets/bc2052b7-0294-4698-825d-6b2a27fc27d5)
+![Visual Settings](https://github.com/user-attachments/assets/b7e5397d-7de5-479f-b2ca-412f57cefa80)
+![Performance Settings](https://github.com/user-attachments/assets/260d3634-b1e9-4765-97a3-927aa06404a7)
+
