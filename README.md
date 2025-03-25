@@ -40,9 +40,10 @@ Force dedicated GPU selection in your graphics driver settings.
 
 - https://github.com/mono/SkiaSharp/issues/2837
 
-⚠️ So i replacing SKGLElement with SKElement in XAML and code. ⚠️
-Since SKElement doesn't support OpenGL hardware acceleration, rendering performance may decrease for some effects in renderers. 
-I'll leave it until the problems with black screen are solved below.
+⚠️ So i replacing SKGLElement with SKElement in XAML and code.
+
+- Since SKElement doesn't support OpenGL hardware acceleration, rendering performance may decrease for some effects in renderers.
+- I'll leave it until the problems with black screen are solved below.
 
 ## Quick Start
 
