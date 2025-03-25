@@ -37,11 +37,6 @@ namespace SpectrumNet
     }
 
     /// <summary>
-    /// Configuration record for renderer settings
-    /// </summary>
-    public record RendererConfig(bool IsOverlayActive, RenderQuality Quality);
-
-    /// <summary>
     /// Factory for creating spectrum renderer instances.
     /// </summary>
     public static class SpectrumRendererFactory
