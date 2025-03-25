@@ -2,7 +2,7 @@
 
 # SpectrumNet - Real-Time Audio Spectrum Visualizer
 
-SpectrumNet is a powerful audio visualization application that transforms real-time audio input into captivating visual spectrums. Built with C# and WPF, it leverages advanced signal processing and modern rendering techniques to provide an immersive experience.
+SpectrumNet is a audio visualization application that transforms real-time audio input into captivating visual spectrums. Built with C# and WPF, it leverages advanced signal processing and modern rendering techniques to provide an immersive experience.
 
 ## Key Features
 
