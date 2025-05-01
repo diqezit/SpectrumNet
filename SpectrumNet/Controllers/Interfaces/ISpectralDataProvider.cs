@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// ISpectralDataProvider.cs
+#nullable enable
 
 namespace SpectrumNet.Controllers.Interfaces;
 

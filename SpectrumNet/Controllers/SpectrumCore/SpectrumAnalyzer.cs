@@ -2,11 +2,10 @@
 
 namespace SpectrumNet.Controllers.SpectrumCore;
 
-public record FftEventArgs(Complex[] Result, int SampleRate);
-public record SpectralDataEventArgs(SpectralData Data);
-public record SpectralData(float[] Spectrum, DateTime Timestamp);
-
-public sealed class SpectrumAnalyzer : ISpectralDataProvider, IDisposable, IComponent
+public sealed class SpectrumAnalyzer 
+    : AsyncDisposableBase, 
+    ISpectralDataProvider, 
+    IComponent
 {
     private const string LogSource = nameof(SpectrumAnalyzer);
     private readonly IFftProcessor _fftProcessor;
@@ -18,12 +17,11 @@ public sealed class SpectrumAnalyzer : ISpectralDataProvider, IDisposable, IComp
     private readonly ArrayPool<float> _floatArrayPool = ArrayPool<float>.Shared;
     private SpectralData? _lastData;
     private SpectrumScale _scaleType = SpectrumScale.Linear;
-    private bool _disposed;
 
     public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
     public event EventHandler? Disposed;
     public ISite? Site { get; set; }
-    public bool IsDisposed => _disposed;
+    public bool IsDisposed => _isDisposed;
 
     public SpectrumAnalyzer(
         IFftProcessor fftProcessor,
@@ -32,10 +30,12 @@ public sealed class SpectrumAnalyzer : ISpectralDataProvider, IDisposable, IComp
         int channelCapacity = Constants.DefaultChannelCapacity
     )
     {
-        _fftProcessor = fftProcessor
-            ?? throw new ArgumentNullException(nameof(fftProcessor));
-        _converter = converter
-            ?? throw new ArgumentNullException(nameof(converter));
+        _fftProcessor = fftProcessor ??
+            throw new ArgumentNullException(nameof(fftProcessor));
+
+        _converter = converter ??
+            throw new ArgumentNullException(nameof(converter));
+
         _context = context;
         var options = new BoundedChannelOptions(channelCapacity)
         {
@@ -109,19 +109,23 @@ public sealed class SpectrumAnalyzer : ISpectralDataProvider, IDisposable, IComp
             ErrorMessage = "Error updating settings"
         });
 
-    public SpectralData? GetCurrentSpectrum() =>
-        _disposed ? throw new ObjectDisposedException(nameof(SpectrumAnalyzer))
-                  : _lastData;
+    public SpectralData? GetCurrentSpectrum()
+    {
+        ThrowIfDisposed();
+        return _lastData;
+    }
 
     public async Task AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate,
         CancellationToken cancellationToken = default)
     {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(SpectrumAnalyzer));
+        ThrowIfDisposed();
+
         if (samples.Length == 0)
             return;
+
         using var linkedCts =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
+
         try
         {
             await _fftProcessor.AddSamplesAsync(samples, sampleRate,
@@ -137,37 +141,65 @@ public sealed class SpectrumAnalyzer : ISpectralDataProvider, IDisposable, IComp
 
     public void SafeReset() => ResetSpectrum();
 
-    public void Dispose()
+    protected override void DisposeManaged()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
         _fftProcessor.FftCalculated -= OnFftCalculated;
         _cts.Cancel();
         _processingChannel.Writer.Complete();
-        if (_fftProcessor is IAsyncDisposable ad)
-            SafeExecute(() =>
-                ad.DisposeAsync().AsTask().GetAwaiter().GetResult(),
-                new ErrorHandlingOptions
-                {
-                    Source = LogSource,
-                    ErrorMessage = "Error disposing processor"
-                });
-        SafeExecute(() =>
+
+        try
+        {
+            if (_fftProcessor is IDisposable disposable)
+                disposable.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, LogSource, $"Error disposing processor: {ex.Message}");
+        }
+
+        _cts.Dispose();
+
+        try
         {
             if (_context != null)
-                _context.Post(_ => Disposed?.Invoke(this, EventArgs.Empty),
-                    null);
+                _context.Post(_ => Disposed?.Invoke(this, EventArgs.Empty), null);
             else
                 Disposed?.Invoke(this, EventArgs.Empty);
-        },
-        new ErrorHandlingOptions
+        }
+        catch (Exception ex)
         {
-            Source = LogSource,
-            ErrorMessage = "Error invoking Disposed event"
-        });
+            Log(LogLevel.Error, LogSource, $"Error invoking Disposed event: {ex.Message}");
+        }
+    }
+
+    protected override async ValueTask DisposeAsyncManagedResources()
+    {
+        _fftProcessor.FftCalculated -= OnFftCalculated;
+        _cts.Cancel();
+        _processingChannel.Writer.Complete();
+
+        try
+        {
+            await _fftProcessor.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, LogSource, $"Error disposing processor asynchronously: {ex.Message}");
+        }
+
         _cts.Dispose();
-        SuppressFinalize(this);
+
+        try
+        {
+            if (_context != null)
+                _context.Post(_ => Disposed?.Invoke(this, EventArgs.Empty), null);
+            else
+                Disposed?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, LogSource, $"Error invoking Disposed event: {ex.Message}");
+        }
     }
 
     private async Task ProcessFftResultsAsync() =>
@@ -236,7 +268,7 @@ public sealed class SpectrumAnalyzer : ISpectralDataProvider, IDisposable, IComp
     private void OnFftCalculated(object? sender, FftEventArgs e) =>
         SafeExecute(() =>
         {
-            if (_disposed || e.Result.Length == 0 || _cts.IsCancellationRequested)
+            if (_isDisposed || e.Result.Length == 0 || _cts.IsCancellationRequested)
                 return;
             if (!_processingChannel.Writer.TryWrite((e.Result, e.SampleRate)))
                 Log(LogLevel.Warning, LogSource,

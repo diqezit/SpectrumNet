@@ -7,7 +7,7 @@ public sealed class OverlayWindow : Window, IDisposable
     private const string LogSource = "OverlayWindow";
 
     private readonly record struct RenderContext(
-        IAudioVisualizationController Controller,
+        IMainController Controller,
         SKElement SkElement, // Заменяем SKGLElement на SKElement
         DispatcherTimer RenderTimer);
 
@@ -21,7 +21,7 @@ public sealed class OverlayWindow : Window, IDisposable
 
     public new bool IsInitialized => _renderContext != null && !_isDisposed;
 
-    public OverlayWindow(IAudioVisualizationController controller, OverlayConfiguration? configuration = null)
+    public OverlayWindow(IMainController controller, OverlayConfiguration? configuration = null)
     {
         ArgumentNullException.ThrowIfNull(controller);
         _configuration = configuration ?? new();
@@ -53,7 +53,7 @@ public sealed class OverlayWindow : Window, IDisposable
         }
     }
 
-    private void InitializeOverlay(IAudioVisualizationController controller)
+    private void InitializeOverlay(IMainController controller)
     {
         ConfigureWindowProperties();
 

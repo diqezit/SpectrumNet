@@ -1,22 +1,19 @@
 ﻿#nullable enable
 
-using SpectrumNet.DataSettings;
-using SpectrumNet.Service.Enums;
-
 namespace SpectrumNet;
 
 public partial class ControlPanelWindow : Window, IDisposable
 {
     private const string LogPrefix = "ControlPanelWindow";
 
-    private readonly IAudioVisualizationController _controller;
+    private readonly IMainController _controller;
     private readonly Dictionary<string, Action> _buttonActions;
     private readonly Dictionary<string, Action<double>> _sliderActions;
     private readonly Dictionary<(string Name, Type ItemType), Action<object>> _comboBoxActions;
     private readonly Dictionary<string, Action<bool>> _checkBoxActions;
     private bool _isDisposed;
 
-    public ControlPanelWindow(IAudioVisualizationController controller)
+    public ControlPanelWindow(IMainController controller)
     {
         ArgumentNullException.ThrowIfNull(controller);
         _controller = controller;
@@ -183,21 +180,33 @@ public partial class ControlPanelWindow : Window, IDisposable
 
     private void OnFavoriteButtonClick(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && button.Tag is RenderStyle style)
+        Safe(() =>
         {
-            var favorites = Settings.Instance.FavoriteRenderers;
-            bool isFavorite = favorites.Contains(style);
+            if (sender is Button button && button.Tag is RenderStyle style)
+            {
+                var favorites = Settings.Instance.FavoriteRenderers;
+                bool isFavorite = favorites.Contains(style);
 
 #if DEBUG
-            Log(LogLevel.Debug, LogPrefix, string.Format("{0} render style {1} from favorites",
-                isFavorite ? "Removing" : "Adding", style));
+                Log(LogLevel.Debug, LogPrefix, string.Format("{0} render style {1} from favorites",
+                    isFavorite ? "Removing" : "Adding", style));
 #endif
 
-            if (isFavorite)
-                favorites.Remove(style);
-            else
-                favorites.Add(style);
-        }
+                if (isFavorite)
+                    favorites.Remove(style);
+                else
+                    favorites.Add(style);
+
+                SettingsWindow.Instance.SaveSettings();
+                _controller.OnPropertyChanged(nameof(_controller.OrderedDrawingTypes));
+                var currentSelection = RenderStyleComboBox.SelectedItem;
+
+                RenderStyleComboBox.ItemsSource = null;
+                RenderStyleComboBox.ItemsSource = _controller.OrderedDrawingTypes;
+                RenderStyleComboBox.SelectedItem = currentSelection;
+                RenderStyleComboBox.UpdateLayout();
+            }
+        }, GetLoggerOptions("Error handling favorite button click"));
     }
     #endregion
 

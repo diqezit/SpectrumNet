@@ -1257,14 +1257,6 @@
                                             <Setter Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
                                             <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
                                             <Setter TargetName="ArrowBorder" Property="Background" Value="{DynamicResource ComboBoxHoverBackgroundBrush}"/>
-                                            <Setter TargetName="Arrow" Property="RenderTransform">
-                                                <Setter.Value>
-                                                    <TransformGroup>
-                                                        <RotateTransform Angle="{Binding Angle, ElementName=ArrowRotation}"/>
-                                                        <ScaleTransform ScaleX="1.2" ScaleY="1.2"/>
-                                                    </TransformGroup>
-                                                </Setter.Value>
-                                            </Setter>
                                         </Trigger>
                                         <Trigger Property="IsChecked" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource ComboBoxPressedBackgroundBrush}"/>

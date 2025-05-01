@@ -2,7 +2,8 @@
 
 namespace SpectrumNet.Controllers.SpectrumCore;
 
-public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
+public sealed class FftProcessor 
+    : AsyncDisposableBase, IFftProcessor
 {
     private const string LogSource = nameof(FftProcessor);
     private readonly int _fftSize;
@@ -19,7 +20,6 @@ public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
     private readonly ArrayPool<float> _floatArrayPool = ArrayPool<float>.Shared;
     private float[] _window;
     private int _sampleCount;
-    private bool _disposed;
     private FftWindowType _windowType = FftWindowType.Hann;
 
     public event EventHandler<FftEventArgs>? FftCalculated;
@@ -71,15 +71,18 @@ public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
     public ValueTask AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate,
         CancellationToken cancellationToken = default)
     {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(FftProcessor));
+        ThrowIfDisposed();
+
         if (sampleRate <= 0)
             throw new ArgumentException("Sample rate must be positive",
                 nameof(sampleRate));
+
         if (samples.Length == 0)
             return ValueTask.CompletedTask;
+
         using var linkedCts =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
+
         return _channel.Writer.TryWrite((samples, sampleRate, linkedCts.Token))
             ? ValueTask.CompletedTask
             : new ValueTask(
@@ -89,29 +92,25 @@ public sealed class FftProcessor : IFftProcessor, IAsyncDisposable
 
     public void ResetFftState()
     {
+        ThrowIfDisposed();
         _sampleCount = 0;
         Array.Clear(_buffer, 0, _fftSize);
     }
 
-    public async ValueTask DisposeAsync()
+    protected override void DisposeManaged()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
-        await SafeValueTaskResultAsync(async () =>
-        {
-            _cts.Cancel();
-            _channel.Writer.Complete();
-            _threadLocalBuffer.Dispose();
-            await Task.CompletedTask;
-            return true;
-        },
-        defaultValue: false,
-        options: new ErrorHandlingOptions
-        {
-            Source = LogSource,
-            ErrorMessage = "Error during disposal"
-        });
+        _cts.Cancel();
+        _channel.Writer.Complete();
+        _threadLocalBuffer.Dispose();
+        _cts.Dispose();
+    }
+
+    protected override async ValueTask DisposeAsyncManagedResources()
+    {
+        _cts.Cancel();
+        _channel.Writer.Complete();
+        _threadLocalBuffer.Dispose();
+        await Task.CompletedTask;
         _cts.Dispose();
     }
 

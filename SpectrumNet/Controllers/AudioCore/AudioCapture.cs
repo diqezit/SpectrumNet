@@ -2,15 +2,16 @@
 
 namespace SpectrumNet.Controllers.AudioCore;
 
-public sealed class AudioCapture : IDisposable
+public sealed class AudioCapture : AsyncDisposableBase
 {
     private const string LogPrefix = "AudioCapture";
     private const int DefaultDeviceCheckIntervalMs = 500;
 
-    private readonly object _lock = new();
-    private readonly object _stateLock = new();
+    private readonly object
+        _lock = new(),
+        _stateLock = new();
 
-    private readonly IAudioVisualizationController _controller;
+    private readonly IMainController _controller;
     private readonly MMDeviceEnumerator _deviceEnumerator;
     private readonly AudioEndpointNotificationHandler _notificationHandler;
     private readonly int _deviceCheckIntervalMs;
@@ -18,9 +19,7 @@ public sealed class AudioCapture : IDisposable
     private MMDevice? _currentDevice;
     private string _lastDeviceId = string.Empty;
     private CaptureState? _state;
-
-    private bool _isDisposed,
-        _isReinitializing;
+    private bool _isReinitializing;
 
     public bool IsRecording { get; private set; }
     public bool IsDeviceAvailable => GetDefaultAudioDevice() != null;
@@ -32,7 +31,7 @@ public sealed class AudioCapture : IDisposable
     );
 
     public AudioCapture(
-        IAudioVisualizationController controller,
+        IMainController controller,
         int deviceCheckIntervalMs = DefaultDeviceCheckIntervalMs)
     {
         ArgumentNullException.ThrowIfNull(controller);
@@ -62,8 +61,7 @@ public sealed class AudioCapture : IDisposable
         _deviceEnumerator.RegisterEndpointNotificationCallback(
             _notificationHandler
         );
-        Log(
-            LogLevel.Information,
+        Log(LogLevel.Information,
             LogPrefix,
             "Audio device notification handler registered successfully",
             forceLog: true
@@ -229,10 +227,9 @@ public sealed class AudioCapture : IDisposable
 
     public async Task StartCaptureAsync()
     {
-        if (_isDisposed || _isReinitializing || _controller.IsTransitioning || IsRecording)
-        {
-            return;
-        }
+        ThrowIfDisposed();
+
+        if (_isReinitializing || _controller.IsTransitioning || IsRecording) return;
 
         var device = GetDefaultAudioDevice();
         if (device is null) return;
@@ -280,8 +277,7 @@ public sealed class AudioCapture : IDisposable
         UpdateStatus(true);
         _state.Capture.StartRecording();
 
-        Log(
-            LogLevel.Information,
+        Log(LogLevel.Information,
             LogPrefix,
             $"Audio capture started on device: {device.FriendlyName}",
             forceLog: true
@@ -290,7 +286,7 @@ public sealed class AudioCapture : IDisposable
 
     public async Task StopCaptureAsync(bool updateUI = true)
     {
-        if (_isDisposed) return;
+        ThrowIfDisposed();
 
         if (!IsRecording && _state is null) return;
 
@@ -304,8 +300,22 @@ public sealed class AudioCapture : IDisposable
 
         if (stateToDispose is not null)
         {
+            using var timeoutCts = new CancellationTokenSource(FromSeconds(3));
+
             await SafeAsync(
-                async () => await Task.Run(() => StopCaptureCore(stateToDispose)),
+                async () =>
+                {
+                    var stopTask = Task.Run(() => StopCaptureCore(stateToDispose));
+
+                    if (await Task.WhenAny(
+                        stopTask,
+                        Task.Delay(2000, timeoutCts.Token)) != stopTask)
+                    {
+                        Log(LogLevel.Warning,
+                            LogPrefix,
+                            "StopCapture operation timed out");
+                    }
+                },
                 new ErrorHandlingOptions
                 {
                     Source = LogPrefix,
@@ -319,11 +329,31 @@ public sealed class AudioCapture : IDisposable
 
     private void StopCaptureCore(CaptureState state)
     {
-        state.Capture.StopRecording();
+        try
+        {
+            state.Capture.StopRecording();
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error stopping recording: {ex.Message}");
+        }
+
         if (!_controller.IsTransitioning)
         {
-            state.Analyzer.SafeReset();
+            try
+            {
+                state.Analyzer.SafeReset();
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error,
+                    LogPrefix,
+                    $"Error resetting analyzer: {ex.Message}");
+            }
         }
+
         DisposeCaptureState(state);
     }
 
@@ -352,8 +382,7 @@ public sealed class AudioCapture : IDisposable
         }
         catch (Exception ex)
         {
-            Log(
-                LogLevel.Error,
+            Log(LogLevel.Error,
                 LogPrefix,
                 $"Error getting default audio device: {ex.Message}"
             );
@@ -431,8 +460,7 @@ public sealed class AudioCapture : IDisposable
     {
         if (e.Exception is not null)
         {
-            Log(
-                LogLevel.Error,
+            Log(LogLevel.Error,
                 LogPrefix,
                 $"Recording stopped with error: {e.Exception.Message}"
             );
@@ -444,8 +472,7 @@ public sealed class AudioCapture : IDisposable
             return;
         }
 
-        Log(
-            LogLevel.Information,
+        Log(LogLevel.Information,
             LogPrefix,
             "Recording stopped normally",
             forceLog: true
@@ -457,28 +484,50 @@ public sealed class AudioCapture : IDisposable
         return SafeAsync(
             async () =>
             {
-                while (!token.IsCancellationRequested)
+                try
                 {
-                    await Task.Delay(
-                        _deviceCheckIntervalMs,
-                        token
-                    );
-                    if (!IsRecording || _controller.IsTransitioning)
+                    while (!token.IsCancellationRequested)
                     {
-                        continue;
-                    }
+                        await Task.Delay(
+                            _deviceCheckIntervalMs,
+                            token
+                        );
+                        if (!IsRecording || _controller.IsTransitioning)
+                        {
+                            continue;
+                        }
 
-                    var device = GetDefaultAudioDevice();
-                    if (device is null || device.ID != _lastDeviceId)
-                    {
-                        OnDeviceChanged();
+                        var device = GetDefaultAudioDevice();
+                        if (device is null || device.ID != _lastDeviceId)
+                        {
+                            OnDeviceChanged();
+                        }
                     }
+                }
+                catch (TaskCanceledException)
+                {
+                    Log(LogLevel.Information,
+                        LogPrefix,
+                        "Device monitoring task cancelled normally",
+                        forceLog: false);
+                }
+                catch (OperationCanceledException)
+                {
+                    Log(LogLevel.Information,
+                        LogPrefix,
+                        "Device monitoring operation cancelled normally",
+                        forceLog: false);
                 }
             },
             new ErrorHandlingOptions
             {
                 Source = LogPrefix,
-                ErrorMessage = "Error in device monitoring"
+                ErrorMessage = "Error in device monitoring",
+                IgnoreExceptions =
+                [
+                    typeof(TaskCanceledException),
+                    typeof(OperationCanceledException)
+                ]
             }
         );
     }
@@ -500,8 +549,18 @@ public sealed class AudioCapture : IDisposable
     {
         if (state is null) return;
 
-        state.Capture.DataAvailable -= OnDataAvailable;
-        state.Capture.RecordingStopped -= OnRecordingStopped;
+        try
+        {
+            state.Capture.DataAvailable -= OnDataAvailable;
+            state.Capture.RecordingStopped -= OnRecordingStopped;
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error unsubscribing events: {ex.Message}");
+        }
+
         SafeDispose(
             state.Capture,
             nameof(state.Capture),
@@ -511,6 +570,7 @@ public sealed class AudioCapture : IDisposable
                 ErrorMessage = "Error disposing capture"
             }
         );
+
         SafeDispose(
             state.CTS,
             nameof(state.CTS),
@@ -520,63 +580,122 @@ public sealed class AudioCapture : IDisposable
                 ErrorMessage = "Error disposing CTS"
             }
         );
+
+        try
+        {
+            if (state.Analyzer is IAsyncDisposable asyncDisposable)
+            {
+                _ = asyncDisposable.DisposeAsync();
+            }
+            else
+            {
+                SafeDispose(
+                    state.Analyzer,
+                    nameof(state.Analyzer),
+                    new ErrorHandlingOptions
+                    {
+                        Source = LogPrefix,
+                        ErrorMessage = "Error disposing analyzer"
+                    }
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error during analyzer disposal: {ex.Message}");
+        }
+    }
+
+    protected override void DisposeManaged()
+    {
+        try
+        {
+            StopCaptureAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error stopping capture during dispose: {ex.Message}");
+        }
+
+        try
+        {
+            _deviceEnumerator.UnregisterEndpointNotificationCallback(_notificationHandler);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error unregistering notification callback: {ex.Message}");
+        }
+
         SafeDispose(
-            state.Analyzer,
-            nameof(state.Analyzer),
+            _currentDevice,
+            nameof(_currentDevice),
             new ErrorHandlingOptions
             {
                 Source = LogPrefix,
-                ErrorMessage = "Error disposing analyzer"
+                ErrorMessage = "Error disposing current device"
+            }
+        );
+
+        SafeDispose(
+            _deviceEnumerator,
+            nameof(_deviceEnumerator),
+            new ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error disposing device enumerator"
             }
         );
     }
 
-    public void Dispose()
+    protected override async ValueTask DisposeAsyncManagedResources()
     {
-        if (_isDisposed) return;
-
-        lock (_lock)
+        try
         {
-            if (_isDisposed) return;
-
-            Safe(
-                () => StopCaptureAsync().GetAwaiter().GetResult(),
-                new ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error stopping capture during dispose"
-                }
-            );
-            Safe(
-                () => _deviceEnumerator.UnregisterEndpointNotificationCallback(
-                    _notificationHandler
-                ),
-                new ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error unregistering notification callback"
-                }
-            );
-            SafeDispose(
-                _currentDevice,
-                nameof(_currentDevice),
-                new ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing current device"
-                }
-            );
-            SafeDispose(
-                _deviceEnumerator,
-                nameof(_deviceEnumerator),
-                new ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error disposing device enumerator"
-                }
-            );
-            _isDisposed = true;
+            await StopCaptureAsync();
         }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error stopping capture during async dispose: {ex.Message}");
+        }
+
+        try
+        {
+            _deviceEnumerator.UnregisterEndpointNotificationCallback(_notificationHandler);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error unregistering notification callback: {ex.Message}");
+        }
+
+        SafeDispose(
+            _currentDevice,
+            nameof(_currentDevice),
+            new ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error disposing current device"
+            }
+        );
+
+        SafeDispose(
+            _deviceEnumerator,
+            nameof(_deviceEnumerator),
+            new ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error disposing device enumerator"
+            }
+        );
     }
 
     private class AudioEndpointNotificationHandler : IMMNotificationClient
