@@ -1,5 +1,8 @@
 ﻿#nullable enable
 
+using SpectrumNet.Service;
+using SpectrumNet.Service.Enums;
+
 namespace SpectrumNet;
 
 public partial class App : System.Windows.Application
@@ -13,7 +16,8 @@ public partial class App : System.Windows.Application
 
             SmartLogger.Initialize();
 
-            AppDomain.CurrentDomain.UnhandledException += (_, args) => {
+            AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            {
                 var logger = SmartLogger.LoggerFactory.CreateLogger<App>();
                 logger.LogCritical(args.ExceptionObject as Exception, "Unhandled exception in application");
             };

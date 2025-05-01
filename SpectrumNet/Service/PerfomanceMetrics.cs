@@ -1,14 +1,10 @@
-﻿using static System.Math;
-using static System.Environment;
-using static System.DateTime;
-using static System.TimeSpan;
-using static System.GC;
-using static System.FormattableString;
-using static SpectrumNet.SmartLogger;
+﻿#nullable enable
 
-namespace SpectrumNet;
+namespace SpectrumNet.Service;
 
-public readonly record struct PerformanceMetrics(double FrameTime, double Fps);
+public readonly record struct PerformanceMetrics(
+    double FrameTime,
+    double Fps);
 
 public static class PerformanceMetricsManager
 {
@@ -166,7 +162,7 @@ public static class PerformanceMetricsManager
     private static void UpdateCpuUsage()
     {
         var now = UtcNow;
-        if ((now - _lastCpuUpdate) < _cpuUpdateInterval) return;
+        if (now - _lastCpuUpdate < _cpuUpdateInterval) return;
 
         Safe(() =>
         {
@@ -244,7 +240,7 @@ public static class PerformanceMetricsManager
     private static void UpdatePerformanceHistory(float fps, double cpuUsage, double ramUsage)
     {
         var now = UtcNow;
-        if ((now - _lastSnapshotTime) < _snapshotInterval) return;
+        if (now - _lastSnapshotTime < _snapshotInterval) return;
 
         lock (_syncLock)
         {

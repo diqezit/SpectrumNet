@@ -126,7 +126,7 @@ Content="Spectrum Analyser"
                     Background="{DynamicResource SurfaceBrush}"
                     CornerRadius="16"
                     Margin="24">
-                
+
                 <!--<sk:SKGLElement x:Name="spectrumCanvas"-->
                 <sk:SKElement x:Name="spectrumCanvas"
                               Margin="16"
