@@ -1,506 +1,570 @@
 ﻿#nullable enable
 
-using SpectrumNet.Service.Enums;
+using static SpectrumNet.Views.Renderers.DotsRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
 
-/// <summary>
-/// Renderer that visualizes spectrum data as dots with various optimizations.
-/// </summary>
-public sealed class DotsRenderer : BaseSpectrumRenderer
+public sealed class DotsRenderer : EffectSpectrumRenderer
 {
-    #region Constants
-    private static class Constants
-    {
-        // Logging
-        public const string LOG_PREFIX = "DotsRenderer";
-
-        // Rendering thresholds and limits
-        public const float MIN_INTENSITY_THRESHOLD = 0.01f;  // Minimum intensity to render a dot
-        public const float MIN_DOT_RADIUS = 2.0f;           // Minimum dot radius in pixels
-        public const float MAX_DOT_MULTIPLIER = 0.5f;       // Maximum multiplier for dot size
-
-        // Alpha and binning parameters
-        public const float ALPHA_MULTIPLIER = 255.0f;       // Multiplier for alpha calculation
-        public const int ALPHA_BINS = 16;                   // Number of alpha bins for batching
-
-        // Dot size parameters
-        public const float NORMAL_DOT_MULTIPLIER = 1.0f;    // Normal dot size multiplier
-        public const float OVERLAY_DOT_MULTIPLIER = 1.5f;   // Overlay dot size multiplier
-
-        // Performance settings
-        public const int VECTOR_SIZE = 4;                   // Size for SIMD vectorization
-        public const int MIN_BATCH_SIZE = 32;               // Minimum batch size for parallel processing
-    }
-    #endregion
-
-    #region Fields
     private static readonly Lazy<DotsRenderer> _instance = new(() => new DotsRenderer());
 
-    // Object pools for efficient resource management
-    private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 5);
-    private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
-
-    // Rendering state
-    private float _dotRadiusMultiplier = Constants.NORMAL_DOT_MULTIPLIER;
-
-    // Quality-dependent settings
-    private new bool _useAntiAlias = true;
-    private SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-    private bool _useHardwareAcceleration = true;
-    private bool _useVectorization = true;
-    private bool _batchProcessing = true;
-
-    // Cached resources
-    private SKPaint? _dotPaint;
-    private SKPicture? _cachedBackground;
-    private readonly object _lockObject = new();
-    private Task? _backgroundCalculationTask;
-    private new bool _disposed;
-    #endregion
-
-    #region Structures
-    /// <summary>
-    /// Represents data for a single circle in the visualization.
-    /// </summary>
-    private struct CircleData
-    {
-        public float X;
-        public float Y;
-        public float Radius;
-        public float Intensity;
-    }
-    #endregion
-
-    #region Singleton Pattern
     private DotsRenderer() { }
 
-    /// <summary>
-    /// Gets the singleton instance of the dots renderer.
-    /// </summary>
     public static DotsRenderer GetInstance() => _instance.Value;
-    #endregion
 
-    #region Initialization and Configuration
-    /// <summary>
-    /// Initializes the dots renderer and prepares rendering resources.
-    /// </summary>
+    public record Constants
+    {
+        public const string LOG_PREFIX = "DotsRenderer";
+
+        public const float
+            BASE_DOT_RADIUS = 4.0f,
+            MIN_DOT_RADIUS = 1.5f,
+            MAX_DOT_RADIUS = 8.0f,
+            DOT_RADIUS_SCALE_FACTOR = 0.8f;
+
+        public const float
+            DOT_SPEED_BASE = 80.0f,
+            DOT_SPEED_SCALE = 120.0f,
+            DOT_VELOCITY_DAMPING = 0.95f;
+
+        public const float
+            SPECTRUM_INFLUENCE_FACTOR = 2.0f,
+            SPECTRUM_VELOCITY_FACTOR = 1.5f;
+
+        public const float
+            ALPHA_BASE = 0.85f,
+            ALPHA_RANGE = 0.15f;
+
+        public const int
+            LOW_QUALITY_DOT_COUNT = 75,
+            MEDIUM_QUALITY_DOT_COUNT = 150,
+            HIGH_QUALITY_DOT_COUNT = 300,
+            DEFAULT_DOT_COUNT = MEDIUM_QUALITY_DOT_COUNT;
+
+        public const float
+            GLOW_RADIUS_FACTOR = 0.3f,
+            BASE_GLOW_ALPHA = 0.6f;
+
+        public const int MIN_BAR_COUNT = 32;
+    }
+
+    private readonly record struct Dot(
+        float X, float Y,
+        float VelocityX, float VelocityY,
+        float Radius,
+        float BaseRadius,
+        SKColor Color);
+
+    private readonly record struct RenderData(
+        Dot[] Dots,
+        float MaxSpectrum,
+        int BarCount)
+    {
+        public readonly float AlphaFactor => MathF.Max(0.3f, MathF.Min(1.0f, MaxSpectrum + 0.3f));
+    }
+
+    private static readonly Random _random = new();
+    private static readonly Vector2 _gravityCenter = new(0.5f, 0.5f);
+
+    private Dot[] _dots = [];
+    private SKImageInfo _lastImageInfo;
+    private float _maxSpectrum;
+    private int _dotCount = DEFAULT_DOT_COUNT;
+    private float _globalRadiusMultiplier = 1.0f;
+
+    private readonly object _renderDataLock = new();
+    private bool _dataReady;
+    private RenderData? _currentRenderData;
+
+    private readonly SKPaint _dotPaint = new();
+    private readonly SKPaint _glowPaint = new();
+
     public override void Initialize()
     {
-        Safe(() =>
-        {
-            base.Initialize();
-            InitializePaints();
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
-    }
-
-    /// <summary>
-    /// Initializes paint objects used for rendering.
-    /// </summary>
-    private void InitializePaints()
-    {
-        Safe(() =>
-        {
-            _dotPaint?.Dispose();
-            _dotPaint = new SKPaint
+        Safe(
+            () =>
             {
-                IsAntialias = _useAntiAlias,
-                Style = Fill
-            };
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.InitializePaints",
-            ErrorMessage = "Failed to initialize paints"
-        });
+                base.Initialize();
+                InitializeResources();
+                ApplyQualitySettings();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            }
+        );
     }
 
-    /// <summary>
-    /// Configures the renderer with overlay status and quality settings.
-    /// </summary>
-    /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
-    /// <param name="quality">The rendering quality level.</param>
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+    private void InitializeResources()
     {
-        Safe(() =>
-        {
-            base.Configure(isOverlayActive, quality);
+        Safe(
+            () =>
+            {
+                _dotPaint.IsAntialias = true;
+                _dotPaint.Style = SKPaintStyle.Fill;
 
-            _dotRadiusMultiplier = isOverlayActive ?
-                Constants.OVERLAY_DOT_MULTIPLIER :
-                Constants.NORMAL_DOT_MULTIPLIER;
+                _glowPaint.IsAntialias = true;
+                _glowPaint.Style = SKPaintStyle.Fill;
+                _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR);
 
-            // Invalidate cached resources
-            _cachedBackground?.Dispose();
-            _cachedBackground = null;
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Configure",
-            ErrorMessage = "Failed to configure renderer"
-        });
+                ResetDots(new SKImageInfo(800, 600));
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.InitializeResources",
+                ErrorMessage = "Failed to initialize renderer resources"
+            }
+        );
     }
 
-    /// <summary>
-    /// Applies quality settings based on the current quality level.
-    /// </summary>
+    private void ResetDots(SKImageInfo info)
+    {
+        _lastImageInfo = info;
+        _dots = new Dot[_dotCount];
+
+        for (int i = 0; i < _dotCount; i++)
+        {
+            float x = _random.NextSingle() * info.Width;
+            float y = _random.NextSingle() * info.Height;
+            float baseRadius = MinMaxRadius(_random.NextSingle());
+            SKColor color = GenerateRandomColor();
+
+            _dots[i] = new Dot(
+                x, y,
+                (_random.NextSingle() - 0.5f) * DOT_SPEED_BASE,
+                (_random.NextSingle() - 0.5f) * DOT_SPEED_BASE,
+                baseRadius,
+                baseRadius,
+                color
+            );
+        }
+    }
+
+    private static float MinMaxRadius(float factor) =>
+        MIN_DOT_RADIUS + (MAX_DOT_RADIUS - MIN_DOT_RADIUS) * factor;
+
+    private static SKColor GenerateRandomColor()
+    {
+        byte r = (byte)_random.Next(180, 255);
+        byte g = (byte)_random.Next(100, 180);
+        byte b = (byte)_random.Next(50, 100);
+        return new SKColor(r, g, b);
+    }
+
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium)
+    {
+        Safe(
+            () =>
+            {
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
+
+                if (configChanged)
+                {
+                    OnConfigurationChanged();
+                }
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.Configure",
+                ErrorMessage = "Failed to configure renderer"
+            }
+        );
+    }
+
     protected override void ApplyQualitySettings()
     {
-        Safe(() =>
-        {
-            base.ApplyQualitySettings();
-
-            switch (_quality)
+        Safe(
+            () =>
             {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-                    _useHardwareAcceleration = true;
-                    _useVectorization = false;
-                    _batchProcessing = false;
-                    break;
+                base.ApplyQualitySettings();
 
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useHardwareAcceleration = true;
-                    _useVectorization = true;
-                    _batchProcessing = true;
-                    break;
+                int oldDotCount = _dotCount;
+                _dotCount = Quality switch
+                {
+                    RenderQuality.Low => LOW_QUALITY_DOT_COUNT,
+                    RenderQuality.Medium => MEDIUM_QUALITY_DOT_COUNT,
+                    RenderQuality.High => HIGH_QUALITY_DOT_COUNT,
+                    _ => MEDIUM_QUALITY_DOT_COUNT
+                };
 
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useHardwareAcceleration = true;
-                    _useVectorization = true;
-                    _batchProcessing = true;
-                    break;
-            }
+                _glowPaint.MaskFilter = UseAdvancedEffects
+                    ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR)
+                    : null;
 
-            if (_dotPaint != null)
+                if (oldDotCount != _dotCount)
+                {
+                    lock (_renderDataLock)
+                    {
+                        _dataReady = false;
+                        _currentRenderData = null;
+                    }
+
+                    if (_lastImageInfo.Width > 0 && _lastImageInfo.Height > 0)
+                    {
+                        ResetDots(_lastImageInfo);
+                    }
+                }
+
+                OnQualitySettingsApplied();
+            },
+            new ErrorHandlingOptions
             {
-                _dotPaint.IsAntialias = _useAntiAlias;
+                Source = $"{LOG_PREFIX}.ApplyQualitySettings",
+                ErrorMessage = "Failed to apply quality settings"
             }
-
-            _cachedBackground?.Dispose();
-            _cachedBackground = null;
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
-            ErrorMessage = "Failed to apply quality settings"
-        });
+        );
     }
-    #endregion
 
-    #region Rendering
-    /// <summary>
-    /// Renders the dots visualization on the canvas using spectrum data.
-    /// </summary>
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        SKPaint paint)
     {
-        if (!QuickValidate(canvas, spectrum, info, paint))
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
         {
-            drawPerformanceInfo?.Invoke(canvas!, info);
             return;
         }
 
-        if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-        {
-            drawPerformanceInfo?.Invoke(canvas, info);
-            return;
-        }
-
-        Safe(() =>
-        {
-            UpdatePaint(paint!);
-
-            int spectrumLength = spectrum!.Length;
-            int actualBarCount = Min(spectrumLength, barCount);
-            float canvasHeight = info.Height;
-            float calculatedBarWidth = barWidth * Constants.MAX_DOT_MULTIPLIER * _dotRadiusMultiplier;
-            float totalWidth = barWidth + barSpacing;
-
-            float[] processedSpectrum = PrepareSpectrum(spectrum, actualBarCount, spectrumLength);
-
-            List<CircleData> circles = CalculateCircleData(
-                processedSpectrum,
-                calculatedBarWidth,
-                totalWidth,
-                canvasHeight);
-
-            List<List<CircleData>> circleBins = GroupCirclesByAlphaBin(circles);
-
-            DrawCircles(canvas!, circleBins);
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Render",
-            ErrorMessage = "Error during rendering"
-        });
-
-        drawPerformanceInfo?.Invoke(canvas!, info);
-    }
-
-    /// <summary>
-    /// Updates the paint object with current settings.
-    /// </summary>
-    private void UpdatePaint(SKPaint basePaint)
-    {
-        Safe(() =>
-        {
-            if (_dotPaint == null)
+        Safe(
+            () =>
             {
-                InitializePaints();
-            }
-
-            if (_dotPaint != null)
-            {
-                _dotPaint.Color = basePaint.Color;
-                _dotPaint.IsAntialias = _useAntiAlias;
-            }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.UpdatePaint",
-            ErrorMessage = "Failed to update paint"
-        });
-    }
-    #endregion
-
-    #region Circle Calculation and Rendering
-    /// <summary>
-    /// Calculates circle data based on spectrum values.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
-    private List<CircleData> CalculateCircleData(
-        float[] smoothedSpectrum,
-        float multiplier,
-        float totalWidth,
-        float canvasHeight)
-    {
-        var circles = new List<CircleData>(smoothedSpectrum.Length);
-
-        if (_useVectorization && IsHardwareAccelerated && smoothedSpectrum.Length >= 4)
-        {
-            return CalculateCircleDataOptimized(smoothedSpectrum, multiplier, totalWidth, canvasHeight);
-        }
-
-        for (int i = 0; i < smoothedSpectrum.Length; i++)
-        {
-            float intensity = smoothedSpectrum[i];
-            if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
-
-            float dotRadius = Max(multiplier * intensity, Constants.MIN_DOT_RADIUS);
-            float x = i * totalWidth + dotRadius;
-            float y = canvasHeight - intensity * canvasHeight;
-
-            circles.Add(new CircleData
-            {
-                X = x,
-                Y = y,
-                Radius = dotRadius,
-                Intensity = intensity
-            });
-        }
-
-        return circles;
-    }
-
-    /// <summary>
-    /// Calculates circle data with optimizations for large datasets.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
-    private List<CircleData> CalculateCircleDataOptimized(
-       float[] smoothedSpectrum,
-       float multiplier,
-       float totalWidth,
-       float canvasHeight)
-    {
-        var circles = new List<CircleData>(smoothedSpectrum.Length);
-        const int chunkSize = 16;
-        int chunks = smoothedSpectrum.Length / chunkSize;
-
-        for (int chunk = 0; chunk < chunks; chunk++)
-        {
-            int startIdx = chunk * chunkSize;
-            int endIdx = startIdx + chunkSize;
-
-            for (int i = startIdx; i < endIdx; i++)
-            {
-                float intensity = smoothedSpectrum[i];
-                if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
-
-                float dotRadius = Max(multiplier * intensity, Constants.MIN_DOT_RADIUS);
-                float x = i * totalWidth + dotRadius;
-                float y = canvasHeight - intensity * canvasHeight;
-
-                circles.Add(new CircleData
+                if (_lastImageInfo.Width != info.Width || _lastImageInfo.Height != info.Height)
                 {
-                    X = x,
-                    Y = y,
-                    Radius = dotRadius,
-                    Intensity = intensity
-                });
-            }
-        }
-
-        // Process remaining elements
-        for (int i = chunks * chunkSize; i < smoothedSpectrum.Length; i++)
-        {
-            float intensity = smoothedSpectrum[i];
-            if (intensity < Constants.MIN_INTENSITY_THRESHOLD) continue;
-
-            float dotRadius = Max(multiplier * intensity, Constants.MIN_DOT_RADIUS);
-            float x = i * totalWidth + dotRadius;
-            float y = canvasHeight - intensity * canvasHeight;
-
-            circles.Add(new CircleData
-            {
-                X = x,
-                Y = y,
-                Radius = dotRadius,
-                Intensity = intensity
-            });
-        }
-
-        return circles;
-    }
-
-    /// <summary>
-    /// Groups circles into bins by alpha value for efficient rendering.
-    /// </summary>
-    private List<List<CircleData>> GroupCirclesByAlphaBin(List<CircleData> circles)
-    {
-        List<List<CircleData>> circleBins = new List<List<CircleData>>(Constants.ALPHA_BINS);
-
-        for (int i = 0; i < Constants.ALPHA_BINS; i++)
-        {
-            circleBins.Add(new List<CircleData>(circles.Count / Constants.ALPHA_BINS + 1));
-        }
-
-        float binStep = 255f / (Constants.ALPHA_BINS - 1);
-
-        foreach (var circle in circles)
-        {
-            byte alpha = (byte)Min(circle.Intensity * Constants.ALPHA_MULTIPLIER, 255);
-            int binIndex = Min((int)(alpha / binStep), Constants.ALPHA_BINS - 1);
-            circleBins[binIndex].Add(circle);
-        }
-
-        return circleBins;
-    }
-
-    /// <summary>
-    /// Draws circles efficiently by grouping them by alpha value.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
-    private void DrawCircles(SKCanvas canvas, List<List<CircleData>> circleBins)
-    {
-        Safe(() =>
-        {
-            if (_dotPaint == null) return;
-
-            SKRect canvasBounds = new SKRect(0, 0, canvas.DeviceClipBounds.Width, canvas.DeviceClipBounds.Height);
-            float binStep = 255f / (Constants.ALPHA_BINS - 1);
-
-            for (int binIndex = 0; binIndex < Constants.ALPHA_BINS; binIndex++)
-            {
-                var bin = circleBins[binIndex];
-                if (bin.Count == 0)
-                    continue;
-
-                byte binAlpha = (byte)(binIndex * binStep);
-                _dotPaint.Color = _dotPaint.Color.WithAlpha(binAlpha);
-
-                if (bin.Count <= 5 || !_batchProcessing)
-                {
-                    // Draw individual circles for small batches
-                    foreach (var circle in bin)
-                    {
-                        // Skip circles outside the canvas
-                        SKRect circleBounds = new SKRect(
-                            circle.X - circle.Radius,
-                            circle.Y - circle.Radius,
-                            circle.X + circle.Radius,
-                            circle.Y + circle.Radius);
-
-                        if (!canvas.QuickReject(circleBounds))
-                        {
-                            canvas.DrawCircle(circle.X, circle.Y, circle.Radius, _dotPaint);
-                        }
-                    }
+                    ResetDots(info);
                 }
-                else
+
+                UpdateState(spectrum, barCount, info);
+
+                if (_dataReady)
                 {
-                    // Batch drawing for better performance
-                    using var path = _pathPool.Get();
-                    path.Reset();
-
-                    foreach (var circle in bin)
-                    {
-                        SKRect circleBounds = new SKRect(
-                            circle.X - circle.Radius,
-                            circle.Y - circle.Radius,
-                            circle.X + circle.Radius,
-                            circle.Y + circle.Radius);
-
-                        if (!canvas.QuickReject(circleBounds))
-                        {
-                            path.AddCircle(circle.X, circle.Y, circle.Radius);
-                        }
-                    }
-
-                    canvas.DrawPath(path, _dotPaint);
+                    RenderFrame(canvas, info);
                 }
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.RenderEffect",
+                ErrorMessage = "Error in RenderEffect method"
             }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.DrawCircles",
-            ErrorMessage = "Error drawing circles"
-        });
+        );
     }
-    #endregion
 
-    #region Disposal
-    /// <summary>
-    /// Disposes of resources used by the renderer.
-    /// </summary>
+    private bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint)
+    {
+        if (!_isInitialized)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
+            return false;
+        }
+        if (canvas == null || spectrum == null || paint == null)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, "Invalid render parameters: null values");
+            return false;
+        }
+
+        if (info.Width <= 0 || info.Height <= 0)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+            return false;
+        }
+
+        if (spectrum.Length == 0)
+        {
+            Log(LogLevel.Warning, LOG_PREFIX, "Empty spectrum data");
+            return true;
+        }
+
+        if (_disposed)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
+            return false;
+        }
+
+        return true;
+    }
+
+    private void UpdateState(
+        float[] spectrum,
+        int barCount,
+        SKImageInfo info)
+    {
+        Safe(
+            () =>
+            {
+                float[] processedSpectrum = ProcessSpectrumForDots(spectrum, barCount);
+                _maxSpectrum = processedSpectrum.Length > 0 ? processedSpectrum.Max() : 0f;
+
+                UpdateGlobalRadiusMultiplier();
+                UpdateDots(processedSpectrum, info);
+                PrepareRenderData(barCount);
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.UpdateState",
+                ErrorMessage = "Error updating renderer state"
+            }
+        );
+    }
+
+    private void UpdateGlobalRadiusMultiplier()
+    {
+        _globalRadiusMultiplier = 1.0f + _maxSpectrum * DOT_RADIUS_SCALE_FACTOR;
+        _globalRadiusMultiplier = Clamp(_globalRadiusMultiplier, 0.5f, 2.0f);
+    }
+
+    private static float[] ProcessSpectrumForDots(float[] spectrum, int barCount)
+    {
+        int targetCount = Max(MIN_BAR_COUNT, Min(spectrum.Length, barCount));
+        float[] processedSpectrum = new float[targetCount];
+
+        if (spectrum.Length == 0 || targetCount <= 0)
+            return processedSpectrum;
+
+        float blockSize = (float)spectrum.Length / targetCount;
+
+        for (int i = 0; i < targetCount; i++)
+        {
+            processedSpectrum[i] = CalculateAverageSpectrumBlock(spectrum, i, blockSize);
+        }
+
+        return processedSpectrum;
+    }
+
+    private static float CalculateAverageSpectrumBlock(float[] spectrum, int blockIndex, float blockSize)
+    {
+        float sum = 0;
+        int start = (int)(blockIndex * blockSize);
+        int end = (int)((blockIndex + 1) * blockSize);
+        int actualEnd = Min(end, spectrum.Length);
+        int count = actualEnd - start;
+
+        if (count <= 0)
+            return 0;
+
+        for (int j = start; j < actualEnd; j++)
+        {
+            sum += spectrum[j];
+        }
+
+        return sum / count;
+    }
+
+    private void UpdateDots(float[] processedSpectrum, SKImageInfo info)
+    {
+        Dot[] updatedDots = new Dot[_dots.Length];
+        float deltaTime = (float)(DateTime.Now - _lastUpdateTime).TotalSeconds;
+        deltaTime = Clamp(deltaTime, 0.001f, 0.1f);
+
+        for (int i = 0; i < _dots.Length; i++)
+        {
+            var dot = _dots[i];
+            int spectrumIndex = GetSpectrumIndexForDot(i, processedSpectrum.Length);
+            float spectrumValue = processedSpectrum[spectrumIndex];
+
+            updatedDots[i] = UpdateSingleDot(dot, spectrumValue, deltaTime, info);
+        }
+
+        _dots = updatedDots;
+    }
+
+    private int GetSpectrumIndexForDot(int dotIndex, int spectrumLength)
+    {
+        int index = (int)((float)dotIndex / _dotCount * spectrumLength);
+        return Clamp(index, 0, spectrumLength - 1);
+    }
+
+    private Dot UpdateSingleDot(Dot dot, float spectrumValue, float deltaTime, SKImageInfo info)
+    {
+        float normalizedX = dot.X / info.Width;
+        float normalizedY = dot.Y / info.Height;
+
+        (float forceX, float forceY) = CalculateForces(normalizedX, normalizedY, spectrumValue);
+
+        float newVelocityX = (dot.VelocityX + forceX * deltaTime) * DOT_VELOCITY_DAMPING;
+        float newVelocityY = (dot.VelocityY + forceY * deltaTime) * DOT_VELOCITY_DAMPING;
+
+        float newX = dot.X + newVelocityX * deltaTime;
+        float newY = dot.Y + newVelocityY * deltaTime;
+
+        (newX, newVelocityX) = HandleBoundaryCollision(newX, newVelocityX, 0, info.Width);
+        (newY, newVelocityY) = HandleBoundaryCollision(newY, newVelocityY, 0, info.Height);
+
+        float newRadius = dot.BaseRadius * (1.0f + spectrumValue * SPECTRUM_VELOCITY_FACTOR) * _globalRadiusMultiplier;
+
+        return dot with
+        {
+            X = newX,
+            Y = newY,
+            VelocityX = newVelocityX,
+            VelocityY = newVelocityY,
+            Radius = newRadius
+        };
+    }
+
+    private static (float forceX, float forceY) CalculateForces(float normalizedX, float normalizedY, float spectrumValue)
+    {
+        float gravityX = (_gravityCenter.X - normalizedX) * DOT_SPEED_BASE;
+        float gravityY = (_gravityCenter.Y - normalizedY) * DOT_SPEED_BASE;
+
+        float spectrumForceX = (normalizedX - 0.5f) * spectrumValue * SPECTRUM_INFLUENCE_FACTOR * DOT_SPEED_SCALE;
+        float spectrumForceY = (normalizedY - 0.5f) * spectrumValue * SPECTRUM_INFLUENCE_FACTOR * DOT_SPEED_SCALE;
+
+        return (gravityX + spectrumForceX, gravityY + spectrumForceY);
+    }
+
+    private static (float position, float velocity) HandleBoundaryCollision(
+        float position, float velocity, float minBound, float maxBound)
+    {
+        if (position < minBound)
+        {
+            return (minBound, -velocity * 0.5f);
+        }
+        else if (position > maxBound)
+        {
+            return (maxBound, -velocity * 0.5f);
+        }
+        return (position, velocity);
+    }
+
+    private void PrepareRenderData(int barCount)
+    {
+        lock (_renderDataLock)
+        {
+            _currentRenderData = new RenderData(
+                _dots,
+                _maxSpectrum,
+                barCount);
+            _dataReady = true;
+        }
+    }
+
+    private void RenderFrame(
+        SKCanvas canvas,
+        SKImageInfo _)
+    {
+        Safe(
+            () =>
+            {
+                RenderData renderData;
+                lock (_renderDataLock)
+                {
+                    if (!_dataReady || _currentRenderData == null)
+                        return;
+                    renderData = _currentRenderData.Value;
+                }
+
+                Dot[] sortedDots = [.. renderData.Dots.OrderBy(d => d.Radius)];
+
+                DrawDots(canvas, sortedDots, renderData.AlphaFactor);
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.RenderFrame",
+                ErrorMessage = "Error rendering dots frame"
+            }
+        );
+    }
+
+    private void DrawDots(
+        SKCanvas canvas,
+        Dot[] dots,
+        float alphaFactor)
+    {
+        foreach (var dot in dots)
+        {
+            if (dot.Radius < 0.5f)
+                continue;
+
+            byte alpha = (byte)(ALPHA_BASE * 255 * alphaFactor);
+
+            DrawDotWithGlow(canvas, dot, alpha);
+        }
+    }
+
+    private void DrawDotWithGlow(SKCanvas canvas, Dot dot, byte alpha)
+    {
+        if (UseAdvancedEffects)
+        {
+            _glowPaint.Color = dot.Color.WithAlpha((byte)(BASE_GLOW_ALPHA * alpha));
+            float glowRadius = dot.Radius * (1.0f + GLOW_RADIUS_FACTOR);
+            canvas.DrawCircle(dot.X, dot.Y, glowRadius, _glowPaint);
+        }
+
+        _dotPaint.Color = dot.Color.WithAlpha(alpha);
+        canvas.DrawCircle(dot.X, dot.Y, dot.Radius, _dotPaint);
+    }
+
+    protected override void OnInvalidateCachedResources()
+    {
+        Safe(
+            () =>
+            {
+                _dataReady = false;
+                _currentRenderData = null;
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnInvalidateCachedResources",
+                ErrorMessage = "Failed to invalidate cached resources"
+            }
+        );
+    }
+
     public override void Dispose()
     {
         if (!_disposed)
         {
-            Safe(() =>
-            {
-                _dotPaint?.Dispose();
-                _dotPaint = null;
+            Safe(
+                () =>
+                {
+                    OnDispose();
+                },
+                new ErrorHandlingOptions
+                {
+                    Source = $"{LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during renderer disposal"
+                }
+            );
 
-                _cachedBackground?.Dispose();
-                _cachedBackground = null;
-
-                _backgroundCalculationTask?.Wait(100);
-
-                _pathPool?.Dispose();
-                _paintPool?.Dispose();
-
-                base.Dispose();
-
-                _disposed = true;
-                Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.Dispose",
-                ErrorMessage = "Error during disposal"
-            });
+            _disposed = true;
+            GC.SuppressFinalize(this);
         }
     }
-    #endregion
+
+    protected override void OnDispose()
+    {
+        Safe(
+            () =>
+            {
+                DisposeManagedResources();
+                base.OnDispose();
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnDispose",
+                ErrorMessage = "Error during OnDispose"
+            }
+        );
+    }
+
+    private void DisposeManagedResources()
+    {
+        _dotPaint?.Dispose();
+        _glowPaint?.Dispose();
+        _dots = [];
+    }
 }
