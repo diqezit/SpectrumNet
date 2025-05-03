@@ -1,339 +1,295 @@
 ﻿#nullable enable
 
-using SpectrumNet.Service.Enums;
+using static SpectrumNet.Views.Renderers.GaugeRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
 
-/// <summary>
-/// Renderer that visualizes audio levels as an analog gauge with a needle and peak indicator.
-/// </summary>
-public sealed class GaugeRenderer : BaseSpectrumRenderer
+public sealed class GaugeRenderer : EffectSpectrumRenderer
 {
-    #region Singleton Pattern
-    private static readonly Lazy<GaugeRenderer> Instance = new(() => new GaugeRenderer(),
-                                                              LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<GaugeRenderer> _instance = new(() => new GaugeRenderer());
 
     private GaugeRenderer() { }
 
-    /// <summary>
-    /// Gets the singleton instance of the GaugeRenderer.
-    /// </summary>
-    public static GaugeRenderer GetInstance() => Instance.Value;
-    #endregion
+    public static GaugeRenderer GetInstance() => _instance.Value;
 
-    #region Constants
-    /// <summary>
-    /// Constants used by the GaugeRenderer for defining gauge properties and behavior.
-    /// </summary>
-    private static class GaugeConstants
+    public record Constants
     {
-        public const string LOG_PREFIX = "[GaugeRenderer]";
+        public const string LOG_PREFIX = "GaugeRenderer";
 
-        public static class Db
-        {
-            public const float Max = 5f;
-            public const float Min = -30f;
-            public const float PeakThreshold = 5f;
-        }
+        public const float
+            DB_MAX = 5f,
+            DB_MIN = -30f,
+            DB_PEAK_THRESHOLD = 5f;
 
-        public static class Angle
-        {
-            public const float Start = -150f;
-            public const float End = -30f;
-            public const float TotalRange = End - Start;
-        }
+        public const float
+            ANGLE_START = -150f,
+            ANGLE_END = -30f,
+            ANGLE_TOTAL_RANGE = ANGLE_END - ANGLE_START;
 
-        public static class Needle
-        {
-            public const float DefaultLengthMultiplier = 1.55f;
-            public const float DefaultCenterYOffsetMultiplier = 0.4f;
-            public const float StrokeWidth = 2.25f;
-            public const float CenterCircleRadiusOverlay = 0.015f;
-            public const float CenterCircleRadius = 0.02f;
-            public const float BaseWidthMultiplier = 2.5f;
-        }
+        public const float
+            NEEDLE_DEFAULT_LENGTH_MULTIPLIER = 1.55f,
+            NEEDLE_DEFAULT_CENTER_Y_OFFSET_MULTIPLIER = 0.4f,
+            NEEDLE_STROKE_WIDTH = 2.25f,
+            NEEDLE_CENTER_CIRCLE_RADIUS_OVERLAY = 0.015f,
+            NEEDLE_CENTER_CIRCLE_RADIUS = 0.02f,
+            NEEDLE_BASE_WIDTH_MULTIPLIER = 2.5f;
 
-        public static class Background
-        {
-            public const float OuterFrameCornerRadius = 8f;
-            public const float InnerFramePadding = 4f;
-            public const float InnerFrameCornerRadius = 6f;
-            public const float BackgroundPadding = 4f;
-            public const float BackgroundCornerRadius = 4f;
-            public const float VuTextSizeFactor = 0.2f;
-            public const float VuTextBottomOffsetFactor = 0.2f;
-        }
+        public const float
+            BG_OUTER_FRAME_CORNER_RADIUS = 8f,
+            BG_INNER_FRAME_PADDING = 4f,
+            BG_INNER_FRAME_CORNER_RADIUS = 6f,
+            BG_BACKGROUND_PADDING = 4f,
+            BG_BACKGROUND_CORNER_RADIUS = 4f,
+            BG_VU_TEXT_SIZE_FACTOR = 0.2f,
+            BG_VU_TEXT_BOTTOM_OFFSET_FACTOR = 0.2f;
 
-        public static class Scale
-        {
-            public const float CenterYOffsetFactor = 0.15f;
-            public const float RadiusXFactorOverlay = 0.4f;
-            public const float RadiusXFactor = 0.45f;
-            public const float RadiusYFactorOverlay = 0.45f;
-            public const float RadiusYFactor = 0.5f;
-            public const float TextOffsetFactorOverlay = 0.1f;
-            public const float TextOffsetFactor = 0.12f;
-            public const float TextSizeFactorOverlay = 0.08f;
-            public const float TextSizeFactor = 0.1f;
-            public const float TickLengthZeroFactorOverlay = 0.12f;
-            public const float TickLengthZeroFactor = 0.15f;
-            public const float TickLengthFactorOverlay = 0.07f;
-            public const float TickLengthFactor = 0.08f;
-            public const float TickLengthMinorFactorOverlay = 0.05f;
-            public const float TickLengthMinorFactor = 0.06f;
-            public const float TickStrokeWidth = 1.8f;
-            public const float TextSizeMultiplierZero = 1.15f;
-        }
+        public const float
+            SCALE_CENTER_Y_OFFSET_FACTOR = 0.15f,
+            SCALE_RADIUS_X_FACTOR_OVERLAY = 0.4f,
+            SCALE_RADIUS_X_FACTOR = 0.45f,
+            SCALE_RADIUS_Y_FACTOR_OVERLAY = 0.45f,
+            SCALE_RADIUS_Y_FACTOR = 0.5f,
+            SCALE_TEXT_OFFSET_FACTOR_OVERLAY = 0.1f,
+            SCALE_TEXT_OFFSET_FACTOR = 0.12f,
+            SCALE_TEXT_SIZE_FACTOR_OVERLAY = 0.08f,
+            SCALE_TEXT_SIZE_FACTOR = 0.1f,
+            SCALE_TICK_LENGTH_ZERO_FACTOR_OVERLAY = 0.12f,
+            SCALE_TICK_LENGTH_ZERO_FACTOR = 0.15f,
+            SCALE_TICK_LENGTH_FACTOR_OVERLAY = 0.07f,
+            SCALE_TICK_LENGTH_FACTOR = 0.08f,
+            SCALE_TICK_LENGTH_MINOR_FACTOR_OVERLAY = 0.05f,
+            SCALE_TICK_LENGTH_MINOR_FACTOR = 0.06f,
+            SCALE_TICK_STROKE_WIDTH = 1.8f,
+            SCALE_TEXT_SIZE_MULTIPLIER_ZERO = 1.15f;
 
-        public static class PeakLamp
-        {
-            public const float RadiusFactorOverlay = 0.04f;
-            public const float RadiusFactor = 0.05f;
-            public const float LampXOffsetFactorOverlay = 0.12f;
-            public const float LampXOffsetFactor = 0.1f;
-            public const float LampYOffsetFactorOverlay = 0.18f;
-            public const float LampYOffsetFactor = 0.2f;
-            public const float TextSizeFactorOverlay = 1.2f;
-            public const float TextSizeFactor = 1.5f;
-            public const float TextYOffsetFactor = 2.5f;
-            public const float RimStrokeWidth = 1f;
-            public const float GlowRadiusMultiplier = 1.5f;
-            public const float InnerRadiusMultiplier = 0.8f;
-        }
+        public const float
+            PEAK_LAMP_RADIUS_FACTOR_OVERLAY = 0.04f,
+            PEAK_LAMP_RADIUS_FACTOR = 0.05f,
+            PEAK_LAMP_X_OFFSET_FACTOR_OVERLAY = 0.12f,
+            PEAK_LAMP_X_OFFSET_FACTOR = 0.1f,
+            PEAK_LAMP_Y_OFFSET_FACTOR_OVERLAY = 0.18f,
+            PEAK_LAMP_Y_OFFSET_FACTOR = 0.2f,
+            PEAK_LAMP_TEXT_SIZE_FACTOR_OVERLAY = 1.2f,
+            PEAK_LAMP_TEXT_SIZE_FACTOR = 1.5f,
+            PEAK_LAMP_TEXT_Y_OFFSET_FACTOR = 2.5f,
+            PEAK_LAMP_RIM_STROKE_WIDTH = 1f,
+            PEAK_LAMP_GLOW_RADIUS_MULTIPLIER = 1.5f,
+            PEAK_LAMP_INNER_RADIUS_MULTIPLIER = 0.8f;
 
-        public static class Rendering
-        {
-            public const float AspectRatio = 2.0f;
-            public const float GaugeRectPadding = 0.8f;
-            public const float MinDbClamp = 1e-10f;
-            public const float Margin = 0.05f;
-        }
+        public const float
+            RENDERING_ASPECT_RATIO = 2.0f,
+            RENDERING_GAUGE_RECT_PADDING = 0.8f,
+            RENDERING_MIN_DB_CLAMP = 1e-10f,
+            RENDERING_MARGIN = 0.05f;
 
-        public static class MinorMarks
-        {
-            public const int Divisor = 3;
-        }
+        public const int
+            MINOR_MARKS_DIVISOR = 3,
+            PEAK_HOLD_DURATION = 15;
     }
-    #endregion
 
-    #region Fields
-    private readonly GaugeState _state = new();
-    private GaugeRendererConfig _config = GaugeRendererConfig.Default;
-    private new bool _disposed;
-    private RenderQuality _quality = RenderQuality.Medium;
-    private new bool _useAntiAlias = true;
-    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-    private new bool _useAdvancedEffects = true;
-    private int _peakHoldCounter = 0;
-
-    private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 5);
-    private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 2);
-
-    private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
-    private readonly object _stateLock = new();
-
-    private static readonly (float Value, string Label)[] MajorMarks = new[]
+    private readonly record struct GaugeState(
+        float CurrentNeedlePosition,
+        float TargetNeedlePosition,
+        float PreviousValue,
+        bool PeakActive)
     {
+        public GaugeState() : this(0f, 0f, DB_MIN, false) { }
+    }
+
+    private readonly record struct GaugeConfig(
+        float SmoothingFactorIncrease,
+        float SmoothingFactorDecrease,
+        float RiseSpeed,
+        float FallSpeed,
+        float Damping,
+        float NeedleLengthMultiplier,
+        float NeedleCenterYOffsetMultiplier)
+    {
+        public static GaugeConfig Default => new(
+            SmoothingFactorIncrease: 0.2f,
+            SmoothingFactorDecrease: 0.05f,
+            RiseSpeed: 0.15f,
+            FallSpeed: 0.03f,
+            Damping: 0.7f,
+            NeedleLengthMultiplier: NEEDLE_DEFAULT_LENGTH_MULTIPLIER,
+            NeedleCenterYOffsetMultiplier: NEEDLE_DEFAULT_CENTER_Y_OFFSET_MULTIPLIER
+        );
+
+        public GaugeConfig WithOverlayMode(bool isOverlayActive) => this with
+        {
+            SmoothingFactorIncrease = isOverlayActive ? 0.1f : 0.2f,
+            SmoothingFactorDecrease = isOverlayActive ? 0.02f : 0.05f,
+            NeedleLengthMultiplier = isOverlayActive ? 1.6f : NEEDLE_DEFAULT_LENGTH_MULTIPLIER,
+            NeedleCenterYOffsetMultiplier = isOverlayActive ? 0.35f : NEEDLE_DEFAULT_CENTER_Y_OFFSET_MULTIPLIER
+        };
+    }
+
+    private static readonly (float Value, string Label)[] _majorMarks =
+    [
         (-30f, "-30"), (-20f, "-20"), (-10f, "-10"),
         (-7f, "-7"), (-5f, "-5"), (-3f, "-3"),
         (0f, "0"), (3f, "+3"), (5f, "+5")
-    };
-    private static readonly List<float> MinorMarkValues = new();
+    ];
 
-    private const int PeakHoldDuration = 15;
-    #endregion
+    private static readonly List<float> _minorMarkValues = [];
 
-    #region Initialization and Configuration
-    /// <summary>
-    /// Initializes the renderer and prepares resources for rendering.
-    /// </summary>
-    public override void Initialize()
-    {
-        Safe(() =>
-        {
-            lock (_stateLock)
-            {
-                _state.CurrentNeedlePosition = 0f;
-                _state.TargetNeedlePosition = 0f;
-                _state.PreviousValue = GaugeConstants.Db.Min;
-                _state.PeakActive = false;
-            }
-            _config = GaugeRendererConfig.Default;
-            ApplyQualitySettings();
-            Log(LogLevel.Debug, GaugeConstants.LOG_PREFIX, "Initialized");
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{GaugeConstants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
-    }
+    // reused shader color arrays
+    private static readonly SKColor[] _gaugeBackgroundColors = [new(250, 250, 240), new(230, 230, 215)];
+    private static readonly SKColor[] _needleCenterColors = [SKColors.White, new(180, 180, 180), new(60, 60, 60)];
+    private static readonly float[] _centerColorStops = [0.0f, 0.3f, 1.0f];
+    private static readonly SKColor[] _redTickColors = [new(200, 0, 0), SKColors.Red];
+    private static readonly SKColor[] _grayTickColors = [new(60, 60, 60), new(100, 100, 100)];
+    private static readonly SKColor[] _activeLampColors = [SKColors.White, new(255, 180, 180), SKColors.Red];
+    private static readonly SKColor[] _inactiveLampColors = [new(220, 220, 220), new(180, 0, 0), new(80, 0, 0)];
 
-    /// <summary>
-    /// Configures the renderer with overlay status and quality settings.
-    /// </summary>
-    /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
-    /// <param name="quality">The rendering quality level.</param>
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-    {
-        Safe(() =>
-        {
-            _config = _config.WithOverlayMode(isOverlayActive);
-            if (_quality != quality)
-            {
-                _quality = quality;
-                ApplyQualitySettings();
-            }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{GaugeConstants.LOG_PREFIX}.Configure",
-            ErrorMessage = "Failed to configure renderer"
-        });
-    }
+    private readonly object _stateLock = new();
+    private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
 
-    /// <summary>
-    /// Applies quality settings to adjust rendering parameters.
-    /// </summary>
-    protected override void ApplyQualitySettings()
-    {
-        Safe(() =>
-        {
-            switch (_quality)
-            {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-                    _useAdvancedEffects = false;
-                    break;
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useAdvancedEffects = true;
-                    break;
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useAdvancedEffects = true;
-                    break;
-            }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{GaugeConstants.LOG_PREFIX}.ApplyQualitySettings",
-            ErrorMessage = "Failed to apply quality settings"
-        });
-    }
+    private GaugeState _state = new();
+    private GaugeConfig _config = GaugeConfig.Default;
+    private int _peakHoldCounter;
 
     static GaugeRenderer()
     {
         InitializeMinorMarks();
     }
 
-    private static void InitializeMinorMarks()
+    public override void Initialize()
     {
-        var majorValues = MajorMarks.Select(m => m.Value).OrderBy(v => v).ToList();
-        for (int i = 0; i < majorValues.Count - 1; i++)
-        {
-            float start = majorValues[i];
-            float end = majorValues[i + 1];
-            float step = (end - start) / GaugeConstants.MinorMarks.Divisor;
-            for (float value = start + step; value < end; value += step)
-                MinorMarkValues.Add(value);
-        }
-    }
-    #endregion
+        Safe(
+            () =>
+            {
+                base.Initialize();
 
-    #region Rendering
-    /// <summary>
-    /// Renders the gauge visualization on the canvas using spectrum data.
-    /// </summary>
-    /// <param name="canvas">The SkiaSharp canvas to render on.</param>
-    /// <param name="spectrum">The spectrum data array.</param>
-    /// <param name="info">Image information for rendering context.</param>
-    /// <param name="barWidth">Width of individual bars (unused in this renderer).</param>
-    /// <param name="barSpacing">Spacing between bars (unused in this renderer).</param>
-    /// <param name="barCount">Number of bars (unused in this renderer).</param>
-    /// <param name="paint">Paint object for styling.</param>
-    /// <param name="drawPerformanceInfo">Action to draw performance information.</param>
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
+                lock (_stateLock)
+                {
+                    _state = new GaugeState();
+                    _config = GaugeConfig.Default;
+                }
+
+                ApplyQualitySettings();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.Initialize",
+                ErrorMessage = "Failed to initialize renderer"
+            }
+        );
+    }
+
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium)
+    {
+        Safe(
+            () =>
+            {
+                bool configChanged = Quality != quality;
+                base.Configure(isOverlayActive, quality);
+
+                _config = _config.WithOverlayMode(isOverlayActive);
+
+                if (configChanged)
+                {
+                    OnConfigurationChanged();
+                }
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.Configure",
+                ErrorMessage = "Failed to configure renderer"
+            }
+        );
+    }
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, paint))
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
         {
-            drawPerformanceInfo?.Invoke(canvas!, info);
             return;
         }
 
-        if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-        {
-            drawPerformanceInfo?.Invoke(canvas, info);
-            return;
-        }
-
-        Safe(() =>
-        {
-            bool semaphoreAcquired = false;
-            try
+        Safe(
+            () =>
             {
-                semaphoreAcquired = _renderSemaphore.Wait(0);
-                if (semaphoreAcquired)
+                bool semaphoreAcquired = false;
+                try
                 {
-                    UpdateGaugeState(spectrum!);
-                }
+                    semaphoreAcquired = _renderSemaphore.Wait(0);
+                    if (semaphoreAcquired)
+                    {
+                        UpdateGaugeState(spectrum);
+                    }
 
-                RenderGaugeComponents(canvas!, info, paint!, drawPerformanceInfo);
-            }
-            finally
+                    RenderGaugeComponents(canvas, info, paint);
+                }
+                finally
+                {
+                    if (semaphoreAcquired)
+                        _renderSemaphore.Release();
+                }
+            },
+            new ErrorHandlingOptions
             {
-                if (semaphoreAcquired)
-                    _renderSemaphore.Release();
+                Source = $"{LOG_PREFIX}.RenderEffect",
+                ErrorMessage = "Error during rendering"
             }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{GaugeConstants.LOG_PREFIX}.Render",
-            ErrorMessage = "Error during rendering"
-        });
+        );
     }
 
-    /// <summary>
-    /// Validates rendering parameters before processing.
-    /// </summary>
-    private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKPaint? paint)
+    private bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint)
     {
+        if (!_isInitialized)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
+            return false;
+        }
         if (canvas == null)
         {
-            Log(LogLevel.Error, GaugeConstants.LOG_PREFIX, "Canvas is null");
+            Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
             return false;
         }
         if (spectrum == null || spectrum.Length == 0)
         {
-            Log(LogLevel.Warning, GaugeConstants.LOG_PREFIX, "Spectrum is null or empty");
+            Log(LogLevel.Warning, LOG_PREFIX, "Spectrum is null or empty");
             return false;
         }
         if (paint == null)
         {
-            Log(LogLevel.Error, GaugeConstants.LOG_PREFIX, "Paint is null");
+            Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+            return false;
+        }
+        if (info.Width <= 0 || info.Height <= 0)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
             return false;
         }
         if (_disposed)
         {
-            Log(LogLevel.Error, GaugeConstants.LOG_PREFIX, "Renderer is disposed");
+            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
             return false;
         }
+
         return true;
     }
-    #endregion
 
-    #region Rendering Implementation
-    /// <summary>
-    /// Renders all gauge components.
-    /// </summary>
-    private void RenderGaugeComponents(SKCanvas canvas, SKImageInfo info, SKPaint basePaint, Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+    private void RenderGaugeComponents(
+        SKCanvas canvas,
+        SKImageInfo info,
+        SKPaint basePaint)
     {
         var gaugeRect = CalculateGaugeRect(info);
         bool isOverlayActive = _config.SmoothingFactorIncrease == 0.1f;
@@ -342,114 +298,222 @@ public sealed class GaugeRenderer : BaseSpectrumRenderer
         DrawScale(canvas, gaugeRect, isOverlayActive);
         DrawNeedle(canvas, gaugeRect, _state.CurrentNeedlePosition, isOverlayActive, basePaint);
         DrawPeakLamp(canvas, gaugeRect, isOverlayActive);
-        drawPerformanceInfo?.Invoke(canvas, info);
     }
 
-    /// <summary>
-    /// Draws the gauge background with frames and VU text.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
     private void DrawGaugeBackground(SKCanvas canvas, SKRect rect)
     {
-        using var outerFramePaint = _paintPool.Get();
-        using var innerFramePaint = _paintPool.Get();
-        using var backgroundPaint = _paintPool.Get();
-        using var textPaint = _paintPool.Get();
+        // Draw outer frame
+        var outerFramePaint = GetOuterFramePaint();
+        canvas.DrawRoundRect(
+            rect,
+            BG_OUTER_FRAME_CORNER_RADIUS,
+            BG_OUTER_FRAME_CORNER_RADIUS,
+            outerFramePaint);
 
-        outerFramePaint.Style = Fill;
-        outerFramePaint.Color = new SKColor(80, 80, 80);
-        outerFramePaint.IsAntialias = _useAntiAlias;
-        canvas.DrawRoundRect(rect, GaugeConstants.Background.OuterFrameCornerRadius, GaugeConstants.Background.OuterFrameCornerRadius, outerFramePaint);
+        // Draw inner frame
+        var innerFrameRect = GetInnerFrameRect(rect);
+        var innerFramePaint = GetInnerFramePaint();
+        canvas.DrawRoundRect(
+            innerFrameRect,
+            BG_INNER_FRAME_CORNER_RADIUS,
+            BG_INNER_FRAME_CORNER_RADIUS,
+            innerFramePaint);
 
-        var innerFrameRect = new SKRect(
-            rect.Left + GaugeConstants.Background.InnerFramePadding,
-            rect.Top + GaugeConstants.Background.InnerFramePadding,
-            rect.Right - GaugeConstants.Background.InnerFramePadding,
-            rect.Bottom - GaugeConstants.Background.InnerFramePadding);
-        innerFramePaint.Style = Fill;
-        innerFramePaint.Color = new SKColor(105, 105, 105);
-        innerFramePaint.IsAntialias = _useAntiAlias;
-        canvas.DrawRoundRect(innerFrameRect, GaugeConstants.Background.InnerFrameCornerRadius, GaugeConstants.Background.InnerFrameCornerRadius, innerFramePaint);
+        // Draw background
+        var backgroundRect = GetBackgroundRect(innerFrameRect);
+        var backgroundPaint = GetBackgroundPaint(backgroundRect);
+        canvas.DrawRoundRect(
+            backgroundRect,
+            BG_BACKGROUND_CORNER_RADIUS,
+            BG_BACKGROUND_CORNER_RADIUS,
+            backgroundPaint);
 
-        var backgroundRect = new SKRect(
-            innerFrameRect.Left + GaugeConstants.Background.BackgroundPadding,
-            innerFrameRect.Top + GaugeConstants.Background.BackgroundPadding,
-            innerFrameRect.Right - GaugeConstants.Background.BackgroundPadding,
-            innerFrameRect.Bottom - GaugeConstants.Background.BackgroundPadding);
-        backgroundPaint.Style = Fill;
-        backgroundPaint.IsAntialias = _useAntiAlias;
-        backgroundPaint.Shader = SKShader.CreateLinearGradient(
-            new SKPoint(backgroundRect.Left, backgroundRect.Top),
-            new SKPoint(backgroundRect.Left, backgroundRect.Bottom),
-            new[] { new SKColor(250, 250, 240), new SKColor(230, 230, 215) },
-            null,
-            SKShaderTileMode.Clamp);
-        canvas.DrawRoundRect(backgroundRect, GaugeConstants.Background.BackgroundCornerRadius, GaugeConstants.Background.BackgroundCornerRadius, backgroundPaint);
-
-        textPaint.Color = SKColors.Black;
-        textPaint.IsAntialias = _useAntiAlias;
-        using var font = new SKFont(SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold), rect.Height * GaugeConstants.Background.VuTextSizeFactor);
-        canvas.DrawText("VU", backgroundRect.MidX, backgroundRect.Bottom - backgroundRect.Height * GaugeConstants.Background.VuTextBottomOffsetFactor, SKTextAlign.Center, font, textPaint);
+        // Draw VU text
+        DrawVuText(canvas, backgroundRect, rect.Height);
     }
 
-    /// <summary>
-    /// Draws the gauge scale with major and minor marks.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
+    private SKPaint GetOuterFramePaint()
+    {
+        var paint = _paintPool.Get();
+        paint.Style = SKPaintStyle.Fill;
+        paint.Color = new SKColor(80, 80, 80);
+        paint.IsAntialias = UseAntiAlias;
+        return paint;
+    }
+
+    private static SKRect GetInnerFrameRect(SKRect outerRect)
+    {
+        return new SKRect(
+            outerRect.Left + BG_INNER_FRAME_PADDING,
+            outerRect.Top + BG_INNER_FRAME_PADDING,
+            outerRect.Right - BG_INNER_FRAME_PADDING,
+            outerRect.Bottom - BG_INNER_FRAME_PADDING);
+    }
+
+    private SKPaint GetInnerFramePaint()
+    {
+        var paint = _paintPool.Get();
+        paint.Style = SKPaintStyle.Fill;
+        paint.Color = new SKColor(105, 105, 105);
+        paint.IsAntialias = UseAntiAlias;
+        return paint;
+    }
+
+    private static SKRect GetBackgroundRect(SKRect innerFrameRect)
+    {
+        return new SKRect(
+            innerFrameRect.Left + BG_BACKGROUND_PADDING,
+            innerFrameRect.Top + BG_BACKGROUND_PADDING,
+            innerFrameRect.Right - BG_BACKGROUND_PADDING,
+            innerFrameRect.Bottom - BG_BACKGROUND_PADDING);
+    }
+
+    private SKPaint GetBackgroundPaint(SKRect backgroundRect)
+    {
+        var paint = _paintPool.Get();
+        paint.Style = SKPaintStyle.Fill;
+        paint.IsAntialias = UseAntiAlias;
+        paint.Shader = SKShader.CreateLinearGradient(
+            new SKPoint(backgroundRect.Left, backgroundRect.Top),
+            new SKPoint(backgroundRect.Left, backgroundRect.Bottom),
+            _gaugeBackgroundColors,
+            null,
+            SKShaderTileMode.Clamp);
+        return paint;
+    }
+
+    private void DrawVuText(SKCanvas canvas, SKRect backgroundRect, float rectHeight)
+    {
+        using var textPaint = _paintPool.Get();
+        textPaint.Color = SKColors.Black;
+        textPaint.IsAntialias = UseAntiAlias;
+
+        using var font = new SKFont(
+            SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold),
+            rectHeight * BG_VU_TEXT_SIZE_FACTOR);
+
+        canvas.DrawText(
+            "VU",
+            backgroundRect.MidX,
+            backgroundRect.Bottom - backgroundRect.Height * BG_VU_TEXT_BOTTOM_OFFSET_FACTOR,
+            SKTextAlign.Center,
+            font,
+            textPaint);
+    }
+
     private void DrawScale(SKCanvas canvas, SKRect rect, bool isOverlayActive)
     {
-        float centerX = rect.MidX;
-        float centerY = rect.MidY + rect.Height * GaugeConstants.Scale.CenterYOffsetFactor;
-        float radiusX = rect.Width * (isOverlayActive ? GaugeConstants.Scale.RadiusXFactorOverlay : GaugeConstants.Scale.RadiusXFactor);
-        float radiusY = rect.Height * (isOverlayActive ? GaugeConstants.Scale.RadiusYFactorOverlay : GaugeConstants.Scale.RadiusYFactor);
+        var scaleParams = GetScaleParameters(rect, isOverlayActive);
 
         using var tickPaint = _paintPool.Get();
         using var textPaint = _paintPool.Get();
 
-        tickPaint.IsAntialias = _useAntiAlias;
-        tickPaint.StrokeWidth = GaugeConstants.Scale.TickStrokeWidth;
+        ConfigureScalePaints(tickPaint, textPaint);
 
-        textPaint.Color = SKColors.Black;
-        textPaint.IsAntialias = _useAntiAlias;
-        if (_useAdvancedEffects)
-            textPaint.ImageFilter = SKImageFilter.CreateDropShadow(0.5f, 0.5f, 0.5f, 0.5f, new SKColor(255, 255, 255, 180));
+        // Draw major marks
+        foreach (var (value, label) in _majorMarks)
+            DrawMark(canvas, scaleParams, value, label, isOverlayActive, tickPaint, textPaint);
 
-        foreach (var (value, label) in MajorMarks)
-            DrawMark(canvas, centerX, centerY, radiusX, radiusY, value, label, isOverlayActive, tickPaint, textPaint);
-
-        foreach (float value in MinorMarkValues)
-            DrawMark(canvas, centerX, centerY, radiusX, radiusY, value, null, isOverlayActive, tickPaint, null);
+        // Draw minor marks
+        foreach (float value in _minorMarkValues)
+            DrawMark(canvas, scaleParams, value, null, isOverlayActive, tickPaint, null);
     }
 
-    /// <summary>
-    /// Draws a single mark on the gauge scale.
-    /// </summary>
-    private void DrawMark(SKCanvas canvas, float centerX, float centerY, float radiusX, float radiusY,
-                          float value, string? label, bool isOverlayActive, SKPaint tickPaint, SKPaint? textPaint)
+    private static (float centerX, float centerY, float radiusX, float radiusY) GetScaleParameters(
+        SKRect rect, bool isOverlayActive)
     {
-        float normalizedValue = (value - GaugeConstants.Db.Min) / (GaugeConstants.Db.Max - GaugeConstants.Db.Min);
-        float angle = GaugeConstants.Angle.Start + normalizedValue * GaugeConstants.Angle.TotalRange;
-        float radian = angle * (float)(PI / 180.0);
+        float centerX = rect.MidX;
+        float centerY = rect.MidY + rect.Height * SCALE_CENTER_Y_OFFSET_FACTOR;
+        float radiusX = rect.Width * (isOverlayActive ? SCALE_RADIUS_X_FACTOR_OVERLAY : SCALE_RADIUS_X_FACTOR);
+        float radiusY = rect.Height * (isOverlayActive ? SCALE_RADIUS_Y_FACTOR_OVERLAY : SCALE_RADIUS_Y_FACTOR);
 
+        return (centerX, centerY, radiusX, radiusY);
+    }
+
+    private void ConfigureScalePaints(SKPaint tickPaint, SKPaint textPaint)
+    {
+        tickPaint.IsAntialias = UseAntiAlias;
+        tickPaint.StrokeWidth = SCALE_TICK_STROKE_WIDTH;
+
+        textPaint.Color = SKColors.Black;
+        textPaint.IsAntialias = UseAntiAlias;
+        if (UseAdvancedEffects)
+            textPaint.ImageFilter = SKImageFilter.CreateDropShadow(
+                0.5f, 0.5f, 0.5f, 0.5f, new SKColor(255, 255, 255, 180));
+    }
+
+    private void DrawMark(
+        SKCanvas canvas,
+        (float centerX, float centerY, float radiusX, float radiusY) scaleParams,
+        float value,
+        string? label,
+        bool isOverlayActive,
+        SKPaint tickPaint,
+        SKPaint? textPaint)
+    {
+        var (centerX, centerY, radiusX, radiusY) = scaleParams;
+        var (angle, radian) = CalculateAngleForValue(value);
+        var tickPoints = CalculateTickPoints(centerX, centerY, radiusX, radiusY, radian, value, label, isOverlayActive);
+
+        DrawTick(canvas, tickPoints, value, label, tickPaint);
+
+        if (!string.IsNullOrEmpty(label) && textPaint != null)
+        {
+            DrawTickLabel(canvas, centerX, centerY, radiusX, radiusY, value, label, angle, radian, isOverlayActive, textPaint);
+        }
+    }
+
+    private static (float angle, float radian) CalculateAngleForValue(float value)
+    {
+        float normalizedValue = (value - DB_MIN) / (DB_MAX - DB_MIN);
+        float angle = ANGLE_START + normalizedValue * ANGLE_TOTAL_RANGE;
+        float radian = angle * (MathF.PI / 180.0f);
+
+        return (angle, radian);
+    }
+
+    private static (float x1, float y1, float x2, float y2) CalculateTickPoints(
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float radian,
+        float value,
+        string? label,
+        bool isOverlayActive)
+    {
         float tickLength = radiusY * (label != null
             ? isOverlayActive
-                ? value == 0 ? GaugeConstants.Scale.TickLengthZeroFactorOverlay : GaugeConstants.Scale.TickLengthFactorOverlay
-                : value == 0 ? GaugeConstants.Scale.TickLengthZeroFactor : GaugeConstants.Scale.TickLengthFactor
-            : isOverlayActive ? GaugeConstants.Scale.TickLengthMinorFactorOverlay : GaugeConstants.Scale.TickLengthMinorFactor);
+                ? value == 0 ? SCALE_TICK_LENGTH_ZERO_FACTOR_OVERLAY : SCALE_TICK_LENGTH_FACTOR_OVERLAY
+                : value == 0 ? SCALE_TICK_LENGTH_ZERO_FACTOR : SCALE_TICK_LENGTH_FACTOR
+            : isOverlayActive ? SCALE_TICK_LENGTH_MINOR_FACTOR_OVERLAY : SCALE_TICK_LENGTH_MINOR_FACTOR);
 
-        float x1 = centerX + (radiusX - tickLength) * (float)Cos(radian);
-        float y1 = centerY + (radiusY - tickLength) * (float)Sin(radian);
-        float x2 = centerX + radiusX * (float)Cos(radian);
-        float y2 = centerY + radiusY * (float)Sin(radian);
+        float x1 = centerX + (radiusX - tickLength) * Cos(radian);
+        float y1 = centerY + (radiusY - tickLength) * Sin(radian);
+        float x2 = centerX + radiusX * Cos(radian);
+        float y2 = centerY + radiusY * Sin(radian);
+
+        return (x1, y1, x2, y2);
+    }
+
+    private static void DrawTick(
+        SKCanvas canvas,
+        (float x1, float y1, float x2, float y2) points,
+        float value,
+        string? label,
+        SKPaint tickPaint)
+    {
+        var (x1, y1, x2, y2) = points;
 
         if (label != null)
         {
             using var tickGradient = SKShader.CreateLinearGradient(
                 new SKPoint(x1, y1),
                 new SKPoint(x2, y2),
-                value >= 0 ? new[] { new SKColor(200, 0, 0), SKColors.Red } : new[] { new SKColor(60, 60, 60), new SKColor(100, 100, 100) },
+                value >= 0 ? _redTickColors : _grayTickColors,
                 null,
                 SKShaderTileMode.Clamp);
+
             tickPaint.Shader = tickGradient;
             canvas.DrawLine(x1, y1, x2, y2, tickPaint);
         }
@@ -458,48 +522,88 @@ public sealed class GaugeRenderer : BaseSpectrumRenderer
             tickPaint.Color = value >= 0 ? new SKColor(220, 0, 0) : new SKColor(80, 80, 80);
             canvas.DrawLine(x1, y1, x2, y2, tickPaint);
         }
-
-        if (!string.IsNullOrEmpty(label) && textPaint != null)
-        {
-            float textOffset = radiusY * (isOverlayActive ? GaugeConstants.Scale.TextOffsetFactorOverlay : GaugeConstants.Scale.TextOffsetFactor);
-            float textSize = radiusY * (isOverlayActive ? GaugeConstants.Scale.TextSizeFactorOverlay : GaugeConstants.Scale.TextSizeFactor);
-            using var font = new SKFont(SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold), textSize);
-            if (value == 0)
-            {
-                font.Size *= GaugeConstants.Scale.TextSizeMultiplierZero;
-                font.Embolden = true;
-            }
-            else
-            {
-                font.Embolden = false;
-            }
-
-            textPaint.Color = value >= 0 ? new SKColor(200, 0, 0) : SKColors.Black;
-            float textX = x2 + textOffset * (float)Cos(radian);
-            float textY = y2 + textOffset * (float)Sin(radian) + font.Metrics.Descent;
-            canvas.DrawText(label, textX, textY, SKTextAlign.Center, font, textPaint);
-        }
     }
 
-    /// <summary>
-    /// Draws the gauge needle with shadow and center circle.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
-    private void DrawNeedle(SKCanvas canvas, SKRect rect, float needlePosition, bool isOverlayActive, SKPaint basePaint)
+    private static void DrawTickLabel(
+        SKCanvas canvas,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float value,
+        string label,
+        float angle,
+        float radian,
+        bool isOverlayActive,
+        SKPaint textPaint)
+    {
+        // Position text along the scale arc, slightly outward from tick end
+        float textOffset = radiusY * (isOverlayActive ? SCALE_TEXT_OFFSET_FACTOR_OVERLAY : SCALE_TEXT_OFFSET_FACTOR);
+        float textSize = radiusY * (isOverlayActive ? SCALE_TEXT_SIZE_FACTOR_OVERLAY : SCALE_TEXT_SIZE_FACTOR);
+
+        using var font = new SKFont(SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold), textSize);
+
+        if (value == 0)
+        {
+            font.Size *= SCALE_TEXT_SIZE_MULTIPLIER_ZERO;
+            font.Embolden = true;
+        }
+        else
+        {
+            font.Embolden = false;
+        }
+
+        textPaint.Color = value >= 0 ? new SKColor(200, 0, 0) : SKColors.Black;
+
+        float textX = centerX + (radiusX + textOffset) * Cos(radian);
+        float textY = centerY + (radiusY + textOffset) * Sin(radian) + font.Metrics.Descent;
+
+        // Adjust text alignment based on angle for better positioning
+        SKTextAlign textAlign = SKTextAlign.Center;
+        if (angle < -120f)
+            textAlign = SKTextAlign.Right;
+        else if (angle > -60f)
+            textAlign = SKTextAlign.Left;
+
+        canvas.DrawText(label, textX, textY, textAlign, font, textPaint);
+    }
+
+    private void DrawNeedle(
+        SKCanvas canvas,
+        SKRect rect,
+        float needlePosition,
+        bool isOverlayActive,
+        SKPaint basePaint)
+    {
+        var needleParams = GetNeedleParameters(rect, needlePosition, isOverlayActive);
+
+        DrawNeedleShape(canvas, needleParams);
+        DrawNeedleCenter(canvas, needleParams, isOverlayActive);
+    }
+
+    private (float centerX, float centerY, float radiusX, float radiusY, float angle, float needleLength)
+        GetNeedleParameters(SKRect rect, float needlePosition, bool isOverlayActive)
     {
         float centerX = rect.MidX;
         float centerY = rect.MidY + rect.Height * _config.NeedleCenterYOffsetMultiplier;
-        float radiusX = rect.Width * (isOverlayActive ? GaugeConstants.Scale.RadiusXFactorOverlay : GaugeConstants.Scale.RadiusXFactor);
-        float radiusY = rect.Height * (isOverlayActive ? GaugeConstants.Scale.RadiusYFactorOverlay : GaugeConstants.Scale.RadiusYFactor);
+        float radiusX = rect.Width * (isOverlayActive ? SCALE_RADIUS_X_FACTOR_OVERLAY : SCALE_RADIUS_X_FACTOR);
+        float radiusY = rect.Height * (isOverlayActive ? SCALE_RADIUS_Y_FACTOR_OVERLAY : SCALE_RADIUS_Y_FACTOR);
+        float angle = ANGLE_START + needlePosition * ANGLE_TOTAL_RANGE;
+        float needleLength = MathF.Min(radiusX, radiusY) * _config.NeedleLengthMultiplier;
 
-        float angle = GaugeConstants.Angle.Start + needlePosition * GaugeConstants.Angle.TotalRange;
+        return (centerX, centerY, radiusX, radiusY, angle, needleLength);
+    }
+
+    private void DrawNeedleShape(SKCanvas canvas, (float centerX, float centerY, float radiusX, float radiusY, float angle, float needleLength) needleParams)
+    {
+        var (centerX, centerY, radiusX, radiusY, angle, needleLength) = needleParams;
+
+        // Calculate needle points
         var (ellipseX, ellipseY) = CalculatePointOnEllipse(centerX, centerY, radiusX, radiusY, angle);
         var (unitX, unitY, _) = NormalizeVector(ellipseX - centerX, ellipseY - centerY);
 
-        float needleLength = Min(radiusX, radiusY) * _config.NeedleLengthMultiplier;
-
         using var needlePath = _pathPool.Get();
-        float baseWidth = GaugeConstants.Needle.StrokeWidth * GaugeConstants.Needle.BaseWidthMultiplier;
+        float baseWidth = NEEDLE_STROKE_WIDTH * NEEDLE_BASE_WIDTH_MULTIPLIER;
         float perpX = -unitY;
         float perpY = unitX;
 
@@ -515,160 +619,260 @@ public sealed class GaugeRenderer : BaseSpectrumRenderer
         needlePath.LineTo(baseRightX, baseRightY);
         needlePath.Close();
 
+        // Draw needle
         using var needlePaint = _paintPool.Get();
-        needlePaint.Style = Fill;
-        needlePaint.IsAntialias = _useAntiAlias;
+        ConfigureNeedlePaint(needlePaint, centerX, centerY, tipX, tipY, needleParams.angle);
+        canvas.DrawPath(needlePath, needlePaint);
+
+        // Draw needle outline
+        using var outlinePaint = _paintPool.Get();
+        ConfigureNeedleOutlinePaint(outlinePaint);
+        canvas.DrawPath(needlePath, outlinePaint);
+    }
+
+    private void ConfigureNeedlePaint(
+        SKPaint needlePaint,
+        float centerX,
+        float centerY,
+        float tipX,
+        float tipY,
+        float angle)
+    {
+        float normalizedAngle = (angle - ANGLE_START) / ANGLE_TOTAL_RANGE;
+
+        needlePaint.Style = SKPaintStyle.Fill;
+        needlePaint.IsAntialias = UseAntiAlias;
         needlePaint.Shader = SKShader.CreateLinearGradient(
             new SKPoint(centerX, centerY),
             new SKPoint(tipX, tipY),
-            new[] { new SKColor(40, 40, 40), needlePosition > 0.75f ? SKColors.Red : new SKColor(180, 0, 0) },
+            new[] { new SKColor(40, 40, 40), normalizedAngle > 0.75f ? SKColors.Red : new SKColor(180, 0, 0) },
             null,
             SKShaderTileMode.Clamp);
-        if (_useAdvancedEffects)
-            needlePaint.ImageFilter = SKImageFilter.CreateDropShadow(2f, 2f, 1.5f, 1.5f, SKColors.Black.WithAlpha(100));
-        canvas.DrawPath(needlePath, needlePaint);
 
-        using var outlinePaint = _paintPool.Get();
-        outlinePaint.Style = Stroke;
+        if (UseAdvancedEffects)
+            needlePaint.ImageFilter = SKImageFilter.CreateDropShadow(
+                2f, 2f, 1.5f, 1.5f, SKColors.Black.WithAlpha(100));
+    }
+
+    private void ConfigureNeedleOutlinePaint(SKPaint outlinePaint)
+    {
+        outlinePaint.Style = SKPaintStyle.Stroke;
         outlinePaint.StrokeWidth = 0.8f;
         outlinePaint.Color = SKColors.Black.WithAlpha(180);
-        outlinePaint.IsAntialias = _useAntiAlias;
-        canvas.DrawPath(needlePath, outlinePaint);
+        outlinePaint.IsAntialias = UseAntiAlias;
+    }
 
-        float centerCircleRadius = rect.Width * (isOverlayActive ? GaugeConstants.Needle.CenterCircleRadiusOverlay : GaugeConstants.Needle.CenterCircleRadius);
+    private void DrawNeedleCenter(
+        SKCanvas canvas,
+        (float centerX, float centerY, float radiusX, float radiusY, float angle, float needleLength) needleParams,
+        bool isOverlayActive)
+    {
+        var (centerX, centerY, _, _, _, _) = needleParams;
+
+        float centerCircleRadius = needleParams.radiusX *
+            (isOverlayActive ? NEEDLE_CENTER_CIRCLE_RADIUS_OVERLAY : NEEDLE_CENTER_CIRCLE_RADIUS);
+
+        // Draw center circle
         using var centerCirclePaint = _paintPool.Get();
-        centerCirclePaint.Style = Fill;
-        centerCirclePaint.IsAntialias = _useAntiAlias;
+        centerCirclePaint.Style = SKPaintStyle.Fill;
+        centerCirclePaint.IsAntialias = UseAntiAlias;
         centerCirclePaint.Shader = SKShader.CreateRadialGradient(
             new SKPoint(centerX - centerCircleRadius * 0.3f, centerY - centerCircleRadius * 0.3f),
             centerCircleRadius * 2,
-            new[] { SKColors.White, new SKColor(180, 180, 180), new SKColor(60, 60, 60) },
-            new[] { 0.0f, 0.3f, 1.0f },
+            _needleCenterColors,
+            _centerColorStops,
             SKShaderTileMode.Clamp);
+
         canvas.DrawCircle(centerX, centerY, centerCircleRadius, centerCirclePaint);
 
+        // Draw highlight
         using var highlightPaint = _paintPool.Get();
         highlightPaint.Color = SKColors.White.WithAlpha(150);
-        highlightPaint.Style = Fill;
-        highlightPaint.IsAntialias = _useAntiAlias;
-        canvas.DrawCircle(centerX - centerCircleRadius * 0.25f, centerY - centerCircleRadius * 0.25f, centerCircleRadius * 0.4f, highlightPaint);
+        highlightPaint.Style = SKPaintStyle.Fill;
+        highlightPaint.IsAntialias = UseAntiAlias;
+
+        canvas.DrawCircle(
+            centerX - centerCircleRadius * 0.25f,
+            centerY - centerCircleRadius * 0.25f,
+            centerCircleRadius * 0.4f,
+            highlightPaint);
     }
 
-    /// <summary>
-    /// Draws the peak lamp indicator.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
     private void DrawPeakLamp(SKCanvas canvas, SKRect rect, bool isOverlayActive)
     {
-        float radiusX = rect.Width * (isOverlayActive ? GaugeConstants.Scale.RadiusXFactorOverlay : GaugeConstants.Scale.RadiusXFactor);
-        float radiusY = rect.Height * (isOverlayActive ? GaugeConstants.Scale.RadiusYFactorOverlay : GaugeConstants.Scale.RadiusYFactor);
-        float lampRadius = Min(radiusX, radiusY) * (isOverlayActive ? GaugeConstants.PeakLamp.RadiusFactorOverlay : GaugeConstants.PeakLamp.RadiusFactor);
-        float lampX = rect.Right - rect.Width * (isOverlayActive ? GaugeConstants.PeakLamp.LampXOffsetFactorOverlay : GaugeConstants.PeakLamp.LampXOffsetFactor);
-        float lampY = rect.Top + rect.Height * (isOverlayActive ? GaugeConstants.PeakLamp.LampYOffsetFactorOverlay : GaugeConstants.PeakLamp.LampYOffsetFactor);
+        var lampParams = GetPeakLampParameters(rect, isOverlayActive);
 
-        SKColor lampColor = _state.PeakActive ? SKColors.Red : new SKColor(80, 0, 0);
-        SKColor glowColor = _state.PeakActive ? SKColors.Red.WithAlpha(80) : SKColors.Transparent;
-
-        if (_state.PeakActive && _useAdvancedEffects)
+        if (_state.PeakActive && UseAdvancedEffects)
         {
-            using var glowPaint = _paintPool.Get();
-            glowPaint.Color = glowColor;
-            glowPaint.MaskFilter = SKMaskFilter.CreateBlur(Normal, lampRadius * GaugeConstants.PeakLamp.GlowRadiusMultiplier);
-            glowPaint.IsAntialias = _useAntiAlias;
-            canvas.DrawCircle(lampX, lampY, lampRadius * GaugeConstants.PeakLamp.GlowRadiusMultiplier, glowPaint);
+            DrawPeakLampGlow(canvas, lampParams);
         }
 
+        DrawPeakLampBody(canvas, lampParams);
+        DrawPeakLampLabel(canvas, lampParams, isOverlayActive);
+    }
+
+    private static (float lampX, float lampY, float lampRadius) GetPeakLampParameters(SKRect rect, bool isOverlayActive)
+    {
+        float radiusX = rect.Width * (isOverlayActive ? SCALE_RADIUS_X_FACTOR_OVERLAY
+            : SCALE_RADIUS_X_FACTOR);
+
+        float radiusY = rect.Height * (isOverlayActive ? SCALE_RADIUS_Y_FACTOR_OVERLAY
+            : SCALE_RADIUS_Y_FACTOR);
+
+        float lampRadius = MathF.Min(radiusX, radiusY)
+            * (isOverlayActive ? PEAK_LAMP_RADIUS_FACTOR_OVERLAY : PEAK_LAMP_RADIUS_FACTOR);
+
+        float lampX = rect.Right
+            - rect.Width
+            * (isOverlayActive ? PEAK_LAMP_X_OFFSET_FACTOR_OVERLAY : PEAK_LAMP_X_OFFSET_FACTOR);
+
+        float lampY = rect.Top
+            + rect.Height
+            * (isOverlayActive ? PEAK_LAMP_Y_OFFSET_FACTOR_OVERLAY : PEAK_LAMP_Y_OFFSET_FACTOR);
+
+        return (lampX, lampY, lampRadius);
+    }
+
+    private void DrawPeakLampGlow(
+        SKCanvas canvas,
+        (float lampX, float lampY, float lampRadius) lampParams)
+    {
+        var (lampX, lampY, lampRadius) = lampParams;
+
+        using var glowPaint = _paintPool.Get();
+        glowPaint.Color = SKColors.Red.WithAlpha(80);
+        glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
+            SKBlurStyle.Normal,
+            lampRadius * PEAK_LAMP_GLOW_RADIUS_MULTIPLIER);
+        glowPaint.IsAntialias = UseAntiAlias;
+
+        canvas.DrawCircle(
+            lampX,
+            lampY,
+            lampRadius * PEAK_LAMP_GLOW_RADIUS_MULTIPLIER,
+            glowPaint);
+    }
+
+    private void DrawPeakLampBody(
+        SKCanvas canvas,
+        (float lampX, float lampY, float lampRadius) lampParams)
+    {
+        var (lampX, lampY, lampRadius) = lampParams;
+
         using var innerPaint = _paintPool.Get();
-        innerPaint.Style = Fill;
-        innerPaint.IsAntialias = _useAntiAlias;
+        innerPaint.Style = SKPaintStyle.Fill;
+        innerPaint.IsAntialias = UseAntiAlias;
         innerPaint.Shader = SKShader.CreateRadialGradient(
             new SKPoint(lampX - lampRadius * 0.2f, lampY - lampRadius * 0.2f),
-            lampRadius * GaugeConstants.PeakLamp.InnerRadiusMultiplier,
-            _state.PeakActive
-                ? new[] { SKColors.White, new SKColor(255, 180, 180), lampColor }
-                : new[] { new SKColor(220, 220, 220), new SKColor(180, 0, 0), new SKColor(80, 0, 0) },
-            new[] { 0.0f, 0.3f, 1.0f },
+            lampRadius * PEAK_LAMP_INNER_RADIUS_MULTIPLIER,
+            _state.PeakActive ? _activeLampColors : _inactiveLampColors,
+            _centerColorStops,
             SKShaderTileMode.Clamp);
-        canvas.DrawCircle(lampX, lampY, lampRadius * GaugeConstants.PeakLamp.InnerRadiusMultiplier, innerPaint);
+
+        canvas.DrawCircle(
+            lampX,
+            lampY,
+            lampRadius * PEAK_LAMP_INNER_RADIUS_MULTIPLIER,
+            innerPaint);
 
         using var reflectionPaint = _paintPool.Get();
         reflectionPaint.Color = SKColors.White.WithAlpha(180);
-        reflectionPaint.Style = Fill;
-        reflectionPaint.IsAntialias = _useAntiAlias;
-        canvas.DrawCircle(lampX - lampRadius * 0.3f, lampY - lampRadius * 0.3f, lampRadius * 0.25f, reflectionPaint);
+        reflectionPaint.Style = SKPaintStyle.Fill;
+        reflectionPaint.IsAntialias = UseAntiAlias;
+
+        canvas.DrawCircle(
+            lampX - lampRadius * 0.3f,
+            lampY - lampRadius * 0.3f,
+            lampRadius * 0.25f,
+            reflectionPaint);
 
         using var rimPaint = _paintPool.Get();
         rimPaint.Color = new SKColor(40, 40, 40);
-        rimPaint.Style = Stroke;
-        rimPaint.StrokeWidth = GaugeConstants.PeakLamp.RimStrokeWidth * 1.2f;
-        rimPaint.IsAntialias = _useAntiAlias;
+        rimPaint.Style = SKPaintStyle.Stroke;
+        rimPaint.StrokeWidth = PEAK_LAMP_RIM_STROKE_WIDTH * 1.2f;
+        rimPaint.IsAntialias = UseAntiAlias;
+
         canvas.DrawCircle(lampX, lampY, lampRadius, rimPaint);
+    }
+
+    private void DrawPeakLampLabel(
+        SKCanvas canvas,
+        (float lampX, float lampY, float lampRadius) lampParams,
+        bool isOverlayActive)
+    {
+        var (lampX, lampY, lampRadius) = lampParams;
 
         using var peakTextPaint = _paintPool.Get();
         peakTextPaint.Color = _state.PeakActive ? SKColors.Red : new SKColor(180, 0, 0);
-        peakTextPaint.IsAntialias = _useAntiAlias;
-        if (_useAdvancedEffects)
-            peakTextPaint.ImageFilter = SKImageFilter.CreateDropShadow(1, 1, 1, 1, SKColors.Black.WithAlpha(150));
-        using var font = new SKFont(SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold),
-                                    lampRadius * (isOverlayActive ? GaugeConstants.PeakLamp.TextSizeFactorOverlay : GaugeConstants.PeakLamp.TextSizeFactor) * 1.2f);
-        float textYOffset = lampRadius * GaugeConstants.PeakLamp.TextYOffsetFactor + font.Metrics.Descent;
-        canvas.DrawText("PEAK", lampX, lampY + textYOffset, SKTextAlign.Center, font, peakTextPaint);
-    }
-    #endregion
+        peakTextPaint.IsAntialias = UseAntiAlias;
 
-    #region Spectrum Processing
-    /// <summary>
-    /// Updates the gauge state based on spectrum data.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
+        if (UseAdvancedEffects)
+            peakTextPaint.ImageFilter = SKImageFilter.CreateDropShadow(
+                1, 1, 1, 1, SKColors.Black.WithAlpha(150));
+
+        float textSize = lampRadius *
+            (isOverlayActive ? PEAK_LAMP_TEXT_SIZE_FACTOR_OVERLAY : PEAK_LAMP_TEXT_SIZE_FACTOR) * 1.2f;
+
+        using var font = new SKFont(
+            SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold), textSize);
+
+        float textYOffset = lampRadius * PEAK_LAMP_TEXT_Y_OFFSET_FACTOR + font.Metrics.Descent;
+
+        canvas.DrawText(
+            "PEAK",
+            lampX,
+            lampY + textYOffset,
+            SKTextAlign.Center,
+            font,
+            peakTextPaint);
+    }
+
     private void UpdateGaugeState(float[] spectrum)
     {
         lock (_stateLock)
         {
             float dbValue = CalculateLoudness(spectrum);
             float smoothedDb = SmoothValue(dbValue);
-            _state.TargetNeedlePosition = CalculateNeedlePosition(smoothedDb);
-            UpdateNeedlePosition();
+            float targetNeedlePosition = CalculateNeedlePosition(smoothedDb);
 
-            float thresholdPosition = CalculateNeedlePosition(GaugeConstants.Db.PeakThreshold);
-            if (_state.CurrentNeedlePosition >= thresholdPosition)
+            _state = _state with
             {
-                _state.PeakActive = true;
-                _peakHoldCounter = PeakHoldDuration;
-            }
-            else if (_peakHoldCounter > 0)
-            {
-                _peakHoldCounter--;
-            }
-            else
-            {
-                _state.PeakActive = false;
-            }
+                TargetNeedlePosition = targetNeedlePosition,
+                PreviousValue = smoothedDb
+            };
+
+            UpdateNeedlePosition();
+            UpdatePeakState();
         }
     }
 
-    /// <summary>
-    /// Calculates the loudness in dB from spectrum data.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization)]
+    private void UpdatePeakState()
+    {
+        float thresholdPosition = CalculateNeedlePosition(DB_PEAK_THRESHOLD);
+
+        if (_state.CurrentNeedlePosition >= thresholdPosition)
+        {
+            _state = _state with { PeakActive = true };
+            _peakHoldCounter = PEAK_HOLD_DURATION;
+        }
+        else if (_peakHoldCounter > 0)
+        {
+            _peakHoldCounter--;
+        }
+        else
+        {
+            _state = _state with { PeakActive = false };
+        }
+    }
+
     private float CalculateLoudness(float[] spectrum)
     {
-        if (spectrum.Length == 0) return GaugeConstants.Db.Min;
+        if (spectrum.Length == 0) return DB_MIN;
 
         float sumOfSquares = 0f;
         if (IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
         {
-            int vectorSize = Vector<float>.Count;
-            int vectorizedLength = spectrum.Length - spectrum.Length % vectorSize;
-
-            for (int i = 0; i < vectorizedLength; i += vectorSize)
-            {
-                Vector<float> values = new(spectrum, i);
-                sumOfSquares += Dot(values, values);
-            }
-
-            for (int i = vectorizedLength; i < spectrum.Length; i++)
-                sumOfSquares += spectrum[i] * spectrum[i];
+            sumOfSquares = CalculateSumOfSquaresVectorized(spectrum);
         }
         else
         {
@@ -676,250 +880,136 @@ public sealed class GaugeRenderer : BaseSpectrumRenderer
                 sumOfSquares += spectrum[i] * spectrum[i];
         }
 
-        float rms = (float)Sqrt(sumOfSquares / spectrum.Length);
-        float db = 20f * (float)Log10(Max(rms, GaugeConstants.Rendering.MinDbClamp));
-        return Clamp(db, GaugeConstants.Db.Min, GaugeConstants.Db.Max);
+        float rms = Sqrt(sumOfSquares / spectrum.Length);
+        float db = 20f * Log10(MathF.Max(rms, RENDERING_MIN_DB_CLAMP));
+        return Clamp(db, DB_MIN, DB_MAX);
     }
 
-    /// <summary>
-    /// Smooths the dB value based on direction of change.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
+    private static float CalculateSumOfSquaresVectorized(float[] spectrum)
+    {
+        float sumOfSquares = 0f;
+        int vectorSize = Vector<float>.Count;
+        int vectorizedLength = spectrum.Length - spectrum.Length % vectorSize;
+
+        for (int i = 0; i < vectorizedLength; i += vectorSize)
+        {
+            Vector<float> values = new(spectrum, i);
+            sumOfSquares += Dot(values, values);
+        }
+
+        for (int i = vectorizedLength; i < spectrum.Length; i++)
+            sumOfSquares += spectrum[i] * spectrum[i];
+
+        return sumOfSquares;
+    }
+
     private float SmoothValue(float newValue)
     {
-        float smoothingFactor = newValue > _state.PreviousValue ? _config.SmoothingFactorIncrease : _config.SmoothingFactorDecrease;
-        return _state.PreviousValue += smoothingFactor * (newValue - _state.PreviousValue);
+        float smoothingFactor = newValue > _state.PreviousValue ?
+            _config.SmoothingFactorIncrease : _config.SmoothingFactorDecrease;
+        return _state.PreviousValue + smoothingFactor * (newValue - _state.PreviousValue);
     }
 
-    /// <summary>
-    /// Calculates the needle position from a dB value.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    private float CalculateNeedlePosition(float db)
+    private static float CalculateNeedlePosition(float db)
     {
-        float normalizedPosition = (Clamp(db, GaugeConstants.Db.Min, GaugeConstants.Db.Max) - GaugeConstants.Db.Min) /
-                                   (GaugeConstants.Db.Max - GaugeConstants.Db.Min);
-        return Clamp(normalizedPosition, GaugeConstants.Rendering.Margin, 1f - GaugeConstants.Rendering.Margin);
+        float normalizedPosition = (Clamp(db, DB_MIN, DB_MAX) - DB_MIN) /
+                                  (DB_MAX - DB_MIN);
+        return Clamp(normalizedPosition, RENDERING_MARGIN, 1f - RENDERING_MARGIN);
     }
 
-    /// <summary>
-    /// Updates the needle position with easing.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
     private void UpdateNeedlePosition()
     {
         float difference = _state.TargetNeedlePosition - _state.CurrentNeedlePosition;
         float speed = difference * (difference > 0 ? _config.RiseSpeed : _config.FallSpeed);
-        float easedSpeed = speed * (1 - _config.Damping) * (1 - Abs(difference));
-        _state.CurrentNeedlePosition += easedSpeed;
-        _state.CurrentNeedlePosition = Clamp(_state.CurrentNeedlePosition, 0f, 1f);
-    }
-    #endregion
+        float easedSpeed = speed * (1 - _config.Damping) * (1 - MathF.Abs(difference));
 
-    #region Helper Methods
-    /// <summary>
-    /// Calculates a point on an ellipse given an angle.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    private static (float x, float y) CalculatePointOnEllipse(float centerX, float centerY, float radiusX, float radiusY, float angleDegrees)
+        _state = _state with
+        {
+            CurrentNeedlePosition = Clamp(_state.CurrentNeedlePosition + easedSpeed, 0f, 1f)
+        };
+    }
+
+    private static void InitializeMinorMarks()
     {
-        float radian = angleDegrees * (float)(PI / 180.0);
-        return (centerX + radiusX * (float)Cos(radian), centerY + radiusY * (float)Sin(radian));
+        _minorMarkValues.Clear();
+        var majorValues = _majorMarks.Select(m => m.Value).OrderBy(v => v).ToList();
+        for (int i = 0; i < majorValues.Count - 1; i++)
+        {
+            float start = majorValues[i];
+            float end = majorValues[i + 1];
+            float step = (end - start) / MINOR_MARKS_DIVISOR;
+            for (float value = start + step; value < end; value += step)
+                _minorMarkValues.Add(value);
+        }
     }
 
-    /// <summary>
-    /// Normalizes a vector and returns its unit components and length.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
+    private static (float x, float y) CalculatePointOnEllipse(
+        float centerX, float centerY, float radiusX, float radiusY, float angleDegrees)
+    {
+        float radian = angleDegrees * (MathF.PI / 180.0f);
+        return (centerX + radiusX * Cos(radian), centerY + radiusY * Sin(radian));
+    }
+
     private static (float unitX, float unitY, float length) NormalizeVector(float dx, float dy)
     {
-        float length = (float)Sqrt(dx * dx + dy * dy);
+        float length = Sqrt(dx * dx + dy * dy);
         return length > 0 ? (dx / length, dy / length, length) : (0f, 0f, 0f);
     }
 
-    /// <summary>
-    /// Calculates the gauge rectangle based on image info.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    public static SKRect CalculateGaugeRect(SKImageInfo info)
+    private static SKRect CalculateGaugeRect(SKImageInfo info)
     {
-        float aspectRatio = GaugeConstants.Rendering.AspectRatio;
+        float aspectRatio = RENDERING_ASPECT_RATIO;
         float width = info.Width / (float)info.Height > aspectRatio
-            ? info.Height * GaugeConstants.Rendering.GaugeRectPadding * aspectRatio
-            : info.Width * GaugeConstants.Rendering.GaugeRectPadding;
+            ? info.Height * RENDERING_GAUGE_RECT_PADDING * aspectRatio
+            : info.Width * RENDERING_GAUGE_RECT_PADDING;
         float height = width / aspectRatio;
         float left = (info.Width - width) / 2;
         float top = (info.Height - height) / 2;
         return new SKRect(left, top, left + width, top + height);
     }
-    #endregion
 
-    #region Disposal
-    /// <summary>
-    /// Disposes of resources used by the renderer.
-    /// </summary>
     public override void Dispose()
     {
         if (!_disposed)
         {
-            Safe(() =>
-            {
-                _renderSemaphore?.Dispose();
-                _paintPool?.Dispose();
-                _pathPool?.Dispose();
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{GaugeConstants.LOG_PREFIX}.Dispose",
-                ErrorMessage = "Error during disposal"
-            });
+            Safe(
+                () =>
+                {
+                    OnDispose();
+                },
+                new ErrorHandlingOptions
+                {
+                    Source = $"{LOG_PREFIX}.Dispose",
+                    ErrorMessage = "Error during renderer disposal"
+                }
+            );
 
             _disposed = true;
-            Log(LogLevel.Debug, GaugeConstants.LOG_PREFIX, "Disposed");
+            GC.SuppressFinalize(this);
         }
     }
-    #endregion
-}
 
-/// <summary>
-/// Constants used by the GaugeRenderer for defining gauge properties and behavior.
-/// </summary>
-public static class GaugeConstants
-{
-    // Constants related to decibel (dB) values
-    public static class Db
+    protected override void OnDispose()
     {
-        public const float Max = 5f;     // Maximum dB value for the gauge
-        public const float Min = -30f;   // Minimum dB value for the gauge
-        public const float PeakThreshold = 5f;     // Threshold for peak indicator activation
+        Safe(
+            () =>
+            {
+                DisposeManagedResources();
+                base.OnDispose();
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnDispose",
+                ErrorMessage = "Error during OnDispose"
+            }
+        );
     }
 
-    // Constants related to angle calculations for the gauge
-    public static class Angle
+    private void DisposeManagedResources()
     {
-        public const float Start = -150f;     // Starting angle for the gauge scale
-        public const float End = -30f;      // Ending angle for the gauge scale
-        public const float TotalRange = End - Start; // Total angular range of the gauge
+        _renderSemaphore?.Dispose();
+        _paintPool?.Dispose();
+        _pathPool?.Dispose();
     }
-
-    // Constants for needle properties
-    public static class Needle
-    {
-        public const float DefaultLengthMultiplier = 1.55f; // Default multiplier for needle length
-        public const float DefaultCenterYOffsetMultiplier = 0.4f;  // Default multiplier for needle center Y offset
-        public const float StrokeWidth = 2.25f; // Stroke width for the needle
-        public const float CenterCircleRadiusOverlay = 0.015f; // Radius of center circle in overlay mode
-        public const float CenterCircleRadius = 0.02f; // Radius of center circle in normal mode
-        public const float BaseWidthMultiplier = 2.5f;  // Multiplier for needle base width
-    }
-
-    // Constants for background and frame properties
-    public static class Background
-    {
-        public const float OuterFrameCornerRadius = 8f;   // Corner radius for outer frame
-        public const float InnerFramePadding = 4f;   // Padding for inner frame
-        public const float InnerFrameCornerRadius = 6f;   // Corner radius for inner frame
-        public const float BackgroundPadding = 4f;   // Padding for background
-        public const float BackgroundCornerRadius = 4f;   // Corner radius for background
-        public const float VuTextSizeFactor = 0.2f; // Factor for VU text size
-        public const float VuTextBottomOffsetFactor = 0.2f; // Factor for VU text bottom offset
-    }
-
-    // Constants for scale properties
-    public static class Scale
-    {
-        public const float CenterYOffsetFactor = 0.15f; // Factor for scale center Y offset
-        public const float RadiusXFactorOverlay = 0.4f;  // Factor for X radius in overlay mode
-        public const float RadiusXFactor = 0.45f; // Factor for X radius in normal mode
-        public const float RadiusYFactorOverlay = 0.45f; // Factor for Y radius in overlay mode
-        public const float RadiusYFactor = 0.5f;  // Factor for Y radius in normal mode
-        public const float TextOffsetFactorOverlay = 0.1f;  // Factor for text offset in overlay mode
-        public const float TextOffsetFactor = 0.12f; // Factor for text offset in normal mode
-        public const float TextSizeFactorOverlay = 0.08f; // Factor for text size in overlay mode
-        public const float TextSizeFactor = 0.1f;  // Factor for text size in normal mode
-        public const float TickLengthZeroFactorOverlay = 0.12f; // Factor for zero tick length in overlay mode
-        public const float TickLengthZeroFactor = 0.15f; // Factor for zero tick length in normal mode
-        public const float TickLengthFactorOverlay = 0.07f; // Factor for major tick length in overlay mode
-        public const float TickLengthFactor = 0.08f; // Factor for major tick length in normal mode
-        public const float TickLengthMinorFactorOverlay = 0.05f; // Factor for minor tick length in overlay mode
-        public const float TickLengthMinorFactor = 0.06f; // Factor for minor tick length in normal mode
-        public const float TickStrokeWidth = 1.8f;  // Stroke width for scale ticks
-        public const float TextSizeMultiplierZero = 1.15f; // Multiplier for "0" text size
-    }
-
-    // Constants for peak lamp properties
-    public static class PeakLamp
-    {
-        public const float RadiusFactorOverlay = 0.04f; // Factor for lamp radius in overlay mode
-        public const float RadiusFactor = 0.05f; // Factor for lamp radius in normal mode
-        public const float LampXOffsetFactorOverlay = 0.12f; // Factor for lamp X offset in overlay mode
-        public const float LampXOffsetFactor = 0.1f;  // Factor for lamp X offset in normal mode
-        public const float LampYOffsetFactorOverlay = 0.18f; // Factor for lamp Y offset in overlay mode
-        public const float LampYOffsetFactor = 0.2f;  // Factor for lamp Y offset in normal mode
-        public const float TextSizeFactorOverlay = 1.2f;  // Factor for text size in overlay mode
-        public const float TextSizeFactor = 1.5f;  // Factor for text size in normal mode
-        public const float TextYOffsetFactor = 2.5f;  // Factor for text Y offset
-        public const float RimStrokeWidth = 1f;    // Stroke width for lamp rim
-        public const float GlowRadiusMultiplier = 1.5f;  // Multiplier for glow radius when active
-        public const float InnerRadiusMultiplier = 0.8f;  // Multiplier for inner lamp radius
-    }
-
-    // Constants for rendering properties
-    public static class Rendering
-    {
-        public const float AspectRatio = 2.0f;   // Aspect ratio for the gauge
-        public const float GaugeRectPadding = 0.8f;   // Padding factor for gauge rectangle
-        public const float MinDbClamp = 1e-10f; // Minimum value for dB calculation to avoid log(0)
-        public const float Margin = 0.05f;  // Margin for needle position clamping
-    }
-
-    // Constants for minor marks
-    public static class MinorMarks
-    {
-        public const int Divisor = 3;                 // Divisor for minor marks between major marks
-    }
-
-    // Logging prefix
-    public const string LOG_PREFIX = "GaugeRenderer";
-}
-
-/// <summary>
-/// Configuration settings for the GaugeRenderer, controlling smoothing and needle behavior.
-/// </summary>
-public readonly record struct GaugeRendererConfig(
-    float SmoothingFactorIncrease,
-    float SmoothingFactorDecrease,
-    float RiseSpeed,
-    float FallSpeed,
-    float Damping,
-    float NeedleLengthMultiplier,
-    float NeedleCenterYOffsetMultiplier)
-{
-    public static GaugeRendererConfig Default => new(
-        SmoothingFactorIncrease: 0.2f,
-        SmoothingFactorDecrease: 0.05f,
-        RiseSpeed: 0.15f,
-        FallSpeed: 0.03f,
-        Damping: 0.7f,
-        NeedleLengthMultiplier: GaugeConstants.Needle.DefaultLengthMultiplier,
-        NeedleCenterYOffsetMultiplier: GaugeConstants.Needle.DefaultCenterYOffsetMultiplier
-    );
-
-    public GaugeRendererConfig WithOverlayMode(bool isOverlayActive) => this with
-    {
-        SmoothingFactorIncrease = isOverlayActive ? 0.1f : 0.2f,
-        SmoothingFactorDecrease = isOverlayActive ? 0.02f : 0.05f,
-        NeedleLengthMultiplier = isOverlayActive ? 1.6f : GaugeConstants.Needle.DefaultLengthMultiplier,
-        NeedleCenterYOffsetMultiplier = isOverlayActive ? 0.35f : GaugeConstants.Needle.DefaultCenterYOffsetMultiplier
-    };
-}
-
-/// <summary>
-/// Internal state of the gauge renderer.
-/// </summary>
-internal sealed class GaugeState
-{
-    public float CurrentNeedlePosition { get; set; }
-    public float TargetNeedlePosition { get; set; }
-    public float PreviousValue { get; set; } = GaugeConstants.Db.Min;
-    public bool PeakActive { get; set; }
 }
