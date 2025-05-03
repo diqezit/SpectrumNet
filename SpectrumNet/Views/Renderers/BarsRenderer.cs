@@ -1,497 +1,264 @@
 ﻿#nullable enable
 
-using SpectrumNet.Service.Enums;
+using static System.MathF;
 
-namespace SpectrumNet.Views.Renderers
+namespace SpectrumNet.Views.Renderers;
+
+public sealed class BarsRenderer : EffectSpectrumRenderer
 {
-    /// <summary>
-    /// Renderer that visualizes spectrum data as vertical bars with effects.
-    /// </summary>
-    public sealed class BarsRenderer : BaseSpectrumRenderer
+    private static class Constants
     {
-        #region Constants
-        private static class Constants
+        public const string
+            LOG_PREFIX = "BarsRenderer";
+
+        public const float
+            MAX_CORNER_RADIUS = 10f,
+            DEFAULT_CORNER_RADIUS_FACTOR = 0.05f,
+            MIN_BAR_HEIGHT = 1f,
+            HIGHLIGHT_WIDTH_PROPORTION = 0.6f,
+            HIGHLIGHT_HEIGHT_PROPORTION = 0.1f,
+            MAX_HIGHLIGHT_HEIGHT = 5f,
+            HIGHLIGHT_ALPHA_DIVISOR = 3f,
+            ALPHA_MULTIPLIER = 1.5f,
+            HIGH_INTENSITY_THRESHOLD = 0.6f,
+            GLOW_EFFECT_ALPHA = 0.25f,
+            GLOW_BLUR_RADIUS_LOW = 1.0f,
+            GLOW_BLUR_RADIUS_MEDIUM = 2.0f,
+            GLOW_BLUR_RADIUS_HIGH = 3.0f;
+
+        public const int
+            BATCH_SIZE = 32;
+    }
+
+    public readonly record struct RenderConfig(float BarWidth, float BarSpacing, int BarCount);
+
+    private static readonly Lazy<BarsRenderer> _instance = new(() => new BarsRenderer());
+
+    private float _glowRadius = Constants.GLOW_BLUR_RADIUS_MEDIUM;
+    private bool _useGlowEffect = true;
+
+    private BarsRenderer() { }
+
+    public static BarsRenderer GetInstance() => _instance.Value;
+
+    protected override void OnQualitySettingsApplied()
+    {
+        Safe(
+           () =>
+           {
+               base.OnQualitySettingsApplied();
+               switch (base.Quality)
+               {
+                   case RenderQuality.Low:
+                       _useGlowEffect = false;
+                       _glowRadius = Constants.GLOW_BLUR_RADIUS_LOW;
+                       break;
+
+                   case RenderQuality.Medium:
+                       _useGlowEffect = true;
+                       _glowRadius = Constants.GLOW_BLUR_RADIUS_MEDIUM;
+                       break;
+
+                   case RenderQuality.High:
+                       _useGlowEffect = true;
+                       _glowRadius = Constants.GLOW_BLUR_RADIUS_HIGH;
+                       break;
+               }
+
+               Log(LogLevel.Debug, Constants.LOG_PREFIX, $"Quality set to {base.Quality}");
+           },
+           new ErrorHandlingOptions
+           {
+               Source = $"{GetType().Name}.OnQualitySettingsApplied",
+               ErrorMessage = "Failed to apply bars specific quality settings"
+           }
+       );
+    }
+
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint paint)
+    {
+        float totalBarWidth = barWidth + barSpacing;
+        float canvasHeight = info.Height;
+        float cornerRadius = CalculateCornerRadius(barWidth);
+
+        for (int i = 0; i < spectrum.Length; i++)
         {
-            // Logging
-            public const string LOG_PREFIX = "BarsRenderer";
+            float magnitude = spectrum[i];
+            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
 
-            // Rendering parameters
-            public const float MAX_CORNER_RADIUS = 10f;
-            public const float DEFAULT_CORNER_RADIUS_FACTOR = 5.0f;
-            public const float MIN_BAR_HEIGHT = 1f;
+            float barHeight = CalculateBarHeight(magnitude, canvasHeight);
+            byte alpha = CalculateBarAlpha(magnitude);
 
-            // Highlight settings
-            public const float HIGHLIGHT_WIDTH_PROPORTION = 0.6f;
-            public const float HIGHLIGHT_HEIGHT_PROPORTION = 0.1f;
-            public const float MAX_HIGHLIGHT_HEIGHT = 5f;
-            public const float HIGHLIGHT_ALPHA_DIVISOR = 3f;
+            using var barPaint = _paintPool.Get();
+            barPaint.Color = paint.Color.WithAlpha(alpha);
+            barPaint.IsAntialias = UseAntiAlias;
 
-            // Color and effect settings
-            public const float ALPHA_MULTIPLIER = 1.5f;
-            public const float HIGH_INTENSITY_THRESHOLD = 0.6f;
+            float x = i * totalBarWidth;
 
-            // Glow effect settings
-            public const float GLOW_EFFECT_ALPHA = 0.25f;
-            public const float GLOW_BLUR_RADIUS_LOW = 1.0f;
-            public const float GLOW_BLUR_RADIUS_MEDIUM = 2.0f;
-            public const float GLOW_BLUR_RADIUS_HIGH = 3.0f;
-        }
-        #endregion
-
-        #region Structures
-        /// <summary>
-        /// Configuration parameters for bar rendering.
-        /// </summary>
-        public readonly record struct RenderConfig(float BarWidth, float BarSpacing, int BarCount);
-        #endregion
-
-        #region Fields
-        private static readonly Lazy<BarsRenderer> _instance = new(() => new BarsRenderer());
-
-        // Object pools for efficient resource management
-        private readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 5);
-        private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 5);
-
-        // Reusable paint objects
-        private readonly SKPaint _barPaint;
-        private readonly SKPaint _highlightPaint;
-        private readonly SKPaint _glowPaint;
-
-        // Quality-dependent settings
-        private new bool _useAntiAlias = true;
-        private SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-        private new bool _useAdvancedEffects = true;
-        private bool _useGlowEffect = true;
-        private float _glowRadius = Constants.GLOW_BLUR_RADIUS_MEDIUM;
-
-        // Thread safety
-        private readonly object _renderLock = new();
-        private new bool _disposed;
-        #endregion
-
-        #region Singleton Pattern
-        /// <summary>
-        /// Private constructor to enforce Singleton pattern.
-        /// </summary>
-        private BarsRenderer()
-        {
-            _barPaint = CreateBasicPaint(SKColors.White);
-            _highlightPaint = CreateBasicPaint(SKColors.White, Fill);
-            _glowPaint = CreateGlowPaint(
-                SKColors.White,
-                Constants.GLOW_BLUR_RADIUS_MEDIUM,
-                CalculateGlowAlpha());
-        }
-
-        /// <summary>
-        /// Gets the singleton instance of the bars renderer.
-        /// </summary>
-        public static BarsRenderer GetInstance() => _instance.Value;
-        #endregion
-
-        #region Initialization and Configuration
-        /// <summary>
-        /// Initializes the bars renderer and prepares rendering resources.
-        /// </summary>
-        public override void Initialize()
-        {
-            Safe(() =>
+            if (base.IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight))
             {
-                base.Initialize();
-
-                // Apply initial quality settings
-                ApplyQualitySettings();
-
-                Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            });
-        }
-
-        /// <summary>
-        /// Configures the renderer with overlay status and quality settings.
-        /// </summary>
-        /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
-        /// <param name="quality">The rendering quality level.</param>
-        public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-        {
-            Safe(() =>
-            {
-                base.Configure(isOverlayActive, quality);
-
-                // Apply quality settings if changed
-                if (_quality != quality)
-                {
-                    ApplyQualitySettings();
-                }
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            });
-        }
-
-        /// <summary>
-        /// Applies quality settings based on the current quality level.
-        /// </summary>
-        protected override void ApplyQualitySettings()
-        {
-            Safe(() =>
-            {
-                base.ApplyQualitySettings();
-
-                switch (_quality)
-                {
-                    case RenderQuality.Low:
-                        _useAntiAlias = false;
-                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-                        _useAdvancedEffects = false;
-                        _useGlowEffect = false;
-                        _glowRadius = Constants.GLOW_BLUR_RADIUS_LOW;
-                        break;
-
-                    case RenderQuality.Medium:
-                        _useAntiAlias = true;
-                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                        _useAdvancedEffects = true;
-                        _useGlowEffect = true;
-                        _glowRadius = Constants.GLOW_BLUR_RADIUS_MEDIUM;
-                        break;
-
-                    case RenderQuality.High:
-                        _useAntiAlias = true;
-                        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                        _useAdvancedEffects = true;
-                        _useGlowEffect = true;
-                        _glowRadius = Constants.GLOW_BLUR_RADIUS_HIGH;
-                        break;
-                }
-
-                // Update paint settings
-                _barPaint.IsAntialias = _useAntiAlias;
-                _highlightPaint.IsAntialias = _useAntiAlias;
-                _glowPaint.IsAntialias = _useAntiAlias;
-                _glowPaint.MaskFilter = _useGlowEffect ?
-                    SKMaskFilter.CreateBlur(Normal, _glowRadius) : null;
-
-                Log(LogLevel.Debug, Constants.LOG_PREFIX, $"Quality set to {_quality}");
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
-                ErrorMessage = "Failed to apply quality settings"
-            });
-        }
-        #endregion
-
-        #region Rendering
-        /// <summary>
-        /// Renders the bars visualization on the canvas using spectrum data.
-        /// </summary>
-        public override void Render(
-            SKCanvas? canvas,
-            float[]? spectrum,
-            SKImageInfo info,
-            float barWidth,
-            float barSpacing,
-            int barCount,
-            SKPaint? paint,
-            Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
-        {
-            if (!QuickValidate(canvas, spectrum, info, paint))
-            {
-                drawPerformanceInfo?.Invoke(canvas!, info);
-                return;
-            }
-
-            // Define render bounds and quick reject if not visible
-            SKRect renderBounds = new(0, 0, info.Width, info.Height);
-            if (canvas!.QuickReject(renderBounds))
-            {
-                drawPerformanceInfo?.Invoke(canvas, info);
-                return;
-            }
-
-            Safe(() =>
-            {
-                lock (_renderLock)
-                {
-                    RenderWithTemplate(
-                        canvas,
-                        spectrum,
-                        info,
-                        barWidth,
-                        barSpacing,
-                        barCount,
-                        paint,
-                        drawPerformanceInfo,
-                        RenderSpectrumBar);
-                }
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.Render",
-                ErrorMessage = "Error during rendering"
-            });
-
-            drawPerformanceInfo?.Invoke(canvas!, info);
-        }
-
-        /// <summary>
-        /// Renders the spectrum as bars.
-        /// </summary>
-        private void RenderSpectrumBar(
-            SKCanvas canvas,
-            float[] spectrum,
-            SKImageInfo info,
-            float barWidth,
-            float barSpacing,
-            SKPaint basePaint)
-        {
-            float totalBarWidth = barWidth + barSpacing;
-            float canvasHeight = info.Height;
-            float cornerRadius = CalculateCornerRadius(barWidth);
-
-            for (int i = 0; i < spectrum.Length; i++)
-            {
-                float magnitude = spectrum[i];
-                if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
-
-                float barHeight = CalculateBarHeight(magnitude, canvasHeight);
-                byte alpha = CalculateBarAlpha(magnitude);
-
-                using var tempBarPaint = _paintPool.Get();
-                tempBarPaint.Color = basePaint.Color.WithAlpha(alpha);
-                tempBarPaint.IsAntialias = _useAntiAlias;
-
-                float x = i * totalBarWidth;
-
-                if (IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight))
-                {
-                    RenderBarWithEffects(
-                        canvas,
-                        x,
-                        barWidth,
-                        barHeight,
-                        canvasHeight,
-                        cornerRadius,
-                        tempBarPaint,
-                        magnitude);
-                }
-            }
-        }
-        #endregion
-
-        #region Bar Rendering Methods
-        /// <summary>
-        /// Renders a bar with all applicable effects based on quality settings.
-        /// </summary>
-        private void RenderBarWithEffects(
-            SKCanvas canvas,
-            float x,
-            float barWidth,
-            float barHeight,
-            float canvasHeight,
-            float cornerRadius,
-            SKPaint barPaint,
-            float magnitude)
-        {
-            // Render glow effect for high intensity bars if enabled
-            if (_useGlowEffect && _useAdvancedEffects &&
-                magnitude > Constants.HIGH_INTENSITY_THRESHOLD)
-            {
-                RenderGlowEffect(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, magnitude);
-            }
-
-            // Render main bar
-            RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
-
-            // Render highlight on top of bar if quality allows
-            if (barHeight > cornerRadius * 2 && _quality != RenderQuality.Low)
-            {
-                RenderBarHighlight(
+                RenderBarWithEffects(
                     canvas,
                     x,
                     barWidth,
                     barHeight,
                     canvasHeight,
-                    _highlightPaint,
-                    barPaint.Color.Alpha);
+                    cornerRadius,
+                    barPaint,
+                    magnitude);
             }
         }
+    }
 
-        /// <summary>
-        /// Renders the glow effect behind a bar.
-        /// </summary>
-        private void RenderGlowEffect(
-            SKCanvas canvas,
-            float x,
-            float barWidth,
-            float barHeight,
-            float canvasHeight,
-            float cornerRadius,
-            float magnitude)
+    private void RenderBarWithEffects(
+        SKCanvas canvas,
+        float x,
+        float barWidth,
+        float barHeight,
+        float canvasHeight,
+        float cornerRadius,
+        SKPaint barPaint,
+        float magnitude)
+    {
+        if (_useGlowEffect && UseAdvancedEffects &&
+            magnitude > Constants.HIGH_INTENSITY_THRESHOLD)
         {
-            _glowPaint.Color = SKColors.White.WithAlpha(
-                (byte)(magnitude * 255f * Constants.GLOW_EFFECT_ALPHA));
+            RenderGlowEffect(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, magnitude);
+        }
 
-            DrawRoundedRect(
+        RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
+
+        if (barHeight > cornerRadius * 2 && base.Quality != RenderQuality.Low)
+        {
+            RenderBarHighlight(
                 canvas,
                 x,
-                canvasHeight - barHeight,
                 barWidth,
                 barHeight,
-                cornerRadius,
-                _glowPaint);
+                canvasHeight,
+                barPaint.Color.Alpha);
         }
+    }
 
-        /// <summary>
-        /// Renders the main bar.
-        /// </summary>
-        private void RenderBar(
-            SKCanvas canvas,
-            float x,
-            float barWidth,
-            float barHeight,
-            float canvasHeight,
-            float cornerRadius,
-            SKPaint barPaint)
+    private void RenderGlowEffect(
+        SKCanvas canvas,
+        float x,
+        float barWidth,
+        float barHeight,
+        float canvasHeight,
+        float cornerRadius,
+        float magnitude)
+    {
+        using var glowPaint = CreateGlowPaint(
+            SKColors.White,
+            _glowRadius,
+            (byte)(magnitude * 255f * Constants.GLOW_EFFECT_ALPHA));
+
+        DrawRoundedRect(
+            canvas,
+            x,
+            canvasHeight - barHeight,
+            barWidth,
+            barHeight,
+            cornerRadius,
+            glowPaint);
+    }
+
+    private void RenderBar(
+        SKCanvas canvas,
+        float x,
+        float barWidth,
+        float barHeight,
+        float canvasHeight,
+        float cornerRadius,
+        SKPaint barPaint)
+    {
+        DrawRoundedRect(
+            canvas,
+            x,
+            canvasHeight - barHeight,
+            barWidth,
+            barHeight,
+            cornerRadius,
+            barPaint);
+    }
+
+    private void RenderBarHighlight(
+        SKCanvas canvas,
+        float x,
+        float barWidth,
+        float barHeight,
+        float canvasHeight,
+        byte baseAlpha)
+    {
+        float highlightWidth = barWidth * Constants.HIGHLIGHT_WIDTH_PROPORTION;
+        float highlightHeight = MathF.Min(
+            barHeight * Constants.HIGHLIGHT_HEIGHT_PROPORTION,
+            Constants.MAX_HIGHLIGHT_HEIGHT);
+
+        float highlightX = x + (barWidth - highlightWidth) / 2;
+
+        using var highlightPaint = _paintPool.Get();
+        highlightPaint.Color = SKColors.White.WithAlpha(
+            (byte)(baseAlpha / Constants.HIGHLIGHT_ALPHA_DIVISOR));
+        highlightPaint.IsAntialias = UseAntiAlias;
+
+        canvas.DrawRect(
+            highlightX,
+            canvasHeight - barHeight,
+            highlightWidth,
+            highlightHeight,
+            highlightPaint);
+    }
+
+    [MethodImpl(AggressiveInlining)]
+    private static float CalculateCornerRadius(float barWidth) =>
+        MathF.Min(barWidth * Constants.DEFAULT_CORNER_RADIUS_FACTOR,
+            Constants.MAX_CORNER_RADIUS);
+
+    [MethodImpl(AggressiveInlining)]
+    private static float CalculateBarHeight(float magnitude, float canvasHeight) =>
+        MathF.Max(magnitude * canvasHeight, Constants.MIN_BAR_HEIGHT);
+
+    [MethodImpl(AggressiveInlining)]
+    private static byte CalculateBarAlpha(float magnitude) =>
+        (byte)MathF.Min(magnitude * Constants.ALPHA_MULTIPLIER * 255f, 255f);
+
+    [MethodImpl(AggressiveInlining)]
+    private static void DrawRoundedRect(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        float cornerRadius,
+        SKPaint paint)
+    {
+        canvas.DrawRoundRect(
+            new SKRect(x, y, x + width, y + height),
+            cornerRadius,
+            cornerRadius,
+            paint);
+    }
+
+    protected override void OnDispose()
+    {
+        Safe(() =>
         {
-            DrawRoundedRect(
-                canvas,
-                x,
-                canvasHeight - barHeight,
-                barWidth,
-                barHeight,
-                cornerRadius,
-                barPaint);
-        }
-
-        /// <summary>
-        /// Renders a highlight at the top of the bar.
-        /// </summary>
-        private void RenderBarHighlight(
-            SKCanvas canvas,
-            float x,
-            float barWidth,
-            float barHeight,
-            float canvasHeight,
-            SKPaint highlightPaint,
-            byte baseAlpha)
+            base.OnDispose();
+        },
+        new ErrorHandlingOptions
         {
-            float highlightWidth = barWidth * Constants.HIGHLIGHT_WIDTH_PROPORTION;
-            float highlightHeight = MathF.Min(
-                barHeight * Constants.HIGHLIGHT_HEIGHT_PROPORTION,
-                Constants.MAX_HIGHLIGHT_HEIGHT);
-
-            float highlightX = x + (barWidth - highlightWidth) / 2;
-
-            highlightPaint.Color = highlightPaint.Color.WithAlpha(
-                (byte)(baseAlpha / Constants.HIGHLIGHT_ALPHA_DIVISOR));
-
-            canvas.DrawRect(
-                highlightX,
-                canvasHeight - barHeight,
-                highlightWidth,
-                highlightHeight,
-                highlightPaint);
-        }
-        #endregion
-
-        #region Helper Methods
-        /// <summary>
-        /// Calculates the glow alpha value.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        private static byte CalculateGlowAlpha() =>
-            (byte)(255f * Constants.GLOW_EFFECT_ALPHA);
-
-        /// <summary>
-        /// Checks if the render area is visible on the canvas.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        private bool IsRenderAreaVisible(
-            SKCanvas canvas,
-            float x,
-            float y,
-            float width,
-            float height)
-        {
-            var clipBounds = canvas.LocalClipBounds;
-            return clipBounds.IntersectsWith(new SKRect(x, y, x + width, y + height));
-        }
-
-        /// <summary>
-        /// Calculates the corner radius for bars.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        private float CalculateCornerRadius(float barWidth) =>
-            MathF.Min(barWidth * Constants.DEFAULT_CORNER_RADIUS_FACTOR,
-                      Constants.MAX_CORNER_RADIUS);
-
-        /// <summary>
-        /// Calculates the height of a bar based on magnitude.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        private float CalculateBarHeight(float magnitude, float canvasHeight) =>
-            MathF.Max(magnitude * canvasHeight, Constants.MIN_BAR_HEIGHT);
-
-        /// <summary>
-        /// Calculates the alpha value for a bar based on magnitude.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        private byte CalculateBarAlpha(float magnitude) =>
-            (byte)MathF.Min(magnitude * Constants.ALPHA_MULTIPLIER * 255f, 255f);
-
-        /// <summary>
-        /// Draws a rounded rectangle.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        private void DrawRoundedRect(
-            SKCanvas canvas,
-            float x,
-            float y,
-            float width,
-            float height,
-            float cornerRadius,
-            SKPaint paint)
-        {
-            canvas.DrawRoundRect(
-                new SKRect(x, y, x + width, y + height),
-                cornerRadius,
-                cornerRadius,
-                paint);
-        }
-        #endregion
-
-        #region Disposal
-        /// <summary>
-        /// Disposes of resources used by the renderer.
-        /// </summary>
-        public override void Dispose()
-        {
-            if (!_disposed)
-            {
-                Safe(() =>
-                {
-                    _barPaint?.Dispose();
-                    _highlightPaint?.Dispose();
-                    _glowPaint?.Dispose();
-
-                    _pathPool?.Dispose();
-                    _paintPool?.Dispose();
-
-                    base.Dispose();
-
-                    _disposed = true;
-                    Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
-                }, new ErrorHandlingOptions
-                {
-                    Source = $"{Constants.LOG_PREFIX}.Dispose",
-                    ErrorMessage = "Error during disposal"
-                });
-            }
-        }
-        #endregion
+            Source = $"{GetType().Name}.OnDispose",
+            ErrorMessage = "Error during CircularBarsRenderer disposal"
+        });
     }
 }

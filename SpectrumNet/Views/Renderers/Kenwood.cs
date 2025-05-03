@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Views.Abstract;
+
 namespace SpectrumNet.Views.Renderers;
 
 /// <summary>

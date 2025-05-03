@@ -26,6 +26,7 @@ global using SpectrumNet.Service.Colors;
 global using SpectrumNet.Service.ErrorHandlers;
 global using SpectrumNet.Service.Utilities;
 global using SpectrumNet.Views;
+global using SpectrumNet.Views.Abstract;
 global using SpectrumNet.Views.Enums;
 global using SpectrumNet.Views.Renderers;
 global using SpectrumNet.Views.Utils;
