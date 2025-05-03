@@ -41,7 +41,6 @@ global using System.Reflection;
 global using System.Runtime.CompilerServices;
 global using System.Runtime.InteropServices;
 global using System.Threading.Channels;
-global using System.Timers;
 global using System.Windows;
 global using System.Windows.Controls;
 global using System.Windows.Data;
@@ -51,6 +50,7 @@ global using System.Windows.Media;
 global using System.Windows.Threading;
 global using static SkiaSharp.SKBlurStyle;
 global using static SkiaSharp.SKPaintStyle;
+global using static SpectrumNet.Controllers.SpectrumCore.Constants;
 global using static SpectrumNet.Service.ErrorHandlers.SmartLogger;
 global using static System.DateTime;
 global using static System.Environment;
@@ -74,3 +74,5 @@ global using MessageBox = System.Windows.MessageBox;
 global using Parallel = System.Threading.Tasks.Parallel;
 global using RichTextBox = System.Windows.Controls.RichTextBox;
 global using TextBox = System.Windows.Controls.TextBox;
+
+

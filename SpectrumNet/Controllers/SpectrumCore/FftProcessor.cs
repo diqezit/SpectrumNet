@@ -2,22 +2,24 @@
 
 namespace SpectrumNet.Controllers.SpectrumCore;
 
-public sealed class FftProcessor 
-    : AsyncDisposableBase, IFftProcessor
+public sealed class FftProcessor
+    : AsyncDisposableBase,
+    IFftProcessor
 {
-    private const string LogSource = nameof(FftProcessor);
+    private const string LOG_SOURCE = nameof(FftProcessor);
+
     private readonly int _fftSize;
     private readonly Complex[] _buffer;
-    private readonly Channel<(ReadOnlyMemory<float> Samples, int SampleRate,
-        CancellationToken Token)> _channel;
+    private readonly Channel<(ReadOnlyMemory<float> Samples, int SampleRate, CancellationToken Token)> _channel;
     private readonly CancellationTokenSource _cts = new();
-    private readonly Dictionary<FftWindowType, float[]> _windows = new();
+    private readonly Dictionary<FftWindowType, float[]> _windows = [];
     private readonly float[] _cosCache, _sinCache;
     private readonly int _vecSize = Vector<float>.Count;
     private readonly ParallelOptions _parallelOpts;
     private readonly ThreadLocal<Complex[]> _threadLocalBuffer;
     private readonly ArrayPool<Complex> _complexArrayPool = ArrayPool<Complex>.Shared;
     private readonly ArrayPool<float> _floatArrayPool = ArrayPool<float>.Shared;
+
     private float[] _window;
     private int _sampleCount;
     private FftWindowType _windowType = FftWindowType.Hann;
@@ -25,31 +27,23 @@ public sealed class FftProcessor
     public event EventHandler<FftEventArgs>? FftCalculated;
 
     public FftProcessor(
-        int fftSize = Constants.DefaultFftSize,
-        int channelCapacity = Constants.DefaultChannelCapacity
-    )
+        int fftSize = DEFAULT_FFT_SIZE,
+        int channelCapacity = DEFAULT_CHANNEL_CAPACITY)
     {
-        if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
-            throw new ArgumentException("FFT size must be a positive power of 2",
-                nameof(fftSize));
+        ValidateFftSize(fftSize);
+
         _fftSize = fftSize;
         _buffer = new Complex[fftSize];
         (_cosCache, _sinCache) = TrigonometricTables.Get(fftSize);
-        foreach (FftWindowType type in Enum.GetValues(typeof(FftWindowType)))
-            _windows[type] = GenerateWindow(fftSize, type);
+
+        InitializeWindows(fftSize);
         _window = _windows[_windowType];
-        var options = new BoundedChannelOptions(channelCapacity)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true
-        };
-        _channel = Channel.CreateBounded<(ReadOnlyMemory<float>, int, CancellationToken)>(
-            options);
-        _parallelOpts = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = ProcessorCount
-        };
+
+        _channel = CreateProcessingChannel(channelCapacity);
+
+        _parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = ProcessorCount };
         _threadLocalBuffer = new ThreadLocal<Complex[]>(() => new Complex[fftSize]);
+
         Task.Run(ProcessAsync);
     }
 
@@ -60,34 +54,30 @@ public sealed class FftProcessor
         {
             if (_windowType == value)
                 return;
+
             if (!_windows.TryGetValue(value, out var window) || window is null)
                 throw new InvalidOperationException($"Unsupported window type: {value}");
+
             _windowType = value;
             _window = window;
             ResetFftState();
         }
     }
 
-    public ValueTask AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate,
+    public ValueTask AddSamplesAsync(
+        ReadOnlyMemory<float> samples,
+        int sampleRate,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
         if (sampleRate <= 0)
-            throw new ArgumentException("Sample rate must be positive",
-                nameof(sampleRate));
+            throw new ArgumentException("Sample rate must be positive", nameof(sampleRate));
 
         if (samples.Length == 0)
             return ValueTask.CompletedTask;
 
-        using var linkedCts =
-            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
-
-        return _channel.Writer.TryWrite((samples, sampleRate, linkedCts.Token))
-            ? ValueTask.CompletedTask
-            : new ValueTask(
-                _channel.Writer.WriteAsync((samples, sampleRate, linkedCts.Token),
-                    linkedCts.Token).AsTask());
+        return WriteToChannelAsync(samples, sampleRate, cancellationToken);
     }
 
     public void ResetFftState()
@@ -99,57 +89,108 @@ public sealed class FftProcessor
 
     protected override void DisposeManaged()
     {
+        CleanupResources();
+    }
+
+    protected override async ValueTask DisposeAsyncManagedResources()
+    {
+        CleanupResources();
+        await Task.CompletedTask;
+    }
+
+    private void CleanupResources()
+    {
         _cts.Cancel();
         _channel.Writer.Complete();
         _threadLocalBuffer.Dispose();
         _cts.Dispose();
     }
 
-    protected override async ValueTask DisposeAsyncManagedResources()
+    private void ValidateFftSize(int fftSize)
     {
-        _cts.Cancel();
-        _channel.Writer.Complete();
-        _threadLocalBuffer.Dispose();
-        await Task.CompletedTask;
-        _cts.Dispose();
+        if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
+            throw new ArgumentException("FFT size must be a positive power of 2", nameof(fftSize));
+    }
+
+    private void InitializeWindows(int fftSize)
+    {
+        foreach (FftWindowType type in Enum.GetValues(typeof(FftWindowType)))
+            _windows[type] = GenerateWindow(fftSize, type);
+    }
+
+    private Channel<(ReadOnlyMemory<float>, int, CancellationToken)> CreateProcessingChannel(int capacity)
+    {
+        var options = new BoundedChannelOptions(capacity)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true
+        };
+        return Channel.CreateBounded<(ReadOnlyMemory<float>, int, CancellationToken)>(options);
+    }
+
+    private ValueTask WriteToChannelAsync(
+        ReadOnlyMemory<float> samples,
+        int sampleRate,
+        CancellationToken cancellationToken)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _cts.Token);
+
+        return _channel.Writer.TryWrite((samples, sampleRate, linkedCts.Token))
+            ? ValueTask.CompletedTask
+            : new ValueTask(
+                _channel.Writer.WriteAsync(
+                    (samples, sampleRate, linkedCts.Token),
+                    linkedCts.Token).AsTask());
     }
 
     private float[] GenerateWindow(int size, FftWindowType type) =>
         SafeResult(() =>
         {
             float[] w = new float[size];
-            Action<int> setWindow = type switch
-            {
-                FftWindowType.Hann =>
-                    i => w[i] = 0.5f * (1f - _cosCache[i]),
-                FftWindowType.Hamming =>
-                    i => w[i] = 0.54f - 0.46f * _cosCache[i],
-                FftWindowType.Blackman =>
-                    i => w[i] = 0.42f - 0.5f * _cosCache[i] +
-                        0.08f * MathF.Cos(Constants.TwoPi * 2 * i / (size - 1)),
-                FftWindowType.Bartlett =>
-                    i => w[i] = 2f / (size - 1) * ((size - 1) / 2f -
-                        MathF.Abs(i - (size - 1) / 2f)),
-                FftWindowType.Kaiser =>
-                    i => w[i] = BesselI0(Constants.KaiserBeta *
-                        MathF.Sqrt(1 - MathF.Pow(2f * i / (size - 1) - 1, 2))) /
-                        BesselI0(Constants.KaiserBeta),
-                _ => throw new NotSupportedException($"Unsupported window type: {type}")
-            };
+            Action<int> setWindow = GetWindowGenerator(w, size, type);
+
             Parallel.For(0, size, setWindow);
             return w;
         },
         defaultValue: new float[size],
         options: new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error generating window"
         });
+
+    private Action<int> GetWindowGenerator(float[] w, int size, FftWindowType type)
+    {
+        return type switch
+        {
+            FftWindowType.Hann =>
+                i => w[i] = 0.5f * (1f - _cosCache[i]),
+
+            FftWindowType.Hamming =>
+                i => w[i] = 0.54f - 0.46f * _cosCache[i],
+
+            FftWindowType.Blackman =>
+                i => w[i] = 0.42f - 0.5f * _cosCache[i] +
+                    0.08f * MathF.Cos(TWO_PI * 2 * i / (size - 1)),
+
+            FftWindowType.Bartlett =>
+                i => w[i] = 2f / (size - 1) * ((size - 1) / 2f -
+                    MathF.Abs(i - (size - 1) / 2f)),
+
+            FftWindowType.Kaiser =>
+                i => w[i] = BesselI0(KAISER_BETA *
+                    MathF.Sqrt(1 - MathF.Pow(2f * i / (size - 1) - 1, 2))) /
+                    BesselI0(KAISER_BETA),
+
+            _ => throw new NotSupportedException($"Unsupported window type: {type}")
+        };
+    }
 
     private static float BesselI0(float x)
     {
         float sum = 1f, term = x * x / 4f;
-        for (int k = 1; term > Constants.BesselEpsilon; k++)
+        for (int k = 1; term > BESSEL_EPSILON; k++)
         {
             sum += term;
             term *= x * x / (4f * k * k);
@@ -160,42 +201,41 @@ public sealed class FftProcessor
     private async Task ProcessAsync() =>
         await SafeExecuteAsync(async () =>
         {
-            await foreach (var (samples, rate, token) in
-                _channel.Reader.ReadAllAsync(_cts.Token))
+            await foreach (var (samples, rate, token) in _channel.Reader.ReadAllAsync(_cts.Token))
             {
                 if (token.IsCancellationRequested)
                     continue;
+
                 if (samples.Length > 0)
                     await Task.Run(() => ProcessBatch(samples, rate, token), token);
             }
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error in FFT processing loop",
-            IgnoreExceptions = new[] { typeof(OperationCanceledException) }
+            IgnoreExceptions = [typeof(OperationCanceledException)]
         });
 
-    private void ProcessBatch(ReadOnlyMemory<float> samples, int rate,
+    private void ProcessBatch(
+        ReadOnlyMemory<float> samples,
+        int rate,
         CancellationToken cancellationToken) =>
         SafeExecute(() =>
         {
             int pos = 0;
-            while (pos < samples.Length)
+            while (pos < samples.Length && !cancellationToken.IsCancellationRequested)
             {
-                if (cancellationToken.IsCancellationRequested)
-                    return;
-                int count = Min(_fftSize - _sampleCount,
-                    samples.Length - pos);
+                int count = Min(_fftSize - _sampleCount, samples.Length - pos);
                 if (count <= 0)
                     break;
+
                 ProcessChunk(samples.Slice(pos, count));
                 pos += count;
                 _sampleCount += count;
-                if (_sampleCount >= _fftSize)
+
+                if (_sampleCount >= _fftSize && !cancellationToken.IsCancellationRequested)
                 {
-                    if (cancellationToken.IsCancellationRequested)
-                        return;
                     PerformFftAndNotify(rate, cancellationToken);
                     ResetFftState();
                 }
@@ -203,62 +243,71 @@ public sealed class FftProcessor
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error processing batch"
         });
 
-    private void PerformFftAndNotify(int rate,
+    private void PerformFftAndNotify(
+        int rate,
         CancellationToken cancellationToken) =>
         SafeExecute(() =>
         {
             Complex[] fftBuffer = _complexArrayPool.Rent(_fftSize);
             Array.Copy(_buffer, fftBuffer, _fftSize);
-            Task.Run(() =>
-            {
-                try
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                        return;
-                    FastFourierTransform.FFT(true,
-                        (int)Log2(_fftSize), fftBuffer);
-                    if (!cancellationToken.IsCancellationRequested &&
-                        FftCalculated != null)
-                        FftCalculated(this,
-                            new FftEventArgs(fftBuffer, rate));
-                }
-                catch (Exception ex)
-                {
-                    Log(LogLevel.Error, LogSource,
-                        $"FFT calculation failed: {ex}");
-                }
-                finally
-                {
-                    _complexArrayPool.Return(fftBuffer);
-                }
-            }, cancellationToken);
+
+            ScheduleFftCalculation(fftBuffer, rate, cancellationToken);
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error preparing FFT"
         });
+
+    private void ScheduleFftCalculation(
+        Complex[] fftBuffer,
+        int rate,
+        CancellationToken cancellationToken)
+    {
+        Task.Run(() =>
+        {
+            try
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+
+                FastFourierTransform.FFT(true, (int)Log2(_fftSize), fftBuffer);
+
+                NotifyFftResultIfNeeded(fftBuffer, rate, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error, LOG_SOURCE, $"FFT calculation failed: {ex}");
+            }
+            finally
+            {
+                _complexArrayPool.Return(fftBuffer);
+            }
+        }, cancellationToken);
+    }
+
+    private void NotifyFftResultIfNeeded(
+        Complex[] fftBuffer,
+        int rate,
+        CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.IsCancellationRequested && FftCalculated != null)
+            FftCalculated(this, new FftEventArgs(fftBuffer, rate));
+    }
 
     private void ProcessChunk(ReadOnlyMemory<float> chunk) =>
         SafeExecute(() =>
         {
             int offset = _sampleCount;
             int len = chunk.Length;
-            if (len > 1024)
+
+            if (len > BATCH_SIZE)
             {
-                int chunkSize = Max(1024, len / ProcessorCount);
-                Parallel.For(0, (len + chunkSize - 1) / chunkSize, _parallelOpts, i =>
-                {
-                    int start = i * chunkSize;
-                    int end = Min(start + chunkSize, len);
-                    if (_parallelOpts.CancellationToken.IsCancellationRequested)
-                        return;
-                    ApplyWindow(chunk.Slice(start, end - start), offset + start);
-                });
+                ProcessLargeChunkInParallel(chunk, offset, len);
             }
             else
             {
@@ -267,24 +316,52 @@ public sealed class FftProcessor
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error processing chunk"
         });
+
+    private void ProcessLargeChunkInParallel(ReadOnlyMemory<float> chunk, int offset, int len)
+    {
+        int chunkSize = Max(BATCH_SIZE, len / ProcessorCount);
+        Parallel.For(0, (len + chunkSize - 1) / chunkSize, _parallelOpts, i =>
+        {
+            if (_parallelOpts.CancellationToken.IsCancellationRequested)
+                return;
+
+            int start = i * chunkSize;
+            int end = Min(start + chunkSize, len);
+
+            ApplyWindow(chunk[start..end], offset + start);
+        });
+    }
 
     private void ApplyWindow(ReadOnlyMemory<float> data, int offset)
     {
         int len = data.Length;
         int vecEnd = len - len % _vecSize;
+
+        ProcessVectorizedData(data, offset, vecEnd);
+        ProcessRemainingData(data, offset, vecEnd, len);
+    }
+
+    private void ProcessVectorizedData(ReadOnlyMemory<float> data, int offset, int vecEnd)
+    {
         Span<float> temp = stackalloc float[_vecSize];
+
         for (int i = 0; i < vecEnd; i += _vecSize)
         {
             data.Span.Slice(i, _vecSize).CopyTo(temp);
             Vector<float> s = new(temp);
             Vector<float> w = new(_window, offset + i);
             (s * w).CopyTo(temp);
+
             for (int j = 0; j < _vecSize; j++)
                 _buffer[offset + i + j] = new Complex { X = temp[j] };
         }
+    }
+
+    private void ProcessRemainingData(ReadOnlyMemory<float> data, int offset, int vecEnd, int len)
+    {
         for (int i = vecEnd; i < len; i++)
             _buffer[offset + i] = new Complex { X = data.Span[i] * _window[offset + i] };
     }

@@ -7,7 +7,8 @@ public sealed class SpectrumAnalyzer
     ISpectralDataProvider, 
     IComponent
 {
-    private const string LogSource = nameof(SpectrumAnalyzer);
+    private const string LOG_SOURCE = nameof(SpectrumAnalyzer);
+
     private readonly IFftProcessor _fftProcessor;
     private readonly ISpectrumConverter _converter;
     private readonly SynchronizationContext? _context;
@@ -15,6 +16,7 @@ public sealed class SpectrumAnalyzer
     private readonly CancellationTokenSource _cts = new();
     private readonly Channel<(Complex[] Fft, int SampleRate)> _processingChannel;
     private readonly ArrayPool<float> _floatArrayPool = ArrayPool<float>.Shared;
+
     private SpectralData? _lastData;
     private SpectrumScale _scaleType = SpectrumScale.Linear;
 
@@ -27,24 +29,17 @@ public sealed class SpectrumAnalyzer
         IFftProcessor fftProcessor,
         ISpectrumConverter converter,
         SynchronizationContext? context = null,
-        int channelCapacity = Constants.DefaultChannelCapacity
-    )
+        int channelCapacity = DEFAULT_CHANNEL_CAPACITY)
     {
-        _fftProcessor = fftProcessor ??
-            throw new ArgumentNullException(nameof(fftProcessor));
+        ValidateDependencies(fftProcessor, converter);
 
-        _converter = converter ??
-            throw new ArgumentNullException(nameof(converter));
-
+        _fftProcessor = fftProcessor;
+        _converter = converter;
         _context = context;
-        var options = new BoundedChannelOptions(channelCapacity)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true
-        };
-        _processingChannel = Channel.CreateBounded<(Complex[] Fft, int SampleRate)>(options);
-        Task.Run(ProcessFftResultsAsync);
-        _fftProcessor.FftCalculated += OnFftCalculated;
+
+        _processingChannel = CreateProcessingChannel(channelCapacity);
+
+        InitializeProcessing();
     }
 
     public SpectrumScale ScaleType
@@ -56,6 +51,7 @@ public sealed class SpectrumAnalyzer
             {
                 if (_scaleType == value)
                     return;
+
                 _scaleType = value;
                 ResetSpectrum();
             }
@@ -69,6 +65,7 @@ public sealed class SpectrumAnalyzer
             {
                 if (_fftProcessor.WindowType == windowType)
                     return;
+
                 _fftProcessor.WindowType = windowType;
                 _fftProcessor.ResetFftState();
                 ResetSpectrum();
@@ -76,7 +73,7 @@ public sealed class SpectrumAnalyzer
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = $"Error setting window type: {windowType}"
         });
 
@@ -87,25 +84,15 @@ public sealed class SpectrumAnalyzer
         {
             lock (_lock)
             {
-                bool changed = false;
-                if (_fftProcessor.WindowType != windowType)
-                {
-                    _fftProcessor.WindowType = windowType;
-                    _fftProcessor.ResetFftState();
-                    changed = true;
-                }
-                if (_scaleType != scaleType)
-                {
-                    _scaleType = scaleType;
-                    changed = true;
-                }
+                bool changed = UpdateProcessorSettings(windowType, scaleType);
+
                 if (changed)
                     ResetSpectrum();
             }
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error updating settings"
         });
 
@@ -115,7 +102,9 @@ public sealed class SpectrumAnalyzer
         return _lastData;
     }
 
-    public async Task AddSamplesAsync(ReadOnlyMemory<float> samples, int sampleRate,
+    public async Task AddSamplesAsync(
+        ReadOnlyMemory<float> samples,
+        int sampleRate,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -123,25 +112,87 @@ public sealed class SpectrumAnalyzer
         if (samples.Length == 0)
             return;
 
-        using var linkedCts =
-            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
-
-        try
-        {
-            await _fftProcessor.AddSamplesAsync(samples, sampleRate,
-                linkedCts.Token);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Log(LogLevel.Error, LogSource,
-                $"Error adding samples: {ex}");
-            throw;
-        }
+        await ForwardSamplesToProcessorAsync(samples, sampleRate, cancellationToken);
     }
 
     public void SafeReset() => ResetSpectrum();
 
     protected override void DisposeManaged()
+    {
+        CleanupResources();
+        RaiseDisposedEvent();
+    }
+
+    protected override async ValueTask DisposeAsyncManagedResources()
+    {
+        await CleanupResourcesAsync();
+        RaiseDisposedEvent();
+    }
+
+    private static void ValidateDependencies(IFftProcessor fftProcessor, ISpectrumConverter converter)
+    {
+        ArgumentNullException.ThrowIfNull(fftProcessor);
+
+        ArgumentNullException.ThrowIfNull(converter);
+    }
+
+    private static Channel<(Complex[] Fft, int SampleRate)> CreateProcessingChannel(int channelCapacity)
+    {
+        var options = new BoundedChannelOptions(channelCapacity)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true
+        };
+
+        return Channel.CreateBounded<(Complex[] Fft, int SampleRate)>(options);
+    }
+
+    private void InitializeProcessing()
+    {
+        Task.Run(ProcessFftResultsAsync);
+        _fftProcessor.FftCalculated += OnFftCalculated;
+    }
+
+    private bool UpdateProcessorSettings(FftWindowType windowType, SpectrumScale scaleType)
+    {
+        bool changed = false;
+
+        if (_fftProcessor.WindowType != windowType)
+        {
+            _fftProcessor.WindowType = windowType;
+            _fftProcessor.ResetFftState();
+            changed = true;
+        }
+
+        if (_scaleType != scaleType)
+        {
+            _scaleType = scaleType;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private async Task ForwardSamplesToProcessorAsync(
+        ReadOnlyMemory<float> samples,
+        int sampleRate,
+        CancellationToken cancellationToken)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _cts.Token);
+
+        try
+        {
+            await _fftProcessor.AddSamplesAsync(samples, sampleRate, linkedCts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log(LogLevel.Error, LOG_SOURCE, $"Error adding samples: {ex}");
+            throw;
+        }
+    }
+
+    private void CleanupResources()
     {
         _fftProcessor.FftCalculated -= OnFftCalculated;
         _cts.Cancel();
@@ -154,25 +205,13 @@ public sealed class SpectrumAnalyzer
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogSource, $"Error disposing processor: {ex.Message}");
+            Log(LogLevel.Error, LOG_SOURCE, $"Error disposing processor: {ex.Message}");
         }
 
         _cts.Dispose();
-
-        try
-        {
-            if (_context != null)
-                _context.Post(_ => Disposed?.Invoke(this, EventArgs.Empty), null);
-            else
-                Disposed?.Invoke(this, EventArgs.Empty);
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogSource, $"Error invoking Disposed event: {ex.Message}");
-        }
     }
 
-    protected override async ValueTask DisposeAsyncManagedResources()
+    private async Task CleanupResourcesAsync()
     {
         _fftProcessor.FftCalculated -= OnFftCalculated;
         _cts.Cancel();
@@ -184,11 +223,14 @@ public sealed class SpectrumAnalyzer
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogSource, $"Error disposing processor asynchronously: {ex.Message}");
+            Log(LogLevel.Error, LOG_SOURCE, $"Error disposing processor asynchronously: {ex.Message}");
         }
 
         _cts.Dispose();
+    }
 
+    private void RaiseDisposedEvent()
+    {
         try
         {
             if (_context != null)
@@ -198,70 +240,88 @@ public sealed class SpectrumAnalyzer
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogSource, $"Error invoking Disposed event: {ex.Message}");
+            Log(LogLevel.Error, LOG_SOURCE, $"Error invoking Disposed event: {ex.Message}");
         }
     }
 
     private async Task ProcessFftResultsAsync() =>
         await SafeExecuteAsync(async () =>
         {
-            await foreach (var (fft, sampleRate) in
-                _processingChannel.Reader.ReadAllAsync(_cts.Token))
+            await foreach (var (fft, sampleRate) in _processingChannel.Reader.ReadAllAsync(_cts.Token))
             {
                 if (_cts.IsCancellationRequested)
                     break;
-                try
-                {
-                    var currentScale = _scaleType;
-                    var spectrum = await Task.Run(() =>
-                    {
-                        _cts.Token.ThrowIfCancellationRequested();
-                        return _converter.ConvertToSpectrum(
-                            fft, sampleRate, currentScale, _cts.Token);
-                    }, _cts.Token);
-                    var data = new SpectralData(spectrum, UtcNow);
-                    lock (_lock)
-                        _lastData = data;
-                    if (_context != null)
-                        _context.Post(_ => SpectralDataReady?.Invoke(
-                            this, new SpectralDataEventArgs(data)), null);
-                    else
-                        SpectralDataReady?.Invoke(
-                            this, new SpectralDataEventArgs(data));
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Log(LogLevel.Error, LogSource,
-                        $"Error processing FFT result: {ex}");
-                }
+
+                await ProcessFftDataAsync(fft, sampleRate);
             }
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error in FFT results processing loop",
-            IgnoreExceptions = new[] { typeof(OperationCanceledException) }
+            IgnoreExceptions = [typeof(OperationCanceledException)]
         });
+
+    private async Task ProcessFftDataAsync(Complex[] fft, int sampleRate)
+    {
+        try
+        {
+            var currentScale = _scaleType;
+            var spectrum = await ComputeSpectrumAsync(fft, sampleRate, currentScale);
+
+            var data = new SpectralData(spectrum, UtcNow);
+
+            UpdateAndNotifyWithNewData(data);
+        }
+        catch (OperationCanceledException)
+        {
+            // Operation was canceled, just exit
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, LOG_SOURCE, $"Error processing FFT result: {ex}");
+        }
+    }
+
+    private async Task<float[]> ComputeSpectrumAsync(
+        Complex[] fft,
+        int sampleRate,
+        SpectrumScale scale)
+    {
+        return await Task.Run(() =>
+        {
+            _cts.Token.ThrowIfCancellationRequested();
+            return _converter.ConvertToSpectrum(fft, sampleRate, scale, _cts.Token);
+        }, _cts.Token);
+    }
+
+    private void UpdateAndNotifyWithNewData(SpectralData data)
+    {
+        lock (_lock)
+            _lastData = data;
+
+        NotifyDataReady(data);
+    }
+
+    private void NotifyDataReady(SpectralData data)
+    {
+        if (_context != null)
+            _context.Post(_ => SpectralDataReady?.Invoke(
+                this, new SpectralDataEventArgs(data)), null);
+        else
+            SpectralDataReady?.Invoke(this, new SpectralDataEventArgs(data));
+    }
 
     private void ResetSpectrum() =>
         SafeExecute(() =>
         {
             _lastData = null;
-            var emptyData = new SpectralData(Array.Empty<float>(), UtcNow);
-            if (_context != null)
-                _context.Post(_ => SpectralDataReady?.Invoke(
-                    this, new SpectralDataEventArgs(emptyData)), null);
-            else
-                SpectralDataReady?.Invoke(
-                    this, new SpectralDataEventArgs(emptyData));
+            var emptyData = new SpectralData([], UtcNow);
+            NotifyDataReady(emptyData);
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error resetting spectrum"
         });
 
@@ -270,13 +330,18 @@ public sealed class SpectrumAnalyzer
         {
             if (_isDisposed || e.Result.Length == 0 || _cts.IsCancellationRequested)
                 return;
-            if (!_processingChannel.Writer.TryWrite((e.Result, e.SampleRate)))
-                Log(LogLevel.Warning, LogSource,
-                    "Processing channel is full, dropping FFT result");
+
+            if (!TryEnqueueFftResult(e.Result, e.SampleRate))
+                Log(LogLevel.Warning, LOG_SOURCE, "Processing channel is full, dropping FFT result");
         },
         new ErrorHandlingOptions
         {
-            Source = LogSource,
+            Source = LOG_SOURCE,
             ErrorMessage = "Error handling FFT calculation event"
         });
+
+    private bool TryEnqueueFftResult(Complex[] fftResult, int sampleRate)
+    {
+        return _processingChannel.Writer.TryWrite((fftResult, sampleRate));
+    }
 }
