@@ -1,337 +1,538 @@
 ﻿#nullable enable
 
-using SpectrumNet.Views.Abstract;
+using static SpectrumNet.Views.Renderers.KenwoodRenderer.Constants;
 
 namespace SpectrumNet.Views.Renderers;
 
-/// <summary>
-/// Renderer that visualizes spectrum data as a classic Kenwood-style equalizer.
-/// </summary>
-public sealed class KenwoodRenderer : BaseSpectrumRenderer
+public sealed class KenwoodRenderer : EffectSpectrumRenderer
 {
-    #region Singleton Pattern
     private static readonly Lazy<KenwoodRenderer> _instance = new(() => new KenwoodRenderer());
-    private KenwoodRenderer() { } // Приватный конструктор
-    public static KenwoodRenderer GetInstance() => _instance.Value;
-    #endregion
 
-    #region Constants
-    private static class Constants
+    private KenwoodRenderer() { }
+
+    public static KenwoodRenderer GetInstance() => _instance.Value;
+
+    public record Constants
     {
-        // Logging
         public const string LOG_PREFIX = "KenwoodRenderer";
 
-        // Animation and smoothing factors
-        public const float ANIMATION_SPEED = 0.85f;         // Speed of animation transitions
-        public const float REFLECTION_OPACITY = 0.4f;       // Opacity of reflection effect
-        public const float REFLECTION_HEIGHT = 0.6f;        // Height factor for reflection effect
-        public const float PEAK_FALL_SPEED = 0.007f;        // Speed at which peaks fall
-        public const float SCALE_FACTOR = 0.9f;             // Scaling factor for segment sizes
-        public const float DESIRED_SEGMENT_HEIGHT = 10f;    // Desired height of each segment
-        public const float SEGMENT_ROUNDNESS = 4f;          // Roundness factor for segments
+        public const float
+            ANIMATION_SPEED = 0.85f,
+            REFLECTION_OPACITY = 0.4f,
+            REFLECTION_HEIGHT = 0.6f,
+            PEAK_FALL_SPEED = 0.007f,
+            SCALE_FACTOR = 0.9f,
+            DESIRED_SEGMENT_HEIGHT = 10f,
+            SEGMENT_ROUNDNESS = 4f;
 
-        // Smoothing and transition defaults
-        public const float DEFAULT_SMOOTHING_FACTOR = 1.5f; // Default factor for smoothing spectrum data
-        public const float DEFAULT_TRANSITION_SMOOTHNESS = 1f; // Default smoothness for transitions
+        public const float
+            DEFAULT_SMOOTHING_FACTOR = 1.5f,
+            DEFAULT_TRANSITION_SMOOTHNESS = 1f;
 
-        // Buffer and pool settings
-        public const int MAX_BUFFER_POOL_SIZE = 16;         // Maximum size of buffer pools
-        public const int INITIAL_BUFFER_SIZE = 1024;        // Initial size for float and DateTime arrays
+        public const int
+            MAX_BUFFER_POOL_SIZE = 16,
+            INITIAL_BUFFER_SIZE = 1024;
 
-        // Rendering geometry
-        public const float SEGMENT_GAP = 2f;                // Gap between segments
-        public const int PEAK_HOLD_TIME_MS = 500;           // Time in milliseconds to hold peak values
+        public const float SEGMENT_GAP = 2f;
+        public const int PEAK_HOLD_TIME_MS = 500;
 
-        // Gradient and shadow
-        public const float OUTLINE_STROKE_WIDTH = 1.2f;     // Width of segment outlines
-        public const float SHADOW_BLUR_RADIUS = 3f;         // Blur radius for shadow effect
+        public const float
+            OUTLINE_STROKE_WIDTH = 1.2f,
+            SHADOW_BLUR_RADIUS = 3f;
 
-        // Spectrum processing factors
-        public const float SPECTRUM_WEIGHT = 0.3f;          // Weight of peak values in spectrum scaling
-        public const float BOOST_FACTOR = 0.3f;             // Boost factor for higher frequencies
+        public const float
+            SPECTRUM_WEIGHT = 0.3f,
+            BOOST_FACTOR = 0.3f;
 
-        // Default quality setting
-        public const RenderQuality DEFAULT_QUALITY = RenderQuality.Medium; // Default rendering quality level
+        public const RenderQuality DEFAULT_QUALITY = RenderQuality.Medium;
     }
-    #endregion
 
-    #region Fields
-    // Quality settings
-    private new bool _useAntiAlias = true;
-    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
     private bool _enableShadows = true;
     private bool _enableReflections = true;
-    private float _segmentRoundness = Constants.SEGMENT_ROUNDNESS;
+    private float _segmentRoundness = SEGMENT_ROUNDNESS;
     private bool _useSegmentedBars = true;
 
-    // Smoothing and transition factors
-    private float _smoothingFactor = Constants.DEFAULT_SMOOTHING_FACTOR;
-    private float _transitionSmoothness = Constants.DEFAULT_TRANSITION_SMOOTHNESS;
+    private new float _smoothingFactor = DEFAULT_SMOOTHING_FACTOR;
+    private float _transitionSmoothness = DEFAULT_TRANSITION_SMOOTHNESS;
 
-    // Configuration values
-    private readonly float _animationSpeed = Constants.ANIMATION_SPEED;
-    private readonly float _reflectionOpacity = Constants.REFLECTION_OPACITY;
-    private readonly float _reflectionHeight = Constants.REFLECTION_HEIGHT;
-    private readonly float _peakFallSpeed = Constants.PEAK_FALL_SPEED;
-    private readonly float _scaleFactor = Constants.SCALE_FACTOR;
-    private readonly float _desiredSegmentHeight = Constants.DESIRED_SEGMENT_HEIGHT;
+    private readonly float
+        _animationSpeed = ANIMATION_SPEED,
+        _reflectionOpacity = REFLECTION_OPACITY,
+        _reflectionHeight = REFLECTION_HEIGHT,
+        _peakFallSpeed = PEAK_FALL_SPEED,
+        _scaleFactor = SCALE_FACTOR,
+        _desiredSegmentHeight = DESIRED_SEGMENT_HEIGHT;
 
-    // Bar and segment counters
     private int _currentSegmentCount, _currentBarCount, _lastRenderCount;
     private float _lastTotalBarWidth, _lastBarWidth, _lastBarSpacing, _lastSegmentHeight;
     private int _pendingBarCount;
     private float _pendingCanvasHeight;
 
-    // Spectrum and processing buffers
-    private float[]? _previousSpectrum, _peaks, _renderBarValues, _renderPeaks;
+    private float[]? _peaks, _renderBarValues, _renderPeaks;
     private float[]? _processingBarValues, _processingPeaks, _pendingSpectrum, _velocities;
     private DateTime[]? _peakHoldTimes;
 
-    // Cached SKPath objects
     private SKPath? _cachedBarPath, _cachedGreenSegmentsPath, _cachedYellowSegmentsPath, _cachedRedSegmentsPath;
     private SKPath? _cachedOutlinePath, _cachedPeakPath, _cachedShadowPath, _cachedReflectionPath;
     private bool _pathsNeedRebuild = true;
     private SKMatrix _lastTransform = SKMatrix.Identity;
 
-    // Buffer pools
     private readonly ConcurrentQueue<float[]> _floatBufferPool = new();
     private readonly ConcurrentQueue<DateTime[]> _dateTimeBufferPool = new();
 
-    // Synchronization primitives
     private readonly SemaphoreSlim _dataSemaphore = new(1, 1);
     private readonly AutoResetEvent _dataAvailableEvent = new(false);
 
-    // Gradient shaders
     private SKShader? _barGradient, _greenGradient, _yellowGradient, _redGradient, _reflectionGradient;
 
-    // Pre-configured SKPaint objects
     private readonly SKPaint _peakPaint = new()
     {
         IsAntialias = true,
-        Style = Fill,
-        Color = SKColors.White // White for peak indicators
+        Style = SKPaintStyle.Fill,
+        Color = SKColors.White
     };
 
     private readonly SKPaint _segmentShadowPaint = new()
     {
         IsAntialias = true,
-        Style = Fill,
-        Color = new SKColor(0, 0, 0, 80), // Semi-transparent black for shadow
-        MaskFilter = SKMaskFilter.CreateBlur(Normal, Constants.SHADOW_BLUR_RADIUS)
+        Style = SKPaintStyle.Fill,
+        Color = new SKColor(0, 0, 0, 80),
+        MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, SHADOW_BLUR_RADIUS)
     };
 
     private readonly SKPaint _outlinePaint = new()
     {
         IsAntialias = true,
-        Style = Stroke,
-        Color = new SKColor(255, 255, 255, 60), // Semi-transparent white for outline
-        StrokeWidth = Constants.OUTLINE_STROKE_WIDTH
+        Style = SKPaintStyle.Stroke,
+        Color = new SKColor(255, 255, 255, 60),
+        StrokeWidth = OUTLINE_STROKE_WIDTH
     };
 
     private readonly SKPaint _reflectionPaint = new()
     {
         IsAntialias = true,
-        Style = Fill,
+        Style = SKPaintStyle.Fill,
         BlendMode = SKBlendMode.SrcOver
     };
 
-    // Color definitions for gradients
-    private static readonly SKColor _greenStartColor = new(0, 230, 120, 255); // Bottom of green gradient
-    private static readonly SKColor _greenEndColor = new(0, 255, 0, 255);     // Top of green gradient
-    private static readonly SKColor _yellowStartColor = new(255, 230, 0, 255); // Bottom of yellow gradient
-    private static readonly SKColor _yellowEndColor = new(255, 180, 0, 255);   // Top of yellow gradient
-    private static readonly SKColor _redStartColor = new(255, 80, 0, 255);     // Bottom of red gradient
-    private static readonly SKColor _redEndColor = new(255, 30, 0, 255);       // Top of red gradient
+    private static readonly SKColor[] _greenColors = [new(0, 230, 120, 255), new(0, 255, 0, 255)];
+    private static readonly SKColor[] _yellowColors = [new(255, 230, 0, 255), new(255, 180, 0, 255)];
+    private static readonly SKColor[] _redColors = [new(255, 80, 0, 255), new(255, 30, 0, 255)];
+    private static readonly SKColor[] _barColors = [
+        new(0, 230, 120, 255), new(0, 255, 0, 255),
+        new(255, 230, 0, 255), new(255, 180, 0, 255),
+        new(255, 80, 0, 255), new(255, 30, 0, 255)
+    ];
+    private static readonly float[] _barColorPositions = [0f, 0.6f, 0.6f, 0.85f, 0.85f, 1f];
 
-    // Calculation thread objects
     private Task? _calculationTask;
     private CancellationTokenSource? _calculationCts;
     private SKRect _lastCanvasRect = SKRect.Empty;
 
-    // Segment paint cache
-    private readonly Dictionary<int, SKPaint> _segmentPaints = new();
+    private readonly Dictionary<int, SKPaint> _segmentPaints = [];
+    private volatile bool _buffersInitialized;
 
-    // Disposal flag
-    private new bool _disposed;
-    #endregion
-
-    #region Initialization and Configuration
-    /// <summary>
-    /// Initializes the Kenwood renderer and prepares resources for rendering.
-    /// </summary>
-    public override void Initialize()
+    protected override void OnInitialize()
     {
-        Safe(() =>
-        {
-            if (_isInitialized)
-                return;
-
-            base.Initialize();
-
-            // Pre-fill buffer pools
-            for (int i = 0; i < 8; i++)
+        Safe(
+            () =>
             {
-                _floatBufferPool.Enqueue(new float[Constants.INITIAL_BUFFER_SIZE]);
-                _dateTimeBufferPool.Enqueue(new DateTime[Constants.INITIAL_BUFFER_SIZE]);
+                InitializeBufferPools();
+                InitializePaths();
+                InitializeBuffers(INITIAL_BUFFER_SIZE);
+                StartCalculationThread();
+
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnInitialize",
+                ErrorMessage = "Failed to initialize renderer resources"
             }
-
-            // Initialize cached SKPath objects
-            _cachedBarPath = new SKPath();
-            _cachedGreenSegmentsPath = new SKPath();
-            _cachedYellowSegmentsPath = new SKPath();
-            _cachedRedSegmentsPath = new SKPath();
-            _cachedOutlinePath = new SKPath();
-            _cachedPeakPath = new SKPath();
-            _cachedShadowPath = new SKPath();
-            _cachedReflectionPath = new SKPath();
-
-            ApplyQualitySettings();
-            StartCalculationThread();
-
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
+        );
     }
 
-    /// <summary>
-    /// Starts the background calculation thread.
-    /// </summary>
+    private void InitializeBufferPools()
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            _floatBufferPool.Enqueue(new float[INITIAL_BUFFER_SIZE]);
+            _dateTimeBufferPool.Enqueue(new DateTime[INITIAL_BUFFER_SIZE]);
+        }
+    }
+
+    private void InitializeBuffers(int size)
+    {
+        _previousSpectrum = new float[size];
+        _peaks = new float[size];
+        _peakHoldTimes = new DateTime[size];
+        _velocities = new float[size];
+        _renderBarValues = new float[size];
+        _renderPeaks = new float[size];
+        _processingBarValues = new float[size];
+        _processingPeaks = new float[size];
+
+        Array.Fill(_peakHoldTimes, DateTime.MinValue);
+        Array.Fill(_velocities, 0f);
+        _buffersInitialized = true;
+    }
+
+    private void InitializePaths()
+    {
+        _cachedBarPath = new SKPath();
+        _cachedGreenSegmentsPath = new SKPath();
+        _cachedYellowSegmentsPath = new SKPath();
+        _cachedRedSegmentsPath = new SKPath();
+        _cachedOutlinePath = new SKPath();
+        _cachedPeakPath = new SKPath();
+        _cachedShadowPath = new SKPath();
+        _cachedReflectionPath = new SKPath();
+    }
+
     private void StartCalculationThread()
     {
         _calculationCts = new CancellationTokenSource();
-        _calculationTask = Task.Factory.StartNew(() => CalculationThreadMain(_calculationCts.Token),
-            _calculationCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        _calculationTask = Task.Factory.StartNew(
+            () => CalculationThreadMain(_calculationCts.Token),
+            _calculationCts.Token,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
     }
 
-    /// <summary>
-    /// Configures the renderer with overlay status and quality settings.
-    /// </summary>
-    /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
-    /// <param name="quality">The rendering quality level.</param>
-    public override void Configure(bool isOverlayActive, RenderQuality quality = Constants.DEFAULT_QUALITY)
+    protected override void OnConfigurationChanged()
     {
-        Safe(() =>
-        {
-            base.Configure(isOverlayActive, quality);
+        Safe(
+            () =>
+            {
+                _smoothingFactor = _isOverlayActive ? 0.6f : DEFAULT_SMOOTHING_FACTOR * 0.2f;
+                _transitionSmoothness = _isOverlayActive ? 0.7f : 0.5f;
+                _pathsNeedRebuild = true;
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnConfigurationChanged",
+                ErrorMessage = "Failed to apply configuration changes"
+            }
+        );
+    }
 
-            _smoothingFactor = isOverlayActive ? 0.6f : Constants.DEFAULT_SMOOTHING_FACTOR * 0.2f;
-            _transitionSmoothness = isOverlayActive ? 0.7f : 0.5f;
+    protected override void OnQualitySettingsApplied()
+    {
+        Safe(
+            () =>
+            {
+                ApplyQualityBasedSettings();
+                UpdatePaintProperties();
+                _pathsNeedRebuild = true;
+
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnQualitySettingsApplied",
+                ErrorMessage = "Failed to apply quality settings"
+            }
+        );
+    }
+
+    private void ApplyQualityBasedSettings()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                _enableShadows = false;
+                _enableReflections = false;
+                _segmentRoundness = 0f;
+                _useSegmentedBars = false;
+                break;
+
+            case RenderQuality.Medium:
+                _enableShadows = true;
+                _enableReflections = false;
+                _segmentRoundness = 2f;
+                _useSegmentedBars = true;
+                break;
+
+            case RenderQuality.High:
+                _enableShadows = true;
+                _enableReflections = true;
+                _segmentRoundness = SEGMENT_ROUNDNESS;
+                _useSegmentedBars = true;
+                break;
+        }
+    }
+
+    private void UpdatePaintProperties()
+    {
+        _peakPaint.IsAntialias = UseAntiAlias;
+        _segmentShadowPaint.IsAntialias = UseAntiAlias;
+        _outlinePaint.IsAntialias = UseAntiAlias;
+        _reflectionPaint.IsAntialias = UseAntiAlias;
+    }
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint paint)
+    {
+        if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+            return;
+
+        if (!_buffersInitialized)
+        {
+            InitializeBuffers(Max(barCount, INITIAL_BUFFER_SIZE));
+        }
+
+        Safe(
+            () =>
+            {
+                float totalWidth = info.Width;
+                float totalBarWidth = totalWidth / barCount;
+                barWidth = totalBarWidth * 0.7f;
+                barSpacing = totalBarWidth * 0.3f;
+
+                ProcessCanvasChanges(
+                    info,
+                    canvas);
+
+                SubmitSpectrumData(
+                    spectrum,
+                    barCount,
+                    info.Height);
+
+                if (_renderBarValues == null || _renderPeaks == null || _currentBarCount == 0)
+                    return;
+
+                int renderCount = Min(_currentBarCount, _renderBarValues.Length);
+                if (renderCount <= 0)
+                    return;
+
+                float totalGap = (_currentSegmentCount - 1) * SEGMENT_GAP;
+                float segmentHeight = (info.Height - totalGap) / _currentSegmentCount * _scaleFactor;
+
+                UpdateRenderingPaths(
+                    info,
+                    barWidth,
+                    barSpacing,
+                    totalBarWidth,
+                    segmentHeight,
+                    renderCount);
+
+                RenderBarElements(
+                    canvas,
+                    info);
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.RenderEffect",
+                ErrorMessage = "Error during rendering"
+            }
+        );
+    }
+
+    private void ProcessCanvasChanges(
+        SKImageInfo info,
+        SKCanvas canvas)
+    {
+        bool canvasSizeChanged = Abs(_lastCanvasRect.Height - info.Height) > 0.5f ||
+                                Abs(_lastCanvasRect.Width - info.Width) > 0.5f;
+
+        bool transformChanged = canvas.TotalMatrix != _lastTransform;
+        if (transformChanged)
+            _lastTransform = canvas.TotalMatrix;
+
+        if (canvasSizeChanged)
+        {
+            _currentSegmentCount = Max(1, (int)(info.Height / (_desiredSegmentHeight + SEGMENT_GAP)));
+            CreateGradients(info.Height);
+            _lastCanvasRect = info.Rect;
             _pathsNeedRebuild = true;
-
-            if (_quality != quality)
-            {
-                ApplyQualitySettings();
-            }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Configure",
-            ErrorMessage = "Failed to configure renderer"
-        });
+        }
     }
 
-    /// <summary>
-    /// Applies quality settings based on the current quality level.
-    /// </summary>
-    protected override void ApplyQualitySettings()
+    private void SubmitSpectrumData(
+        float[] spectrum,
+        int barCount,
+        float canvasHeight)
     {
-        Safe(() =>
+        _dataSemaphore.Wait();
+        try
         {
-            base.ApplyQualitySettings();
+            _pendingSpectrum = spectrum;
+            _pendingBarCount = barCount;
+            _pendingCanvasHeight = canvasHeight;
 
-            switch (_quality)
+            if (_processingBarValues != null && _renderBarValues != null &&
+                _processingPeaks != null && _renderPeaks != null &&
+                _processingBarValues.Length == _renderBarValues.Length)
             {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-                    _enableShadows = false;
-                    _enableReflections = false;
-                    _segmentRoundness = 0f; // No rounding for faster rendering
-                    _useSegmentedBars = false; // Single gradient rectangle per bar
-                    break;
-
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _enableShadows = true;
-                    _enableReflections = false;
-                    _segmentRoundness = 2f; // Moderate rounding
-                    _useSegmentedBars = true; // Segmented bars
-                    break;
-
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _enableShadows = true;
-                    _enableReflections = true;
-                    _segmentRoundness = Constants.SEGMENT_ROUNDNESS; // Full rounding
-                    _useSegmentedBars = true; // Segmented bars with all effects
-                    break;
+                (_renderBarValues, _processingBarValues) = (_processingBarValues, _renderBarValues);
+                (_renderPeaks, _processingPeaks) = (_processingPeaks, _renderPeaks);
             }
-
-            // Update paint properties
-            _peakPaint.IsAntialias = _useAntiAlias;
-            _segmentShadowPaint.IsAntialias = _useAntiAlias;
-            _outlinePaint.IsAntialias = _useAntiAlias;
-            _reflectionPaint.IsAntialias = _useAntiAlias;
-
-            _pathsNeedRebuild = true; // Invalidate paths when quality changes
-
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, $"Quality changed to {_quality}");
-        }, new ErrorHandlingOptions
+        }
+        finally
         {
-            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
-            ErrorMessage = "Failed to apply quality settings"
-        });
+            _dataSemaphore.Release();
+            _dataAvailableEvent.Set();
+        }
     }
-    #endregion
 
-    #region Buffer Management
-    /// <summary>
-    /// Gets a float buffer from the pool or creates a new one if needed.
-    /// </summary>
+    private void UpdateRenderingPaths(
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth,
+        float segmentHeight,
+        int renderCount)
+    {
+        bool dimensionsChanged = Abs(_lastTotalBarWidth - totalBarWidth) > 0.01f ||
+                                Abs(_lastBarWidth - barWidth) > 0.01f ||
+                                Abs(_lastBarSpacing - barSpacing) > 0.01f ||
+                                Abs(_lastSegmentHeight - segmentHeight) > 0.01f ||
+                                _lastRenderCount != renderCount;
+
+        if (_pathsNeedRebuild || dimensionsChanged)
+        {
+            RebuildPaths(
+                info,
+                barWidth,
+                barSpacing,
+                totalBarWidth,
+                segmentHeight,
+                renderCount);
+
+            _lastTotalBarWidth = totalBarWidth;
+            _lastBarWidth = barWidth;
+            _lastBarSpacing = barSpacing;
+            _lastSegmentHeight = segmentHeight;
+            _lastRenderCount = renderCount;
+            _pathsNeedRebuild = false;
+        }
+    }
+
+    private void RenderBarElements(
+        SKCanvas canvas,
+        SKImageInfo info)
+    {
+        if (_useSegmentedBars)
+        {
+            RenderSegmentedBars(canvas);
+        }
+        else
+        {
+            RenderSimpleBars(canvas);
+        }
+
+        RenderPeaks(canvas);
+
+        if (_enableReflections && info.Height > 200 && _cachedReflectionPath != null)
+        {
+            RenderReflection(
+                canvas,
+                info);
+        }
+    }
+
+    private void RenderPeaks(SKCanvas canvas)
+    {
+        if (_cachedPeakPath != null)
+            canvas.DrawPath(_cachedPeakPath, _peakPaint);
+    }
+
+    private void RenderSegmentedBars(SKCanvas canvas)
+    {
+        RenderShadows(canvas);
+        RenderColorSegments(canvas);
+        RenderOutlines(canvas);
+    }
+
+    private void RenderShadows(SKCanvas canvas)
+    {
+        if (_enableShadows && _cachedShadowPath != null)
+            canvas.DrawPath(_cachedShadowPath, _segmentShadowPaint);
+    }
+
+    private void RenderColorSegments(SKCanvas canvas)
+    {
+        if (_cachedGreenSegmentsPath != null)
+            canvas.DrawPath(_cachedGreenSegmentsPath, EnsureSegmentPaint(0, _greenGradient));
+
+        if (_cachedYellowSegmentsPath != null)
+            canvas.DrawPath(_cachedYellowSegmentsPath, EnsureSegmentPaint(1, _yellowGradient));
+
+        if (_cachedRedSegmentsPath != null)
+            canvas.DrawPath(_cachedRedSegmentsPath, EnsureSegmentPaint(2, _redGradient));
+    }
+
+    private void RenderOutlines(SKCanvas canvas)
+    {
+        if (_cachedOutlinePath != null)
+            canvas.DrawPath(_cachedOutlinePath, _outlinePaint);
+    }
+
+    private void RenderSimpleBars(SKCanvas canvas)
+    {
+        if (_cachedBarPath != null)
+        {
+            using var barPaint = CreateStandardPaint(SKColors.White);
+            barPaint.Shader = _barGradient;
+            canvas.DrawPath(_cachedBarPath, barPaint);
+        }
+    }
+
+    private void RenderReflection(
+        SKCanvas canvas,
+        SKImageInfo info)
+    {
+        canvas.Save();
+        canvas.Scale(1, -1);
+        canvas.Translate(0, -info.Height * 2);
+
+        PrepareReflectionPaint();
+
+        canvas.DrawPath(_cachedReflectionPath, _reflectionPaint);
+        canvas.Restore();
+    }
+
+    private void PrepareReflectionPaint()
+    {
+        if (_reflectionPaint.Color.Alpha == 0)
+            _reflectionPaint.Color = new SKColor(255, 255, 255, (byte)(_reflectionOpacity * 255));
+
+        if (_reflectionGradient != null)
+            _reflectionPaint.Shader = _reflectionGradient;
+    }
+
     private float[] GetFloatBuffer(int size)
     {
         if (_floatBufferPool.TryDequeue(out var buffer) && buffer.Length >= size)
             return buffer;
-        return new float[Max(size, Constants.INITIAL_BUFFER_SIZE)];
+        return new float[Max(size, INITIAL_BUFFER_SIZE)];
     }
 
-    /// <summary>
-    /// Gets a DateTime buffer from the pool or creates a new one if needed.
-    /// </summary>
     private DateTime[] GetDateTimeBuffer(int size)
     {
         if (_dateTimeBufferPool.TryDequeue(out var buffer) && buffer.Length >= size)
             return buffer;
-        return new DateTime[Max(size, Constants.INITIAL_BUFFER_SIZE)];
+        return new DateTime[Max(size, INITIAL_BUFFER_SIZE)];
     }
 
-    /// <summary>
-    /// Returns a float buffer to the pool if space is available.
-    /// </summary>
     private void ReturnBufferToPool(float[]? buffer)
     {
-        if (buffer != null && _floatBufferPool.Count < Constants.MAX_BUFFER_POOL_SIZE)
+        if (buffer != null && _floatBufferPool.Count < MAX_BUFFER_POOL_SIZE)
             _floatBufferPool.Enqueue(buffer);
     }
 
-    /// <summary>
-    /// Returns a DateTime buffer to the pool if space is available.
-    /// </summary>
     private void ReturnBufferToPool(DateTime[]? buffer)
     {
-        if (buffer != null && _dateTimeBufferPool.Count < Constants.MAX_BUFFER_POOL_SIZE)
+        if (buffer != null && _dateTimeBufferPool.Count < MAX_BUFFER_POOL_SIZE)
             _dateTimeBufferPool.Enqueue(buffer);
     }
-    #endregion
 
-    #region Calculation Thread
-    /// <summary>
-    /// Main function for the background calculation thread.
-    /// </summary>
     private void CalculationThreadMain(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -343,28 +544,13 @@ public sealed class KenwoodRenderer : BaseSpectrumRenderer
                 if (ct.IsCancellationRequested)
                     break;
 
-                float[]? spectrumData = null;
-                int barCount = 0;
-                int canvasHeight = 0;
+                var (data, barCount, canvasHeight) = ExtractPendingSpectrumData(ct);
 
-                _dataSemaphore.Wait(ct);
-                try
-                {
-                    if (_pendingSpectrum != null)
-                    {
-                        spectrumData = _pendingSpectrum;
-                        barCount = _pendingBarCount;
-                        canvasHeight = (int)_pendingCanvasHeight;
-                        _pendingSpectrum = null;
-                    }
-                }
-                finally
-                {
-                    _dataSemaphore.Release();
-                }
-
-                if (spectrumData != null && spectrumData.Length > 0)
-                    ProcessSpectrumData(spectrumData, barCount, canvasHeight);
+                if (data != null && data.Length > 0)
+                    ProcessSpectrumData(
+                        data,
+                        barCount,
+                        canvasHeight);
             }
             catch (OperationCanceledException)
             {
@@ -372,141 +558,27 @@ public sealed class KenwoodRenderer : BaseSpectrumRenderer
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error, Constants.LOG_PREFIX, $"Calculation error: {ex.Message}");
+                Log(LogLevel.Error, LOG_PREFIX, $"Calculation error: {ex.Message}");
                 Thread.Sleep(100);
             }
         }
     }
 
-    /// <summary>
-    /// Processes spectrum data to calculate bar heights and peak positions.
-    /// </summary>
-    private void ProcessSpectrumData(float[] spectrum, int barCount, float canvasHeight)
+    private (float[]? data, int barCount, int canvasHeight) ExtractPendingSpectrumData(CancellationToken ct)
     {
-        int spectrumLength = spectrum.Length;
-        int actualBarCount = Min(spectrumLength, barCount);
+        float[]? spectrumData = null;
+        int barCount = 0;
+        int canvasHeight = 0;
 
-        // Initialize buffers if needed
-        if (_previousSpectrum == null || _previousSpectrum.Length != actualBarCount)
-        {
-            ReturnBufferToPool(_previousSpectrum);
-            ReturnBufferToPool(_peaks);
-            ReturnBufferToPool(_peakHoldTimes);
-            ReturnBufferToPool(_velocities);
-
-            _previousSpectrum = GetFloatBuffer(actualBarCount);
-            _peaks = GetFloatBuffer(actualBarCount);
-            _peakHoldTimes = GetDateTimeBuffer(actualBarCount);
-            _velocities = GetFloatBuffer(actualBarCount);
-
-            Array.Fill(_peakHoldTimes, DateTime.MinValue);
-            Array.Fill(_velocities, 0f);
-        }
-
-        // Scale spectrum data to bar count
-        float[] scaledSpectrum = GetFloatBuffer(actualBarCount);
-        ScaleSpectrum(spectrum, scaledSpectrum, actualBarCount, spectrumLength);
-
-        // Prepare buffers for new computed values
-        float[] computedBarValues = GetFloatBuffer(actualBarCount);
-        float[] computedPeaks = GetFloatBuffer(actualBarCount);
-        DateTime currentTime = Now;
-
-        // Animation and smoothing parameters
-        float smoothFactor = _smoothingFactor * _animationSpeed;
-        float peakFallRate = _peakFallSpeed * (float)canvasHeight * _animationSpeed;
-        double peakHoldTimeMs = Constants.PEAK_HOLD_TIME_MS;
-
-        // Physics parameters for smooth transitions
-        float maxChangeThreshold = canvasHeight * 0.3f;
-        float velocityDamping = 0.8f * _transitionSmoothness;
-        float springStiffness = 0.2f * (1 - _transitionSmoothness);
-
-        // Process spectrum data in batches for better cache locality
-        const int batchSize = 64;
-        for (int batchStart = 0; batchStart < actualBarCount; batchStart += batchSize)
-        {
-            int batchEnd = Min(batchStart + batchSize, actualBarCount);
-
-            for (int i = batchStart; i < batchEnd; i++)
-            {
-                float targetValue = scaledSpectrum[i];
-                float currentValue = _previousSpectrum[i];
-                float delta = targetValue - currentValue;
-                float adaptiveSmoothFactor = smoothFactor;
-                float absDelta = Abs(delta * canvasHeight);
-
-                // Use adaptive smoothing for large changes
-                if (absDelta > maxChangeThreshold)
-                {
-                    float changeRatio = Min(1.0f, absDelta / (canvasHeight * 0.7f));
-                    adaptiveSmoothFactor = Max(smoothFactor * 0.3f,
-                        smoothFactor * (1.0f + changeRatio * 0.5f));
-                }
-
-                // Apply spring physics for smooth transitions
-                _velocities![i] = _velocities[i] * velocityDamping + delta * springStiffness;
-                float newValue = currentValue + _velocities[i] + delta * adaptiveSmoothFactor;
-                newValue = Max(0f, Min(1f, newValue));
-
-                // Store results
-                _previousSpectrum[i] = newValue;
-                float barValue = newValue * canvasHeight;
-                computedBarValues[i] = barValue;
-
-                // Process peak values
-                if (_peaks != null && _peakHoldTimes != null)
-                {
-                    float currentPeak = _peaks[i];
-                    if (barValue > currentPeak)
-                    {
-                        // New peak found
-                        _peaks[i] = barValue;
-                        _peakHoldTimes[i] = currentTime;
-                    }
-                    else if ((currentTime - _peakHoldTimes[i]).TotalMilliseconds > peakHoldTimeMs)
-                    {
-                        // Peak hold time expired, start falling
-                        float peakDelta = currentPeak - barValue;
-                        float adaptiveFallRate = peakFallRate;
-
-                        // Faster fall for peaks far from bar
-                        if (peakDelta > maxChangeThreshold)
-                            adaptiveFallRate = peakFallRate * (1.0f + peakDelta / canvasHeight * 2.0f);
-
-                        _peaks[i] = Max(0f, currentPeak - adaptiveFallRate);
-                    }
-                    computedPeaks[i] = _peaks[i];
-                }
-            }
-        }
-
-        // Update processing and rendering buffers
-        _dataSemaphore.Wait();
+        _dataSemaphore.Wait(ct);
         try
         {
-            if (_processingBarValues == null || _processingBarValues.Length != actualBarCount)
+            if (_pendingSpectrum != null)
             {
-                ReturnBufferToPool(_processingBarValues);
-                ReturnBufferToPool(_processingPeaks);
-
-                _processingBarValues = GetFloatBuffer(actualBarCount);
-                _processingPeaks = GetFloatBuffer(actualBarCount);
-            }
-
-            Buffer.BlockCopy(computedBarValues, 0, _processingBarValues!, 0, actualBarCount * sizeof(float));
-            Buffer.BlockCopy(computedPeaks, 0, _processingPeaks!, 0, actualBarCount * sizeof(float));
-            _currentBarCount = actualBarCount;
-
-            if (_renderBarValues == null || _renderBarValues.Length != actualBarCount)
-            {
-                ReturnBufferToPool(_renderBarValues);
-                ReturnBufferToPool(_renderPeaks);
-
-                _renderBarValues = GetFloatBuffer(actualBarCount);
-                _renderPeaks = GetFloatBuffer(actualBarCount);
-                Buffer.BlockCopy(_processingBarValues!, 0, _renderBarValues!, 0, actualBarCount * sizeof(float));
-                Buffer.BlockCopy(_processingPeaks!, 0, _renderPeaks!, 0, actualBarCount * sizeof(float));
+                spectrumData = _pendingSpectrum;
+                barCount = _pendingBarCount;
+                canvasHeight = (int)_pendingCanvasHeight;
+                _pendingSpectrum = null;
             }
         }
         finally
@@ -514,261 +586,538 @@ public sealed class KenwoodRenderer : BaseSpectrumRenderer
             _dataSemaphore.Release();
         }
 
-        // Return temporary buffers to pool
+        return (spectrumData, barCount, canvasHeight);
+    }
+
+    private void ProcessSpectrumData(
+        float[] spectrum,
+        int barCount,
+        float canvasHeight)
+    {
+        int spectrumLength = spectrum.Length;
+        int actualBarCount = Min(spectrumLength, barCount);
+
+        InitializeBuffersIfNeeded(actualBarCount);
+
+        float[] scaledSpectrum = GetFloatBuffer(actualBarCount);
+        ScaleSpectrum(
+            spectrum,
+            scaledSpectrum,
+            actualBarCount,
+            spectrumLength);
+
+        float[] computedBarValues = GetFloatBuffer(actualBarCount);
+        float[] computedPeaks = GetFloatBuffer(actualBarCount);
+        DateTime currentTime = DateTime.Now;
+
+        ProcessSpectrumAnimation(
+            scaledSpectrum,
+            computedBarValues,
+            computedPeaks,
+            currentTime,
+            canvasHeight,
+            actualBarCount);
+
+        UpdateRenderingBuffers(
+            computedBarValues,
+            computedPeaks,
+            actualBarCount);
+
         ReturnBufferToPool(scaledSpectrum);
         ReturnBufferToPool(computedBarValues);
         ReturnBufferToPool(computedPeaks);
         _pathsNeedRebuild = true;
     }
-    #endregion
 
-    #region Rendering
-    /// <summary>
-    /// Renders the Kenwood-style visualization on the canvas using spectrum data.
-    /// </summary>
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+    private void InitializeBuffersIfNeeded(int actualBarCount)
     {
-        // Validate rendering parameters
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+        if (!_buffersInitialized || _previousSpectrum == null || _velocities == null ||
+            _peaks == null || _peakHoldTimes == null || _previousSpectrum.Length < actualBarCount)
         {
-            drawPerformanceInfo?.Invoke(canvas!, info);
-            return;
-        }
+            Log(LogLevel.Debug, LOG_PREFIX, $"Reinitializing buffers for {actualBarCount} bars");
 
-        // Quick reject if canvas area is not visible
-        if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-        {
-            drawPerformanceInfo?.Invoke(canvas, info);
-            return;
-        }
-
-        Safe(() =>
-        {
-            // Calculate bar dimensions
-            float totalWidth = info.Width;
-            float totalBarWidth = totalWidth / barCount;
-            barWidth = totalBarWidth * 0.7f;
-            barSpacing = totalBarWidth * 0.3f;
-
-            // Check if canvas size or transform changed
-            bool canvasSizeChanged = Abs(_lastCanvasRect.Height - info.Height) > 0.5f ||
-                                    Abs(_lastCanvasRect.Width - info.Width) > 0.5f;
-
-            bool transformChanged = canvas.TotalMatrix != _lastTransform;
-            if (transformChanged)
-                _lastTransform = canvas.TotalMatrix;
-
-            // Update segment count and gradients if canvas size changed
-            if (canvasSizeChanged)
-            {
-                _currentSegmentCount = Max(1, (int)(info.Height / (_desiredSegmentHeight + Constants.SEGMENT_GAP)));
-                CreateGradients(info.Height);
-                _lastCanvasRect = info.Rect;
-                _pathsNeedRebuild = true;
-            }
-
-            // Submit spectrum data for processing
             _dataSemaphore.Wait();
             try
             {
-                _pendingSpectrum = spectrum;
-                _pendingBarCount = barCount;
-                _pendingCanvasHeight = info.Height;
+                ReturnBufferToPool(_previousSpectrum);
+                ReturnBufferToPool(_peaks);
+                ReturnBufferToPool(_peakHoldTimes);
+                ReturnBufferToPool(_velocities);
 
-                // Swap processing and rendering buffers
-                if (_processingBarValues != null && _renderBarValues != null &&
-                    _processingPeaks != null && _renderPeaks != null &&
-                    _processingBarValues.Length == _renderBarValues.Length)
-                {
-                    var tempBarValues = _renderBarValues;
-                    _renderBarValues = _processingBarValues;
-                    _processingBarValues = tempBarValues;
+                _previousSpectrum = GetFloatBuffer(actualBarCount);
+                _peaks = GetFloatBuffer(actualBarCount);
+                _peakHoldTimes = GetDateTimeBuffer(actualBarCount);
+                _velocities = GetFloatBuffer(actualBarCount);
 
-                    var tempPeaks = _renderPeaks;
-                    _renderPeaks = _processingPeaks;
-                    _processingPeaks = tempPeaks;
-                }
+                Array.Fill(_peakHoldTimes, DateTime.MinValue);
+                Array.Fill(_velocities, 0f);
+                _buffersInitialized = true;
             }
             finally
             {
                 _dataSemaphore.Release();
-                _dataAvailableEvent.Set();
             }
-
-            // Skip rendering if no data available
-            if (_renderBarValues == null || _renderPeaks == null || _currentBarCount == 0)
-                return;
-
-            int renderCount = Min(_currentBarCount, _renderBarValues.Length);
-            if (renderCount <= 0)
-                return;
-
-            // Calculate segment dimensions
-            float totalGap = (_currentSegmentCount - 1) * Constants.SEGMENT_GAP;
-            float segmentHeight = (info.Height - totalGap) / _currentSegmentCount * _scaleFactor;
-
-            // Check if paths need to be rebuilt
-            bool dimensionsChanged = Abs(_lastTotalBarWidth - totalBarWidth) > 0.01f ||
-                                    Abs(_lastBarWidth - barWidth) > 0.01f ||
-                                    Abs(_lastBarSpacing - barSpacing) > 0.01f ||
-                                    Abs(_lastSegmentHeight - segmentHeight) > 0.01f ||
-                                    _lastRenderCount != renderCount;
-
-            if (_pathsNeedRebuild || dimensionsChanged || transformChanged || canvasSizeChanged)
-            {
-                RebuildPaths(info, barWidth, barSpacing, totalBarWidth, segmentHeight, renderCount);
-                _lastTotalBarWidth = totalBarWidth;
-                _lastBarWidth = barWidth;
-                _lastBarSpacing = barSpacing;
-                _lastSegmentHeight = segmentHeight;
-                _lastRenderCount = renderCount;
-                _pathsNeedRebuild = false;
-            }
-
-            // Render segmented bars
-            if (_useSegmentedBars)
-            {
-                if (_enableShadows && _cachedShadowPath != null)
-                    canvas.DrawPath(_cachedShadowPath, _segmentShadowPaint);
-
-                if (_cachedGreenSegmentsPath != null)
-                    canvas.DrawPath(_cachedGreenSegmentsPath, EnsureSegmentPaint(0, _greenGradient));
-                if (_cachedYellowSegmentsPath != null)
-                    canvas.DrawPath(_cachedYellowSegmentsPath, EnsureSegmentPaint(1, _yellowGradient));
-                if (_cachedRedSegmentsPath != null)
-                    canvas.DrawPath(_cachedRedSegmentsPath, EnsureSegmentPaint(2, _redGradient));
-                if (_cachedOutlinePath != null)
-                    canvas.DrawPath(_cachedOutlinePath, _outlinePaint);
-            }
-            else
-            {
-                // Render simple bars with gradient
-                if (_cachedBarPath != null)
-                {
-                    using var barPaint = new SKPaint
-                    {
-                        IsAntialias = _useAntiAlias,
-                        Style = Fill,
-                        Shader = _barGradient
-                    };
-                    canvas.DrawPath(_cachedBarPath, barPaint);
-                }
-            }
-
-            // Render peak indicators
-            if (_cachedPeakPath != null)
-                canvas.DrawPath(_cachedPeakPath, _peakPaint);
-
-            // Render reflection effect
-            if (_enableReflections && info.Height > 200 && _cachedReflectionPath != null)
-            {
-                canvas.Save();
-                canvas.Scale(1, -1);
-                canvas.Translate(0, -info.Height * 2);
-
-                if (_reflectionPaint.Color.Alpha == 0)
-                    _reflectionPaint.Color = new SKColor(255, 255, 255, (byte)(_reflectionOpacity * 255));
-                if (_reflectionGradient != null)
-                    _reflectionPaint.Shader = _reflectionGradient;
-
-                canvas.DrawPath(_cachedReflectionPath, _reflectionPaint);
-                canvas.Restore();
-            }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Render",
-            ErrorMessage = "Error during rendering"
-        });
-
-        // Draw performance info
-        drawPerformanceInfo?.Invoke(canvas!, info);
+        }
     }
 
-    /// <summary>
-    /// Validates rendering parameters.
-    /// </summary>
-    private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint)
+    private void ProcessSpectrumAnimation(
+        float[] scaledSpectrum,
+        float[] computedBarValues,
+        float[] computedPeaks,
+        DateTime currentTime,
+        float canvasHeight,
+        int actualBarCount)
     {
-        return canvas != null &&
-               spectrum != null &&
-               spectrum.Length >= 2 &&
-               paint != null &&
-               info.Width > 0 &&
-               info.Height > 0;
+        if (!_buffersInitialized || _velocities == null || _previousSpectrum == null ||
+            _peaks == null || _peakHoldTimes == null)
+        {
+            InitializeBuffersIfNeeded(actualBarCount);
+            if (!_buffersInitialized)
+                return;
+        }
+
+        float smoothFactor = _smoothingFactor * _animationSpeed;
+        float peakFallRate = _peakFallSpeed * canvasHeight * _animationSpeed;
+        double peakHoldTimeMs = PEAK_HOLD_TIME_MS;
+
+        float maxChangeThreshold = canvasHeight * 0.3f;
+        float velocityDamping = 0.8f * _transitionSmoothness;
+        float springStiffness = 0.2f * (1 - _transitionSmoothness);
+
+        const int batchSize = 64;
+        for (int batchStart = 0; batchStart < actualBarCount; batchStart += batchSize)
+        {
+            int batchEnd = Min(batchStart + batchSize, actualBarCount);
+            ProcessSpectrumBatch(
+                batchStart,
+                batchEnd,
+                scaledSpectrum,
+                computedBarValues,
+                computedPeaks,
+                currentTime,
+                canvasHeight,
+                smoothFactor,
+                peakFallRate,
+                peakHoldTimeMs,
+                maxChangeThreshold,
+                velocityDamping,
+                springStiffness);
+        }
     }
 
-    /// <summary>
-    /// Creates gradient shaders for different bar sections.
-    /// </summary>
+    private void ProcessSpectrumBatch(
+        int batchStart,
+        int batchEnd,
+        float[] scaledSpectrum,
+        float[] computedBarValues,
+        float[] computedPeaks,
+        DateTime currentTime,
+        float canvasHeight,
+        float smoothFactor,
+        float peakFallRate,
+        double peakHoldTimeMs,
+        float maxChangeThreshold,
+        float velocityDamping,
+        float springStiffness)
+    {
+        if (_velocities == null || _previousSpectrum == null ||
+            _peaks == null || _peakHoldTimes == null)
+            return;
+
+        for (int i = batchStart; i < batchEnd; i++)
+        {
+            if (i >= _velocities.Length || i >= _previousSpectrum.Length)
+                continue;
+
+            ProcessSingleSpectrumValue(
+                i,
+                scaledSpectrum[i],
+                _previousSpectrum[i],
+                canvasHeight,
+                smoothFactor,
+                maxChangeThreshold,
+                velocityDamping,
+                springStiffness,
+                computedBarValues);
+
+            ProcessPeakValue(
+                i,
+                computedBarValues[i],
+                computedPeaks,
+                currentTime,
+                peakFallRate,
+                peakHoldTimeMs,
+                canvasHeight,
+                maxChangeThreshold);
+        }
+    }
+
+    private void ProcessSingleSpectrumValue(
+        int index,
+        float targetValue,
+        float currentValue,
+        float canvasHeight,
+        float smoothFactor,
+        float maxChangeThreshold,
+        float velocityDamping,
+        float springStiffness,
+        float[] computedBarValues)
+    {
+        if (_velocities == null || _previousSpectrum == null ||
+            index >= _velocities.Length || index >= _previousSpectrum.Length)
+            return;
+
+        float delta = targetValue - currentValue;
+        float adaptiveSmoothFactor = smoothFactor;
+        float absDelta = Abs(delta * canvasHeight);
+
+        if (absDelta > maxChangeThreshold)
+        {
+            float changeRatio = Min(1.0f, absDelta / (canvasHeight * 0.7f));
+            adaptiveSmoothFactor = Max(
+                smoothFactor * 0.3f,
+                smoothFactor * (1.0f + changeRatio * 0.5f));
+        }
+
+        _velocities[index] = _velocities[index] * velocityDamping + delta * springStiffness;
+        float newValue = currentValue + _velocities[index] + delta * adaptiveSmoothFactor;
+        newValue = Max(0f, Min(1f, newValue));
+
+        _previousSpectrum[index] = newValue;
+        computedBarValues[index] = newValue * canvasHeight;
+    }
+
+    private void ProcessPeakValue(
+        int index,
+        float barValue,
+        float[] computedPeaks,
+        DateTime currentTime,
+        float peakFallRate,
+        double peakHoldTimeMs,
+        float canvasHeight,
+        float maxChangeThreshold)
+    {
+        if (_peaks == null || _peakHoldTimes == null ||
+            index >= _peaks.Length || index >= _peakHoldTimes.Length)
+            return;
+
+        float currentPeak = _peaks[index];
+
+        if (barValue > currentPeak)
+        {
+            UpdateNewPeak(
+                index,
+                barValue,
+                currentTime);
+        }
+        else if ((currentTime - _peakHoldTimes[index]).TotalMilliseconds > peakHoldTimeMs)
+        {
+            UpdateFallingPeak(
+                index,
+                currentPeak,
+                barValue,
+                canvasHeight,
+                maxChangeThreshold,
+                peakFallRate);
+        }
+
+        computedPeaks[index] = _peaks[index];
+    }
+
+    private void UpdateNewPeak(
+        int index,
+        float barValue,
+        DateTime currentTime)
+    {
+        if (_peaks == null || _peakHoldTimes == null ||
+            index >= _peaks.Length || index >= _peakHoldTimes.Length)
+            return;
+
+        _peaks[index] = barValue;
+        _peakHoldTimes[index] = currentTime;
+    }
+
+    private void UpdateFallingPeak(
+        int index,
+        float currentPeak,
+        float barValue,
+        float canvasHeight,
+        float maxChangeThreshold,
+        float peakFallRate)
+    {
+        if (_peaks == null || index >= _peaks.Length)
+            return;
+
+        float peakDelta = currentPeak - barValue;
+        float adaptiveFallRate = peakFallRate;
+
+        if (peakDelta > maxChangeThreshold)
+            adaptiveFallRate = peakFallRate * (1.0f + peakDelta / canvasHeight * 2.0f);
+
+        _peaks[index] = Max(0f, currentPeak - adaptiveFallRate);
+    }
+
+    private void UpdateRenderingBuffers(
+        float[] computedBarValues,
+        float[] computedPeaks,
+        int actualBarCount)
+    {
+        _dataSemaphore.Wait();
+        try
+        {
+            EnsureProcessingBuffers(actualBarCount);
+            CopyComputedValues(
+                computedBarValues,
+                computedPeaks,
+                actualBarCount);
+            EnsureRenderingBuffers(actualBarCount);
+        }
+        finally
+        {
+            _dataSemaphore.Release();
+        }
+    }
+
+    private void EnsureProcessingBuffers(int actualBarCount)
+    {
+        if (_processingBarValues == null || _processingPeaks == null ||
+            _processingBarValues.Length < actualBarCount)
+        {
+            ReturnBufferToPool(_processingBarValues);
+            ReturnBufferToPool(_processingPeaks);
+
+            _processingBarValues = GetFloatBuffer(actualBarCount);
+            _processingPeaks = GetFloatBuffer(actualBarCount);
+        }
+    }
+
+    private void CopyComputedValues(
+        float[] computedBarValues,
+        float[] computedPeaks,
+        int actualBarCount)
+    {
+        if (_processingBarValues == null || _processingPeaks == null)
+            return;
+
+        int bytesToCopy = Min(actualBarCount,
+            Min(_processingBarValues.Length, computedBarValues.Length)) * sizeof(float);
+
+        Buffer.BlockCopy(
+            computedBarValues,
+            0,
+            _processingBarValues,
+            0,
+            bytesToCopy);
+
+        Buffer.BlockCopy(
+            computedPeaks,
+            0,
+            _processingPeaks,
+            0,
+            bytesToCopy);
+
+        _currentBarCount = actualBarCount;
+    }
+
+    private void EnsureRenderingBuffers(int actualBarCount)
+    {
+        if (_renderBarValues == null || _renderPeaks == null ||
+            _renderBarValues.Length < actualBarCount)
+        {
+            ReturnBufferToPool(_renderBarValues);
+            ReturnBufferToPool(_renderPeaks);
+
+            _renderBarValues = GetFloatBuffer(actualBarCount);
+            _renderPeaks = GetFloatBuffer(actualBarCount);
+        }
+
+        if (_processingBarValues != null && _processingPeaks != null &&
+            _renderBarValues != null && _renderPeaks != null)
+        {
+            int bytesToCopy = Min(actualBarCount,
+                Min(_processingBarValues.Length, _renderBarValues.Length)) * sizeof(float);
+
+            Buffer.BlockCopy(
+                _processingBarValues,
+                0,
+                _renderBarValues,
+                0,
+                bytesToCopy);
+
+            Buffer.BlockCopy(
+                _processingPeaks,
+                0,
+                _renderPeaks,
+                0,
+                bytesToCopy);
+        }
+    }
+
+    private static void ScaleSpectrum(
+        float[] spectrum,
+        float[] scaledSpectrum,
+        int barCount,
+        int spectrumLength)
+    {
+        float blockSize = spectrumLength / (float)barCount;
+        int maxThreads = Max(2, Environment.ProcessorCount / 2);
+
+        Parallel.For(0, barCount, new ParallelOptions { MaxDegreeOfParallelism = maxThreads }, i =>
+        {
+            ScaleSpectrumForBar(
+                i,
+                spectrum,
+                scaledSpectrum,
+                barCount,
+                spectrumLength,
+                blockSize);
+        });
+    }
+
+    private static void ScaleSpectrumForBar(
+        int barIndex,
+        float[] spectrum,
+        float[] scaledSpectrum,
+        int barCount,
+        int spectrumLength,
+        float blockSize)
+    {
+        int start = (int)(barIndex * blockSize);
+        int end = Min((int)((barIndex + 1) * blockSize), spectrumLength);
+        int count = end - start;
+
+        if (count <= 0)
+        {
+            scaledSpectrum[barIndex] = 0f;
+            return;
+        }
+
+        float sum = 0f;
+        float peak = float.MinValue;
+        int vectorSize = Vector<float>.Count;
+        int j = start;
+
+        Vector<float> sumVector = Vector<float>.Zero;
+        Vector<float> maxVector = new(float.MinValue);
+
+        for (; j <= end - vectorSize; j += vectorSize)
+        {
+            var vec = new Vector<float>(spectrum, j);
+            sumVector += vec;
+            maxVector = System.Numerics.Vector.Max(maxVector, vec);
+        }
+
+        for (int k = 0; k < vectorSize; k++)
+        {
+            sum += sumVector[k];
+            peak = Max(peak, maxVector[k]);
+        }
+
+        for (; j < end; j++)
+        {
+            float value = spectrum[j];
+            sum += value;
+            peak = Max(peak, value);
+        }
+
+        float average = sum / count;
+        float weight = SPECTRUM_WEIGHT;
+        scaledSpectrum[barIndex] = average * (1.0f - weight) + peak * weight;
+
+        ApplyFrequencyBoost(barIndex, barCount, scaledSpectrum);
+
+        scaledSpectrum[barIndex] = Min(1.0f, scaledSpectrum[barIndex]);
+    }
+
+    private static void ApplyFrequencyBoost(int barIndex, int barCount, float[] scaledSpectrum)
+    {
+        if (barIndex > barCount / 2)
+        {
+            float boost = 1.0f + (float)barIndex / barCount * BOOST_FACTOR;
+            scaledSpectrum[barIndex] *= boost;
+        }
+    }
+
     private void CreateGradients(float height)
     {
-        // Dispose existing gradients
+        Safe(
+            () =>
+            {
+                DisposeGradients();
+                CreateSegmentGradients(height);
+                CreateCombinedGradients(height);
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.CreateGradients",
+                ErrorMessage = "Failed to create gradients"
+            }
+        );
+    }
+
+    private void DisposeGradients()
+    {
         _greenGradient?.Dispose();
         _yellowGradient?.Dispose();
         _redGradient?.Dispose();
         _reflectionGradient?.Dispose();
         _barGradient?.Dispose();
+    }
 
-        // Create green gradient (bottom section)
+    private void CreateSegmentGradients(float height)
+    {
         _greenGradient = SKShader.CreateLinearGradient(
             new SKPoint(0, 0),
             new SKPoint(0, height / 3),
-            new[] { _greenStartColor, _greenEndColor },
+            _greenColors,
             null,
             SKShaderTileMode.Clamp);
 
-        // Create yellow gradient (middle section)
         _yellowGradient = SKShader.CreateLinearGradient(
             new SKPoint(0, height / 3),
             new SKPoint(0, height * 2 / 3),
-            new[] { _yellowStartColor, _yellowEndColor },
+            _yellowColors,
             null,
             SKShaderTileMode.Clamp);
 
-        // Create red gradient (top section)
         _redGradient = SKShader.CreateLinearGradient(
             new SKPoint(0, height * 2 / 3),
             new SKPoint(0, height),
-            new[] { _redStartColor, _redEndColor },
+            _redColors,
             null,
-            SKShaderTileMode.Clamp);
-
-        // Create reflection gradient
-        _reflectionGradient = SKShader.CreateLinearGradient(
-            new SKPoint(0, 0),
-            new SKPoint(0, height * _reflectionHeight),
-            new[] { new SKColor(255, 255, 255, (byte)(_reflectionOpacity * 255)), SKColors.Transparent },
-            null,
-            SKShaderTileMode.Clamp);
-
-        // Create combined gradient for non-segmented bars
-        _barGradient = SKShader.CreateLinearGradient(
-            new SKPoint(0, height), // Bottom
-            new SKPoint(0, 0),      // Top
-            new[] { _greenStartColor, _greenEndColor, _yellowStartColor, _yellowEndColor, _redStartColor, _redEndColor },
-            new float[] { 0f, 0.6f, 0.6f, 0.85f, 0.85f, 1f },
             SKShaderTileMode.Clamp);
     }
 
-    /// <summary>
-    /// Gets or creates a paint object for a segment type.
-    /// </summary>
+    private void CreateCombinedGradients(float height)
+    {
+        SKColor[] reflectionColors = [
+            new SKColor(255, 255, 255, (byte)(_reflectionOpacity * 255)),
+            SKColors.Transparent
+        ];
+
+        _reflectionGradient = SKShader.CreateLinearGradient(
+            new SKPoint(0, 0),
+            new SKPoint(0, height * _reflectionHeight),
+            reflectionColors,
+            null,
+            SKShaderTileMode.Clamp);
+
+        _barGradient = SKShader.CreateLinearGradient(
+            new SKPoint(0, height),
+            new SKPoint(0, 0),
+            _barColors,
+            _barColorPositions,
+            SKShaderTileMode.Clamp);
+    }
+
     private SKPaint EnsureSegmentPaint(int index, SKShader? shader)
     {
         if (!_segmentPaints.TryGetValue(index, out var paint) || paint == null)
         {
             paint = new SKPaint
             {
-                IsAntialias = _useAntiAlias,
-                Style = Fill,
+                IsAntialias = UseAntiAlias,
+                Style = SKPaintStyle.Fill,
                 Shader = shader
             };
             _segmentPaints[index] = paint;
@@ -776,12 +1125,53 @@ public sealed class KenwoodRenderer : BaseSpectrumRenderer
         return paint;
     }
 
-    /// <summary>
-    /// Rebuilds all rendering paths based on current spectrum data.
-    /// </summary>
-    private void RebuildPaths(SKImageInfo info, float barWidth, float barSpacing, float totalBarWidth, float segmentHeight, int renderCount)
+    private void RebuildPaths(
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth,
+        float segmentHeight,
+        int renderCount)
     {
-        // Reset all paths
+        Safe(
+            () =>
+            {
+                ResetAllPaths();
+
+                float minVisibleValue = segmentHeight * 0.5f;
+
+                if (!_useSegmentedBars)
+                {
+                    BuildSimpleBarPaths(
+                        info,
+                        barWidth,
+                        barSpacing,
+                        totalBarWidth,
+                        renderCount,
+                        minVisibleValue);
+                }
+                else
+                {
+                    BuildSegmentedBarPaths(
+                        info,
+                        barWidth,
+                        barSpacing,
+                        totalBarWidth,
+                        segmentHeight,
+                        renderCount,
+                        minVisibleValue);
+                }
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.RebuildPaths",
+                ErrorMessage = "Failed to rebuild rendering paths"
+            }
+        );
+    }
+
+    private void ResetAllPaths()
+    {
         _cachedBarPath?.Reset();
         _cachedGreenSegmentsPath?.Reset();
         _cachedYellowSegmentsPath?.Reset();
@@ -790,302 +1180,469 @@ public sealed class KenwoodRenderer : BaseSpectrumRenderer
         _cachedPeakPath?.Reset();
         _cachedShadowPath?.Reset();
         _cachedReflectionPath?.Reset();
+    }
 
-        float minVisibleValue = segmentHeight * 0.5f;
+    private void BuildSimpleBarPaths(
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth,
+        int renderCount,
+        float minVisibleValue)
+    {
+        if (_renderBarValues == null || _renderPeaks == null ||
+            _cachedBarPath == null || _cachedPeakPath == null)
+            return;
 
-        if (!_useSegmentedBars)
+        for (int i = 0; i < renderCount && i < _renderBarValues.Length; i++)
         {
-            // Simple bar mode - just draw rectangles
-            for (int i = 0; i < renderCount; i++)
+            float x = i * totalBarWidth + barSpacing / 2;
+            float barValue = _renderBarValues[i];
+
+            if (barValue > minVisibleValue)
             {
-                float x = i * totalBarWidth + barSpacing / 2;
-                float barValue = _renderBarValues![i];
-
-                if (barValue > minVisibleValue)
-                {
-                    float barTop = info.Height - barValue;
-                    _cachedBarPath!.AddRect(SKRect.Create(x, barTop, barWidth, barValue));
-                }
-
-                if (_renderPeaks![i] > minVisibleValue)
-                {
-                    float peakY = info.Height - _renderPeaks[i];
-                    float peakHeight = 3f;
-                    _cachedPeakPath!.AddRect(SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight));
-                }
+                AddBarPath(
+                    info,
+                    x,
+                    barWidth,
+                    barValue);
             }
-        }
-        else
-        {
-            // Segmented bar mode - draw segments with color zones
-            int greenCount = (int)(_currentSegmentCount * 0.6);
-            int yellowCount = (int)(_currentSegmentCount * 0.25);
 
-            // Build reflection path if enabled
-            if (_enableReflections && info.Height > 200)
-                BuildReflectionPath(info, barWidth, barSpacing, totalBarWidth, segmentHeight, renderCount, minVisibleValue);
-
-            // Build segments for each bar
-            for (int i = 0; i < renderCount; i++)
+            if (i < _renderPeaks.Length)
             {
-                float x = i * totalBarWidth + barSpacing / 2;
-                float barValue = _renderBarValues![i];
-
-                if (barValue > minVisibleValue)
-                {
-                    int segmentsToRender = Min(
-                        (int)Ceiling(barValue / (segmentHeight + Constants.SEGMENT_GAP)),
-                        _currentSegmentCount);
-
-                    bool needShadow = _enableShadows && barValue > info.Height * 0.5f;
-
-                    // Add shadow segments
-                    if (needShadow)
-                    {
-                        for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
-                        {
-                            float segmentBottom = info.Height - segIndex * (segmentHeight + Constants.SEGMENT_GAP);
-                            float segmentTop = segmentBottom - segmentHeight;
-                            AddRoundRectToPath(_cachedShadowPath!, x + 2, segmentTop + 2, barWidth, segmentHeight);
-                        }
-                    }
-
-                    // Add color segments
-                    for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
-                    {
-                        float segmentBottom = info.Height - segIndex * (segmentHeight + Constants.SEGMENT_GAP);
-                        float segmentTop = segmentBottom - segmentHeight;
-
-                        // Select target path based on segment position (green, yellow, or red zone)
-                        SKPath targetPath = segIndex < greenCount ? _cachedGreenSegmentsPath!
-                            : segIndex < greenCount + yellowCount ? _cachedYellowSegmentsPath! : _cachedRedSegmentsPath!;
-
-                        AddRoundRectToPath(targetPath, x, segmentTop, barWidth, segmentHeight);
-                        AddRoundRectToPath(_cachedOutlinePath!, x, segmentTop, barWidth, segmentHeight);
-                    }
-                }
-
-                // Add peak indicators
-                if (_renderPeaks![i] > minVisibleValue)
-                {
-                    float peakY = info.Height - _renderPeaks[i];
-                    float peakHeight = 3f;
-                    _cachedPeakPath!.AddRect(SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight));
-                }
+                AddPeakPath(
+                    info,
+                    i,
+                    x,
+                    barWidth,
+                    minVisibleValue);
             }
         }
     }
 
-    /// <summary>
-    /// Builds the reflection path for all bars.
-    /// </summary>
-    private void BuildReflectionPath(SKImageInfo info, float barWidth, float barSpacing, float totalBarWidth, float segmentHeight, int renderCount, float minVisibleValue)
+    private void AddBarPath(
+        SKImageInfo info,
+        float x,
+        float barWidth,
+        float barValue)
     {
-        // Use fewer bars for reflection to improve performance
+        if (_cachedBarPath == null)
+            return;
+
+        float barTop = info.Height - barValue;
+        _cachedBarPath.AddRect(
+            SKRect.Create(
+                x,
+                barTop,
+                barWidth,
+                barValue));
+    }
+
+    private void AddPeakPath(
+        SKImageInfo info,
+        int index,
+        float x,
+        float barWidth,
+        float minVisibleValue)
+    {
+        if (_renderPeaks == null || _cachedPeakPath == null ||
+            index >= _renderPeaks.Length)
+            return;
+
+        if (_renderPeaks[index] > minVisibleValue)
+        {
+            float peakY = info.Height - _renderPeaks[index];
+            float peakHeight = 3f;
+            _cachedPeakPath.AddRect(
+                SKRect.Create(
+                    x,
+                    peakY - peakHeight,
+                    barWidth,
+                    peakHeight));
+        }
+    }
+
+    private void BuildSegmentedBarPaths(
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth,
+        float segmentHeight,
+        int renderCount,
+        float minVisibleValue)
+    {
+        if (_renderBarValues == null || _renderPeaks == null)
+            return;
+
+        int greenCount = (int)(_currentSegmentCount * 0.6);
+        int yellowCount = (int)(_currentSegmentCount * 0.25);
+
+        if (_enableReflections && info.Height > 200)
+        {
+            BuildReflectionPath(
+                info,
+                barWidth,
+                barSpacing,
+                totalBarWidth,
+                segmentHeight,
+                renderCount,
+                minVisibleValue);
+        }
+
+        for (int i = 0; i < renderCount && i < _renderBarValues.Length; i++)
+        {
+            BuildBarSegments(
+                info,
+                i,
+                barWidth,
+                barSpacing,
+                totalBarWidth,
+                segmentHeight,
+                minVisibleValue,
+                greenCount,
+                yellowCount);
+
+            AddPeakPath(
+                info,
+                i,
+                i * totalBarWidth + barSpacing / 2,
+                barWidth,
+                minVisibleValue);
+        }
+    }
+
+    private void BuildBarSegments(
+        SKImageInfo info,
+        int barIndex,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth,
+        float segmentHeight,
+        float minVisibleValue,
+        int greenCount,
+        int yellowCount)
+    {
+        if (_renderBarValues == null || barIndex >= _renderBarValues.Length)
+            return;
+
+        float x = barIndex * totalBarWidth + barSpacing / 2;
+        float barValue = _renderBarValues[barIndex];
+
+        if (barValue <= minVisibleValue)
+            return;
+
+        int segmentsToRender = Min(
+            (int)Ceiling(barValue / (segmentHeight + SEGMENT_GAP)),
+            _currentSegmentCount);
+
+        bool needShadow = _enableShadows && barValue > info.Height * 0.5f;
+
+        for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
+        {
+            float segmentBottom = info.Height - segIndex * (segmentHeight + SEGMENT_GAP);
+            float segmentTop = segmentBottom - segmentHeight;
+
+            if (needShadow && _cachedShadowPath != null)
+            {
+                AddRoundRectToPath(
+                    _cachedShadowPath,
+                    x + 2,
+                    segmentTop + 2,
+                    barWidth,
+                    segmentHeight);
+            }
+
+            SKPath? targetPath = DetermineSegmentColorPath(
+                segIndex,
+                greenCount,
+                yellowCount);
+
+            if (targetPath != null)
+            {
+                AddRoundRectToPath(
+                    targetPath,
+                    x,
+                    segmentTop,
+                    barWidth,
+                    segmentHeight);
+            }
+
+            if (_cachedOutlinePath != null)
+            {
+                AddRoundRectToPath(
+                    _cachedOutlinePath,
+                    x,
+                    segmentTop,
+                    barWidth,
+                    segmentHeight);
+            }
+        }
+    }
+
+    private SKPath? DetermineSegmentColorPath(
+        int segmentIndex,
+        int greenCount,
+        int yellowCount)
+    {
+        return segmentIndex < greenCount
+            ? _cachedGreenSegmentsPath
+            : segmentIndex < greenCount + yellowCount
+                ? _cachedYellowSegmentsPath
+                : _cachedRedSegmentsPath;
+    }
+
+    private void BuildReflectionPath(
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth,
+        float segmentHeight,
+        int renderCount,
+        float minVisibleValue)
+    {
+        if (_renderBarValues == null || _renderPeaks == null ||
+            _cachedReflectionPath == null)
+            return;
+
         int reflectionBarStep = Max(1, renderCount / 60);
 
         for (int i = 0; i < renderCount; i += reflectionBarStep)
         {
-            float x = i * totalBarWidth + barSpacing / 2;
-            float barValue = _renderBarValues![i];
-
-            if (barValue > minVisibleValue)
+            if (i < _renderBarValues.Length)
             {
-                // Limit reflection to first few segments
-                int maxReflectionSegments = Min(3, _currentSegmentCount);
-                int segmentsToRender = Min(
-                    (int)Ceiling(barValue / (segmentHeight + Constants.SEGMENT_GAP)),
-                    maxReflectionSegments);
-
-                // Add reflection segments
-                for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
-                {
-                    float segmentBottom = info.Height - segIndex * (segmentHeight + Constants.SEGMENT_GAP);
-                    float segmentTop = segmentBottom - segmentHeight;
-                    var rect = SKRect.Create(x, segmentTop, barWidth, segmentHeight * _reflectionHeight);
-
-                    if (_segmentRoundness > 0)
-                        _cachedReflectionPath!.AddRoundRect(rect, _segmentRoundness, _segmentRoundness);
-                    else
-                        _cachedReflectionPath!.AddRect(rect);
-                }
-            }
-
-            // Add peak reflections
-            if (_renderPeaks![i] > minVisibleValue)
-            {
-                float peakY = info.Height - _renderPeaks[i];
-                float peakHeight = 3f;
-                _cachedReflectionPath!.AddRect(
-                    SKRect.Create(x, peakY - peakHeight, barWidth, peakHeight * _reflectionHeight));
+                BuildSingleBarReflection(
+                    info,
+                    i,
+                    barWidth,
+                    barSpacing,
+                    totalBarWidth,
+                    segmentHeight,
+                    minVisibleValue);
             }
         }
     }
 
-    /// <summary>
-    /// Adds a rounded rectangle to the specified path.
-    /// </summary>
-    private void AddRoundRectToPath(SKPath path, float x, float y, float width, float height)
+    private void BuildSingleBarReflection(
+        SKImageInfo info,
+        int barIndex,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth,
+        float segmentHeight,
+        float minVisibleValue)
     {
+        if (_renderBarValues == null || _renderPeaks == null ||
+            _cachedReflectionPath == null || barIndex >= _renderBarValues.Length)
+            return;
+
+        float x = barIndex * totalBarWidth + barSpacing / 2;
+        float barValue = _renderBarValues[barIndex];
+
+        if (barValue > minVisibleValue)
+        {
+            BuildSegmentReflections(
+                info,
+                x,
+                barWidth,
+                barValue,
+                segmentHeight);
+        }
+
+        if (barIndex < _renderPeaks.Length)
+        {
+            BuildPeakReflection(
+                info,
+                barIndex,
+                x,
+                barWidth,
+                minVisibleValue);
+        }
+    }
+
+    private void BuildSegmentReflections(
+        SKImageInfo info,
+        float x,
+        float barWidth,
+        float barValue,
+        float segmentHeight)
+    {
+        if (_cachedReflectionPath == null)
+            return;
+
+        int maxReflectionSegments = Min(3, _currentSegmentCount);
+        int segmentsToRender = Min(
+            (int)Ceiling(barValue / (segmentHeight + SEGMENT_GAP)),
+            maxReflectionSegments);
+
+        for (int segIndex = 0; segIndex < segmentsToRender; segIndex++)
+        {
+            float segmentBottom = info.Height - segIndex * (segmentHeight + SEGMENT_GAP);
+            float segmentTop = segmentBottom - segmentHeight;
+            var rect = SKRect.Create(
+                x,
+                segmentTop,
+                barWidth,
+                segmentHeight * _reflectionHeight);
+
+            if (_segmentRoundness > 0)
+                _cachedReflectionPath.AddRoundRect(
+                    rect,
+                    _segmentRoundness,
+                    _segmentRoundness);
+            else
+                _cachedReflectionPath.AddRect(rect);
+        }
+    }
+
+    private void BuildPeakReflection(
+        SKImageInfo info,
+        int barIndex,
+        float x,
+        float barWidth,
+        float minVisibleValue)
+    {
+        if (_renderPeaks == null || _cachedReflectionPath == null ||
+            barIndex >= _renderPeaks.Length)
+            return;
+
+        if (_renderPeaks[barIndex] > minVisibleValue)
+        {
+            float peakY = info.Height - _renderPeaks[barIndex];
+            float peakHeight = 3f;
+            _cachedReflectionPath.AddRect(
+                SKRect.Create(
+                    x,
+                    peakY - peakHeight,
+                    barWidth,
+                    peakHeight * _reflectionHeight));
+        }
+    }
+
+    private void AddRoundRectToPath(
+        SKPath path,
+        float x,
+        float y,
+        float width,
+        float height)
+    {
+        if (path == null)
+            return;
+
         var rect = SKRect.Create(x, y, width, height);
         if (_segmentRoundness > 0.5f)
-            path.AddRoundRect(rect, _segmentRoundness, _segmentRoundness);
+            path.AddRoundRect(
+                rect,
+                _segmentRoundness,
+                _segmentRoundness);
         else
             path.AddRect(rect);
     }
-    #endregion
 
-    #region Spectrum Processing
-    /// <summary>
-    /// Scales spectrum data to match the target bar count.
-    /// </summary>
-    private void ScaleSpectrum(float[] spectrum, float[] scaledSpectrum, int barCount, int spectrumLength)
+    protected override void OnInvalidateCachedResources()
     {
-        float blockSize = spectrumLength / (float)barCount;
-        int maxThreads = Max(2, ProcessorCount / 2);
-
-        Parallel.For(0, barCount, new ParallelOptions { MaxDegreeOfParallelism = maxThreads }, i =>
-        {
-            int start = (int)(i * blockSize);
-            int end = Min((int)((i + 1) * blockSize), spectrumLength);
-            int count = end - start;
-
-            if (count <= 0)
+        Safe(
+            () =>
             {
-                scaledSpectrum[i] = 0f;
-                return;
-            }
-
-            float sum = 0f;
-            float peak = float.MinValue;
-            int vectorSize = Vector<float>.Count;
-            int j = start;
-
-            // Use SIMD for faster processing
-            Vector<float> sumVector = Vector<float>.Zero;
-            Vector<float> maxVector = new Vector<float>(float.MinValue);
-
-            for (; j <= end - vectorSize; j += vectorSize)
+                _pathsNeedRebuild = true;
+            },
+            new ErrorHandlingOptions
             {
-                var vec = new Vector<float>(spectrum, j);
-                sumVector += vec;
-                maxVector = Max(maxVector, vec);
+                Source = $"{LOG_PREFIX}.OnInvalidateCachedResources",
+                ErrorMessage = "Failed to invalidate cached resources"
             }
-
-            // Extract values from vectors
-            for (int k = 0; k < vectorSize; k++)
-            {
-                sum += sumVector[k];
-                peak = Max(peak, maxVector[k]);
-            }
-
-            // Process remaining elements
-            for (; j < end; j++)
-            {
-                float value = spectrum[j];
-                sum += value;
-                peak = Max(peak, value);
-            }
-
-            // Calculate weighted average between mean and peak
-            float average = sum / count;
-            float weight = Constants.SPECTRUM_WEIGHT;
-            scaledSpectrum[i] = average * (1.0f - weight) + peak * weight;
-
-            // Apply frequency boost to higher frequencies
-            if (i > barCount / 2)
-            {
-                float boost = 1.0f + (float)i / barCount * Constants.BOOST_FACTOR;
-                scaledSpectrum[i] *= boost;
-            }
-
-            // Clamp final value
-            scaledSpectrum[i] = Min(1.0f, scaledSpectrum[i]);
-        });
+        );
     }
-    #endregion
 
-    #region Disposal
-    /// <summary>
-    /// Disposes of resources used by the renderer.
-    /// </summary>
-    public override void Dispose()
+    protected override void OnDispose()
     {
-        if (_disposed)
-            return;
-
-        Safe(() =>
-        {
-            // Stop calculation thread
-            _calculationCts?.Cancel();
-            _dataAvailableEvent.Set();
-
-            try
+        Safe(
+            () =>
             {
-                _calculationTask?.Wait(500);
-            }
-            catch (Exception ex)
+                DisposeThreadResources();
+                DisposeSynchronizationObjects();
+                ReturnAllBuffers();
+                ClearBufferPools();
+                DisposePaintsAndPaths();
+                DisposeShaders();
+
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+            },
+            new ErrorHandlingOptions
             {
-                Log(LogLevel.Error, Constants.LOG_PREFIX, $"Dispose wait error: {ex.Message}");
+                Source = $"{LOG_PREFIX}.OnDispose",
+                ErrorMessage = "Error during disposal"
             }
-
-            // Dispose synchronization objects
-            _calculationCts?.Dispose();
-            _dataAvailableEvent.Dispose();
-            _dataSemaphore.Dispose();
-
-            // Return buffers to pool
-            ReturnBufferToPool(_previousSpectrum);
-            ReturnBufferToPool(_peaks);
-            ReturnBufferToPool(_peakHoldTimes);
-            ReturnBufferToPool(_renderBarValues);
-            ReturnBufferToPool(_renderPeaks);
-            ReturnBufferToPool(_processingBarValues);
-            ReturnBufferToPool(_processingPeaks);
-            ReturnBufferToPool(_velocities);
-
-            // Clear buffer pools
-            while (_floatBufferPool.TryDequeue(out _)) { }
-            while (_dateTimeBufferPool.TryDequeue(out _)) { }
-
-            // Dispose paints
-            foreach (var paint in _segmentPaints.Values)
-                paint.Dispose();
-            _segmentPaints.Clear();
-
-            // Dispose paths
-            _cachedBarPath?.Dispose();
-            _cachedGreenSegmentsPath?.Dispose();
-            _cachedYellowSegmentsPath?.Dispose();
-            _cachedRedSegmentsPath?.Dispose();
-            _cachedOutlinePath?.Dispose();
-            _cachedPeakPath?.Dispose();
-            _cachedShadowPath?.Dispose();
-            _cachedReflectionPath?.Dispose();
-
-            // Dispose shaders
-            _greenGradient?.Dispose();
-            _yellowGradient?.Dispose();
-            _redGradient?.Dispose();
-            _reflectionGradient?.Dispose();
-            _barGradient?.Dispose();
-
-            // Dispose paint objects
-            _peakPaint.Dispose();
-            _segmentShadowPaint.Dispose();
-            _outlinePaint.Dispose();
-            _reflectionPaint.Dispose();
-
-            // Call base implementation
-            base.Dispose();
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Dispose",
-            ErrorMessage = "Error during disposal"
-        });
-
-        _disposed = true;
-        Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
+        );
     }
-    #endregion
+
+    private void DisposeThreadResources()
+    {
+        _calculationCts?.Cancel();
+        _dataAvailableEvent.Set();
+
+        try
+        {
+            _calculationTask?.Wait(500);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, $"Dispose wait error: {ex.Message}");
+        }
+
+        _calculationCts?.Dispose();
+    }
+
+    private void DisposeSynchronizationObjects()
+    {
+        _dataAvailableEvent.Dispose();
+        _dataSemaphore.Dispose();
+    }
+
+    private void ReturnAllBuffers()
+    {
+        ReturnBufferToPool(_previousSpectrum);
+        ReturnBufferToPool(_peaks);
+        ReturnBufferToPool(_peakHoldTimes);
+        ReturnBufferToPool(_renderBarValues);
+        ReturnBufferToPool(_renderPeaks);
+        ReturnBufferToPool(_processingBarValues);
+        ReturnBufferToPool(_processingPeaks);
+        ReturnBufferToPool(_velocities);
+    }
+
+    private void ClearBufferPools()
+    {
+        while (_floatBufferPool.TryDequeue(out _)) { }
+        while (_dateTimeBufferPool.TryDequeue(out _)) { }
+    }
+
+    private void DisposePaintsAndPaths()
+    {
+        foreach (var paint in _segmentPaints.Values)
+            paint.Dispose();
+        _segmentPaints.Clear();
+
+        _peakPaint.Dispose();
+        _segmentShadowPaint.Dispose();
+        _outlinePaint.Dispose();
+        _reflectionPaint.Dispose();
+
+        _cachedBarPath?.Dispose();
+        _cachedGreenSegmentsPath?.Dispose();
+        _cachedYellowSegmentsPath?.Dispose();
+        _cachedRedSegmentsPath?.Dispose();
+        _cachedOutlinePath?.Dispose();
+        _cachedPeakPath?.Dispose();
+        _cachedShadowPath?.Dispose();
+        _cachedReflectionPath?.Dispose();
+    }
+
+    private void DisposeShaders()
+    {
+        _greenGradient?.Dispose();
+        _yellowGradient?.Dispose();
+        _redGradient?.Dispose();
+        _reflectionGradient?.Dispose();
+        _barGradient?.Dispose();
+    }
 }
