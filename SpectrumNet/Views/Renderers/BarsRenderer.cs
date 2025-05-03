@@ -103,7 +103,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
             float x = i * totalBarWidth;
 
-            if (base.IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight))
+            if (IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight))
             {
                 RenderBarWithEffects(
                     canvas,

@@ -256,12 +256,13 @@ public abstract class BaseSpectrumRenderer
         && info.Width > 0
         && info.Height > 0;
 
-    protected bool IsRenderAreaVisible(
-        SKCanvas canvas,
+    protected static bool IsRenderAreaVisible(
+        SKCanvas? canvas,
         float x,
         float y,
         float width,
         float height) =>
+        canvas == null ||
         !canvas.QuickReject(new SKRect(x, y, x + width, y + height));
 
     private static void ScaleSpectrumParallel(
