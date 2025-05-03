@@ -1,63 +1,48 @@
 ﻿#nullable enable
 
-using SpectrumNet.Service.Enums;
+using static SpectrumNet.Views.Renderers.LoudnessMeterRenderer.Constants;
 
 namespace SpectrumNet.Views.Renderers;
 
-/// <summary>
-/// Renderer that visualizes spectrum data as a vertical loudness meter with peak indicator.
-/// </summary>
-public sealed class LoudnessMeterRenderer : BaseSpectrumRenderer
+public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
 {
-    #region Singleton Pattern
     private static readonly Lazy<LoudnessMeterRenderer> _instance = new(() => new LoudnessMeterRenderer());
-    private LoudnessMeterRenderer() { } // Приватный конструктор
-    public static LoudnessMeterRenderer GetInstance() => _instance.Value;
-    #endregion
 
-    #region Constants
-    private static class Constants
+    private LoudnessMeterRenderer() { }
+
+    public static LoudnessMeterRenderer GetInstance() => _instance.Value;
+
+    public record Constants
     {
-        // Logging
         public const string LOG_PREFIX = "LoudnessMeterRenderer";
 
-        // Loudness calculation constants
-        public const float MIN_LOUDNESS_THRESHOLD = 0.001f; // Minimum loudness to trigger rendering
-        public const float SMOOTHING_FACTOR_NORMAL = 0.3f;   // Smoothing factor for normal mode
-        public const float SMOOTHING_FACTOR_OVERLAY = 0.5f;   // Smoothing factor for overlay mode
-        public const float PEAK_DECAY_RATE = 0.05f;  // Rate at which peak loudness decays
+        public const float
+            MIN_LOUDNESS_THRESHOLD = 0.001f,
+            SMOOTHING_FACTOR_NORMAL = 0.3f,
+            SMOOTHING_FACTOR_OVERLAY = 0.5f,
+            PEAK_DECAY_RATE = 0.05f;
 
-        // Rendering constants
-        public const float GLOW_INTENSITY = 0.4f;   // Intensity factor for glow effect
-        public const float HIGH_LOUDNESS_THRESHOLD = 0.7f;   // Threshold for high loudness (red)
-        public const float MEDIUM_LOUDNESS_THRESHOLD = 0.4f;   // Threshold for medium loudness (yellow)
-        public const float BORDER_WIDTH = 1.5f;   // Width of the border stroke
-        public const float BLUR_SIGMA = 10f;    // Sigma value for blur mask filter
-        public const float PEAK_RECT_HEIGHT = 4f;     // Height of the peak indicator rectangle
-        public const float GLOW_HEIGHT_FACTOR = 1f / 3f;// Factor for glow height relative to meter
-        public const int MARKER_COUNT = 10;     // Number of divisions for markers
+        public const float
+            GLOW_INTENSITY = 0.4f,
+            HIGH_LOUDNESS_THRESHOLD = 0.7f,
+            MEDIUM_LOUDNESS_THRESHOLD = 0.4f,
+            BORDER_WIDTH = 1.5f,
+            BLUR_SIGMA = 10f,
+            PEAK_RECT_HEIGHT = 4f,
+            GLOW_HEIGHT_FACTOR = 1f / 3f;
 
-        // Gradient constants
-        public const float GRADIENT_ALPHA_FACTOR = 0.8f;   // Alpha transparency factor for gradient colors
+        public const int MARKER_COUNT = 10;
+        public const float GRADIENT_ALPHA_FACTOR = 0.8f;
 
-        // Quality settings
         public static class Quality
         {
-            // Low quality settings
-            public const bool LOW_USE_ADVANCED_EFFECTS = false;
-
-            // Medium quality settings
-            public const bool MEDIUM_USE_ADVANCED_EFFECTS = true;
-
-            // High quality settings
-            public const bool HIGH_USE_ADVANCED_EFFECTS = true;
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
         }
     }
-    #endregion
 
-    #region Fields
-    // Rendering resources
-    private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 5);
     private SKPaint? _backgroundPaint;
     private SKPaint? _markerPaint;
     private SKPaint? _fillPaint;
@@ -65,440 +50,446 @@ public sealed class LoudnessMeterRenderer : BaseSpectrumRenderer
     private SKPaint? _peakPaint;
     private SKPicture? _staticPicture;
 
-    // Loudness state
     private float _previousLoudness;
     private float _peakLoudness;
     private float? _cachedLoudness;
 
-    // Canvas dimensions
     private int _currentWidth;
     private int _currentHeight;
 
-    // Quality-dependent settings
-    private new bool _useAntiAlias = true;
-    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-    private new bool _useAdvancedEffects = true;
-
-    // Synchronization and state
-    private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _loudnessSemaphore = new(1, 1);
     private readonly object _loudnessLock = new();
-    private new bool _disposed;
-    #endregion
 
-    #region Initialization and Configuration
-    /// <summary>
-    /// Initializes the loudness meter renderer and prepares resources for rendering.
-    /// </summary>
-    public override void Initialize()
+    protected override void OnInitialize()
     {
-        Safe(() =>
-        {
-            base.Initialize();
-
-            // Initialize state
-            _previousLoudness = 0f;
-            _peakLoudness = 0f;
-
-            // Create required paints
-            _backgroundPaint = new SKPaint
+        Safe(
+            () =>
             {
-                Style = Stroke,
-                StrokeWidth = Constants.BORDER_WIDTH,
-                Color = SKColors.White.WithAlpha(100),
-                IsAntialias = _useAntiAlias
-            };
-
-            _markerPaint = new SKPaint
+                InitializeStateValues();
+                CreatePaints();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            new ErrorHandlingOptions
             {
-                Style = Stroke,
-                StrokeWidth = 1,
-                Color = SKColors.White.WithAlpha(150),
-                IsAntialias = _useAntiAlias
-            };
-
-            _fillPaint = new SKPaint
-            {
-                Style = Fill,
-                IsAntialias = _useAntiAlias
-            };
-
-            _glowPaint = new SKPaint
-            {
-                Style = Fill,
-                IsAntialias = _useAntiAlias,
-                MaskFilter = SKMaskFilter.CreateBlur(Normal, Constants.BLUR_SIGMA)
-            };
-
-            _peakPaint = new SKPaint
-            {
-                Style = Fill,
-                IsAntialias = _useAntiAlias
-            };
-
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
-    }
-
-    /// <summary>
-    /// Configures the renderer with overlay status and quality settings.
-    /// </summary>
-    /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
-    /// <param name="quality">The rendering quality level.</param>
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-    {
-        Safe(() =>
-        {
-            base.Configure(isOverlayActive, quality);
-
-            // Update smoothing factor based on overlay mode
-            _smoothingFactor = isOverlayActive ?
-                Constants.SMOOTHING_FACTOR_OVERLAY :
-                Constants.SMOOTHING_FACTOR_NORMAL;
-
-            // Update quality if needed
-            if (_quality != quality)
-            {
-                _quality = quality;
-                ApplyQualitySettings();
+                Source = $"{LOG_PREFIX}.OnInitialize",
+                ErrorMessage = "Failed to initialize renderer"
             }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Configure",
-            ErrorMessage = "Failed to configure renderer"
-        });
+        );
     }
 
-    /// <summary>
-    /// Applies quality settings based on the current quality level.
-    /// </summary>
-    protected override void ApplyQualitySettings()
+    private void InitializeStateValues()
     {
-        Safe(() =>
-        {
-            base.ApplyQualitySettings();
-
-            switch (_quality)
-            {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-                    _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-                    break;
-
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-                    break;
-
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-                    break;
-            }
-
-            // Обновляем только IsAntialias, не используя устаревшее FilterQuality
-            if (_backgroundPaint != null) _backgroundPaint.IsAntialias = _useAntiAlias;
-            if (_markerPaint != null) _markerPaint.IsAntialias = _useAntiAlias;
-            if (_fillPaint != null) _fillPaint.IsAntialias = _useAntiAlias;
-            if (_glowPaint != null) _glowPaint.IsAntialias = _useAntiAlias;
-            if (_peakPaint != null) _peakPaint.IsAntialias = _useAntiAlias;
-
-            // Сбрасываем статический кэш для пересоздания
-            _staticPicture?.Dispose();
-            _staticPicture = null;
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
-            ErrorMessage = "Failed to apply quality settings"
-        });
+        _previousLoudness = 0f;
+        _peakLoudness = 0f;
+        _cachedLoudness = null;
+        _currentWidth = 0;
+        _currentHeight = 0;
     }
-    #endregion
 
-    #region Rendering
-    /// <summary>
-    /// Renders the loudness meter visualization on the canvas using spectrum data.
-    /// </summary>
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
+    private void CreatePaints()
+    {
+        CreateBackgroundPaint();
+        CreateMarkerPaint();
+        CreateFillPaint();
+        CreateGlowPaint();
+        CreatePeakPaint();
+    }
+
+    private void CreateBackgroundPaint()
+    {
+        _backgroundPaint = new SKPaint
+        {
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = BORDER_WIDTH,
+            Color = SKColors.White.WithAlpha(100),
+            IsAntialias = UseAntiAlias
+        };
+    }
+
+    private void CreateMarkerPaint()
+    {
+        _markerPaint = new SKPaint
+        {
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1,
+            Color = SKColors.White.WithAlpha(150),
+            IsAntialias = UseAntiAlias
+        };
+    }
+
+    private void CreateFillPaint()
+    {
+        _fillPaint = new SKPaint
+        {
+            Style = SKPaintStyle.Fill,
+            IsAntialias = UseAntiAlias
+        };
+    }
+
+    private void CreateGlowPaint()
+    {
+        _glowPaint = new SKPaint
+        {
+            Style = SKPaintStyle.Fill,
+            IsAntialias = UseAntiAlias,
+            MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BLUR_SIGMA)
+        };
+    }
+
+    private void CreatePeakPaint()
+    {
+        _peakPaint = new SKPaint
+        {
+            Style = SKPaintStyle.Fill,
+            IsAntialias = UseAntiAlias
+        };
+    }
+
+    protected override void OnConfigurationChanged()
+    {
+        Safe(
+            () =>
+            {
+                UpdateSmoothingFactor();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed, overlay: {_isOverlayActive}");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnConfigurationChanged",
+                ErrorMessage = "Failed to apply configuration changes"
+            }
+        );
+    }
+
+    private void UpdateSmoothingFactor()
+    {
+        _smoothingFactor = _isOverlayActive ?
+            SMOOTHING_FACTOR_OVERLAY :
+            SMOOTHING_FACTOR_NORMAL;
+    }
+
+    protected override void OnQualitySettingsApplied()
+    {
+        Safe(
+            () =>
+            {
+                UpdatePaintProperties();
+                ResetStaticCache();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnQualitySettingsApplied",
+                ErrorMessage = "Failed to apply quality settings"
+            }
+        );
+    }
+
+    private void UpdatePaintProperties()
+    {
+        UpdatePaintAntialiasing();
+    }
+
+    private void UpdatePaintAntialiasing()
+    {
+        if (_backgroundPaint != null) _backgroundPaint.IsAntialias = UseAntiAlias;
+        if (_markerPaint != null) _markerPaint.IsAntialias = UseAntiAlias;
+        if (_fillPaint != null) _fillPaint.IsAntialias = UseAntiAlias;
+        if (_glowPaint != null) _glowPaint.IsAntialias = UseAntiAlias;
+        if (_peakPaint != null) _peakPaint.IsAntialias = UseAntiAlias;
+    }
+
+    private void ResetStaticCache()
+    {
+        _staticPicture?.Dispose();
+        _staticPicture = null;
+    }
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        SKPaint paint)
     {
-        // Validate rendering parameters
         if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-        {
-            drawPerformanceInfo?.Invoke(canvas!, info);
             return;
-        }
 
-        // Quick reject if canvas area is not visible
-        if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-        {
-            drawPerformanceInfo?.Invoke(canvas, info);
-            return;
-        }
-
-        Safe(() =>
-        {
-            float loudness = 0f;
-            bool semaphoreAcquired = false;
-
-            try
+        Safe(
+            () =>
             {
-                // Try to acquire semaphore for updating state
-                semaphoreAcquired = _renderSemaphore.Wait(0);
+                float loudness = ProcessLoudnessData(spectrum);
 
-                if (semaphoreAcquired)
+                if (CheckCanvasDimensionsChanged(info))
                 {
-                    // Process new loudness value
-                    loudness = CalculateAndSmoothLoudness(spectrum!);
-                    _cachedLoudness = loudness;
+                    UpdateCanvasDimensions(info);
+                    UpdateStaticElements();
+                }
 
-                    // Update peak loudness
-                    if (loudness > _peakLoudness)
-                    {
-                        _peakLoudness = loudness;
-                    }
-                    else
-                    {
-                        _peakLoudness = Max(0, _peakLoudness - Constants.PEAK_DECAY_RATE);
-                    }
-                }
-                else
-                {
-                    // Use cached loudness if semaphore not available
-                    lock (_loudnessLock)
-                    {
-                        loudness = _cachedLoudness ?? CalculateAndSmoothLoudness(spectrum!);
-                    }
-                }
-            }
-            finally
+                RenderMeter(
+                    canvas,
+                    info,
+                    loudness,
+                    _peakLoudness);
+            },
+            new ErrorHandlingOptions
             {
-                // Release semaphore if acquired
-                if (semaphoreAcquired)
-                {
-                    _renderSemaphore.Release();
-                }
+                Source = $"{LOG_PREFIX}.RenderEffect",
+                ErrorMessage = "Error during rendering"
             }
-
-            // Update static elements if canvas size changed or if static picture doesn't exist
-            if (info.Width != _currentWidth || info.Height != _currentHeight || _staticPicture == null)
-            {
-                _currentWidth = info.Width;
-                _currentHeight = info.Height;
-                UpdateStaticElements();
-            }
-
-            // Render the meter with current loudness values
-            RenderEnhancedMeter(canvas!, info, loudness, _peakLoudness);
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Render",
-            ErrorMessage = "Error during rendering"
-        });
-
-        // Draw performance info
-        drawPerformanceInfo?.Invoke(canvas!, info);
+        );
     }
 
-    /// <summary>
-    /// Validates all render parameters before processing.
-    /// </summary>
-    private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint)
+    private bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint)
+    {
+        return ValidateCanvas(canvas) &&
+               ValidateSpectrum(spectrum) &&
+               ValidatePaint(paint) &&
+               ValidateDimensions(info) &&
+               !_disposed;
+    }
+
+    private static bool ValidateCanvas(SKCanvas? canvas)
     {
         if (canvas == null)
         {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, "Canvas is null");
+            Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
             return false;
         }
+        return true;
+    }
 
+    private static bool ValidateSpectrum(float[]? spectrum)
+    {
         if (spectrum == null || spectrum.Length == 0)
         {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, "Spectrum is null or empty");
+            Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
             return false;
         }
+        return true;
+    }
 
+    private static bool ValidatePaint(SKPaint? paint)
+    {
         if (paint == null)
         {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, "Paint is null");
+            Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
             return false;
         }
+        return true;
+    }
 
+    private static bool ValidateDimensions(SKImageInfo info)
+    {
         if (info.Width <= 0 || info.Height <= 0)
         {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, "Invalid canvas dimensions");
+            Log(LogLevel.Error, LOG_PREFIX, $"Invalid canvas dimensions: {info.Width}x{info.Height}");
             return false;
         }
+        return true;
+    }
 
-        if (_disposed)
+    private bool CheckCanvasDimensionsChanged(SKImageInfo info)
+    {
+        return info.Width != _currentWidth ||
+               info.Height != _currentHeight ||
+               _staticPicture == null;
+    }
+
+    private float ProcessLoudnessData(float[] spectrum)
+    {
+        float loudness = 0f;
+        bool semaphoreAcquired = false;
+
+        try
         {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, "Renderer is disposed");
+            semaphoreAcquired = _loudnessSemaphore.Wait(0);
+
+            if (semaphoreAcquired)
+            {
+                loudness = ProcessAndCacheLoudness(spectrum);
+            }
+            else
+            {
+                loudness = GetCachedLoudness(spectrum);
+            }
+        }
+        finally
+        {
+            if (semaphoreAcquired)
+                _loudnessSemaphore.Release();
+        }
+
+        return loudness;
+    }
+
+    private float ProcessAndCacheLoudness(float[] spectrum)
+    {
+        float loudness = CalculateAndSmoothLoudness(spectrum);
+        _cachedLoudness = loudness;
+        UpdatePeakLoudness(loudness);
+        return loudness;
+    }
+
+    private float GetCachedLoudness(float[] spectrum)
+    {
+        lock (_loudnessLock)
+        {
+            return _cachedLoudness ?? CalculateAndSmoothLoudness(spectrum);
+        }
+    }
+
+    private void UpdatePeakLoudness(float loudness)
+    {
+        if (loudness > _peakLoudness)
+            _peakLoudness = loudness;
+        else
+            _peakLoudness = Max(0, _peakLoudness - PEAK_DECAY_RATE);
+    }
+
+    private void UpdateCanvasDimensions(SKImageInfo info)
+    {
+        _currentWidth = info.Width;
+        _currentHeight = info.Height;
+    }
+
+    private void UpdateStaticElements()
+    {
+        Safe(
+            () =>
+            {
+                if (!ValidateCanvasDimensions())
+                    return;
+
+                CreateGradientShader();
+                RecordStaticElements();
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.UpdateStaticElements",
+                ErrorMessage = "Failed to update static elements"
+            }
+        );
+    }
+
+    private bool ValidateCanvasDimensions()
+    {
+        if (_currentWidth <= 0 || _currentHeight <= 0)
+        {
+            Log(
+                LogLevel.Warning,
+                LOG_PREFIX,
+                $"Invalid dimensions for static elements: {_currentWidth}x{_currentHeight}");
             return false;
         }
 
         return true;
     }
-    #endregion
 
-    #region Rendering Implementation
-    /// <summary>
-    /// Updates static elements of the meter (background and markers).
-    /// </summary>
-    private void UpdateStaticElements()
+    private void CreateGradientShader()
     {
-        Safe(() =>
-        {
-            // Проверка на валидность размеров
-            if (_currentWidth <= 0 || _currentHeight <= 0)
-            {
-                Log(LogLevel.Warning, Constants.LOG_PREFIX,
-                    $"Invalid dimensions for static elements: {_currentWidth}x{_currentHeight}");
-                return;
-            }
+        if (_fillPaint == null)
+            return;
 
-            // Create gradient shader for meter fill
-            if (_fillPaint != null)
-            {
-                var gradientShader = SKShader.CreateLinearGradient(
-                    new SKPoint(0, _currentHeight),
-                    new SKPoint(0, 0),
-                    new[]
-                    {
-                        SKColors.Green.WithAlpha((byte)(255 * Constants.GRADIENT_ALPHA_FACTOR)),
-                        SKColors.Yellow.WithAlpha((byte)(255 * Constants.GRADIENT_ALPHA_FACTOR)),
-                        SKColors.Red.WithAlpha((byte)(255 * Constants.GRADIENT_ALPHA_FACTOR))
-                    },
-                    new[] { 0f, 0.5f, 1.0f },
-                    SKShaderTileMode.Clamp);
+        var gradientColors = CreateGradientColors();
+        var colorPositions = new[] { 0f, 0.5f, 1.0f };
 
-                _fillPaint.Shader = gradientShader;
-            }
+        var gradientShader = SKShader.CreateLinearGradient(
+            new SKPoint(0, _currentHeight),
+            new SKPoint(0, 0),
+            gradientColors,
+            colorPositions,
+            SKShaderTileMode.Clamp);
 
-            // Create SKPicture with static elements to improve performance
-            using var recorder = new SKPictureRecorder();
-            var rect = new SKRect(0, 0, _currentWidth, _currentHeight);
-            using var canvas = recorder.BeginRecording(rect);
-
-            // Draw border
-            if (_backgroundPaint != null)
-            {
-                canvas.DrawRect(0, 0, _currentWidth, _currentHeight, _backgroundPaint);
-            }
-
-            // Draw markers
-            if (_markerPaint != null)
-            {
-                for (int i = 1; i < Constants.MARKER_COUNT; i++)
-                {
-                    float y = _currentHeight - _currentHeight * i / (float)Constants.MARKER_COUNT;
-                    canvas.DrawLine(0, y, _currentWidth, y, _markerPaint);
-                }
-            }
-
-            // Dispose previous picture and store new one
-            _staticPicture?.Dispose();
-            _staticPicture = recorder.EndRecording();
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.UpdateStaticElements",
-            ErrorMessage = "Failed to update static elements"
-        });
+        _fillPaint.Shader = gradientShader;
     }
 
-    /// <summary>
-    /// Renders the meter with current loudness and peak values.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    private void RenderEnhancedMeter(
+    private static SKColor[] CreateGradientColors()
+    {
+        byte alpha = (byte)(255 * GRADIENT_ALPHA_FACTOR);
+
+        return [
+            SKColors.Green.WithAlpha(alpha),
+            SKColors.Yellow.WithAlpha(alpha),
+            SKColors.Red.WithAlpha(alpha)
+        ];
+    }
+
+    private void RecordStaticElements()
+    {
+        using var recorder = new SKPictureRecorder();
+        var rect = new SKRect(0, 0, _currentWidth, _currentHeight);
+        using var canvas = recorder.BeginRecording(rect);
+
+        DrawStaticBorder(canvas);
+        DrawStaticMarkers(canvas);
+
+        _staticPicture?.Dispose();
+        _staticPicture = recorder.EndRecording();
+    }
+
+    private void DrawStaticBorder(SKCanvas canvas)
+    {
+        if (_backgroundPaint == null)
+            return;
+
+        canvas.DrawRect(
+            0,
+            0,
+            _currentWidth,
+            _currentHeight,
+            _backgroundPaint);
+    }
+
+    private void DrawStaticMarkers(SKCanvas canvas)
+    {
+        if (_markerPaint == null)
+            return;
+
+        for (int i = 1; i < MARKER_COUNT; i++)
+        {
+            float y = _currentHeight - _currentHeight * i / (float)MARKER_COUNT;
+            canvas.DrawLine(
+                0,
+                y,
+                _currentWidth,
+                y,
+                _markerPaint);
+        }
+    }
+
+    private void RenderMeter(
         SKCanvas canvas,
         SKImageInfo info,
         float loudness,
         float peakLoudness)
     {
-        if (loudness < Constants.MIN_LOUDNESS_THRESHOLD) return;
+        if (loudness < MIN_LOUDNESS_THRESHOLD)
+            return;
 
         canvas.Save();
 
         try
         {
-            // Рисуем статические элементы (фон и деления)
-            if (_staticPicture != null)
-            {
-                // Используем кэшированную картинку, если она есть
-                canvas.DrawPicture(_staticPicture);
-            }
-            else
-            {
-                // Если картинки нет, рисуем напрямую
-                if (_backgroundPaint != null)
-                {
-                    canvas.DrawRect(0, 0, info.Width, info.Height, _backgroundPaint);
-                }
+            RenderStaticElements(canvas, info);
 
-                if (_markerPaint != null)
-                {
-                    for (int i = 1; i < Constants.MARKER_COUNT; i++)
-                    {
-                        float y = info.Height - info.Height * i / (float)Constants.MARKER_COUNT;
-                        canvas.DrawLine(0, y, info.Width, y, _markerPaint);
-                    }
-                }
+            float meterHeight = CalculateMeterHeight(
+                info,
+                loudness);
 
-                // Попробуем создать _staticPicture для следующего кадра
-                if (_currentWidth <= 0 || _currentHeight <= 0)
-                {
-                    _currentWidth = info.Width;
-                    _currentHeight = info.Height;
-                    UpdateStaticElements();
-                }
-            }
+            float peakHeight = CalculatePeakHeight(
+                info,
+                peakLoudness);
 
-            // Calculate heights
-            float meterHeight = info.Height * loudness;
-            float peakHeight = info.Height * peakLoudness;
-
-            // Draw meter fill with gradient
-            if (_fillPaint != null)
-            {
-                canvas.DrawRect(0, info.Height - meterHeight, info.Width, meterHeight, _fillPaint);
-            }
-
-            // Draw glow effect for high loudness levels
-            if (_useAdvancedEffects && loudness > Constants.HIGH_LOUDNESS_THRESHOLD && _glowPaint != null)
-            {
-                byte alpha = (byte)(255 * Constants.GLOW_INTENSITY *
-                    (loudness - Constants.HIGH_LOUDNESS_THRESHOLD) /
-                    (1 - Constants.HIGH_LOUDNESS_THRESHOLD));
-
-                _glowPaint.Color = SKColors.Red.WithAlpha(alpha);
-                canvas.DrawRect(0, info.Height - meterHeight,
-                    info.Width, meterHeight * Constants.GLOW_HEIGHT_FACTOR, _glowPaint);
-            }
-
-            // Draw peak indicator
-            if (_peakPaint != null)
-            {
-                float peakLineY = info.Height - peakHeight;
-
-                // Set peak color based on loudness level
-                _peakPaint.Color = loudness > Constants.HIGH_LOUDNESS_THRESHOLD ? SKColors.Red :
-                                loudness > Constants.MEDIUM_LOUDNESS_THRESHOLD ? SKColors.Yellow :
-                                SKColors.Green;
-
-                canvas.DrawRect(0, peakLineY - Constants.PEAK_RECT_HEIGHT / 2,
-                    info.Width, Constants.PEAK_RECT_HEIGHT, _peakPaint);
-            }
+            RenderMeterFill(canvas, info, meterHeight);
+            RenderGlowEffect(canvas, info, loudness, meterHeight);
+            RenderPeakIndicator(canvas, info, loudness, peakHeight);
         }
         finally
         {
@@ -506,107 +497,283 @@ public sealed class LoudnessMeterRenderer : BaseSpectrumRenderer
         }
     }
 
-    /// <summary>
-    /// Calculates and smooths loudness value from spectrum data.
-    /// </summary>
+    private static float CalculateMeterHeight(
+        SKImageInfo info,
+        float loudness) =>
+        info.Height * loudness;
+
+    private static float CalculatePeakHeight(
+        SKImageInfo info,
+        float peakLoudness) =>
+        info.Height * peakLoudness;
+
+    private void RenderStaticElements(SKCanvas canvas, SKImageInfo info)
+    {
+        if (_staticPicture != null)
+            DrawCachedStaticElements(canvas);
+        else
+        {
+            RenderStaticElementsDirect(canvas, info);
+            TryInitializeStaticCache(info);
+        }
+    }
+
+    private void DrawCachedStaticElements(SKCanvas canvas)
+    {
+        canvas.DrawPicture(_staticPicture!);
+    }
+
+    private void RenderStaticElementsDirect(SKCanvas canvas, SKImageInfo info)
+    {
+        DrawBorderDirect(canvas, info);
+        DrawMarkersDirect(canvas, info);
+    }
+
+    private void DrawBorderDirect(SKCanvas canvas, SKImageInfo info)
+    {
+        if (_backgroundPaint == null)
+            return;
+
+        canvas.DrawRect(
+            0,
+            0,
+            info.Width,
+            info.Height,
+            _backgroundPaint);
+    }
+
+    private void DrawMarkersDirect(SKCanvas canvas, SKImageInfo info)
+    {
+        if (_markerPaint == null)
+            return;
+
+        for (int i = 1; i < MARKER_COUNT; i++)
+        {
+            float y = info.Height - info.Height * i / (float)MARKER_COUNT;
+            canvas.DrawLine(
+                0,
+                y,
+                info.Width,
+                y,
+                _markerPaint);
+        }
+    }
+
+    private void TryInitializeStaticCache(SKImageInfo info)
+    {
+        if (_currentWidth <= 0 || _currentHeight <= 0)
+        {
+            _currentWidth = info.Width;
+            _currentHeight = info.Height;
+            UpdateStaticElements();
+        }
+    }
+
+    private void RenderMeterFill(
+        SKCanvas canvas,
+        SKImageInfo info,
+        float meterHeight)
+    {
+        if (_fillPaint == null)
+            return;
+
+        canvas.DrawRect(
+            0,
+            info.Height - meterHeight,
+            info.Width,
+            meterHeight,
+            _fillPaint);
+    }
+
+    private void RenderGlowEffect(
+        SKCanvas canvas,
+        SKImageInfo info,
+        float loudness,
+        float meterHeight)
+    {
+        if (!UseAdvancedEffects ||
+            loudness <= HIGH_LOUDNESS_THRESHOLD ||
+            _glowPaint == null)
+            return;
+
+        byte alpha = CalculateGlowAlpha(loudness);
+        _glowPaint.Color = SKColors.Red.WithAlpha(alpha);
+
+        float glowHeight = meterHeight * GLOW_HEIGHT_FACTOR;
+
+        canvas.DrawRect(
+            0,
+            info.Height - meterHeight,
+            info.Width,
+            glowHeight,
+            _glowPaint);
+    }
+
+    private static byte CalculateGlowAlpha(float loudness)
+    {
+        float normalizedLoudness = (loudness - HIGH_LOUDNESS_THRESHOLD) /
+                                 (1 - HIGH_LOUDNESS_THRESHOLD);
+
+        return (byte)(255 * GLOW_INTENSITY * normalizedLoudness);
+    }
+
+    private void RenderPeakIndicator(
+        SKCanvas canvas,
+        SKImageInfo info,
+        float loudness,
+        float peakHeight)
+    {
+        if (_peakPaint == null)
+            return;
+
+        float peakLineY = info.Height - peakHeight;
+        SetPeakColorByLoudness(loudness);
+
+        canvas.DrawRect(
+            0,
+            peakLineY - PEAK_RECT_HEIGHT / 2,
+            info.Width,
+            PEAK_RECT_HEIGHT,
+            _peakPaint);
+    }
+
+    private void SetPeakColorByLoudness(float loudness)
+    {
+        if (_peakPaint == null)
+            return;
+
+        if (loudness > HIGH_LOUDNESS_THRESHOLD)
+            _peakPaint.Color = SKColors.Red;
+        else if (loudness > MEDIUM_LOUDNESS_THRESHOLD)
+            _peakPaint.Color = SKColors.Yellow;
+        else
+            _peakPaint.Color = SKColors.Green;
+    }
+
     [MethodImpl(AggressiveOptimization)]
     private float CalculateAndSmoothLoudness(float[] spectrum)
     {
         float rawLoudness = CalculateLoudness(spectrum.AsSpan());
-        float smoothedLoudness = _previousLoudness + (rawLoudness - _previousLoudness) * _smoothingFactor;
-        smoothedLoudness = Clamp(smoothedLoudness, Constants.MIN_LOUDNESS_THRESHOLD, 1f);
-        _previousLoudness = smoothedLoudness;
+        float smoothedLoudness = ApplySmoothingToLoudness(rawLoudness);
         return smoothedLoudness;
     }
 
-    /// <summary>
-    /// Calculates loudness level from spectrum data.
-    /// </summary>
+    private float ApplySmoothingToLoudness(float rawLoudness)
+    {
+        float smoothedLoudness = _previousLoudness +
+                              (rawLoudness - _previousLoudness) * _smoothingFactor;
+
+        smoothedLoudness = Clamp(smoothedLoudness, MIN_LOUDNESS_THRESHOLD, 1f);
+        _previousLoudness = smoothedLoudness;
+
+        return smoothedLoudness;
+    }
+
     [MethodImpl(AggressiveInlining)]
     private float CalculateLoudness(ReadOnlySpan<float> spectrum)
     {
-        if (spectrum.IsEmpty) return 0f;
+        if (spectrum.IsEmpty)
+            return 0f;
 
-        float sum = 0f;
-
-        // Use SIMD if possible for better performance
-        if (IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
-        {
-            int vectorSize = Vector<float>.Count;
-            int vectorizedLength = spectrum.Length - spectrum.Length % vectorSize;
-            int i = 0;
-
-            // Process vectors
-            Vector<float> sumVector = Vector<float>.Zero;
-            for (; i < vectorizedLength; i += vectorSize)
-            {
-                Vector<float> values = new Vector<float>(spectrum.Slice(i, vectorSize));
-                sumVector += Abs(values);
-            }
-
-            // Sum vector elements
-            for (int j = 0; j < vectorSize; j++)
-            {
-                sum += sumVector[j];
-            }
-
-            // Process remaining elements
-            for (; i < spectrum.Length; i++)
-            {
-                sum += Abs(spectrum[i]);
-            }
-        }
-        else
-        {
-            // Standard processing
-            for (int i = 0; i < spectrum.Length; i++)
-            {
-                sum += Abs(spectrum[i]);
-            }
-        }
+        float sum = UseAdvancedEffects && spectrum.Length >= Vector<float>.Count
+            ? CalculateLoudnessVectorized(spectrum)
+            : CalculateLoudnessSequential(spectrum);
 
         return Clamp(sum / spectrum.Length, 0f, 1f);
     }
-    #endregion
 
-    #region Disposal
-    /// <summary>
-    /// Disposes of resources used by the renderer.
-    /// </summary>
-    public override void Dispose()
+    private static float CalculateLoudnessVectorized(ReadOnlySpan<float> spectrum)
     {
-        if (!_disposed)
+        float sum = 0f;
+        int vectorSize = Vector<float>.Count;
+        int vectorizedLength = spectrum.Length - spectrum.Length % vectorSize;
+
+        Vector<float> sumVector = Vector<float>.Zero;
+        int i = 0;
+
+        for (; i < vectorizedLength; i += vectorSize)
         {
-            Safe(() =>
-            {
-                // Dispose synchronization primitives
-                _renderSemaphore?.Dispose();
-
-                // Dispose rendering resources
-                _staticPicture?.Dispose();
-                _backgroundPaint?.Dispose();
-                _markerPaint?.Dispose();
-                _fillPaint?.Dispose();
-                _glowPaint?.Dispose();
-                _peakPaint?.Dispose();
-
-                // Dispose object pools
-                _paintPool?.Dispose();
-
-                // Clean up cached data
-                _cachedLoudness = null;
-
-                // Call base implementation
-                base.Dispose();
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.Dispose",
-                ErrorMessage = "Error during disposal"
-            });
-
-            _disposed = true;
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
+            Vector<float> values = new(spectrum.Slice(i, vectorSize));
+            sumVector += System.Numerics.Vector.Abs(values);
         }
+
+        for (int j = 0; j < vectorSize; j++)
+            sum += sumVector[j];
+
+        for (; i < spectrum.Length; i++)
+            sum += Abs(spectrum[i]);
+
+        return sum;
     }
-    #endregion
+
+    private static float CalculateLoudnessSequential(ReadOnlySpan<float> spectrum)
+    {
+        float sum = 0f;
+
+        for (int i = 0; i < spectrum.Length; i++)
+            sum += Abs(spectrum[i]);
+
+        return sum;
+    }
+
+    protected override void OnDispose()
+    {
+        Safe(
+            () =>
+            {
+                DisposeSynchronizationObjects();
+                DisposeRenderingResources();
+                ClearCachedData();
+
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{LOG_PREFIX}.OnDispose",
+                ErrorMessage = "Error during disposal"
+            }
+        );
+    }
+
+    private void DisposeSynchronizationObjects()
+    {
+        _loudnessSemaphore?.Dispose();
+    }
+
+    private void DisposeRenderingResources()
+    {
+        DisposeStaticPicture();
+        DisposePaints();
+    }
+
+    private void DisposeStaticPicture()
+    {
+        _staticPicture?.Dispose();
+        _staticPicture = null;
+    }
+
+    private void DisposePaints()
+    {
+        _backgroundPaint?.Dispose();
+        _backgroundPaint = null;
+
+        _markerPaint?.Dispose();
+        _markerPaint = null;
+
+        _fillPaint?.Dispose();
+        _fillPaint = null;
+
+        _glowPaint?.Dispose();
+        _glowPaint = null;
+
+        _peakPaint?.Dispose();
+        _peakPaint = null;
+    }
+
+    private void ClearCachedData()
+    {
+        _cachedLoudness = null;
+        _previousLoudness = 0;
+        _peakLoudness = 0;
+    }
 }
