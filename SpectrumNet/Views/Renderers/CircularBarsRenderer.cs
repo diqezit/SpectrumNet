@@ -1,10 +1,13 @@
 ﻿#nullable enable
 
+using static SpectrumNet.Views.Renderers.CircularBarsRenderer.Constants;
+using static System.MathF;
+
 namespace SpectrumNet.Views.Renderers;
 
 public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 {
-    private static class Constants
+    public record Constants
     {
         public const string
             LOG_PREFIX = "CircularBarsRenderer";
@@ -33,18 +36,13 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             DEFAULT_PATH_POOL_SIZE = 8;
     }
 
-    public readonly record struct RenderConfig(float BarWidth, float BarSpacing, int BarCount);
-
     private static readonly Lazy<CircularBarsRenderer> _instance = new(() => new CircularBarsRenderer());
 
     private Vector2[]? _barVectors;
     private int _previousBarCount;
 
-    private readonly SKPathPool _barPathPool;
-
     private CircularBarsRenderer()
     {
-        _barPathPool = new SKPathPool(Constants.DEFAULT_PATH_POOL_SIZE);
     }
 
     public static CircularBarsRenderer GetInstance() => _instance.Value;
@@ -52,18 +50,17 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         Safe(
-           () =>
-           {
-               base.OnQualitySettingsApplied();
-               // Specific quality settings for CircularBarsRenderer if needed
-               Log(LogLevel.Debug, Constants.LOG_PREFIX, $"Quality set to {base.Quality}");
-           },
-           new ErrorHandlingOptions
-           {
-               Source = $"{GetType().Name}.OnQualitySettingsApplied",
-               ErrorMessage = "Failed to apply circular bars specific quality settings"
-           }
-       );
+            () =>
+            {
+                base.OnQualitySettingsApplied();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality set to {base.Quality}");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{GetType().Name}.OnQualitySettingsApplied",
+                ErrorMessage = "Failed to apply circular bars specific quality settings"
+            }
+        );
     }
 
     protected override void RenderEffect(
@@ -77,7 +74,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
     {
         float centerX = info.Width / 2f;
         float centerY = info.Height / 2f;
-        float mainRadius = MathF.Min(centerX, centerY) * Constants.RADIUS_PROPORTION;
+        float mainRadius = MathF.Min(centerX, centerY) * RADIUS_PROPORTION;
         float adjustedBarWidth = AdjustBarWidthForBarCount(
             barWidth,
             barCount,
@@ -96,12 +93,12 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             paint);
     }
 
-    private float AdjustBarWidthForBarCount(float barWidth, int barCount, float minDimension)
+    private static float AdjustBarWidthForBarCount(float barWidth, int barCount, float minDimension)
     {
-        float maxPossibleWidth = 2 * MathF.PI * Constants.RADIUS_PROPORTION * minDimension / 2 /
-                                  barCount * Constants.BAR_SPACING_FACTOR;
+        float maxPossibleWidth = 2 * MathF.PI * RADIUS_PROPORTION * minDimension / 2 /
+                                 barCount * BAR_SPACING_FACTOR;
 
-        return MathF.Max(MathF.Min(barWidth, maxPossibleWidth), Constants.MIN_STROKE_WIDTH);
+        return MathF.Max(MathF.Min(barWidth, maxPossibleWidth), MIN_STROKE_WIDTH);
     }
 
     private void RenderCircularBars(
@@ -118,14 +115,14 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         {
             IsAntialias = UseAntiAlias,
             Style = Stroke,
-            Color = basePaint.Color.WithAlpha(Constants.INNER_CIRCLE_ALPHA),
+            Color = basePaint.Color.WithAlpha(INNER_CIRCLE_ALPHA),
             StrokeWidth = barWidth * 0.5f
         };
 
         canvas.DrawCircle(
             centerX,
             centerY,
-            mainRadius * Constants.INNER_RADIUS_FACTOR,
+            mainRadius * INNER_RADIUS_FACTOR,
             innerCirclePaint);
 
         EnsureBarVectors(barCount);
@@ -163,7 +160,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             }
         }, new ErrorHandlingOptions
         {
-            Source = $"{Constants.LOG_PREFIX}.EnsureBarVectors",
+            Source = $"{LOG_PREFIX}.EnsureBarVectors",
             ErrorMessage = "Error calculating bar vectors"
         });
     }
@@ -182,16 +179,16 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 
         for (int i = 0; i < barCount; i++)
         {
-            if (spectrum[i] <= Constants.GLOW_THRESHOLD)
+            if (spectrum[i] <= GLOW_THRESHOLD)
                 continue;
 
-            float radius = mainRadius + spectrum[i] * mainRadius * Constants.SPECTRUM_MULTIPLIER;
-            var path = _barPathPool.Get();
+            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+            var path = _pathPool!.Get();
 
             AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
             batchPath.AddPath(path);
 
-            _barPathPool.Return(path);
+            _pathPool!.Return(path);
         }
 
         if (!batchPath.IsEmpty)
@@ -200,9 +197,9 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             {
                 IsAntialias = UseAntiAlias,
                 Style = Stroke,
-                Color = basePaint.Color.WithAlpha((byte)(255 * Constants.GLOW_INTENSITY)),
+                Color = basePaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY)),
                 StrokeWidth = barWidth * 1.2f,
-                MaskFilter = SKMaskFilter.CreateBlur(Normal, Constants.GLOW_RADIUS)
+                MaskFilter = SKMaskFilter.CreateBlur(Normal, GLOW_RADIUS)
             };
 
             canvas.DrawPath(batchPath, glowPaint);
@@ -226,13 +223,13 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             if (spectrum[i] < MIN_MAGNITUDE_THRESHOLD)
                 continue;
 
-            float radius = mainRadius + spectrum[i] * mainRadius * Constants.SPECTRUM_MULTIPLIER;
-            var path = _barPathPool.Get();
+            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+            var path = _pathPool!.Get();
 
             AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
             batchPath.AddPath(path);
 
-            _barPathPool.Return(path);
+            _pathPool!.Return(path);
         }
 
         if (!batchPath.IsEmpty)
@@ -264,17 +261,17 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 
         for (int i = 0; i < barCount; i++)
         {
-            if (spectrum[i] <= Constants.HIGHLIGHT_THRESHOLD)
+            if (spectrum[i] <= HIGHLIGHT_THRESHOLD)
                 continue;
 
-            float radius = mainRadius + spectrum[i] * mainRadius * Constants.SPECTRUM_MULTIPLIER;
-            float innerPoint = mainRadius + (radius - mainRadius) * Constants.HIGHLIGHT_POSITION;
+            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+            float innerPoint = mainRadius + (radius - mainRadius) * HIGHLIGHT_POSITION;
 
-            var path = _barPathPool.Get();
+            var path = _pathPool!.Get();
             AddBarToPath(path, i, centerX, centerY, innerPoint, radius);
             batchPath.AddPath(path);
 
-            _barPathPool.Return(path);
+            _pathPool!.Return(path);
         }
 
         if (!batchPath.IsEmpty)
@@ -283,7 +280,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             {
                 IsAntialias = UseAntiAlias,
                 Style = Stroke,
-                Color = SKColors.White.WithAlpha((byte)(255 * Constants.HIGHLIGHT_INTENSITY)),
+                Color = SKColors.White.WithAlpha((byte)(255 * HIGHLIGHT_INTENSITY)),
                 StrokeWidth = barWidth * 0.6f
             };
 
@@ -313,79 +310,10 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             centerY + outerRadius * vector.Y);
     }
 
-    private class SKPathPool : IDisposable
-    {
-        private readonly List<SKPath> _paths = new();
-        private readonly List<SKPath> _inUse = new();
-        private readonly object _lockObject = new();
-        private bool _disposed;
-
-        public SKPathPool(int capacity)
-        {
-            for (int i = 0; i < capacity; i++)
-                _paths.Add(new SKPath());
-        }
-
-        public SKPath Get()
-        {
-            lock (_lockObject)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, nameof(SKPathPool));
-
-                SKPath path;
-                if (_paths.Count > 0)
-                {
-                    path = _paths[_paths.Count - 1];
-                    _paths.RemoveAt(_paths.Count - 1);
-                }
-                else
-                {
-                    path = new SKPath();
-                }
-
-                path.Reset();
-                _inUse.Add(path);
-                return path;
-            }
-        }
-
-        public void Return(SKPath path)
-        {
-            lock (_lockObject)
-            {
-                if (_disposed)
-                    return;
-
-                if (_inUse.Remove(path))
-                    _paths.Add(path);
-            }
-        }
-
-        public void Dispose()
-        {
-            lock (_lockObject)
-            {
-                if (!_disposed)
-                {
-                    foreach (var path in _paths)
-                        path.Dispose();
-
-                    foreach (var path in _inUse)
-                        path.Dispose();
-
-                    _paths.Clear();
-                    _inUse.Clear();
-                    _disposed = true;
-                }
-            }
-        }
-    }
-
     protected override void OnDispose()
     {
         Safe(() =>
         {
-            _barPathPool?.Dispose();
             base.OnDispose();
         },
         new ErrorHandlingOptions

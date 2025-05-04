@@ -1,12 +1,13 @@
 ﻿#nullable enable
 
+using static SpectrumNet.Views.Renderers.BarsRenderer.Constants;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
 
 public sealed class BarsRenderer : EffectSpectrumRenderer
 {
-    private static class Constants
+    public record Constants
     {
         public const string
             LOG_PREFIX = "BarsRenderer";
@@ -30,11 +31,9 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
             BATCH_SIZE = 32;
     }
 
-    public readonly record struct RenderConfig(float BarWidth, float BarSpacing, int BarCount);
-
     private static readonly Lazy<BarsRenderer> _instance = new(() => new BarsRenderer());
 
-    private float _glowRadius = Constants.GLOW_BLUR_RADIUS_MEDIUM;
+    private float _glowRadius = GLOW_BLUR_RADIUS_MEDIUM;
     private bool _useGlowEffect = true;
 
     private BarsRenderer() { }
@@ -44,37 +43,37 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         Safe(
-           () =>
-           {
-               base.OnQualitySettingsApplied();
-               switch (base.Quality)
-               {
-                   case RenderQuality.Low:
-                       _useGlowEffect = false;
-                       _glowRadius = Constants.GLOW_BLUR_RADIUS_LOW;
-                       break;
+            () =>
+            {
+                base.OnQualitySettingsApplied();
 
-                   case RenderQuality.Medium:
-                       _useGlowEffect = true;
-                       _glowRadius = Constants.GLOW_BLUR_RADIUS_MEDIUM;
-                       break;
+                switch (base.Quality)
+                {
+                    case RenderQuality.Low:
+                        _useGlowEffect = false;
+                        _glowRadius = GLOW_BLUR_RADIUS_LOW;
+                        break;
 
-                   case RenderQuality.High:
-                       _useGlowEffect = true;
-                       _glowRadius = Constants.GLOW_BLUR_RADIUS_HIGH;
-                       break;
-               }
+                    case RenderQuality.Medium:
+                        _useGlowEffect = true;
+                        _glowRadius = GLOW_BLUR_RADIUS_MEDIUM;
+                        break;
 
-               Log(LogLevel.Debug, Constants.LOG_PREFIX, $"Quality set to {base.Quality}");
-           },
-           new ErrorHandlingOptions
-           {
-               Source = $"{GetType().Name}.OnQualitySettingsApplied",
-               ErrorMessage = "Failed to apply bars specific quality settings"
-           }
-       );
+                    case RenderQuality.High:
+                        _useGlowEffect = true;
+                        _glowRadius = GLOW_BLUR_RADIUS_HIGH;
+                        break;
+                }
+
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality set to {base.Quality}. Glow: {_useGlowEffect}, Radius: {_glowRadius}");
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{nameof(BarsRenderer)}.{nameof(OnQualitySettingsApplied)}",
+                ErrorMessage = "Failed to apply bars specific quality settings"
+            }
+        );
     }
-
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -85,37 +84,93 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        float totalBarWidth = barWidth + barSpacing;
-        float canvasHeight = info.Height;
-        float cornerRadius = CalculateCornerRadius(barWidth);
-
-        for (int i = 0; i < spectrum.Length; i++)
+        if (!_isInitialized || _disposed || info.Width <= 0 || info.Height <= 0)
         {
-            float magnitude = spectrum[i];
-            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
-
-            float barHeight = CalculateBarHeight(magnitude, canvasHeight);
-            byte alpha = CalculateBarAlpha(magnitude);
-
-            using var barPaint = _paintPool.Get();
-            barPaint.Color = paint.Color.WithAlpha(alpha);
-            barPaint.IsAntialias = UseAntiAlias;
-
-            float x = i * totalBarWidth;
-
-            if (IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight))
-            {
-                RenderBarWithEffects(
-                    canvas,
-                    x,
-                    barWidth,
-                    barHeight,
-                    canvasHeight,
-                    cornerRadius,
-                    barPaint,
-                    magnitude);
-            }
+            if (!_isInitialized) Log(LogLevel.Error, LOG_PREFIX, "Renderer not initialized in RenderEffect.");
+            if (_disposed) Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed in RenderEffect.");
+            return;
         }
+
+        Safe(
+            () =>
+            {
+                if (canvas == null || spectrum == null || paint == null)
+                {
+                    Log(LogLevel.Error,
+                        LOG_PREFIX,
+                        "Invalid render parameters (null canvas, spectrum, or paint) inside Safe block.");
+                    return;
+                }
+
+                SKCanvas nonNullCanvas = canvas;
+                float[] nonNullSpectrum = spectrum;
+                SKPaint nonNullPaint = paint;
+
+
+                float totalBarWidth = barWidth + barSpacing;
+                float canvasHeight = info.Height;
+                float cornerRadius = CalculateCornerRadius(barWidth);
+
+                for (int i = 0; i < nonNullSpectrum.Length; i++)
+                {
+                    float magnitude = nonNullSpectrum[i];
+                    if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
+
+                    float barHeight = CalculateBarHeight(magnitude, canvasHeight);
+                    byte alpha = CalculateBarAlpha(magnitude);
+
+                    using var barPaint = _paintPool!.Get();
+
+                    if (barPaint == null)
+                    {
+                        Log(LogLevel.Error, LOG_PREFIX, $"Failed to acquire paint from pool for bar {i}.");
+                        continue;
+                    }
+
+                    barPaint.Color = nonNullPaint.Color.WithAlpha(alpha);
+                    barPaint.IsAntialias = UseAntiAlias;
+
+                    float x = i * totalBarWidth;
+
+                    if (IsRenderAreaVisible(
+                            nonNullCanvas,
+                            x,
+                            0,
+                            barWidth,
+                            canvasHeight))
+                    {
+                        RenderBarWithEffects(
+                            nonNullCanvas,
+                            x,
+                            barWidth,
+                            barHeight,
+                            canvasHeight,
+                            cornerRadius,
+                            barPaint,
+                            magnitude);
+                    }
+                }
+            },
+            new ErrorHandlingOptions
+            {
+                Source = $"{nameof(BarsRenderer)}.{nameof(RenderEffect)}",
+                ErrorMessage = "Error during bars rendering"
+            }
+        );
+    }
+
+    protected override void OnDispose()
+    {
+        Safe(() =>
+        {
+            base.OnDispose();
+            Log(LogLevel.Debug, LOG_PREFIX, "Disposed.");
+        },
+        new ErrorHandlingOptions
+        {
+            Source = $"{nameof(BarsRenderer)}.{nameof(OnDispose)}",
+            ErrorMessage = "Error during BarsRenderer disposal"
+        });
     }
 
     private void RenderBarWithEffects(
@@ -129,7 +184,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         float magnitude)
     {
         if (_useGlowEffect && UseAdvancedEffects &&
-            magnitude > Constants.HIGH_INTENSITY_THRESHOLD)
+            magnitude > HIGH_INTENSITY_THRESHOLD)
         {
             RenderGlowEffect(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, magnitude);
         }
@@ -160,7 +215,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         using var glowPaint = CreateGlowPaint(
             SKColors.White,
             _glowRadius,
-            (byte)(magnitude * 255f * Constants.GLOW_EFFECT_ALPHA));
+            (byte)(magnitude * 255f * GLOW_EFFECT_ALPHA));
 
         DrawRoundedRect(
             canvas,
@@ -199,16 +254,22 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         float canvasHeight,
         byte baseAlpha)
     {
-        float highlightWidth = barWidth * Constants.HIGHLIGHT_WIDTH_PROPORTION;
+        float highlightWidth = barWidth * HIGHLIGHT_WIDTH_PROPORTION;
         float highlightHeight = MathF.Min(
-            barHeight * Constants.HIGHLIGHT_HEIGHT_PROPORTION,
-            Constants.MAX_HIGHLIGHT_HEIGHT);
+            barHeight * HIGHLIGHT_HEIGHT_PROPORTION,
+            MAX_HIGHLIGHT_HEIGHT);
 
         float highlightX = x + (barWidth - highlightWidth) / 2;
 
-        using var highlightPaint = _paintPool.Get();
+        using var highlightPaint = _paintPool!.Get();
+        if (highlightPaint == null)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, "Failed to acquire paint for highlight.");
+            return;
+        }
+
         highlightPaint.Color = SKColors.White.WithAlpha(
-            (byte)(baseAlpha / Constants.HIGHLIGHT_ALPHA_DIVISOR));
+            (byte)(baseAlpha / HIGHLIGHT_ALPHA_DIVISOR));
         highlightPaint.IsAntialias = UseAntiAlias;
 
         canvas.DrawRect(
@@ -221,16 +282,16 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
     [MethodImpl(AggressiveInlining)]
     private static float CalculateCornerRadius(float barWidth) =>
-        MathF.Min(barWidth * Constants.DEFAULT_CORNER_RADIUS_FACTOR,
-            Constants.MAX_CORNER_RADIUS);
+        MathF.Min(barWidth * DEFAULT_CORNER_RADIUS_FACTOR,
+                  MAX_CORNER_RADIUS);
 
     [MethodImpl(AggressiveInlining)]
     private static float CalculateBarHeight(float magnitude, float canvasHeight) =>
-        MathF.Max(magnitude * canvasHeight, Constants.MIN_BAR_HEIGHT);
+        MathF.Max(magnitude * canvasHeight, MIN_BAR_HEIGHT);
 
     [MethodImpl(AggressiveInlining)]
     private static byte CalculateBarAlpha(float magnitude) =>
-        (byte)MathF.Min(magnitude * Constants.ALPHA_MULTIPLIER * 255f, 255f);
+        (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * 255f, 255f);
 
     [MethodImpl(AggressiveInlining)]
     private static void DrawRoundedRect(
@@ -247,18 +308,5 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
             cornerRadius,
             cornerRadius,
             paint);
-    }
-
-    protected override void OnDispose()
-    {
-        Safe(() =>
-        {
-            base.OnDispose();
-        },
-        new ErrorHandlingOptions
-        {
-            Source = $"{GetType().Name}.OnDispose",
-            ErrorMessage = "Error during CircularBarsRenderer disposal"
-        });
     }
 }

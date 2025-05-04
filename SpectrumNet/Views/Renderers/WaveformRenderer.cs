@@ -1,7 +1,8 @@
 ﻿#nullable enable
 
-using static System.MathF;
+using static SkiaSharp.SKColors;
 using static SpectrumNet.Views.Renderers.WaveformRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -14,7 +15,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         public const float
             SMOOTHING_FACTOR_NORMAL = 0.3f,
             SMOOTHING_FACTOR_OVERLAY = 0.5f,
-            MIN_MAGNITUDE_THRESHOLD = 0.01f,
             MAX_SPECTRUM_VALUE = 1.5f,
             MIN_STROKE_WIDTH = 2.0f,
             GLOW_INTENSITY = 0.4f,
@@ -75,6 +75,11 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
         var paints = CreatePaints(paint, spectrum.Length);
         DrawWaveform(canvas, spectrum, midY, xStep, paints);
+
+        _paintPool!.Return(paints.wave);
+        _paintPool!.Return(paints.fill);
+        if (paints.glow != null) _paintPool!.Return(paints.glow);
+        if (paints.highlight != null) _paintPool!.Return(paints.highlight);
     }
 
     private (SKPaint wave, SKPaint fill, SKPaint? glow, SKPaint? highlight) CreatePaints(
@@ -91,8 +96,8 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private SKPaint ConfigureWaveformPaint(SKPaint basePaint, int spectrumLength)
     {
-        var paint = _paintPool.Get();
-        paint.Style = SKPaintStyle.Stroke;
+        var paint = _paintPool!.Get();
+        paint.Style = Stroke;
         paint.StrokeWidth = MathF.Max(MIN_STROKE_WIDTH, 50f / spectrumLength);
         paint.IsAntialias = UseAntiAlias;
         paint.StrokeCap = SKStrokeCap.Round;
@@ -103,8 +108,8 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private SKPaint ConfigureFillPaint(SKPaint basePaint)
     {
-        var paint = _paintPool.Get();
-        paint.Style = SKPaintStyle.Fill;
+        var paint = _paintPool!.Get();
+        paint.Style = Fill;
         paint.Color = basePaint.Color.WithAlpha(FILL_ALPHA);
         paint.IsAntialias = UseAntiAlias;
         return paint;
@@ -112,21 +117,21 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private SKPaint ConfigureGlowPaint(SKPaint basePaint, int spectrumLength)
     {
-        var paint = _paintPool.Get();
-        paint.Style = SKPaintStyle.Stroke;
+        var paint = _paintPool!.Get();
+        paint.Style = Stroke;
         paint.StrokeWidth = MathF.Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 1.5f;
         paint.Color = basePaint.Color;
         paint.IsAntialias = UseAntiAlias;
-        paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, GLOW_RADIUS);
+        paint.MaskFilter = SKMaskFilter.CreateBlur(Normal, GLOW_RADIUS);
         return paint;
     }
 
     private SKPaint ConfigureHighlightPaint(int spectrumLength)
     {
-        var paint = _paintPool.Get();
-        paint.Style = SKPaintStyle.Stroke;
+        var paint = _paintPool!.Get();
+        paint.Style = Stroke;
         paint.StrokeWidth = MathF.Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 0.6f;
-        paint.Color = SKColors.White.WithAlpha((byte)(255 * HIGHLIGHT_ALPHA));
+        paint.Color = White.WithAlpha((byte)(255 * HIGHLIGHT_ALPHA));
         paint.IsAntialias = UseAntiAlias;
         return paint;
     }
@@ -192,7 +197,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             }
         }
 
-        // Process remaining elements
         for (int i = vectorizedLength; i < spectrum.Length; i++)
         {
             if (spectrum[i] > HIGH_AMPLITUDE_THRESHOLD)
@@ -226,17 +230,29 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
     {
         for (int i = 0; i < spectrum.Length; i++)
         {
-            if (spectrum[i] > HIGH_AMPLITUDE_THRESHOLD)
-            {
-                float x = i * xStep;
-                float topY = midY - spectrum[i] * midY;
-                float bottomY = midY + spectrum[i] * midY;
-
-                canvas.DrawPoint(x, topY, highlightPaint);
-                canvas.DrawPoint(x, bottomY, highlightPaint);
-            }
+            RenderHighlightPointsForIndex(canvas, spectrum, midY, xStep, highlightPaint, i);
         }
     }
+
+    private static void RenderHighlightPointsForIndex(
+        SKCanvas canvas,
+        float[] spectrum,
+        float midY,
+        float xStep,
+        SKPaint highlightPaint,
+        int index)
+    {
+        if (spectrum[index] > HIGH_AMPLITUDE_THRESHOLD)
+        {
+            float x = index * xStep;
+            float topY = midY - spectrum[index] * midY;
+            float bottomY = midY + spectrum[index] * midY;
+
+            canvas.DrawPoint(x, topY, highlightPaint);
+            canvas.DrawPoint(x, bottomY, highlightPaint);
+        }
+    }
+
 
     private void CreateWavePaths(float[] spectrum, float midY, float xStep)
     {
@@ -252,18 +268,29 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
         for (int i = 1; i < spectrum.Length; i++)
         {
-            float prevX = (i - 1) * xStep;
-            float prevTopY = midY - spectrum[i - 1] * midY;
-            float prevBottomY = midY + spectrum[i - 1] * midY;
-
-            x = i * xStep;
-            topY = midY - spectrum[i] * midY;
-            bottomY = midY + spectrum[i] * midY;
-
-            float controlX = (prevX + x) / 2;
-            _topPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
-            _bottomPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
+            AddWaveSegment(_topPath, _bottomPath, spectrum, midY, xStep, i);
         }
+    }
+
+    private static void AddWaveSegment(
+        SKPath topPath,
+        SKPath bottomPath,
+        float[] spectrum,
+        float midY,
+        float xStep,
+        int index)
+    {
+        float prevX = (index - 1) * xStep;
+        float prevTopY = midY - spectrum[index - 1] * midY;
+        float prevBottomY = midY + spectrum[index - 1] * midY;
+
+        float x = index * xStep;
+        float topY = midY - spectrum[index] * midY;
+        float bottomY = midY + spectrum[index] * midY;
+
+        float controlX = (prevX + x) / 2;
+        topPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
+        bottomPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
     }
 
     private void CreateFillPath(
@@ -277,6 +304,23 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         float startTopY = midY - spectrum[0] * midY;
         _fillPath.MoveTo(startX, startTopY);
 
+        AppendTopFillCurve(_fillPath, spectrum, midY, xStep);
+
+        float endX = (spectrum.Length - 1) * xStep;
+        float endBottomY = midY + spectrum[^1] * midY;
+        _fillPath.LineTo(endX, endBottomY);
+
+        AppendBottomFillCurve(_fillPath, spectrum, midY, xStep);
+
+        _fillPath.Close();
+    }
+
+    private static void AppendTopFillCurve(
+        SKPath path,
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
         for (int i = 1; i < spectrum.Length; i++)
         {
             float prevX = (i - 1) * xStep;
@@ -286,13 +330,16 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             float topY = midY - spectrum[i] * midY;
 
             float controlX = (prevX + x) / 2;
-            _fillPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
+            path.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
         }
+    }
 
-        float endX = (spectrum.Length - 1) * xStep;
-        float endBottomY = midY + spectrum[^1] * midY;
-        _fillPath.LineTo(endX, endBottomY);
-
+    private static void AppendBottomFillCurve(
+        SKPath path,
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
         for (int i = spectrum.Length - 2; i >= 0; i--)
         {
             float prevX = (i + 1) * xStep;
@@ -302,10 +349,8 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             float bottomY = midY + spectrum[i] * midY;
 
             float controlX = (prevX + x) / 2;
-            _fillPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
+            path.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
         }
-
-        _fillPath.Close();
     }
 
     protected override void OnDispose()

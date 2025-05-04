@@ -1,12 +1,13 @@
 ﻿#nullable enable
 
+using static SpectrumNet.Views.Renderers.CircularWaveRenderer.Constants;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
 
 public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 {
-    private static class Constants
+    public record Constants
     {
         public const string
             LOG_PREFIX = "CircularWaveRenderer";
@@ -37,19 +38,17 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             POINTS_PER_CIRCLE_HIGH = 128;
     }
 
-    public readonly record struct RenderConfig(float BarWidth, float BarSpacing, int BarCount);
-
     private static readonly Lazy<CircularWaveRenderer> _instance = new(() => new CircularWaveRenderer());
 
     private float _angle;
-    private float _rotationSpeed = Constants.ROTATION_SPEED;
+    private float _rotationSpeed = ROTATION_SPEED;
 
     private float[]? _ringMagnitudes;
     private SKPoint[]? _circlePoints;
     private SKPoint _center;
 
-    private int _pointsPerCircle = Constants.POINTS_PER_CIRCLE_MEDIUM;
-    private float _glowRadius = Constants.GLOW_RADIUS_MEDIUM;
+    private int _pointsPerCircle = POINTS_PER_CIRCLE_MEDIUM;
+    private float _glowRadius = GLOW_RADIUS_MEDIUM;
 
     private CircularWaveRenderer() { }
 
@@ -63,7 +62,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             CreateCirclePointsCache();
         }, new ErrorHandlingOptions
         {
-            Source = $"{Constants.LOG_PREFIX}.OnInitialize",
+            Source = $"{LOG_PREFIX}.OnInitialize",
             ErrorMessage = "Failed during CircularWaveRenderer initialization"
         });
     }
@@ -76,26 +75,26 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             switch (base.Quality)
             {
                 case RenderQuality.Low:
-                    _pointsPerCircle = Constants.POINTS_PER_CIRCLE_LOW;
-                    _glowRadius = Constants.GLOW_RADIUS_LOW;
+                    _pointsPerCircle = POINTS_PER_CIRCLE_LOW;
+                    _glowRadius = GLOW_RADIUS_LOW;
                     break;
 
                 case RenderQuality.Medium:
-                    _pointsPerCircle = Constants.POINTS_PER_CIRCLE_MEDIUM;
-                    _glowRadius = Constants.GLOW_RADIUS_MEDIUM;
+                    _pointsPerCircle = POINTS_PER_CIRCLE_MEDIUM;
+                    _glowRadius = GLOW_RADIUS_MEDIUM;
                     break;
 
                 case RenderQuality.High:
-                    _pointsPerCircle = Constants.POINTS_PER_CIRCLE_HIGH;
-                    _glowRadius = Constants.GLOW_RADIUS_HIGH;
+                    _pointsPerCircle = POINTS_PER_CIRCLE_HIGH;
+                    _glowRadius = GLOW_RADIUS_HIGH;
                     break;
             }
 
             CreateCirclePointsCache();
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, $"Quality set to {base.Quality}");
+            Log(LogLevel.Debug, LOG_PREFIX, $"Quality set to {base.Quality}");
         }, new ErrorHandlingOptions
         {
-            Source = $"{Constants.LOG_PREFIX}.OnQualitySettingsApplied",
+            Source = $"{LOG_PREFIX}.OnQualitySettingsApplied",
             ErrorMessage = "Failed to apply circular wave specific quality settings"
         });
     }
@@ -110,11 +109,11 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             for (int i = 0; i < _pointsPerCircle; i++)
             {
                 float angle = i * angleStep;
-                _circlePoints[i] = new SKPoint(MathF.Cos(angle), MathF.Sin(angle));
+                _circlePoints[i] = new SKPoint(Cos(angle), Sin(angle));
             }
         }, new ErrorHandlingOptions
         {
-            Source = $"{Constants.LOG_PREFIX}.CreateCirclePointsCache",
+            Source = $"{LOG_PREFIX}.CreateCirclePointsCache",
             ErrorMessage = "Failed to create circle points cache"
         });
     }
@@ -132,7 +131,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
         _center = new SKPoint(info.Width * 0.5f, info.Height * 0.5f);
 
-        int ringCount = Math.Min(barCount, Constants.MAX_RING_COUNT);
+        int ringCount = Math.Min(barCount, MAX_RING_COUNT);
         PrepareRingMagnitudes(spectrum, ringCount);
 
         RenderCircularWaves(canvas, info, paint, ringCount);
@@ -149,8 +148,8 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         }
         avgIntensity /= spectrum.Length;
 
-        _rotationSpeed = Constants.ROTATION_SPEED * (1f + avgIntensity * Constants.SPECTRUM_ROTATION_INFLUENCE);
-        float deltaTime = MathF.Max(0, (float)(DateTime.Now - _lastUpdateTime).TotalSeconds);
+        _rotationSpeed = ROTATION_SPEED * (1f + avgIntensity * SPECTRUM_ROTATION_INFLUENCE);
+        float deltaTime = MathF.Max(0, (float)(Now - _lastUpdateTime).TotalSeconds);
         _angle = (_angle + _rotationSpeed * deltaTime) % MathF.Tau;
 
         if (_angle < 0) _angle += MathF.Tau;
@@ -188,16 +187,20 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         }
     }
 
-    [MethodImpl(AggressiveOptimization)]
-    private void RenderCircularWaves(SKCanvas canvas, SKImageInfo info, SKPaint basePaint, int ringCount)
+    [MethodImpl(AggressiveInlining)]
+    private void RenderCircularWaves(
+        SKCanvas canvas,
+        SKImageInfo info,
+        SKPaint basePaint,
+        int ringCount)
     {
         if (_ringMagnitudes == null || _circlePoints == null) return;
 
         float smallerDimension = MathF.Min(info.Width, info.Height);
         float maxRadius = smallerDimension * 0.45f;
-        float radiusIncrement = (maxRadius - Constants.CENTER_CIRCLE_RADIUS) / ringCount;
+        float radiusIncrement = (maxRadius - CENTER_CIRCLE_RADIUS) / ringCount;
 
-        using var mainPaint = _paintPool.Get();
+        using var mainPaint = _paintPool!.Get();
         mainPaint.Color = basePaint.Color;
         mainPaint.IsAntialias = UseAntiAlias;
         mainPaint.Style = Stroke;
@@ -207,8 +210,12 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             float magnitude = _ringMagnitudes[i];
             if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
 
-            float baseRadius = Constants.CENTER_CIRCLE_RADIUS + i * radiusIncrement;
-            float waveOffset = MathF.Sin(_time * Constants.WAVE_SPEED + i * Constants.PHASE_OFFSET + _angle) * magnitude * radiusIncrement;
+            float baseRadius = CENTER_CIRCLE_RADIUS + i * radiusIncrement;
+
+            float waveOffset = Sin(_time * WAVE_SPEED + i * PHASE_OFFSET + _angle)
+                * magnitude
+                * radiusIncrement;
+
             float radius = baseRadius + waveOffset;
 
             if (radius <= 0 ||
@@ -220,11 +227,11 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
             float distanceFactor = 1.0f - radius / maxRadius;
             distanceFactor = MathF.Max(0, MathF.Min(1, distanceFactor));
-            float alphaFactor = Constants.MIN_ALPHA_FACTOR + (1.0f - Constants.MIN_ALPHA_FACTOR) * distanceFactor;
-            byte alpha = (byte)MathF.Min(magnitude * Constants.ALPHA_MULTIPLIER * alphaFactor, 255);
+            float alphaFactor = MIN_ALPHA_FACTOR + (1.0f - MIN_ALPHA_FACTOR) * distanceFactor;
+            byte alpha = (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * alphaFactor, 255);
 
-            float strokeWidth = Constants.MIN_STROKE_WIDTH + magnitude * Constants.STROKE_WIDTH_FACTOR;
-            strokeWidth = Clamp(strokeWidth, Constants.MIN_STROKE_WIDTH, Constants.MAX_STROKE_WIDTH);
+            float strokeWidth = MIN_STROKE_WIDTH + magnitude * STROKE_WIDTH_FACTOR;
+            strokeWidth = Clamp(strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH);
 
 
             mainPaint.StrokeWidth = strokeWidth;
@@ -245,7 +252,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         if (_circlePoints == null) return;
 
-        using var path = _pathPool.Get();
+        using var path = _pathPool!.Get();
 
         bool firstPoint = true;
         foreach (var point in _circlePoints)
@@ -268,18 +275,22 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         canvas.DrawPath(path, paint);
     }
 
-    private void RenderRingWithGlow(SKCanvas canvas, float radius, float magnitude, SKPaint paint)
+    private void RenderRingWithGlow(
+        SKCanvas canvas,
+        float radius,
+        float magnitude,
+        SKPaint paint)
     {
         if (_circlePoints == null) return;
 
-        using var glowPaint = _paintPool.Get();
+        using var glowPaint = _paintPool!.Get();
         glowPaint.Color = paint.Color.WithAlpha((byte)MathF.Min(paint.Color.Alpha * 0.7f, 255));
         glowPaint.IsAntialias = paint.IsAntialias;
         glowPaint.Style = paint.Style;
         glowPaint.StrokeWidth = paint.StrokeWidth * 1.5f;
         glowPaint.MaskFilter = SKMaskFilter.CreateBlur(Normal, _glowRadius * magnitude);
 
-        using var path = _pathPool.Get();
+        using var path = _pathPool!.Get();
 
         bool firstPoint = true;
         foreach (var point in _circlePoints)
