@@ -9,6 +9,37 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<DotsRenderer> _instance = new(() => new DotsRenderer());
 
+    private readonly record struct Dot(
+        float X, float Y,
+        float VelocityX, float VelocityY,
+        float Radius,
+        float BaseRadius,
+        SKColor Color);
+
+    private readonly record struct RenderData(
+        Dot[] Dots,
+        float MaxSpectrum,
+        int BarCount)
+    {
+        public readonly float AlphaFactor => MathF.Max(0.3f, MathF.Min(1.0f, MaxSpectrum + 0.3f));
+    }
+
+    private static readonly Random _random = new();
+    private static readonly Vector2 _gravityCenter = new(0.5f, 0.5f);
+
+    private Dot[] _dots = [];
+    private SKImageInfo _lastImageInfo;
+    private float _maxSpectrum;
+    private int _dotCount = DEFAULT_DOT_COUNT;
+    private float _globalRadiusMultiplier = 1.0f;
+
+    private readonly object _renderDataLock = new();
+    private bool _dataReady;
+    private RenderData? _currentRenderData;
+
+    private readonly SKPaint _dotPaint = new();
+    private readonly SKPaint _glowPaint = new();
+
     private DotsRenderer() { }
 
     public static DotsRenderer GetInstance() => _instance.Value;
@@ -49,75 +80,30 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         public const int MIN_BAR_COUNT = 32;
     }
 
-    private readonly record struct Dot(
-        float X, float Y,
-        float VelocityX, float VelocityY,
-        float Radius,
-        float BaseRadius,
-        SKColor Color);
-
-    private readonly record struct RenderData(
-        Dot[] Dots,
-        float MaxSpectrum,
-        int BarCount)
+    protected override void OnInitialize()
     {
-        public readonly float AlphaFactor => MathF.Max(0.3f, MathF.Min(1.0f, MaxSpectrum + 0.3f));
-    }
-
-    private static readonly Random _random = new();
-    private static readonly Vector2 _gravityCenter = new(0.5f, 0.5f);
-
-    private Dot[] _dots = [];
-    private SKImageInfo _lastImageInfo;
-    private float _maxSpectrum;
-    private int _dotCount = DEFAULT_DOT_COUNT;
-    private float _globalRadiusMultiplier = 1.0f;
-
-    private readonly object _renderDataLock = new();
-    private bool _dataReady;
-    private RenderData? _currentRenderData;
-
-    private readonly SKPaint _dotPaint = new();
-    private readonly SKPaint _glowPaint = new();
-
-    public override void Initialize()
-    {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                base.Initialize();
+                base.OnInitialize();
                 InitializeResources();
-                ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            }
+            "OnInitialize",
+            "Failed during renderer initialization"
         );
     }
 
     private void InitializeResources()
     {
-        Safe(
-            () =>
-            {
-                _dotPaint.IsAntialias = true;
-                _dotPaint.Style = SKPaintStyle.Fill;
+        _dotPaint.IsAntialias = true;
+        _dotPaint.Style = SKPaintStyle.Fill;
 
-                _glowPaint.IsAntialias = true;
-                _glowPaint.Style = SKPaintStyle.Fill;
-                _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR);
+        _glowPaint.IsAntialias = true;
+        _glowPaint.Style = SKPaintStyle.Fill;
+        _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR);
 
-                ResetDots(new SKImageInfo(800, 600));
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeResources",
-                ErrorMessage = "Failed to initialize renderer resources"
-            }
-        );
+        ResetDots(new SKImageInfo(800, 600));
     }
 
     private void ResetDots(SKImageInfo info)
@@ -158,67 +144,64 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
                 base.Configure(isOverlayActive, quality);
-
                 if (configChanged)
                 {
+                    Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
                     OnConfigurationChanged();
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            }
+            "Configure",
+            "Failed to configure renderer"
         );
     }
 
-    protected override void ApplyQualitySettings()
+    protected override void OnQualitySettingsApplied()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-
-                int oldDotCount = _dotCount;
-                _dotCount = Quality switch
-                {
-                    RenderQuality.Low => LOW_QUALITY_DOT_COUNT,
-                    RenderQuality.Medium => MEDIUM_QUALITY_DOT_COUNT,
-                    RenderQuality.High => HIGH_QUALITY_DOT_COUNT,
-                    _ => MEDIUM_QUALITY_DOT_COUNT
-                };
-
-                _glowPaint.MaskFilter = UseAdvancedEffects
-                    ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR)
-                    : null;
-
-                if (oldDotCount != _dotCount)
-                {
-                    lock (_renderDataLock)
-                    {
-                        _dataReady = false;
-                        _currentRenderData = null;
-                    }
-
-                    if (_lastImageInfo.Width > 0 && _lastImageInfo.Height > 0)
-                    {
-                        ResetDots(_lastImageInfo);
-                    }
-                }
-
-                OnQualitySettingsApplied();
+                base.OnQualitySettingsApplied();
+                ApplyQualitySpecificSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. New Quality: {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ApplyQualitySettings",
-                ErrorMessage = "Failed to apply quality settings"
-            }
+            "OnQualitySettingsApplied",
+            "Failed to apply specific quality settings"
         );
+    }
+
+    private void ApplyQualitySpecificSettings()
+    {
+        int oldDotCount = _dotCount;
+        _dotCount = Quality switch
+        {
+            RenderQuality.Low => LOW_QUALITY_DOT_COUNT,
+            RenderQuality.Medium => MEDIUM_QUALITY_DOT_COUNT,
+            RenderQuality.High => HIGH_QUALITY_DOT_COUNT,
+            _ => MEDIUM_QUALITY_DOT_COUNT
+        };
+
+        _glowPaint.MaskFilter = UseAdvancedEffects
+            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR)
+            : null;
+
+        if (oldDotCount != _dotCount)
+        {
+            lock (_renderDataLock)
+            {
+                _dataReady = false;
+                _currentRenderData = null;
+            }
+
+            if (_lastImageInfo.Width > 0 && _lastImageInfo.Height > 0)
+            {
+                ResetDots(_lastImageInfo);
+            }
+        }
     }
 
     protected override void RenderEffect(
@@ -230,31 +213,16 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-        {
-            return;
-        }
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
 
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                if (_lastImageInfo.Width != info.Width || _lastImageInfo.Height != info.Height)
-                {
-                    ResetDots(info);
-                }
-
                 UpdateState(spectrum, barCount, info);
-
-                if (_dataReady)
-                {
-                    RenderFrame(canvas, info);
-                }
+                RenderFrame(canvas, info);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderEffect",
-                ErrorMessage = "Error in RenderEffect method"
-            }
+            "RenderEffect",
+            "Error during rendering"
         );
     }
 
@@ -264,35 +232,46 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         SKPaint? paint)
     {
-        if (!_isInitialized)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
-            return false;
-        }
-        if (canvas == null || spectrum == null || paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Invalid render parameters: null values");
-            return false;
-        }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
+        return true;
+    }
 
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
 
-        if (spectrum.Length == 0)
-        {
-            Log(LogLevel.Warning, LOG_PREFIX, "Empty spectrum data");
-            return true;
-        }
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
+        return false;
+    }
 
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
 
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
         return true;
     }
 
@@ -301,29 +280,21 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         int barCount,
         SKImageInfo info)
     {
-        Safe(
-            () =>
-            {
-                float[] processedSpectrum = ProcessSpectrumForDots(spectrum, barCount);
-                _maxSpectrum = processedSpectrum.Length > 0 ? processedSpectrum.Max() : 0f;
+        if (_lastImageInfo.Width != info.Width || _lastImageInfo.Height != info.Height)
+        {
+            ResetDots(info);
+        }
 
-                UpdateGlobalRadiusMultiplier();
-                UpdateDots(processedSpectrum, info);
-                PrepareRenderData(barCount);
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateState",
-                ErrorMessage = "Error updating renderer state"
-            }
-        );
+        float[] processedSpectrum = ProcessSpectrumForDots(spectrum, barCount);
+        _maxSpectrum = processedSpectrum.Length > 0 ? processedSpectrum.Max() : 0f;
+
+        UpdateGlobalRadiusMultiplier();
+        UpdateDots(processedSpectrum, info);
+        PrepareRenderData(barCount);
     }
 
-    private void UpdateGlobalRadiusMultiplier()
-    {
-        _globalRadiusMultiplier = 1.0f + _maxSpectrum * DOT_RADIUS_SCALE_FACTOR;
-        _globalRadiusMultiplier = Clamp(_globalRadiusMultiplier, 0.5f, 2.0f);
-    }
+    private void UpdateGlobalRadiusMultiplier() =>
+        _globalRadiusMultiplier = Clamp(1.0f + _maxSpectrum * DOT_RADIUS_SCALE_FACTOR, 0.5f, 2.0f);
 
     private static float[] ProcessSpectrumForDots(float[] spectrum, int barCount)
     {
@@ -380,11 +351,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         _dots = updatedDots;
     }
 
-    private int GetSpectrumIndexForDot(int dotIndex, int spectrumLength)
-    {
-        int index = (int)((float)dotIndex / _dotCount * spectrumLength);
-        return Clamp(index, 0, spectrumLength - 1);
-    }
+    private int GetSpectrumIndexForDot(int dotIndex, int spectrumLength) =>
+        Clamp((int)((float)dotIndex / _dotCount * spectrumLength), 0, spectrumLength - 1);
 
     private Dot UpdateSingleDot(Dot dot, float spectrumValue, float deltaTime, SKImageInfo info)
     {
@@ -455,7 +423,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         SKCanvas canvas,
         SKImageInfo _)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 RenderData renderData;
@@ -467,14 +435,10 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 }
 
                 Dot[] sortedDots = [.. renderData.Dots.OrderBy(d => d.Radius)];
-
                 DrawDots(canvas, sortedDots, renderData.AlphaFactor);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderFrame",
-                ErrorMessage = "Error rendering dots frame"
-            }
+            "RenderFrame",
+            "Error rendering dots frame"
         );
     }
 
@@ -489,7 +453,6 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 continue;
 
             byte alpha = (byte)(ALPHA_BASE * 255 * alphaFactor);
-
             DrawDotWithGlow(canvas, dot, alpha);
         }
     }
@@ -509,55 +472,43 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _dataReady = false;
                 _currentRenderData = null;
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnInvalidateCachedResources",
-                ErrorMessage = "Failed to invalidate cached resources"
-            }
+            "OnInvalidateCachedResources",
+            "Failed to invalidate cached resources"
         );
     }
 
     public override void Dispose()
     {
-        if (!_disposed)
-        {
-            Safe(
-                () =>
-                {
-                    OnDispose();
-                },
-                new ErrorHandlingOptions
-                {
-                    Source = $"{LOG_PREFIX}.Dispose",
-                    ErrorMessage = "Error during renderer disposal"
-                }
-            );
-
-            _disposed = true;
-            GC.SuppressFinalize(this);
-        }
+        if (_disposed) return;
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            "Dispose",
+            "Error during disposal"
+        );
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     protected override void OnDispose()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 DisposeManagedResources();
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnDispose",
-                ErrorMessage = "Error during OnDispose"
-            }
+            "OnDispose",
+            "Error during specific disposal"
         );
     }
 
@@ -567,4 +518,11 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         _glowPaint?.Dispose();
         _dots = [];
     }
+
+    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
+        Safe(action, new ErrorHandlingOptions
+        {
+            Source = $"{LOG_PREFIX}.{source}",
+            ErrorMessage = errorMessage
+        });
 }
