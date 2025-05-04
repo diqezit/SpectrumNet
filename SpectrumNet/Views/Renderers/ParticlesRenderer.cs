@@ -1,69 +1,227 @@
 ﻿#nullable enable
 
-using SpectrumNet.DataSettings;
-using SpectrumNet.Service.Enums;
+using static System.MathF;
+using static SpectrumNet.Views.Renderers.ParticlesRenderer.Constants;
 
 namespace SpectrumNet.Views.Renderers;
 
-/// <summary>
-/// Renderer that visualizes spectrum data as animated particles.
-/// </summary>
-public sealed class ParticlesRenderer : BaseSpectrumRenderer
+public sealed class ParticlesRenderer : EffectSpectrumRenderer
 {
-    #region Singleton Pattern
     private static readonly Lazy<ParticlesRenderer> _instance = new(() => new ParticlesRenderer());
-    private ParticlesRenderer()
+
+    private struct Particle(
+        float x,
+        float y,
+        float velocity,
+        float size,
+        float life,
+        float alpha,
+        bool isActive)
     {
-        PrecomputeAlphaCurve();
-        InitializeVelocityLookup(Settings.ParticleVelocityMin);
-        _processingThread = new Thread(ProcessSpectrumThreadFunc) { IsBackground = true, Name = "ParticlesProcessor" };
-        _processingRunning = true;
-        _processingThread.Start();
+        public float X = x;
+        public float Y = y;
+        public float Velocity = velocity;
+        public float Size = size;
+        public float Life = life;
+        public float Alpha = alpha;
+        public bool IsActive = isActive;
     }
-    public static ParticlesRenderer GetInstance() => _instance.Value;
-    #endregion
 
-    #region Constants
-    private static class Constants
+    private class CircularParticleBuffer(
+        int capacity,
+        float particleLife,
+        float particleLifeDecay,
+        float velocityMultiplier)
     {
-        // Logging
-        public const string LOG_PREFIX = "ParticlesRenderer";
+        private readonly Particle[] _buffer = new Particle[capacity];
+        private int _head, _tail, _count;
+        private readonly int _capacity = capacity;
 
-        // Rendering constants
-        public const float DEFAULT_LINE_WIDTH = 3f;
-        public const float GLOW_INTENSITY = 0.3f;
-        public const float HIGH_MAGNITUDE_THRESHOLD = 0.7f;
-        public const float OFFSET = 10f;
-        public const float BASELINE_OFFSET = 2f;
+        private readonly float 
+            _particleLife = particleLife,
+            _particleLifeDecay = particleLifeDecay,
+            _velocityMultiplier = velocityMultiplier,
+            _sizeDecayFactor = 0.95f;
 
-        // Spectrum processing constants
-        public const float SMOOTHING_FACTOR_NORMAL = 0.3f;
-        public const float SMOOTHING_FACTOR_OVERLAY = 0.5f;
-        public const int MAX_SAMPLE_POINTS = 256;
+        private readonly object _bufferLock = new();
 
-        // Velocity lookup
-        public const int VELOCITY_LOOKUP_SIZE = 1024;
+        public void Add(Particle particle)
+        {
+            lock (_bufferLock)
+            {
+                if (_count >= _capacity)
+                {
+                    ReplaceOldestParticle(particle);
+                }
+                else
+                {
+                    AddNewParticle(particle);
+                }
+            }
+        }
+
+        private void ReplaceOldestParticle(Particle particle)
+        {
+            _buffer[_tail] = particle;
+            _tail = (_tail + 1) % _capacity;
+            _head = (_head + 1) % _capacity;
+        }
+
+        private void AddNewParticle(Particle particle)
+        {
+            _buffer[_head] = particle;
+            _head = (_head + 1) % _capacity;
+            _count++;
+        }
+
+        public void Update(float upperBound, float[] alphaCurve)
+        {
+            lock (_bufferLock)
+            {
+                UpdateActiveParticles(upperBound, alphaCurve);
+                RemoveInactiveParticles();
+            }
+        }
+
+        private void UpdateActiveParticles(float upperBound, float[] alphaCurve)
+        {
+            int currentTail = _tail;
+
+            for (int i = 0; i < _count; i++)
+            {
+                int index = (currentTail + i) % _capacity;
+                ref Particle particle = ref _buffer[index];
+
+                if (!particle.IsActive) continue;
+
+                UpdateParticlePosition(ref particle, upperBound);
+
+                if (!particle.IsActive) continue;
+
+                UpdateParticleLifetime(ref particle);
+
+                if (!particle.IsActive) continue;
+
+                UpdateParticleSize(ref particle);
+
+                if (!particle.IsActive) continue;
+
+                UpdateParticleAlpha(ref particle, alphaCurve);
+            }
+        }
+
+        private void UpdateParticlePosition(ref Particle particle, float upperBound)
+        {
+            particle.Y -= particle.Velocity * _velocityMultiplier;
+
+            if (particle.Y <= upperBound)
+            {
+                particle.IsActive = false;
+            }
+        }
+
+        private void UpdateParticleLifetime(ref Particle particle)
+        {
+            particle.Life -= _particleLifeDecay;
+            if (particle.Life <= 0)
+            {
+                particle.IsActive = false;
+            }
+        }
+
+        private void UpdateParticleSize(ref Particle particle)
+        {
+            particle.Size *= _sizeDecayFactor;
+            if (particle.Size < 0.5f)
+            {
+                particle.IsActive = false;
+            }
+        }
+
+        private void UpdateParticleAlpha(ref Particle particle, float[] alphaCurve)
+        {
+            float lifeRatio = particle.Life / _particleLife;
+            int alphaIndex = (int)(lifeRatio * (alphaCurve.Length - 1));
+            alphaIndex = Clamp(alphaIndex, 0, alphaCurve.Length - 1);
+            particle.Alpha = alphaCurve[alphaIndex];
+        }
+
+        private void RemoveInactiveParticles()
+        {
+            while (_count > 0 && !_buffer[_tail].IsActive)
+            {
+                _tail = (_tail + 1) % _capacity;
+                _count--;
+            }
+        }
+
+        public Span<Particle> GetActiveParticles()
+        {
+            lock (_bufferLock)
+            {
+                return CollectActiveParticles();
+            }
+        }
+
+        private Span<Particle> CollectActiveParticles()
+        {
+            if (_count == 0) return [];
+
+            Particle[] activeParticles = new Particle[_count];
+            int currentTail = _tail;
+            int activeCount = 0;
+
+            for (int i = 0; i < _count; i++)
+            {
+                int index = (currentTail + i) % _capacity;
+                if (_buffer[index].IsActive)
+                {
+                    activeParticles[activeCount++] = _buffer[index];
+                }
+            }
+
+            return activeParticles.AsSpan(0, activeCount);
+        }
     }
-    #endregion
 
-    #region Fields
-    // Thread-local random for thread safety
+    private class RenderCache
+    {
+        public float Width { get; set; }
+        public float Height { get; set; }
+        public float UpperBound { get; set; }
+        public float LowerBound { get; set; }
+        public float OverlayHeight { get; set; }
+        public float StepSize { get; set; }
+    }
+
+    private readonly struct ProcessingParameters(
+        float[] spectrum,
+        int spectrumLength,
+        float spawnY,
+        int canvasWidth,
+        float barWidth)
+    {
+        public readonly float[] Spectrum = spectrum;
+        public readonly int SpectrumLength = spectrumLength;
+        public readonly float SpawnY = spawnY;
+        public readonly int CanvasWidth = canvasWidth;
+        public readonly float BarWidth = barWidth;
+    }
+
     [ThreadStatic] private static Random? _threadLocalRandom;
 
-    // Particle system state
     private CircularParticleBuffer? _particleBuffer;
-    private RenderCache _renderCache = new();
-    private Settings Settings => Settings.Instance;
+    private readonly RenderCache _renderCache = new();
+    private static Settings Settings => Settings.Instance;
 
-    // Spectrum processing
     private float[]? _spectrumBuffer;
     private float[]? _velocityLookup;
     private float[]? _alphaCurve;
-    private readonly Thread _processingThread;
-    private readonly CancellationTokenSource _cts = new();
-    private readonly AutoResetEvent _spectrumDataAvailable = new(false);
-    private readonly AutoResetEvent _processingComplete = new(false);
-    private readonly object _spectrumLock = new();
+    private Thread? _processingThread;
+    private CancellationTokenSource? _cts;
+    private AutoResetEvent? _spectrumDataAvailable;
+    private AutoResetEvent? _processingComplete;
+    private readonly new object _spectrumLock = new();
     private float[]? _spectrumToProcess;
     private int _spectrumLength;
     private bool _processingRunning;
@@ -71,293 +229,269 @@ public sealed class ParticlesRenderer : BaseSpectrumRenderer
     private int _canvasWidth;
     private float _barWidth;
 
-    // Quality settings
-    private new bool _useAntiAlias = true;
-    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-    private new bool _useAdvancedEffects = true;
     private int _sampleCount = 2;
-    private float _smoothingFactor = Constants.SMOOTHING_FACTOR_NORMAL;
+    private new bool _isOverlayActive;
 
-    public readonly bool _isOverlayActive;
-
-    // Caching
     private SKPicture? _cachedPicture;
-    private new bool _disposed;
-    #endregion
 
-    #region Initialization and Configuration
-    /// <summary>
-    /// Initializes the particles renderer and prepares resources for rendering.
-    /// </summary>
-    public override void Initialize()
+    private ParticlesRenderer() { }
+
+    public static ParticlesRenderer GetInstance() => _instance.Value;
+
+    public record Constants
     {
-        Safe(() =>
+        public const string LOG_PREFIX = "ParticlesRenderer";
+
+        public const float
+            DEFAULT_LINE_WIDTH = 3f,
+            GLOW_INTENSITY = 0.3f,
+            HIGH_MAGNITUDE_THRESHOLD = 0.7f,
+            OFFSET = 10f,
+            BASELINE_OFFSET = 2f;
+
+        public const float
+            SMOOTHING_FACTOR_NORMAL = 0.3f,
+            SMOOTHING_FACTOR_OVERLAY = 0.5f;
+
+        public const int
+            MAX_SAMPLE_POINTS = 256,
+            VELOCITY_LOOKUP_SIZE = 1024;
+
+        public static class Quality
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(ParticlesRenderer));
-            if (_isInitialized) return;
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
 
-            base.Initialize();
-
-            _particleBuffer = new CircularParticleBuffer(
-                Settings.MaxParticles,
-                Settings.ParticleLife,
-                Settings.ParticleLifeDecay,
-                Settings.VelocityMultiplier);
-
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
+            public const int
+                LOW_SAMPLE_COUNT = 1,
+                MEDIUM_SAMPLE_COUNT = 2,
+                HIGH_SAMPLE_COUNT = 4;
+        }
     }
 
-    /// <summary>
-    /// Configures the renderer with overlay status and quality settings.
-    /// </summary>
-    /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
-    /// <param name="quality">The rendering quality level.</param>
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+    protected override void OnInitialize()
     {
-        Safe(() =>
-        {
-            base.Configure(isOverlayActive, quality);
-
-            bool configChanged = _isOverlayActive != isOverlayActive || _quality != quality;
-            _smoothingFactor = isOverlayActive ?
-                Constants.SMOOTHING_FACTOR_OVERLAY :
-                Constants.SMOOTHING_FACTOR_NORMAL;
-
-            if (_quality != quality)
+        ExecuteSafely(
+            () =>
             {
-                ApplyQualitySettings();
-            }
-
-            if (configChanged)
-            {
-                InvalidateCachedResources();
-            }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Configure",
-            ErrorMessage = "Failed to configure renderer"
-        });
+                base.OnInitialize();
+                InitializeResources();
+                StartProcessingThread();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            "OnInitialize",
+            "Failed during renderer initialization"
+        );
     }
 
-    /// <summary>
-    /// Applies quality settings based on the current quality level.
-    /// </summary>
-    protected override void ApplyQualitySettings()
+    private void InitializeResources()
     {
-        Safe(() =>
-        {
-            base.ApplyQualitySettings();
-
-            switch (_quality)
-            {
-                case RenderQuality.Low:
-                    _useAntiAlias = false;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-                    _useAdvancedEffects = false;
-                    _sampleCount = 1;
-                    break;
-
-                case RenderQuality.Medium:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useAdvancedEffects = true;
-                    _sampleCount = 2;
-                    break;
-
-                case RenderQuality.High:
-                    _useAntiAlias = true;
-                    _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                    _useAdvancedEffects = true;
-                    _sampleCount = 4;
-                    break;
-            }
-
-            InvalidateCachedResources();
-
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, $"Quality changed to {_quality}");
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
-            ErrorMessage = "Failed to apply quality settings"
-        });
+        PrecomputeAlphaCurve();
+        InitializeVelocityLookup(Settings.ParticleVelocityMin);
+        InitializeParticleBuffer();
+        InitializeSynchronizationObjects();
     }
 
-    /// <summary>
-    /// Invalidates cached rendering resources.
-    /// </summary>
-    private void InvalidateCachedResources()
+    private void InitializeParticleBuffer()
+    {
+        _particleBuffer = new CircularParticleBuffer(
+            Settings.MaxParticles,
+            Settings.ParticleLife,
+            Settings.ParticleLifeDecay,
+            Settings.VelocityMultiplier);
+    }
+
+    private void InitializeSynchronizationObjects()
+    {
+        _cts = new CancellationTokenSource();
+        _spectrumDataAvailable = new AutoResetEvent(false);
+        _processingComplete = new AutoResetEvent(false);
+    }
+
+    private void StartProcessingThread()
+    {
+        _processingRunning = true;
+        _processingThread = new Thread(ProcessSpectrumThreadFunc)
+        {
+            IsBackground = true,
+            Name = "ParticlesProcessor"
+        };
+        _processingThread.Start();
+    }
+
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
+
+                _isOverlayActive = isOverlayActive;
+                _smoothingFactor = isOverlayActive ? SMOOTHING_FACTOR_OVERLAY : SMOOTHING_FACTOR_NORMAL;
+
+                if (configChanged)
+                {
+                    Log(LogLevel.Debug,
+                        LOG_PREFIX,
+                        $"Configuration changed. New Quality: {Quality}");
+                    OnConfigurationChanged();
+                }
+            },
+            "Configure",
+            "Failed to configure renderer"
+        );
+    }
+
+    protected override void OnQualitySettingsApplied()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                base.OnQualitySettingsApplied();
+                ApplyQualitySpecificSettings();
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Quality settings applied. New Quality: {Quality}");
+            },
+            "OnQualitySettingsApplied",
+            "Failed to apply specific quality settings"
+        );
+    }
+
+    private void ApplyQualitySpecificSettings()
+    {
+        SetQualityBasedParameters();
+        InvalidateCachedResources();
+    }
+
+    private void SetQualityBasedParameters()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                _useAntiAlias = false;
+                _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+                _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+                _sampleCount = Constants.Quality.LOW_SAMPLE_COUNT;
+                break;
+
+            case RenderQuality.Medium:
+                _useAntiAlias = true;
+                _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+                _sampleCount = Constants.Quality.MEDIUM_SAMPLE_COUNT;
+                break;
+
+            case RenderQuality.High:
+                _useAntiAlias = true;
+                _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+                _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+                _sampleCount = Constants.Quality.HIGH_SAMPLE_COUNT;
+                break;
+        }
+    }
+
+    private new void InvalidateCachedResources()
     {
         _cachedPicture?.Dispose();
         _cachedPicture = null;
-        RebuildShaders();
     }
 
-    /// <summary>
-    /// Rebuilds shader resources.
-    /// </summary>
-    private void RebuildShaders()
-    {
-        Log(LogLevel.Debug, Constants.LOG_PREFIX, "Rebuilding shaders.");
-    }
-    #endregion
-
-    #region Rendering
-    /// <summary>
-    /// Renders the particles visualization on the canvas using spectrum data.
-    /// </summary>
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        SKPaint paint)
     {
-        // Validate rendering parameters
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint, drawPerformanceInfo))
-        {
-            drawPerformanceInfo?.Invoke(canvas!, info);
-            return;
-        }
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
 
-        // Quick reject if canvas area is not visible
-        if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-        {
-            drawPerformanceInfo?.Invoke(canvas, info);
-            return;
-        }
-
-        Safe(() =>
-        {
-            // Update render cache dimensions
-            _renderCache.Width = info.Width;
-            _renderCache.Height = info.Height;
-            UpdateRenderCacheBounds(info.Height);
-            _renderCache.StepSize = barCount > 0 ? info.Width / barCount : 0f;
-            _barWidth = barWidth;
-
-            // Process spectrum data and update particles
-            ProcessSpectrumData(spectrum!, _sampleCount);
-            UpdateParticles(_renderCache.UpperBound);
-
-            // Render particles with current quality settings
-            RenderWithQualitySettings(canvas!, info, paint!);
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Render",
-            ErrorMessage = "Error during rendering"
-        });
-
-        // Draw performance info
-        drawPerformanceInfo?.Invoke(canvas!, info);
+        ExecuteSafely(
+            () =>
+            {
+                UpdateRenderCache(info, barCount, barWidth);
+                ProcessSpectrumData(spectrum);
+                UpdateParticles(_renderCache.UpperBound);
+                RenderParticles(canvas, paint, _renderCache.UpperBound, _renderCache.LowerBound);
+            },
+            "RenderEffect",
+            "Error during rendering"
+        );
     }
 
-    /// <summary>
-    /// Validates all render parameters before processing.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
+    private void UpdateRenderCache(SKImageInfo info, int barCount, float barWidth)
+    {
+        _renderCache.Width = info.Width;
+        _renderCache.Height = info.Height;
+        UpdateRenderCacheBounds(info.Height);
+        _renderCache.StepSize = barCount > 0 ? info.Width / barCount : 0f;
+        _barWidth = barWidth;
+    }
+
     private bool ValidateRenderParameters(
         SKCanvas? canvas,
         float[]? spectrum,
         SKImageInfo info,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo) =>
-        !_disposed &&
-        _isInitialized &&
-        canvas != null &&
-        spectrum != null &&
-        spectrum.Length >= 2 &&
-        paint != null &&
-        drawPerformanceInfo != null &&
-        info.Width > 0 &&
-        info.Height > 0;
-
-    /// <summary>
-    /// Renders particles with current quality settings.
-    /// </summary>
-    private void RenderWithQualitySettings(SKCanvas canvas, SKImageInfo info, SKPaint externalPaint)
+        SKPaint? paint)
     {
-        using var paint = externalPaint.Clone();
-        paint.IsAntialias = _useAntiAlias;
-
-        // Render basic visualization
-        RenderBasicVisualization(canvas, paint);
-
-        // Apply advanced effects if enabled
-        if (_useAdvancedEffects)
-        {
-            // Advanced effects disabled for now
-        }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
+        return true;
     }
 
-    /// <summary>
-    /// Renders the basic particle visualization.
-    /// </summary>
-    private void RenderBasicVisualization(SKCanvas canvas, SKPaint paint)
+    private static bool IsCanvasValid(SKCanvas? canvas)
     {
-        RenderParticles(canvas, paint, _renderCache.UpperBound, _renderCache.LowerBound);
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
     }
 
-    /// <summary>
-    /// Renders all active particles to the canvas.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    private void RenderParticles(SKCanvas canvas, SKPaint paint, float upperBound, float lowerBound)
+    private static bool IsSpectrumValid(float[]? spectrum)
     {
-        if (_particleBuffer == null)
-            return;
-
-        var activeParticles = _particleBuffer.GetActiveParticles();
-        int count = activeParticles.Length;
-
-        if (count == 0)
-            return;
-
-        SKColor originalColor = paint.Color;
-        paint.Style = Fill;
-        paint.StrokeCap = SKStrokeCap.Round;
-
-        for (int i = 0; i < count; i++)
-        {
-            ref readonly var particle = ref activeParticles[i];
-
-            // Skip particles outside visible bounds
-            if (particle.Y < upperBound || particle.Y > lowerBound)
-                continue;
-
-            // Apply particle alpha to color
-            SKColor particleColor = originalColor.WithAlpha((byte)(particle.Alpha * 255));
-            paint.Color = particleColor;
-
-            // Draw particle as a circle
-            canvas.DrawCircle(particle.X, particle.Y, particle.Size / 2, paint);
-        }
-
-        // Restore original color
-        paint.Color = originalColor;
+        if (spectrum != null && spectrum.Length > 1) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or too small");
+        return false;
     }
-    #endregion
 
-    #region Spectrum Processing
-    /// <summary>
-    /// Processes spectrum data for visualization.
-    /// </summary>
-    private void ProcessSpectrumData(float[] spectrum, int sampleCount)
+    private static bool IsPaintValid(SKPaint? paint)
     {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
+        return true;
+    }
+
+    private void ProcessSpectrumData(float[] spectrum) => 
         SubmitSpectrumForProcessing(spectrum, _renderCache.LowerBound, (int)_renderCache.Width, _barWidth);
-    }
 
-    /// <summary>
-    /// Submits spectrum data for background processing.
-    /// </summary>
-    private void SubmitSpectrumForProcessing(float[] spectrum, float spawnY, int canvasWidth, float barWidth)
+    private void SubmitSpectrumForProcessing(
+        float[] spectrum,
+        float spawnY,
+        int canvasWidth,
+        float barWidth)
     {
         lock (_spectrumLock)
         {
@@ -368,50 +502,15 @@ public sealed class ParticlesRenderer : BaseSpectrumRenderer
             _barWidth = barWidth;
         }
 
-        _spectrumDataAvailable.Set();
-        _processingComplete.WaitOne(5); // Short timeout to avoid blocking UI
+        _spectrumDataAvailable?.Set();
+        _processingComplete?.WaitOne(5);
     }
 
-    /// <summary>
-    /// Background thread function for processing spectrum data.
-    /// </summary>
     private void ProcessSpectrumThreadFunc()
     {
         try
         {
-            while (_processingRunning && !_cts.Token.IsCancellationRequested)
-            {
-                _spectrumDataAvailable.WaitOne();
-
-                float[]? spectrumCopy;
-                int spectrumLength;
-                float spawnY;
-                int canvasWidth;
-                float barWidth;
-
-                lock (_spectrumLock)
-                {
-                    if (_spectrumToProcess == null)
-                    {
-                        _processingComplete.Set();
-                        continue;
-                    }
-
-                    spectrumCopy = _spectrumToProcess;
-                    spectrumLength = _spectrumLength;
-                    spawnY = _spawnY;
-                    canvasWidth = _canvasWidth;
-                    barWidth = _barWidth;
-                }
-
-                ProcessSpectrumAndSpawnParticles(
-                    spectrumCopy.AsSpan(0, Min(spectrumLength, 2048)),
-                    spawnY,
-                    canvasWidth,
-                    barWidth);
-
-                _processingComplete.Set();
-            }
+            RunProcessingLoop();
         }
         catch (OperationCanceledException)
         {
@@ -419,99 +518,176 @@ public sealed class ParticlesRenderer : BaseSpectrumRenderer
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, $"Error in processing thread: {ex.Message}");
+            Log(LogLevel.Error, LOG_PREFIX, $"Error in processing thread: {ex.Message}");
         }
     }
 
-    /// <summary>
-    /// Processes spectrum data and spawns particles based on magnitude.
-    /// </summary>
-    private void ProcessSpectrumAndSpawnParticles(ReadOnlySpan<float> spectrum, float spawnY, int canvasWidth, float barWidth)
+    private void RunProcessingLoop()
+    {
+        while (_processingRunning && _cts != null && !_cts.Token.IsCancellationRequested)
+        {
+            _spectrumDataAvailable?.WaitOne();
+
+            if (TryGetProcessingParameters(out var parameters))
+            {
+                ProcessSpectrumAndSpawnParticles(
+                    parameters.Spectrum,
+                    parameters.SpectrumLength,
+                    parameters.SpawnY,
+                    parameters.CanvasWidth,
+                    parameters.BarWidth);
+            }
+
+            _processingComplete?.Set();
+        }
+    }
+
+    private bool TryGetProcessingParameters(out ProcessingParameters parameters)
+    {
+        lock (_spectrumLock)
+        {
+            if (_spectrumToProcess == null)
+            {
+                parameters = default;
+                return false;
+            }
+
+            parameters = new ProcessingParameters(
+                _spectrumToProcess,
+                _spectrumLength,
+                _spawnY,
+                _canvasWidth,
+                _barWidth);
+
+            return true;
+        }
+    }
+
+    private void ProcessSpectrumAndSpawnParticles(
+        float[] spectrum,
+        int spectrumLength,
+        float spawnY,
+        int _, // canvasWidth
+        float barWidth)
     {
         if (_particleBuffer == null) return;
 
-        // Get threshold and size based on overlay mode
         float threshold = _isOverlayActive ? Settings.SpawnThresholdOverlay : Settings.SpawnThresholdNormal;
         float baseSize = _isOverlayActive ? Settings.ParticleSizeOverlay : Settings.ParticleSizeNormal;
 
-        // Prepare spectrum buffer
-        int targetCount = Min(spectrum.Length, 2048);
-        if (_spectrumBuffer == null)
-            _spectrumBuffer = ArrayPool<float>.Shared.Rent(targetCount);
+        int safeLength = Min(spectrumLength, 2048);
+        PrepareSpectrumBuffer(safeLength);
 
-        var spectrumBufferSpan = new Span<float>(_spectrumBuffer, 0, targetCount);
-        ScaleSpectrum(spectrum, spectrumBufferSpan);
+        if (_spectrumBuffer == null) return;
 
-        // Calculate step size for particle positioning
+        ScaleSpectrum(spectrum.AsSpan(0, safeLength), _spectrumBuffer.AsSpan(0, safeLength));
+
         float xStep = _renderCache.StepSize;
+        var rnd = GetThreadLocalRandom();
 
-        // Get thread-local random instance
-        var rnd = _threadLocalRandom ??= new Random();
+        SpawnParticlesFromSpectrum(
+            _spectrumBuffer.AsSpan(0, safeLength),
+            spawnY,
+            xStep,
+            barWidth,
+            threshold,
+            baseSize,
+            rnd);
+    }
 
-        // Process each spectrum value and spawn particles
-        for (int i = 0; i < targetCount; i++)
+    private void PrepareSpectrumBuffer(int targetLength)
+    {
+        if (_spectrumBuffer == null || _spectrumBuffer.Length < targetLength)
+            _spectrumBuffer = ArrayPool<float>.Shared.Rent(targetLength);
+    }
+
+    private void SpawnParticlesFromSpectrum(
+        Span<float> spectrumBuffer,
+        float spawnY,
+        float xStep,
+        float barWidth,
+        float threshold,
+        float baseSize,
+        Random rnd)
+    {
+        for (int i = 0; i < spectrumBuffer.Length; i++)
         {
-            float spectrumValue = spectrumBufferSpan[i];
-
-            // Skip if below threshold
-            if (spectrumValue <= threshold) continue;
-
-            // Calculate density factor based on spectrum intensity
-            float densityFactor = MathF.Min(spectrumValue / threshold, 3f);
-
-            // Probabilistic spawning based on spectrum intensity
-            if (rnd.NextDouble() >= densityFactor * Settings.SpawnProbability) continue;
-
-            // Create and add new particle
-            _particleBuffer.Add(new Particle
-            {
-                X = i * xStep + (float)rnd.NextDouble() * barWidth,
-                Y = spawnY,
-                Velocity = GetRandomVelocity() * densityFactor,
-                Size = baseSize * densityFactor,
-                Life = Settings.ParticleLife,
-                Alpha = 1f,
-                IsActive = true
-            });
+            TrySpawnParticleForValue(
+                spectrumBuffer[i],
+                i,
+                xStep,
+                barWidth,
+                spawnY,
+                threshold,
+                baseSize,
+                rnd);
         }
     }
 
-    /// <summary>
-    /// Precomputes alpha curve for particle fading.
-    /// </summary>
+    private void TrySpawnParticleForValue(
+        float spectrumValue,
+        int index,
+        float xStep,
+        float barWidth,
+        float spawnY,
+        float threshold,
+        float baseSize,
+        Random rnd)
+    {
+        if (spectrumValue <= threshold) return;
+
+        float densityFactor = MathF.Min(spectrumValue / threshold, 3f);
+        if (rnd.NextDouble() >= densityFactor * Settings.SpawnProbability) return;
+
+        CreateParticle(index, xStep, barWidth, spawnY, densityFactor, baseSize, rnd);
+    }
+
+    private void CreateParticle(
+        int index,
+        float xStep,
+        float barWidth,
+        float spawnY,
+        float densityFactor,
+        float baseSize,
+        Random rnd)
+    {
+        if (_particleBuffer == null) return;
+
+        _particleBuffer.Add(new Particle(
+            x: index * xStep + (float)rnd.NextDouble() * barWidth,
+            y: spawnY,
+            velocity: GetRandomVelocity() * densityFactor,
+            size: baseSize * densityFactor,
+            life: Settings.ParticleLife,
+            alpha: 1f,
+            isActive: true
+        ));
+    }
+
     private void PrecomputeAlphaCurve()
     {
-        if (_alphaCurve == null) _alphaCurve = ArrayPool<float>.Shared.Rent(101);
+        _alphaCurve ??= ArrayPool<float>.Shared.Rent(101);
 
         float step = 1f / (_alphaCurve.Length - 1);
         for (int i = 0; i < _alphaCurve.Length; i++)
             _alphaCurve[i] = (float)Pow(i * step, Settings.AlphaDecayExponent);
     }
 
-    /// <summary>
-    /// Initializes velocity lookup table for random velocity selection.
-    /// </summary>
     private void InitializeVelocityLookup(float minVelocity)
     {
-        if (_velocityLookup == null) _velocityLookup = ArrayPool<float>.Shared.Rent(Constants.VELOCITY_LOOKUP_SIZE);
+        _velocityLookup ??= ArrayPool<float>.Shared.Rent(VELOCITY_LOOKUP_SIZE);
 
         float velocityRange = Settings.ParticleVelocityMax - Settings.ParticleVelocityMin;
-        for (int i = 0; i < Constants.VELOCITY_LOOKUP_SIZE; i++)
-            _velocityLookup[i] = minVelocity + velocityRange * i / Constants.VELOCITY_LOOKUP_SIZE;
+        for (int i = 0; i < VELOCITY_LOOKUP_SIZE; i++)
+            _velocityLookup[i] = minVelocity + velocityRange * i / VELOCITY_LOOKUP_SIZE;
     }
 
-    /// <summary>
-    /// Updates all active particles' positions and properties.
-    /// </summary>
     private void UpdateParticles(float upperBound)
     {
         if (_particleBuffer == null || _alphaCurve == null) return;
         _particleBuffer.Update(upperBound, _alphaCurve);
     }
 
-    /// <summary>
-    /// Updates render cache bounds based on canvas height and overlay mode.
-    /// </summary>
     private void UpdateRenderCacheBounds(float height)
     {
         float overlayHeight = height * Settings.OverlayHeightMultiplier;
@@ -530,23 +706,18 @@ public sealed class ParticlesRenderer : BaseSpectrumRenderer
         }
     }
 
-    /// <summary>
-    /// Gets a random velocity from the precomputed lookup table.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
     private float GetRandomVelocity()
     {
         if (_velocityLookup == null)
             throw new InvalidOperationException("Velocity lookup not initialized");
 
-        var rnd = _threadLocalRandom ??= new Random();
-        return _velocityLookup[rnd.Next(Constants.VELOCITY_LOOKUP_SIZE)] * Settings.VelocityMultiplier;
+        var rnd = GetThreadLocalRandom();
+        return _velocityLookup[rnd.Next(VELOCITY_LOOKUP_SIZE)] * Settings.VelocityMultiplier;
     }
 
-    /// <summary>
-    /// Scales spectrum data from source to destination span.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
+    private static Random GetThreadLocalRandom() =>
+        _threadLocalRandom ??= new Random();
+
     private static void ScaleSpectrum(ReadOnlySpan<float> source, Span<float> dest)
     {
         int srcLen = source.Length, destLen = dest.Length;
@@ -557,248 +728,145 @@ public sealed class ParticlesRenderer : BaseSpectrumRenderer
             dest[i] = source[(int)(i * scale)];
     }
 
-    /// <summary>
-    /// Updates particle sizes based on current overlay mode.
-    /// </summary>
-    private void UpdateParticleSizes()
+    private void RenderParticles(
+        SKCanvas canvas,
+        SKPaint paint,
+        float upperBound,
+        float lowerBound)
     {
         if (_particleBuffer == null) return;
 
-        float baseSize = _isOverlayActive ? Settings.ParticleSizeOverlay : Settings.ParticleSizeNormal;
-        float oldBaseSize = _isOverlayActive ? Settings.ParticleSizeNormal : Settings.ParticleSizeOverlay;
+        var activeParticles = _particleBuffer.GetActiveParticles();
+        if (activeParticles.Length == 0) return;
 
-        foreach (ref var particle in _particleBuffer.GetActiveParticles())
-        {
-            float relativeSizeFactor = particle.Size / oldBaseSize;
-            particle.Size = baseSize * relativeSizeFactor;
-        }
+        DrawParticles(canvas, paint, upperBound, lowerBound, activeParticles);
     }
-    #endregion
 
-    #region Disposal
-    /// <summary>
-    /// Disposes of resources used by the renderer.
-    /// </summary>
+    private static void DrawParticles(
+        SKCanvas canvas,
+        SKPaint paint,
+        float upperBound,
+        float lowerBound,
+        Span<Particle> particles)
+    {
+        SKColor originalColor = paint.Color;
+        ConfigurePaintForParticles(paint);
+
+        foreach (var particle in particles)
+        {
+            DrawParticleIfVisible(canvas, paint, upperBound, lowerBound, particle, originalColor);
+        }
+
+        paint.Color = originalColor;
+    }
+
+    private static void ConfigurePaintForParticles(SKPaint paint)
+    {
+        paint.Style = SKPaintStyle.Fill;
+        paint.StrokeCap = SKStrokeCap.Round;
+    }
+
+    private static void DrawParticleIfVisible(
+        SKCanvas canvas,
+        SKPaint paint,
+        float upperBound,
+        float lowerBound,
+        Particle particle,
+        SKColor originalColor)
+    {
+        if (particle.Y < upperBound || particle.Y > lowerBound) return;
+
+        paint.Color = originalColor.WithAlpha((byte)(particle.Alpha * 255));
+        canvas.DrawCircle(particle.X, particle.Y, particle.Size / 2, paint);
+    }
+
     public override void Dispose()
     {
         if (_disposed) return;
-
-        Safe(() =>
-        {
-            // Stop processing thread
-            _processingRunning = false;
-            _cts.Cancel();
-            _spectrumDataAvailable.Set();
-            _processingThread.Join(100);
-
-            // Dispose synchronization primitives
-            _cts.Dispose();
-            _spectrumDataAvailable.Dispose();
-            _processingComplete.Dispose();
-
-            // Return pooled arrays
-            if (_spectrumBuffer != null)
+        ExecuteSafely(
+            () =>
             {
-                ArrayPool<float>.Shared.Return(_spectrumBuffer);
-                _spectrumBuffer = null;
-            }
-
-            if (_velocityLookup != null)
-            {
-                ArrayPool<float>.Shared.Return(_velocityLookup);
-                _velocityLookup = null;
-            }
-
-            if (_alphaCurve != null)
-            {
-                ArrayPool<float>.Shared.Return(_alphaCurve);
-                _alphaCurve = null;
-            }
-
-            // Clear other resources
-            _cachedPicture?.Dispose();
-            _cachedPicture = null;
-
-            _particleBuffer = null;
-            _renderCache = new RenderCache();
-
-            // Call base implementation
-            base.Dispose();
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Dispose",
-            ErrorMessage = "Error during disposal"
-        });
-
+                OnDispose();
+            },
+            "Dispose",
+            "Error during disposal"
+        );
         _disposed = true;
-        Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
-    }
-    #endregion
-}
-
-#region Helper Classes
-/// <summary>
-/// Circular buffer for efficient particle storage and updates.
-/// </summary>
-internal class CircularParticleBuffer
-{
-    private readonly Particle[] _buffer;
-    private int _head, _tail, _count;
-    private readonly int _capacity;
-    private readonly float _particleLife, _particleLifeDecay, _velocityMultiplier;
-    private readonly object _bufferLock = new();
-    private readonly float _sizeDecayFactor = 0.95f;
-
-    /// <summary>
-    /// Initializes a new circular buffer for particles.
-    /// </summary>
-    public CircularParticleBuffer(int capacity, float particleLife, float particleLifeDecay, float velocityMultiplier)
-    {
-        _capacity = capacity;
-        _buffer = new Particle[capacity];
-        _particleLife = particleLife;
-        _particleLifeDecay = particleLifeDecay;
-        _velocityMultiplier = velocityMultiplier;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
-    /// <summary>
-    /// Adds a new particle to the buffer, replacing oldest if full.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    public void Add(Particle particle)
+    protected override void OnDispose()
     {
-        lock (_bufferLock)
+        ExecuteSafely(
+            () =>
+            {
+                StopProcessingThread();
+                DisposeResources();
+                base.OnDispose();
+            },
+            "OnDispose",
+            "Error during specific disposal"
+        );
+    }
+
+    private void StopProcessingThread()
+    {
+        _processingRunning = false;
+        _cts?.Cancel();
+        _spectrumDataAvailable?.Set();
+        _processingThread?.Join(100);
+
+        DisposeSynchronizationObjects();
+    }
+
+    private void DisposeSynchronizationObjects()
+    {
+        _cts?.Dispose();
+        _cts = null;
+
+        _spectrumDataAvailable?.Dispose();
+        _spectrumDataAvailable = null;
+
+        _processingComplete?.Dispose();
+        _processingComplete = null;
+    }
+
+    private void DisposeResources()
+    {
+        ReturnPooledArrays();
+
+        _cachedPicture?.Dispose();
+        _cachedPicture = null;
+
+        _particleBuffer = null;
+    }
+
+    private void ReturnPooledArrays()
+    {
+        if (_spectrumBuffer != null)
         {
-            if (_count >= _capacity)
-            {
-                // Buffer is full, replace oldest particle
-                _buffer[_tail] = particle;
-                _tail = (_tail + 1) % _capacity;
-                _head = (_head + 1) % _capacity;
-            }
-            else
-            {
-                // Add to head and increment count
-                _buffer[_head] = particle;
-                _head = (_head + 1) % _capacity;
-                _count++;
-            }
+            ArrayPool<float>.Shared.Return(_spectrumBuffer);
+            _spectrumBuffer = null;
+        }
+
+        if (_velocityLookup != null)
+        {
+            ArrayPool<float>.Shared.Return(_velocityLookup);
+            _velocityLookup = null;
+        }
+
+        if (_alphaCurve != null)
+        {
+            ArrayPool<float>.Shared.Return(_alphaCurve);
+            _alphaCurve = null;
         }
     }
 
-    /// <summary>
-    /// Updates all particles' positions and properties.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    public void Update(float upperBound, float[] alphaCurve)
-    {
-        lock (_bufferLock)
+    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
+        Safe(action, new ErrorHandlingOptions
         {
-            int currentTail = _tail;
-
-            // Update each active particle
-            for (int i = 0; i < _count; i++)
-            {
-                int index = (currentTail + i) % _capacity;
-                ref Particle particle = ref _buffer[index];
-
-                if (!particle.IsActive) continue;
-
-                // Update position based on velocity
-                particle.Y -= particle.Velocity * _velocityMultiplier;
-
-                // Deactivate if out of bounds
-                if (particle.Y <= upperBound)
-                {
-                    particle.IsActive = false;
-                    continue;
-                }
-
-                // Reduce lifetime
-                particle.Life -= _particleLifeDecay;
-                if (particle.Life <= 0)
-                {
-                    particle.IsActive = false;
-                    continue;
-                }
-
-                // Reduce size
-                particle.Size *= _sizeDecayFactor;
-                if (particle.Size < 0.5f)
-                {
-                    particle.IsActive = false;
-                    continue;
-                }
-
-                // Update alpha based on remaining lifetime
-                float lifeRatio = particle.Life / _particleLife;
-                int alphaIndex = (int)(lifeRatio * (alphaCurve.Length - 1));
-                alphaIndex = Clamp(alphaIndex, 0, alphaCurve.Length - 1);
-                particle.Alpha = alphaCurve[alphaIndex];
-            }
-
-            // Remove inactive particles from the tail
-            while (_count > 0 && !_buffer[_tail].IsActive)
-            {
-                _tail = (_tail + 1) % _capacity;
-                _count--;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets a span of all active particles for rendering.
-    /// </summary>
-    [MethodImpl(AggressiveInlining)]
-    public Span<Particle> GetActiveParticles()
-    {
-        lock (_bufferLock)
-        {
-            if (_count == 0) return Span<Particle>.Empty;
-
-            Particle[] activeParticles = new Particle[_count];
-            int currentTail = _tail;
-            int activeCount = 0;
-
-            // Copy only active particles to result array
-            for (int i = 0; i < _count; i++)
-            {
-                int index = (currentTail + i) % _capacity;
-                if (_buffer[index].IsActive)
-                {
-                    activeParticles[activeCount++] = _buffer[index];
-                }
-            }
-
-            return new Span<Particle>(activeParticles, 0, activeCount);
-        }
-    }
+            Source = $"{LOG_PREFIX}.{source}",
+            ErrorMessage = errorMessage
+        });
 }
-
-/// <summary>
-/// Represents a single particle in the visualization.
-/// </summary>
-internal struct Particle
-{
-    public float X;
-    public float Y;
-    public float Velocity;
-    public float Size;
-    public float Life;
-    public float Alpha;
-    public bool IsActive;
-}
-
-/// <summary>
-/// Cache for render-related calculations and bounds.
-/// </summary>
-internal class RenderCache
-{
-    public float Width { get; set; }
-    public float Height { get; set; }
-    public float UpperBound { get; set; }
-    public float LowerBound { get; set; }
-    public float OverlayHeight { get; set; }
-    public float StepSize { get; set; }
-}
-#endregion
