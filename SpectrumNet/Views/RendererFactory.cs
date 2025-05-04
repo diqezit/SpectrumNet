@@ -140,6 +140,7 @@ public static class RendererFactory
         RenderStyle.Voronoi => VoronoiRenderer.GetInstance(),
         RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
         RenderStyle.Waveform => WaveformRenderer.GetInstance(),
+        RenderStyle.WaterRenderer => WaterRenderer.GetInstance(),
         _ => throw new ArgumentException($"Unknown render style: {style}")
     };
 

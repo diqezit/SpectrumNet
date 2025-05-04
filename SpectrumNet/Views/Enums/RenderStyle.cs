@@ -31,5 +31,6 @@ public enum RenderStyle
     TextParticles,
     Voronoi,
     Waterfall,
+    WaterRenderer,
     Waveform
 }
