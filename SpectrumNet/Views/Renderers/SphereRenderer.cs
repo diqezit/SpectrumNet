@@ -1,316 +1,332 @@
 ﻿#nullable enable
 
-using SpectrumNet.Service.Enums;
+using static SpectrumNet.Views.Renderers.SphereRenderer.Constants;
 
 namespace SpectrumNet.Views.Renderers;
 
-/// <summary>
-/// Renderer that visualizes spectrum data as orbiting spheres around a center point.
-/// </summary>
-public sealed class SphereRenderer : BaseSpectrumRenderer
+public sealed class SphereRenderer : EffectSpectrumRenderer
 {
-    #region Singleton Pattern
     private static readonly Lazy<SphereRenderer> _instance = new(() => new SphereRenderer());
-    private SphereRenderer() { } // Приватный конструктор
-    public static SphereRenderer GetInstance() => _instance.Value;
-    #endregion
 
-    #region Constants
-    private static class Constants
+    private SphereRenderer() => InitialiseConfigs();
+
+    public static SphereRenderer GetInstance() => _instance.Value;
+
+    public record Constants
     {
-        // Logging
         public const string LOG_PREFIX = "SphereRenderer";
 
-        // Spectrum processing
-        public const float MIN_MAGNITUDE = 0.01f;
-        public const float MAX_INTENSITY_MULTIPLIER = 3f;
-        public const float MIN_ALPHA = 0.1f;
-        public const float PI_OVER_180 = (float)(PI / 180);
+        public const float
+            MIN_MAGNITUDE = 0.01f,
+            MAX_INTENSITY_MULTIPLIER = 3f,
+            MIN_ALPHA = 0.1f,
+            PI_OVER_180 = (float)(PI / 180);
 
-        // Geometry
-        public const float DEFAULT_RADIUS = 40f;
-        public const float MIN_RADIUS = 1.0f;
-        public const float DEFAULT_SPACING = 10f;
-        public const int DEFAULT_COUNT = 8;
+        public const float
+            DEFAULT_RADIUS = 40f,
+            MIN_RADIUS = 1.0f,
+            DEFAULT_SPACING = 10f;
 
-        // Quality presets
-        public static readonly (float SmoothingFactor, bool AntiAlias, int SphereSegments) LOW_QUALITY =
-            (0.1f, false, 0);
-        public static readonly (float SmoothingFactor, bool AntiAlias, int SphereSegments) MEDIUM_QUALITY =
-            (0.2f, true, 0);
-        public static readonly (float SmoothingFactor, bool AntiAlias, int SphereSegments) HIGH_QUALITY =
-            (0.3f, true, 8);
+        public const int
+            DEFAULT_COUNT = 8,
+            BATCH_SIZE = 128;
 
-        // Configuration presets
-        public static readonly (float Radius, float Spacing, int Count) DEFAULT_CONFIG =
-            (DEFAULT_RADIUS, DEFAULT_SPACING, DEFAULT_COUNT);
-        public static readonly (float Radius, float Spacing, int Count) OVERLAY_CONFIG =
-            (20f, 5f, 16);
+        public static readonly (float Radius, float Spacing, int Count)
+            DEFAULT_CONFIG = (DEFAULT_RADIUS, DEFAULT_SPACING, DEFAULT_COUNT),
+            OVERLAY_CONFIG = (20f, 5f, 16);
 
-        // Performance
-        public const int BATCH_SIZE = 128;
+        public static class Quality
+        {
+            public const float
+                LOW_SMOOTHING_FACTOR = 0.1f,
+                MEDIUM_SMOOTHING_FACTOR = 0.2f,
+                HIGH_SMOOTHING_FACTOR = 0.3f;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
+            public const int
+                LOW_SPHERE_SEGMENTS = 0,
+                MEDIUM_SPHERE_SEGMENTS = 0,
+                HIGH_SPHERE_SEGMENTS = 8;
+        }
     }
-    #endregion
 
-    #region Fields
-    // Object pools for efficient memory management
-    private readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
-
-    // Configuration state
-    private bool _isOverlayActive;
-    private new bool _disposed;
-    private float _sphereRadius, _sphereSpacing;
-    private int _sphereCount;
-
-    // Cached data
-    private float[]? _cosValues, _sinValues, _currentAlphas;
-    private float[]? _processedSpectrum;
-
-    // Synchronization and resources
-    private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
+    private readonly new ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
     private readonly ThreadLocal<SKPath> _spherePath = new(() => new SKPath());
 
-    // Quality settings
-    private float _alphaSmoothingFactor = Constants.MEDIUM_QUALITY.SmoothingFactor;
-    private new bool _useAntiAlias = Constants.MEDIUM_QUALITY.AntiAlias;
-    private int _sphereSegments = Constants.MEDIUM_QUALITY.SphereSegments;
-    private new RenderQuality _quality = RenderQuality.Medium;
-    #endregion
+    private new bool _isOverlayActive;
+    private float _sphereRadius = DEFAULT_RADIUS;
+    private float _sphereSpacing = DEFAULT_SPACING;
+    private int _sphereCount = DEFAULT_COUNT;
 
-    #region Initialization and Configuration
-    /// <summary>
-    /// Initializes the renderer and prepares resources for rendering.
-    /// </summary>
-    public override void Initialize()
-    {
-        Safe(() =>
-        {
-            base.Initialize();
+    private float _alphaSmoothingFactor;
+    private new bool _useAntiAlias;
+    private int _sphereSegments;
 
-            UpdateConfiguration(Constants.DEFAULT_CONFIG);
-            ApplyQualitySettings();
+    private float[]? _cosValues;
+    private float[]? _sinValues;
+    private float[]? _currentAlphas;
+    private new float[]? _processedSpectrum;
 
-            Log(LogLevel.Debug, Constants.LOG_PREFIX, "Initialized");
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Initialize",
-            ErrorMessage = "Failed to initialize renderer"
-        });
-    }
+    private readonly new SemaphoreSlim _spectrumSemaphore = new(1, 1);
 
-    /// <summary>
-    /// Configures the renderer with overlay status and quality settings.
-    /// </summary>
-    /// <param name="isOverlayActive">Indicates if the renderer is used in overlay mode.</param>
-    /// <param name="quality">The rendering quality level.</param>
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-    {
-        Safe(() =>
-        {
-            base.Configure(isOverlayActive, quality);
-
-            bool configChanged = _isOverlayActive != isOverlayActive || _quality != quality;
-
-            _isOverlayActive = isOverlayActive;
-            UpdateConfiguration(isOverlayActive ? Constants.OVERLAY_CONFIG : Constants.DEFAULT_CONFIG);
-
-            if (_quality != quality)
+    protected override void OnInitialize() =>
+        ExecuteSafely(
+            () =>
             {
-                _quality = quality;
-                ApplyQualitySettings();
-            }
+                base.OnInitialize();
+                UpdateConfiguration(DEFAULT_CONFIG);
+                ApplyQualitySpecificSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            "OnInitialize",
+            "Failed to initialize renderer"
+        );
 
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.Configure",
-            ErrorMessage = "Failed to configure renderer"
-        });
-    }
+    private void InitialiseConfigs() => MediumQualityConfigs();
 
-    /// <summary>
-    /// Applies quality settings based on the current quality level.
-    /// </summary>
-    protected override void ApplyQualitySettings()
-    {
-        Safe(() =>
-        {
-            base.ApplyQualitySettings();
-
-            switch (_quality)
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium) =>
+        ExecuteSafely(
+            () =>
             {
-                case RenderQuality.Low:
-                    (_alphaSmoothingFactor, _useAntiAlias, _sphereSegments) = Constants.LOW_QUALITY;
-                    break;
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
 
-                case RenderQuality.Medium:
-                    (_alphaSmoothingFactor, _useAntiAlias, _sphereSegments) = Constants.MEDIUM_QUALITY;
-                    break;
+                _isOverlayActive = isOverlayActive;
 
-                case RenderQuality.High:
-                    (_alphaSmoothingFactor, _useAntiAlias, _sphereSegments) = Constants.HIGH_QUALITY;
-                    break;
-            }
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.ApplyQualitySettings",
-            ErrorMessage = "Failed to apply quality settings"
-        });
-    }
+                if (configChanged)
+                {
+                    UpdateConfiguration(isOverlayActive ? OVERLAY_CONFIG : DEFAULT_CONFIG);
+                    Log(LogLevel.Debug,
+                        LOG_PREFIX,
+                        $"Configuration changed. New Quality: {Quality}");
+                }
+            },
+            "Configure",
+            "Failed to configure renderer"
+        );
 
-    /// <summary>
-    /// Updates the configuration of the sphere renderer.
-    /// </summary>
-    private void UpdateConfiguration((float Radius, float Spacing, int Count) config)
+    protected override void OnQualitySettingsApplied() =>
+        ExecuteSafely(
+            () =>
+            {
+                base.OnQualitySettingsApplied();
+                ApplyQualitySpecificSettings();
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Quality settings applied. New Quality: {Quality}");
+            },
+            "OnQualitySettingsApplied",
+            "Failed to apply specific quality settings"
+        );
+
+    private void ApplyQualitySpecificSettings()
     {
-        Safe(() =>
+        switch (Quality)
         {
-            (_sphereRadius, _sphereSpacing, _sphereCount) = config;
-            _sphereRadius = Max(Constants.MIN_RADIUS, _sphereRadius);
+            case RenderQuality.Low:
+                LowQualityConfigs();
+                break;
 
-            EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
-            PrecomputeTrigValues();
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.UpdateConfiguration",
-            ErrorMessage = "Failed to update configuration"
-        });
+            case RenderQuality.Medium:
+                MediumQualityConfigs();
+                break;
+
+            case RenderQuality.High:
+                HighQualityConfigs();
+                break;
+        }
     }
 
-    /// <summary>
-    /// Adjusts configuration based on canvas dimensions and bar parameters.
-    /// </summary>
-    private void AdjustConfiguration(int barCount, float barSpacing, int canvasWidth, int canvasHeight)
+    private void LowQualityConfigs()
     {
-        Safe(() =>
-        {
-            _sphereRadius = Max(5f, Constants.DEFAULT_RADIUS - barCount * 0.2f + barSpacing * 0.5f);
-            _sphereSpacing = Max(2f, Constants.DEFAULT_SPACING - barCount * 0.1f + barSpacing * 0.3f);
-            _sphereCount = Clamp(barCount / 2, 4, 64);
-
-            float maxRadius = Min(canvasWidth, canvasHeight) / 2f - (_sphereRadius + _sphereSpacing);
-            if (_sphereRadius > maxRadius)
-                _sphereRadius = maxRadius;
-
-            _sphereRadius = Max(Constants.MIN_RADIUS, _sphereRadius);
-
-            EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
-            PrecomputeTrigValues();
-        }, new ErrorHandlingOptions
-        {
-            Source = $"{Constants.LOG_PREFIX}.AdjustConfiguration",
-            ErrorMessage = "Failed to adjust configuration"
-        });
+        _alphaSmoothingFactor = Constants.Quality.LOW_SMOOTHING_FACTOR;
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+        _sphereSegments = Constants.Quality.LOW_SPHERE_SEGMENTS;
     }
-    #endregion
 
-    #region Rendering
-    /// <summary>
-    /// Renders the visualization on the canvas using spectrum data.
-    /// </summary>
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
+    private void MediumQualityConfigs()
+    {
+        _alphaSmoothingFactor = Constants.Quality.MEDIUM_SMOOTHING_FACTOR;
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+        _sphereSegments = Constants.Quality.MEDIUM_SPHERE_SEGMENTS;
+    }
+
+    private void HighQualityConfigs()
+    {
+        _alphaSmoothingFactor = Constants.Quality.HIGH_SMOOTHING_FACTOR;
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+        _sphereSegments = Constants.Quality.HIGH_SPHERE_SEGMENTS;
+    }
+
+    private void UpdateConfiguration((float Radius, float Spacing, int Count) config) =>
+        ExecuteSafely(
+            () =>
+            {
+                (_sphereRadius, _sphereSpacing, _sphereCount) = config;
+                _sphereRadius = Max(MIN_RADIUS, _sphereRadius);
+
+                EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
+                PrecomputeTrigValues();
+            },
+            "UpdateConfiguration",
+            "Failed to update configuration"
+        );
+
+    private void AdjustConfiguration(
+        int barCount,
+        float barSpacing,
+        int canvasWidth,
+        int canvasHeight) =>
+        ExecuteSafely(
+            () =>
+            {
+                _sphereRadius = Max(5f, DEFAULT_RADIUS - barCount * 0.2f + barSpacing * 0.5f);
+                _sphereSpacing = Max(2f, DEFAULT_SPACING - barCount * 0.1f + barSpacing * 0.3f);
+                _sphereCount = Clamp(barCount / 2, 4, 64);
+
+                float maxRadius = Min(canvasWidth,
+                                      canvasHeight) / 2f - (_sphereRadius + _sphereSpacing);
+                if (_sphereRadius > maxRadius)
+                    _sphereRadius = maxRadius;
+
+                _sphereRadius = Max(MIN_RADIUS, _sphereRadius);
+
+                EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
+                PrecomputeTrigValues();
+            },
+            "AdjustConfiguration",
+            "Failed to adjust configuration"
+        );
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+        SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                    return;
+
+                if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+                    return;
+
+                UpdateState(spectrum, info, barWidth, barSpacing, barCount);
+                RenderFrame(canvas, spectrum, info, paint);
+            },
+            "RenderEffect",
+            "Error during rendering"
+        );
+
+    private void UpdateState(
+        float[] spectrum,
+        SKImageInfo info,
+        float _, // bar width
+        float barSpacing,
+        int barCount)
     {
-        // Validate rendering parameters
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+        bool semaphoreAcquired = false;
+        try
         {
-            drawPerformanceInfo?.Invoke(canvas!, info);
-            return;
-        }
-
-        // Quick reject if canvas area is not visible
-        if (canvas!.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-        {
-            drawPerformanceInfo?.Invoke(canvas, info);
-            return;
-        }
-
-        Safe(() =>
-        {
-            bool semaphoreAcquired = false;
-            try
+            semaphoreAcquired = _spectrumSemaphore.Wait(0);
+            if (semaphoreAcquired)
             {
-                semaphoreAcquired = _spectrumSemaphore.Wait(0);
-                if (semaphoreAcquired)
-                {
-                    ProcessSpectrum(spectrum!, info, barWidth, barSpacing, barCount);
-                }
-
-                if (_processedSpectrum != null)
-                {
-                    int sphereCount = Min(spectrum!.Length, _sphereCount);
-                    float centerRadius = info.Height / 2f - (_sphereRadius + _sphereSpacing);
-
-                    RenderSpheres(
-                        canvas!,
-                        _processedSpectrum,
-                        sphereCount,
-                        info.Width / 2f,
-                        info.Height / 2f,
-                        centerRadius,
-                        paint!);
-                }
+                AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
+                ProcessSpectrum(spectrum, barCount);
             }
-            finally
-            {
-                if (semaphoreAcquired)
-                {
-                    _spectrumSemaphore.Release();
-                }
-            }
-        }, new ErrorHandlingOptions
+        }
+        finally
         {
-            Source = $"{Constants.LOG_PREFIX}.Render",
-            ErrorMessage = "Error during rendering"
-        });
-
-        // Draw performance info
-        drawPerformanceInfo?.Invoke(canvas!, info);
+            if (semaphoreAcquired)
+            {
+                _spectrumSemaphore.Release();
+            }
+        }
     }
 
-    /// <summary>
-    /// Validates all render parameters before processing.
-    /// </summary>
-    private bool ValidateRenderParameters(SKCanvas? canvas, float[]? spectrum, SKImageInfo info, SKPaint? paint)
+    private void RenderFrame(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        SKPaint paint)
     {
-        if (_disposed)
+        if (_processedSpectrum != null)
         {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
+            int sphereCount = Min(spectrum.Length, _sphereCount);
+            float centerRadius = info.Height / 2f - (_sphereRadius + _sphereSpacing);
 
-        if (canvas == null || spectrum == null || paint == null)
-        {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, "Invalid render parameters: null values");
-            return false;
+            RenderSpheres(
+                canvas,
+                _processedSpectrum,
+                sphereCount,
+                info.Width / 2f,
+                info.Height / 2f,
+                centerRadius,
+                paint);
         }
+    }
 
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, Constants.LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
-
-        if (spectrum.Length < 2)
-        {
-            Log(LogLevel.Warning, Constants.LOG_PREFIX, "Insufficient spectrum data");
-            return false;
-        }
-
+    private bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint)
+    {
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
         return true;
     }
-    #endregion
 
-    #region Rendering Implementation
-    /// <summary>
-    /// Renders the spheres on the canvas.
-    /// </summary>
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
+
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null && spectrum.Length > 1) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or too small");
+        return false;
+    }
+
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error,
+            LOG_PREFIX,
+            $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
+        return true;
+    }
+
     private void RenderSpheres(
         SKCanvas canvas,
         float[] spectrum,
@@ -318,104 +334,215 @@ public sealed class SphereRenderer : BaseSpectrumRenderer
         float centerX,
         float centerY,
         float maxRadius,
-        SKPaint paint)
+        SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (!AreArraysValid(sphereCount))
+                    return;
+
+                var alphaGroups = GetAlphaGroups(sphereCount, 5);
+
+                if (_sphereSegments > 0)
+                {
+                    RenderHighQualitySpheres(
+                        canvas,
+                        spectrum,
+                        alphaGroups,
+                        paint,
+                        centerX,
+                        centerY,
+                        maxRadius);
+                }
+                else
+                {
+                    RenderSimpleSpheres(
+                        canvas,
+                        spectrum,
+                        alphaGroups,
+                        paint,
+                        centerX,
+                        centerY,
+                        maxRadius);
+                }
+            },
+            "RenderSpheres",
+            "Error during sphere rendering"
+        );
+
+    private void RenderHighQualitySpheres(
+        SKCanvas canvas,
+        float[] spectrum,
+        (int start, int end, float alpha)[] alphaGroups,
+        SKPaint paint,
+        float centerX,
+        float centerY,
+        float maxRadius)
     {
-        if (!AreArraysValid(sphereCount))
-            return;
-
-        var alphaGroups = GetAlphaGroups(sphereCount, 5);
-
-        if (_sphereSegments > 0)
+        foreach (var group in alphaGroups)
         {
-            // High quality rendering with gradient spheres
-            foreach (var group in alphaGroups)
-            {
-                if (group.end <= group.start)
-                    continue;
+            if (group.end <= group.start)
+                continue;
 
-                float groupAlpha = group.alpha;
-                var centerColor = paint.Color.WithAlpha((byte)(255 * groupAlpha));
-                var edgeColor = paint.Color.WithAlpha(0);
+            using var groupPaint = PrepareHighQualityPaint(paint, group.alpha);
 
-                using var shader = SKShader.CreateRadialGradient(
-                    new SKPoint(0, 0),
-                    1.0f,
-                    new[] { centerColor, edgeColor },
-                    new[] { 0.0f, 1.0f },
-                    SKShaderTileMode.Clamp);
-
-                using var groupPaint = _paintPool.Get();
-                groupPaint.Reset();
-                groupPaint.Shader = shader;
-                groupPaint.IsAntialias = _useAntiAlias;
-
-                for (int i = group.start; i < group.end; i++)
-                {
-                    float magnitude = spectrum[i];
-
-                    if (magnitude < Constants.MIN_MAGNITUDE)
-                        continue;
-
-                    float x = centerX + _cosValues![i] * maxRadius;
-                    float y = centerY + _sinValues![i] * maxRadius;
-                    float circleSize = MathF.Max(magnitude * _sphereRadius, 2f) + _sphereSpacing * 0.2f;
-
-                    SKRect bounds = new(x - circleSize, y - circleSize, x + circleSize, y + circleSize);
-                    if (canvas.QuickReject(bounds))
-                        continue;
-
-                    canvas.Save();
-                    canvas.Translate(x, y);
-                    canvas.Scale(circleSize);
-                    canvas.DrawCircle(0, 0, 1.0f, groupPaint);
-                    canvas.Restore();
-                }
-            }
-        }
-        else
-        {
-            // Simple sphere rendering for low and medium quality
-            using var spherePaint = _paintPool.Get();
-            spherePaint.Reset();
-            spherePaint.IsAntialias = _useAntiAlias;
-
-            foreach (var group in alphaGroups)
-            {
-                if (group.end <= group.start)
-                    continue;
-
-                spherePaint.Color = paint.Color.WithAlpha((byte)(255 * group.alpha));
-
-                for (int i = group.start; i < group.end; i++)
-                {
-                    float magnitude = spectrum[i];
-
-                    if (magnitude < Constants.MIN_MAGNITUDE)
-                        continue;
-
-                    float x = centerX + _cosValues![i] * maxRadius;
-                    float y = centerY + _sinValues![i] * maxRadius;
-                    float circleSize = MathF.Max(magnitude * _sphereRadius, 2f) + _sphereSpacing * 0.2f;
-
-                    SKRect bounds = new(x - circleSize, y - circleSize, x + circleSize, y + circleSize);
-                    if (canvas.QuickReject(bounds))
-                        continue;
-
-                    canvas.DrawCircle(x, y, circleSize, spherePaint);
-                }
-            }
+            DrawHighQualitySpheres(
+                canvas,
+                spectrum,
+                group,
+                groupPaint,
+                centerX,
+                centerY,
+                maxRadius);
         }
     }
 
-    /// <summary>
-    /// Groups spheres by alpha value for batch rendering optimization.
-    /// </summary>
+    private SKPaint PrepareHighQualityPaint(SKPaint paint, float alpha)
+    {
+        var centerColor = paint.Color.WithAlpha((byte)(255 * alpha));
+        var edgeColor = paint.Color.WithAlpha(0);
+
+        using var shader = SKShader.CreateRadialGradient(
+            new SKPoint(0, 0),
+            1.0f,
+            [centerColor, edgeColor],
+            [0.0f, 1.0f],
+            SKShaderTileMode.Clamp);
+
+        var groupPaint = _paintPool.Get();
+        groupPaint.Reset();
+        groupPaint.Shader = shader;
+        groupPaint.IsAntialias = _useAntiAlias;
+
+        return groupPaint;
+    }
+
+    private void DrawHighQualitySpheres(
+        SKCanvas canvas,
+        float[] spectrum,
+        (int start, int end, float _) group,
+        SKPaint groupPaint,
+        float centerX,
+        float centerY,
+        float maxRadius)
+    {
+        for (int i = group.start; i < group.end; i++)
+        {
+            float magnitude = spectrum[i];
+
+            if (magnitude < MIN_MAGNITUDE)
+                continue;
+
+            float x = centerX + _cosValues![i] * maxRadius;
+            float y = centerY + _sinValues![i] * maxRadius;
+            float circleSize = Max(magnitude * _sphereRadius, 2f) + _sphereSpacing * 0.2f;
+
+            SKRect bounds = new(x - circleSize, y - circleSize, x + circleSize, y + circleSize);
+            if (canvas.QuickReject(bounds))
+                continue;
+
+            DrawSingleHighQualitySphere(canvas, x, y, circleSize, groupPaint);
+        }
+    }
+
+    private static void DrawSingleHighQualitySphere(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float circleSize,
+        SKPaint paint)
+    {
+        canvas.Save();
+        canvas.Translate(x, y);
+        canvas.Scale(circleSize);
+        canvas.DrawCircle(0, 0, 1.0f, paint);
+        canvas.Restore();
+    }
+
+    private void RenderSimpleSpheres(
+        SKCanvas canvas,
+        float[] spectrum,
+        (int start, int end, float alpha)[] alphaGroups,
+        SKPaint paint,
+        float centerX,
+        float centerY,
+        float maxRadius)
+    {
+        using var spherePaint = PrepareSimplePaint();
+
+        foreach (var group in alphaGroups)
+        {
+            if (group.end <= group.start)
+                continue;
+
+            spherePaint.Color = paint.Color.WithAlpha((byte)(255 * group.alpha));
+
+            DrawSimpleSpheres(
+                canvas,
+                spectrum,
+                group,
+                spherePaint,
+                centerX,
+                centerY,
+                maxRadius);
+        }
+    }
+
+    private SKPaint PrepareSimplePaint()
+    {
+        var spherePaint = _paintPool.Get();
+        spherePaint.Reset();
+        spherePaint.IsAntialias = _useAntiAlias;
+        return spherePaint;
+    }
+
+    private void DrawSimpleSpheres(
+        SKCanvas canvas,
+        float[] spectrum,
+        (int start, int end, float _) group,
+        SKPaint spherePaint,
+        float centerX,
+        float centerY,
+        float maxRadius)
+    {
+        for (int i = group.start; i < group.end; i++)
+        {
+            float magnitude = spectrum[i];
+
+            if (magnitude < MIN_MAGNITUDE)
+                continue;
+
+            float x = centerX + _cosValues![i] * maxRadius;
+            float y = centerY + _sinValues![i] * maxRadius;
+            float circleSize = Max(magnitude * _sphereRadius, 2f) + _sphereSpacing * 0.2f;
+
+            SKRect bounds = new(x - circleSize, y - circleSize, x + circleSize, y + circleSize);
+            if (canvas.QuickReject(bounds))
+                continue;
+
+            canvas.DrawCircle(x, y, circleSize, spherePaint);
+        }
+    }
+
     private (int start, int end, float alpha)[] GetAlphaGroups(int length, int maxGroups)
     {
         if (_currentAlphas == null || length == 0)
-            return Array.Empty<(int, int, float)>();
+            return [];
 
-        List<(int start, int end, float alpha)> groups = new(maxGroups);
+        var groups = new List<(int start, int end, float alpha)>(maxGroups);
+
+        CollectAlphaGroups(groups, length, maxGroups);
+
+        return [.. groups];
+    }
+
+    private void CollectAlphaGroups(
+        List<(int start, int end, float alpha)> groups,
+        int length,
+        int maxGroups)
+    {
+        if (_currentAlphas == null || length == 0)
+            return;
 
         int currentStart = 0;
         float currentAlpha = _currentAlphas[0];
@@ -432,23 +559,25 @@ public sealed class SphereRenderer : BaseSpectrumRenderer
         }
 
         groups.Add((currentStart, length, currentAlpha));
-
-        return groups.ToArray();
     }
-    #endregion
 
-    #region Spectrum Processing
-    /// <summary>
-    /// Processes spectrum data for visualization.
-    /// </summary>
-    private void ProcessSpectrum(float[] spectrum, SKImageInfo info, float barWidth, float barSpacing, int barCount)
+    private void ProcessSpectrum(float[] spectrum, int _) =>
+        ExecuteSafely(
+            () =>
+            {
+                int sphereCount = Min(spectrum.Length, _sphereCount);
+                EnsureProcessedSpectrumCapacity(sphereCount);
+
+                ScaleSpectrumData(spectrum, sphereCount);
+                UpdateAlphas(sphereCount);
+            },
+            "ProcessSpectrum",
+            "Error processing spectrum data"
+        );
+
+    private void ScaleSpectrumData(float[] spectrum, int sphereCount)
     {
-        AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
-        int sphereCount = Min(spectrum.Length, _sphereCount);
-
-        EnsureProcessedSpectrumCapacity(sphereCount);
-
-        if (IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
+        if (IsHardwareAccelerated && spectrum.Length >= System.Numerics.Vector<float>.Count)
         {
             ProcessSpectrumSIMD(spectrum, _processedSpectrum!, sphereCount);
         }
@@ -456,68 +585,101 @@ public sealed class SphereRenderer : BaseSpectrumRenderer
         {
             ScaleSpectrum(spectrum, _processedSpectrum!, sphereCount);
         }
-
-        UpdateAlphas(sphereCount);
     }
 
-    /// <summary>
-    /// Processes spectrum data using SIMD optimizations.
-    /// </summary>
     [MethodImpl(AggressiveOptimization)]
-    private void ProcessSpectrumSIMD(float[] source, float[] target, int targetCount)
+    private static void ProcessSpectrumSIMD(
+        float[] source,
+        float[] target,
+        int targetCount)
     {
         float blockSize = source.Length / (float)targetCount;
 
         Parallel.For(0, targetCount, i =>
         {
-            int start = (int)(i * blockSize);
-            int end = (int)((i + 1) * blockSize);
-            end = Min(end, source.Length);
-
-            if (start >= end)
-            {
-                target[i] = 0;
-                return;
-            }
-
-            float sum = 0;
-            int count = end - start;
-
-            int vectorSize = Vector<float>.Count;
-            int vectorizableLength = (end - start) / vectorSize * vectorSize;
-
-            for (int j = start; j < start + vectorizableLength; j += vectorSize)
-            {
-                Vector<float> vec = new Vector<float>(source, j);
-                sum += Sum(vec);
-            }
-
-            for (int j = start + vectorizableLength; j < end; j++)
-            {
-                sum += source[j];
-            }
-
-            target[i] = sum / count;
+            ProcessSpectrumBlock(source, target, i, blockSize);
         });
     }
 
-    /// <summary>
-    /// Ensures the processed spectrum buffer has sufficient capacity.
-    /// </summary>
-    private void EnsureProcessedSpectrumCapacity(int requiredSize)
+    private static void ProcessSpectrumBlock(
+        float[] source,
+        float[] target,
+        int blockIndex,
+        float blockSize)
     {
-        if (_processedSpectrum != null && _processedSpectrum.Length >= requiredSize)
+        int start = (int)(blockIndex * blockSize);
+        int end = (int)((blockIndex + 1) * blockSize);
+        end = Min(end, source.Length);
+
+        if (start >= end)
+        {
+            target[blockIndex] = 0;
             return;
+        }
 
-        if (_processedSpectrum != null)
-            ArrayPool<float>.Shared.Return(_processedSpectrum);
-
-        _processedSpectrum = ArrayPool<float>.Shared.Rent(requiredSize);
+        target[blockIndex] = CalculateVectorizedAverage(source, start, end);
     }
 
-    /// <summary>
-    /// Scales the spectrum data to the target count.
-    /// </summary>
+    private static float CalculateVectorizedAverage(
+        float[] source,
+        int start,
+        int end)
+    {
+        float sum = 0;
+        int count = end - start;
+
+        int vectorSize = System.Numerics.Vector<float>.Count;
+        int vectorizableLength = (end - start) / vectorSize * vectorSize;
+
+        CalculateVectorizedSum(source, start, vectorizableLength, ref sum);
+        CalculateRemainingSum(source, start + vectorizableLength, end, ref sum);
+
+        return sum / count;
+    }
+
+    private static void CalculateVectorizedSum(
+        float[] source,
+        int start,
+        int vectorizableLength,
+        ref float sum)
+    {
+        int vectorSize = System.Numerics.Vector<float>.Count;
+
+        for (int j = 0; j < vectorizableLength; j += vectorSize)
+        {
+            var vec = new System.Numerics.Vector<float>(source, start + j);
+            sum += System.Numerics.Vector.Sum(vec);
+        }
+    }
+
+    private static void CalculateRemainingSum(
+        float[] source,
+        int start,
+        int end,
+        ref float sum)
+    {
+        for (int j = start; j < end; j++)
+        {
+            sum += source[j];
+        }
+    }
+
+    private void EnsureProcessedSpectrumCapacity(int requiredSize) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_processedSpectrum != null && _processedSpectrum.Length >= requiredSize)
+                    return;
+
+                if (_processedSpectrum != null)
+                    ArrayPool<float>.Shared.Return(_processedSpectrum);
+
+                _processedSpectrum = ArrayPool<float>.Shared.Rent(requiredSize);
+            },
+            "EnsureProcessedSpectrumCapacity",
+            "Failed to ensure spectrum capacity"
+        );
+
     [MethodImpl(AggressiveInlining)]
     private static void ScaleSpectrum(float[] source, float[] target, int targetCount)
     {
@@ -525,8 +687,8 @@ public sealed class SphereRenderer : BaseSpectrumRenderer
 
         for (int i = 0; i < targetCount; i++)
         {
-            int start = (int)(i * blockSize);
-            int end = (int)((i + 1) * blockSize);
+            int start = (int)(blockSize * i);
+            int end = (int)(blockSize * (i + 1));
             end = Min(end, source.Length);
 
             if (start >= end)
@@ -535,111 +697,126 @@ public sealed class SphereRenderer : BaseSpectrumRenderer
                 continue;
             }
 
-            float sum = 0;
-            for (int j = start; j < end; j++)
-                sum += source[j];
-
-            target[i] = sum / (end - start);
+            target[i] = CalculateBlockAverage(source, start, end);
         }
     }
 
-    /// <summary>
-    /// Updates alpha values for smooth transitions.
-    /// </summary>
-    private void UpdateAlphas(int length)
+    [MethodImpl(AggressiveInlining)]
+    private static float CalculateBlockAverage(float[] source, int start, int end)
     {
-        if (_processedSpectrum == null || _currentAlphas == null || _currentAlphas.Length < length)
+        float sum = 0;
+        for (int j = start; j < end; j++)
+            sum += source[j];
+
+        return sum / (end - start);
+    }
+
+    private void UpdateAlphas(int length) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_processedSpectrum == null
+                    || _currentAlphas == null
+                    || _currentAlphas.Length < length)
+                    return;
+
+                for (int i = 0; i < length; i++)
+                {
+                    UpdateSingleAlpha(i);
+                }
+            },
+            "UpdateAlphas",
+            "Failed to update alpha values"
+        );
+
+    private void UpdateSingleAlpha(int index)
+    {
+        if (_processedSpectrum == null || _currentAlphas == null)
             return;
 
-        for (int i = 0; i < length; i++)
-        {
-            float targetAlpha = MathF.Max(Constants.MIN_ALPHA, _processedSpectrum[i] * Constants.MAX_INTENSITY_MULTIPLIER);
-            _currentAlphas[i] = _currentAlphas[i] +
-                               (targetAlpha - _currentAlphas[i]) * _alphaSmoothingFactor;
-        }
-    }
-    #endregion
-
-    #region Helper Methods
-    /// <summary>
-    /// Precomputes trigonometric values for optimized rendering.
-    /// </summary>
-    private void PrecomputeTrigValues()
-    {
-        EnsureArrayCapacity(ref _cosValues, _sphereCount);
-        EnsureArrayCapacity(ref _sinValues, _sphereCount);
-
-        float angleStepRad = 360f / _sphereCount * Constants.PI_OVER_180;
-
-        for (int i = 0; i < _sphereCount; i++)
-        {
-            float angle = i * angleStepRad;
-            _cosValues![i] = MathF.Cos(angle);
-            _sinValues![i] = MathF.Sin(angle);
-        }
+        float targetAlpha = Max(MIN_ALPHA, _processedSpectrum[index] * MAX_INTENSITY_MULTIPLIER);
+        _currentAlphas[index] = _currentAlphas[index] +
+                            (targetAlpha - _currentAlphas[index]) * _alphaSmoothingFactor;
     }
 
-    /// <summary>
-    /// Checks if required arrays are valid and have sufficient capacity.
-    /// </summary>
+    private void PrecomputeTrigValues() =>
+        ExecuteSafely(
+            () =>
+            {
+                EnsureArrayCapacity(ref _cosValues, _sphereCount);
+                EnsureArrayCapacity(ref _sinValues, _sphereCount);
+
+                float angleStepRad = 360f / _sphereCount * PI_OVER_180;
+
+                for (int i = 0; i < _sphereCount; i++)
+                {
+                    float angle = i * angleStepRad;
+                    _cosValues![i] = MathF.Cos(angle);
+                    _sinValues![i] = MathF.Sin(angle);
+                }
+            },
+            "PrecomputeTrigValues",
+            "Failed to precompute trigonometric values"
+        );
+
     private bool AreArraysValid(int requiredLength) =>
         _cosValues != null && _sinValues != null && _currentAlphas != null &&
         _cosValues.Length >= requiredLength &&
         _sinValues.Length >= requiredLength &&
         _currentAlphas.Length >= requiredLength;
 
-    /// <summary>
-    /// Ensures an array has sufficient capacity, reallocating if necessary.
-    /// </summary>
     private static void EnsureArrayCapacity<T>(ref T[]? array, int requiredSize) where T : struct
     {
         if (array == null || array.Length < requiredSize)
             array = new T[requiredSize];
     }
-    #endregion
 
-    #region Disposal
-    /// <summary>
-    /// Disposes of resources used by the renderer.
-    /// </summary>
     public override void Dispose()
     {
-        if (!_disposed)
-        {
-            Safe(() =>
-            {
-                // Dispose synchronization primitives
-                _spectrumSemaphore.Dispose();
-
-                // Dispose thread local resources
-                if (_spherePath.IsValueCreated && _spherePath.Value != null)
-                {
-                    _spherePath.Value.Dispose();
-                }
-                _spherePath.Dispose();
-
-                // Return pooled arrays
-                if (_processedSpectrum != null)
-                    ArrayPool<float>.Shared.Return(_processedSpectrum);
-
-                // Dispose object pools
-                _paintPool.Dispose();
-
-                // Clear references
-                _cosValues = _sinValues = _currentAlphas = _processedSpectrum = null;
-
-                // Call base disposal
-                base.Dispose();
-
-                Log(LogLevel.Debug, Constants.LOG_PREFIX, "Disposed");
-            }, new ErrorHandlingOptions
-            {
-                Source = $"{Constants.LOG_PREFIX}.Dispose",
-                ErrorMessage = "Error during disposal"
-            });
-
-            _disposed = true;
-        }
+        if (_disposed) return;
+        ExecuteSafely(
+            OnDispose,
+            "Dispose",
+            "Error during disposal"
+        );
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
-    #endregion
+
+    protected override void OnDispose() =>
+        ExecuteSafely(
+            () =>
+            {
+                DisposeManagedResources();
+                base.OnDispose();
+            },
+            "OnDispose",
+            "Error during specific disposal"
+        );
+
+    private void DisposeManagedResources()
+    {
+        _spectrumSemaphore.Dispose();
+
+        if (_spherePath.IsValueCreated && _spherePath.Value != null)
+        {
+            _spherePath.Value.Dispose();
+        }
+        _spherePath.Dispose();
+
+        if (_processedSpectrum != null)
+            ArrayPool<float>.Shared.Return(_processedSpectrum);
+
+        _paintPool.Dispose();
+
+        _cosValues = _sinValues = _currentAlphas = _processedSpectrum = null;
+    }
+
+    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
+        Safe(action, new ErrorHandlingOptions
+        {
+            Source = $"{LOG_PREFIX}.{source}",
+            ErrorMessage = errorMessage
+        });
 }
