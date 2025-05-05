@@ -1,17 +1,27 @@
-﻿using static System.MathF;
+﻿#nullable enable
 
 namespace SpectrumNet.Views.Abstract;
 
 public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 {
-    protected readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 5);
-    protected readonly ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 5);
+    private const int DefaultPoolSize = 5;
+    private const string LOG_PREFIX = nameof(EffectSpectrumRenderer);
+
+    protected readonly ObjectPool<SKPath> _pathPool = new(
+        () => new SKPath(),
+        path => path.Reset(),
+        DefaultPoolSize);
+
+    protected readonly ObjectPool<SKPaint> _paintPool = new(
+        () => new SKPaint(),
+        paint => paint.Reset(),
+        DefaultPoolSize);
+
+    private readonly object _renderLock = new();
 
     protected bool _isOverlayActive;
     protected float _time;
     protected DateTime _lastUpdateTime = Now;
-
-    protected readonly object _renderLock = new();
 
     protected abstract void RenderEffect(
         SKCanvas canvas,
@@ -22,49 +32,38 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         int barCount,
         SKPaint paint);
 
-    public override void Initialize()
+    public override void Initialize() => ExecuteSafely(
+        InitializeRenderer,
+        nameof(Initialize),
+        "Failed to initialize renderer");
+
+    private void InitializeRenderer()
     {
-        Safe(
-            () =>
-            {
-                base.Initialize();
-                ApplyQualitySettings();
-                OnInitialize();
-                Log(LogLevel.Debug, $"{GetType().Name}", "Initialized");
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{GetType().Name}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            });
+        base.Initialize();
+        ApplyQualitySettings();
+        OnInitialize();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     protected virtual void OnInitialize() { }
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
+        RenderQuality quality = RenderQuality.Medium) => ExecuteSafely(
+        () => ConfigureRenderer(isOverlayActive, quality),
+        nameof(Configure),
+        "Failed to configure renderer");
+
+    private void ConfigureRenderer(
+        bool isOverlayActive,
+        RenderQuality quality)
     {
-        Safe(
-            () =>
-            {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-
-                base.Configure(isOverlayActive, quality);
-
-                _isOverlayActive = isOverlayActive;
-                Quality = quality;
-
-                if (configChanged)
-                {
-                    OnConfigurationChanged();
-                }
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{GetType().Name}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            });
+        var configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+        base.Configure(isOverlayActive, quality);
+        _isOverlayActive = isOverlayActive;
+        Quality = quality;
+        if (configChanged)
+            OnConfigurationChanged();
     }
 
     protected virtual void OnConfigurationChanged() { }
@@ -79,79 +78,146 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         SKPaint? paint,
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
     {
-        var (isValid, processedSpectrum) = PrepareRender(canvas, spectrum, info, barCount, paint);
+        var (isValid, processed) = PrepareRender(
+            canvas,
+            spectrum,
+            info,
+            barCount,
+            paint);
         if (!isValid)
         {
-            drawPerformanceInfo?.Invoke(canvas!, info);
+            drawPerformanceInfo?.Invoke(
+                canvas!,
+                info);
             return;
         }
 
-        Safe(
-            () =>
-            {
-                lock (_renderLock)
-                {
-                    DateTime now = Now;
-                    float deltaTime = MathF.Max(0, (float)(now - _lastUpdateTime).TotalSeconds);
-                    _lastUpdateTime = now;
-                    _time += deltaTime;
+        var cv = canvas!;
+        var sp = spectrum!;
+        var pr = processed!;
+        var pt = paint!;
 
-                    BeforeRender(
-                        canvas,
-                        spectrum,
-                        info,
-                        barWidth,
-                        barSpacing,
-                        barCount,
-                        paint);
+        ExecuteSafely(
+            () => RenderLocked(
+                cv,
+                sp,
+                pr,
+                info,
+                barWidth,
+                barSpacing,
+                pt),
+            nameof(Render),
+            "Error during rendering");
 
-                    RenderEffect(
-                        canvas!,
-                        processedSpectrum!,
-                        info,
-                        barWidth,
-                        barSpacing,
-                        processedSpectrum!.Length,
-                        paint!);
+        drawPerformanceInfo?.Invoke(
+            cv,
+            info);
+    }
 
-                    AfterRender(
-                        canvas!,
-                        processedSpectrum!,
-                        info);
-                }
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{GetType().Name}.Render",
-                ErrorMessage = "Error during rendering"
-            });
+    private void RenderLocked(
+        SKCanvas canvas,
+        float[] spectrum,
+        float[] processedSpectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        SKPaint paint)
+    {
+        lock (_renderLock)
+        {
+            UpdateTiming();
+            BeforeRender(
+                canvas,
+                spectrum,
+                info,
+                barWidth,
+                barSpacing,
+                processedSpectrum.Length,
+                paint);
+            RenderEffect(
+                canvas,
+                processedSpectrum,
+                info,
+                barWidth,
+                barSpacing,
+                processedSpectrum.Length,
+                paint);
+            AfterRender(
+                canvas,
+                processedSpectrum,
+                info);
+        }
+    }
 
-        drawPerformanceInfo?.Invoke(canvas!, info);
+    private void UpdateTiming()
+    {
+        var now = Now;
+        var delta = MathF.Max(
+            0,
+            (float)(now - _lastUpdateTime).TotalSeconds);
+        _lastUpdateTime = now;
+        _time += delta;
     }
 
     public override void Dispose()
     {
         if (!_disposed)
         {
-            Safe(
+            ExecuteSafely(
                 () =>
                 {
                     OnDispose();
-                    _pathPool?.Dispose();
-                    _paintPool?.Dispose();
+                    _pathPool.Dispose();
+                    _paintPool.Dispose();
                     base.Dispose();
+                    _disposed = true;
                 },
-                new ErrorHandlingOptions
-                {
-                    Source = $"{GetType().Name}.Dispose",
-                    ErrorMessage = "Error during disposal"
-                });
-            _disposed = true;
-            SuppressFinalize(this);
+                nameof(Dispose),
+                "Error during disposal");
+
+            GC.SuppressFinalize(this);
         }
     }
 
     protected virtual void OnDispose() { }
+
+    protected override void ApplyQualitySettings() => ExecuteSafely(
+        () =>
+        {
+            (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
+            _samplingOptions = QualityBasedSamplingOptions();
+            OnQualitySettingsApplied();
+        },
+        nameof(ApplyQualitySettings),
+        "Failed to apply quality settings");
+
+    protected virtual void OnQualitySettingsApplied() { }
+
+    protected override (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
+        Quality switch
+        {
+            RenderQuality.Low => (false, false),
+            RenderQuality.Medium => (true, true),
+            RenderQuality.High => (true, true),
+            _ => (true, true)
+        };
+
+    protected override SKSamplingOptions QualityBasedSamplingOptions() =>
+        Quality switch
+        {
+            RenderQuality.Low => new SKSamplingOptions(
+                SKFilterMode.Nearest,
+                SKMipmapMode.None),
+            RenderQuality.Medium => new SKSamplingOptions(
+                SKFilterMode.Linear,
+                SKMipmapMode.Linear),
+            RenderQuality.High => new SKSamplingOptions(
+                SKFilterMode.Linear,
+                SKMipmapMode.Linear),
+            _ => new SKSamplingOptions(
+                SKFilterMode.Linear,
+                SKMipmapMode.Linear)
+        };
 
     protected virtual void BeforeRender(
         SKCanvas? canvas,
@@ -169,71 +235,44 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         SKImageInfo info)
     { }
 
-    protected override void ApplyQualitySettings()
+    protected SKPaint CreateStandardPaint(
+        SKColor color) => InitPaint(
+            color,
+            SKPaintStyle.Fill,
+            null);
+
+    protected SKPaint CreateGlowPaint(
+        SKColor color,
+        float radius,
+        byte alpha)
     {
-        Safe(
-            () =>
-            {
-                (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
-                _samplingOptions = QualityBasedSamplingOptions();
-                OnQualitySettingsApplied();
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{GetType().Name}.ApplyQualitySettings",
-                ErrorMessage = "Failed to apply quality settings"
-            });
+        var blur = SKMaskFilter.CreateBlur(
+            SKBlurStyle.Normal,
+            radius);
+        return InitPaint(
+            color.WithAlpha(alpha),
+            SKPaintStyle.Fill,
+            blur);
     }
 
-    protected virtual void OnQualitySettingsApplied() { }
-
-    protected override (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() => Quality switch
-    {
-        RenderQuality.Low => (false, false),
-        RenderQuality.Medium => (true, true),
-        RenderQuality.High => (true, true),
-        _ => (true, true)
-    };
-
-    protected override SKSamplingOptions QualityBasedSamplingOptions() => Quality switch
-    {
-        RenderQuality.Low => new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None),
-        RenderQuality.Medium => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
-        RenderQuality.High => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
-        _ => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear)
-    };
-
-    protected SKPaint CreateStandardPaint(SKColor color, SKPaintStyle style = Fill)
+    private SKPaint InitPaint(
+        SKColor color,
+        SKPaintStyle style,
+        SKMaskFilter? maskFilter)
     {
         var paint = _paintPool.Get();
         paint.Color = color;
         paint.Style = style;
         paint.IsAntialias = UseAntiAlias;
+        if (maskFilter is not null)
+            paint.MaskFilter = maskFilter;
         return paint;
     }
 
-    protected SKPaint CreateGlowPaint(SKColor color, float radius, byte alpha)
-    {
-        var paint = _paintPool.Get();
-        paint.Color = color.WithAlpha(alpha);
-        paint.IsAntialias = UseAntiAlias;
-        paint.MaskFilter = SKMaskFilter.CreateBlur(Normal, radius);
-        return paint;
-    }
-
-    protected void InvalidateCachedResources()
-    {
-        Safe(
-            () =>
-            {
-                OnInvalidateCachedResources();
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{GetType().Name}.InvalidateCachedResources",
-                ErrorMessage = "Failed to invalidate cached resources"
-            });
-    }
+    protected void InvalidateCachedResources() => ExecuteSafely(
+        OnInvalidateCachedResources,
+        nameof(InvalidateCachedResources),
+        "Failed to invalidate cached resources");
 
     protected virtual void OnInvalidateCachedResources() { }
 }

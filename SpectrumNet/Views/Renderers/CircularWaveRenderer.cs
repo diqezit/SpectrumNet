@@ -574,13 +574,4 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             "Error during CircularWaveRenderer OnDispose"
         );
     }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage)
-    {
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
-    }
 }

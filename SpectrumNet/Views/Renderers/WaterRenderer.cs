@@ -1306,16 +1306,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         GC.SuppressFinalize(this);
     }
 
-    private static void ExecuteSafely(
-        Action action,
-        string source,
-        string errorMessage) =>
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
-
     private class WaterPoint(float x, float y)
     {
         public SKPoint Position { get; set; } = new(x, y);

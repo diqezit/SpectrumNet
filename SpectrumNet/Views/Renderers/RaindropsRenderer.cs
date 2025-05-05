@@ -1294,11 +1294,4 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _disposed = true;
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage)
-        => Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
 }

@@ -564,11 +564,4 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         _previousSpectrum = null;
         _colorCache = null;
     }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
 }

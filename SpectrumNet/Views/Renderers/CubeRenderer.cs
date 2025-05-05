@@ -915,13 +915,4 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         float targetValue,
         float smoothingFactor) =>
         currentValue * smoothingFactor + targetValue * (1.0f - smoothingFactor);
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage)
-    {
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
-    }
 }

@@ -550,9 +550,5 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         _glitchProcessedSpectrum = null;
         base.OnDispose();
     }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage)
-     => Safe(action, new ErrorHandlingOptions { Source = $"{LOG_PREFIX}.{source}", ErrorMessage = errorMessage });
-
     private static float Lerp(float a, float b, float t) => a + (b - a) * t;
 }

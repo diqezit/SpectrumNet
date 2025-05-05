@@ -518,11 +518,4 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         _glowPaint?.Dispose();
         _dots = [];
     }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
 }

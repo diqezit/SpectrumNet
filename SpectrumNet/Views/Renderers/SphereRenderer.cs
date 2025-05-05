@@ -812,11 +812,4 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
 
         _cosValues = _sinValues = _currentAlphas = _processedSpectrum = null;
     }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
 }

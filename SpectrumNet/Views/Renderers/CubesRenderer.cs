@@ -318,11 +318,4 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
             "Error during specific disposal"
         );
     }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
 }
