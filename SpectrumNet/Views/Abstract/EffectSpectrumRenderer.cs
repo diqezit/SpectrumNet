@@ -18,8 +18,6 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         DefaultPoolSize);
 
     private readonly object _renderLock = new();
-
-    protected bool _isOverlayActive;
     protected float _time;
     protected DateTime _lastUpdateTime = Now;
 

@@ -32,21 +32,17 @@ public class ViewController : IViewController, IDisposable
             throw new ArgumentNullException(nameof(renderElement));
 
         // Инициализация доступных типов рендеринга
-        AvailableDrawingTypes = Enum.GetValues<RenderStyle>()
-            .OrderBy(s => s.ToString())
-            .ToList();
+        AvailableDrawingTypes = [.. Enum.GetValues<RenderStyle>()
+                                        .OrderBy(s => s.ToString())];
 
-        AvailableFftWindowTypes = Enum.GetValues<FftWindowType>()
-            .OrderBy(wt => wt.ToString())
-            .ToList();
+        AvailableFftWindowTypes = [.. Enum.GetValues<FftWindowType>()
+                                          .OrderBy(wt => wt.ToString())];
 
-        AvailableScaleTypes = Enum.GetValues<SpectrumScale>()
-            .OrderBy(s => s.ToString())
-            .ToList();
+        AvailableScaleTypes = [.. Enum.GetValues<SpectrumScale>()
+                                      .OrderBy(s => s.ToString())];
 
-        AvailableRenderQualities = Enum.GetValues<RenderQuality>()
-            .OrderBy(q => (int)q)
-            .ToList();
+        AvailableRenderQualities = [.. Enum.GetValues<RenderQuality>()
+                                           .OrderBy(q => (int)q)];
 
         // Инициализация стилей спектра
         _spectrumStyles = new SpectrumBrushes() ??

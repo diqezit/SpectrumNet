@@ -13,7 +13,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 
     protected bool
         _isInitialized,
-        _disposed;
+        _disposed,
+        _isOverlayActive;
 
     protected float[]? _previousSpectrum;
     protected float[]? _processedSpectrum;
@@ -42,6 +43,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         }
     }
 
+    public bool IsOverlayActive => _isOverlayActive;
     protected bool UseAntiAlias => _useAntiAlias;
     protected bool UseAdvancedEffects => _useAdvancedEffects;
     protected SKSamplingOptions SamplingOptions => _samplingOptions;
@@ -65,6 +67,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         RenderQuality quality = RenderQuality.Medium) => ExecuteSafely(
         action: () =>
         {
+            _isOverlayActive = isOverlayActive;
             _smoothingFactor = isOverlayActive
                 ? OVERLAY_SMOOTHING_FACTOR
                 : DEFAULT_SMOOTHING_FACTOR;
