@@ -9,14 +9,14 @@ public class ObjectPool<T> : IDisposable where T : class
     private readonly Action<T> _objectReset;
 
     public ObjectPool(
-        Func<T> objectGenerator,
-        Action<T> objectReset,
-        int initialCount = 0)
+      Func<T> objectGenerator,
+      Action<T> objectReset,
+      int initialCount = 0)
     {
         _objects = [];
 
         _objectGenerator = objectGenerator ??
-            throw new ArgumentNullException(nameof(objectGenerator));
+                throw new ArgumentNullException(nameof(objectGenerator));
 
         _objectReset = objectReset;
 
@@ -37,10 +37,9 @@ public class ObjectPool<T> : IDisposable where T : class
         return _objectGenerator();
     }
 
-    public void Return(T item)
-    {
-        _objects.Add(item);
-    }
+
+    public void Return(T item) => _objects.Add(item);
+
 
     public void Dispose()
     {
