@@ -9,14 +9,9 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<GlitchRenderer> _instance = new(() => new GlitchRenderer());
 
-    private struct GlitchSegment
-    {
-        public int Y;
-        public int Height;
-        public float XOffset;
-        public float Duration;
-        public bool IsActive;
-    }
+    private GlitchRenderer() { }
+
+    public static GlitchRenderer GetInstance() => _instance.Value;
 
     public record Constants
     {
@@ -25,8 +20,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         public const float
             TIME_STEP = 0.016f;
 
-        // Spectrum Processing
-        public const int 
+        // Spectrum Processing
+        public const int
             PROCESSED_SPECTRUM_SIZE = 128,
             BAND_COUNT = 3;
 
@@ -42,8 +37,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             SPECTRUM_HALF_INDEX_DIVISOR = 2,
             SPECTRUM_MIDPOINT_DIVISOR = 2;
 
-        // Glitch Segment
-        public const int
+        // Glitch Segment
+        public const int
             MAX_GLITCH_SEGMENTS = 10;
 
         public const float
@@ -60,16 +55,16 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             GLITCH_SEGMENT_BASE_HEIGHT = 20,
             GLITCH_SEGMENT_RANDOM_HEIGHT_RANGE = 50;
 
-        // Scanline
-        public const float
+        // Scanline
+        public const float
             SCANLINE_SPEED = 1.5f,
             SCANLINE_HEIGHT = 3f;
 
         public const byte
             SCANLINE_ALPHA = 40;
 
-        // Effect Specific (RGB Split, Noise)
-        public const float
+        // Effect Specific (RGB Split, Noise)
+        public const float
             RGB_SPLIT_MAX = 10f,
             RGB_SPLIT_THRESHOLD_SCALE = 0.5f,
             NOISE_THRESHOLD_SCALE = 0.3f;
@@ -79,12 +74,46 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             NOISE_COUNT_SCALE = 1000,
             NOISE_MIN_PIXEL_SIZE = 1,
             NOISE_MAX_PIXEL_SIZE_RANDOM_ADD = 3;
+
+        public static class Quality
+        {
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const float
+                LOW_RGB_SPLIT_INTENSITY = 0.5f,
+                MEDIUM_RGB_SPLIT_INTENSITY = 0.75f,
+                HIGH_RGB_SPLIT_INTENSITY = 1.0f;
+
+            public const float
+                LOW_NOISE_INTENSITY = 0.5f,
+                MEDIUM_NOISE_INTENSITY = 0.75f,
+                HIGH_NOISE_INTENSITY = 1.0f;
+        }
     }
 
+    private struct GlitchSegment
+    {
+        public int Y;
+        public int Height;
+        public float XOffset;
+        public float Duration;
+        public bool IsActive;
+    }
+
+    // Resources for rendering
     private readonly SemaphoreSlim _glitchSemaphore = new(1, 1);
     private readonly new ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), p => p.Reset(), 5);
     private readonly Random _random = new();
 
+    // Rendering buffers and resources
     private SKBitmap? _bufferBitmap;
     private SKPaint? _bitmapPaint;
     private SKPaint? _redPaint;
@@ -92,120 +121,244 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
     private SKPaint? _scanlinePaint;
     private SKPaint? _noisePaint;
 
+    // Quality settings
+    private new bool _useAntiAlias;
+    private new bool _useAdvancedEffects;
+    private float _rgbSplitIntensity;
+    private float _noiseIntensity;
+
+    // State and buffers
     private float[]? _glitchProcessedSpectrum;
     private List<GlitchSegment>? _glitchSegments;
     private new float _time;
     private int _scanlinePosition;
+    private new bool _isOverlayActive;
 
-    private GlitchRenderer() { }
-    public static GlitchRenderer GetInstance() => _instance.Value;
+    protected override void OnInitialize() =>
+        ExecuteSafely(
+            () =>
+            {
+                base.OnInitialize();
+                InitializeResources();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            nameof(OnInitialize),
+            "Failed during renderer initialization"
+        );
 
-    protected override void OnInitialize()
-     => ExecuteSafely(
-      InitializePaintsAndState,
-      "OnInitialize",
-      "Failed during renderer initialization");
-
-    private void InitializePaintsAndState()
+    private void InitializeResources()
     {
-        base.OnInitialize();
-        _bitmapPaint = new SKPaint { IsAntialias = UseAntiAlias };
+        _bitmapPaint = new SKPaint { IsAntialias = _useAntiAlias };
         _redPaint = CreateBlendPaint(SKColors.Red);
         _bluePaint = CreateBlendPaint(SKColors.Blue);
         _scanlinePaint = new SKPaint { Color = SKColors.White.WithAlpha(SCANLINE_ALPHA), Style = Fill };
         _noisePaint = new SKPaint { Style = Fill };
         _glitchSegments = [];
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     public override void Configure(
-      bool isOverlayActive,
-      RenderQuality quality = RenderQuality.Medium)
-     => ExecuteSafely(() =>
-     {
-         bool changed = _isOverlayActive != isOverlayActive || Quality != quality;
-         base.Configure(isOverlayActive, quality);
-         if (changed)
-         {
-             Log(LogLevel.Debug,
-           LOG_PREFIX,
-           $"Configuration changed. New Quality: {Quality}");
-         }
-     }, "Configure", "Failed to configure renderer");
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium) =>
+        ExecuteSafely(
+            () =>
+            {
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
 
-    protected override void OnQualitySettingsApplied()
-     => ExecuteSafely(ApplyQualitySettingsInternal,
-         "OnQualitySettingsApplied",
-         "Failed to apply specific quality settings");
+                _isOverlayActive = isOverlayActive;
 
-    private void ApplyQualitySettingsInternal()
+                if (configChanged)
+                {
+                    Log(LogLevel.Debug,
+                        LOG_PREFIX,
+                        $"Configuration changed. New Quality: {Quality}");
+                }
+            },
+            nameof(Configure),
+            "Failed to configure renderer"
+        );
+
+    protected override void OnQualitySettingsApplied() =>
+        ExecuteSafely(
+            () =>
+            {
+                base.OnQualitySettingsApplied();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Quality settings applied. New Quality: {Quality}");
+            },
+            nameof(OnQualitySettingsApplied),
+            "Failed to apply specific quality settings"
+        );
+
+    private void ApplyQualityBasedSettings()
     {
-        base.OnQualitySettingsApplied();
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                ApplyLowQualitySettings();
+                break;
+
+            case RenderQuality.Medium:
+                ApplyMediumQualitySettings();
+                break;
+
+            case RenderQuality.High:
+                ApplyHighQualitySettings();
+                break;
+        }
+
+        UpdatePaintSettings();
+    }
+
+    private void ApplyLowQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+        _rgbSplitIntensity = Constants.Quality.LOW_RGB_SPLIT_INTENSITY;
+        _noiseIntensity = Constants.Quality.LOW_NOISE_INTENSITY;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+        _rgbSplitIntensity = Constants.Quality.MEDIUM_RGB_SPLIT_INTENSITY;
+        _noiseIntensity = Constants.Quality.MEDIUM_NOISE_INTENSITY;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+        _rgbSplitIntensity = Constants.Quality.HIGH_RGB_SPLIT_INTENSITY;
+        _noiseIntensity = Constants.Quality.HIGH_NOISE_INTENSITY;
+    }
+
+    private void UpdatePaintSettings()
+    {
         UpdateAntialiasing(_bitmapPaint);
         UpdateAntialiasing(_redPaint);
         UpdateAntialiasing(_bluePaint);
+        UpdateAntialiasing(_scanlinePaint);
+        UpdateAntialiasing(_noisePaint);
     }
-
-    protected override void RenderEffect(
-      SKCanvas canvas,
-      float[] spectrum,
-      SKImageInfo info,
-      float barWidth,
-      float barSpacing,
-      int barCount,
-      SKPaint paint)
-     => ExecuteSafely(() =>
-     {
-         if (!QuickValidate(canvas, spectrum, info, paint))
-             return;
-
-         PerformGlitchUpdatesAndPopulateBuffer(spectrum, info, paint);
-
-         RenderGlitchFromBuffer(canvas, info);
-     }, "RenderEffect", "Error during rendering");
-
-    private void PerformGlitchUpdatesAndPopulateBuffer(
-      float[] spectrum,
-      SKImageInfo info,
-      SKPaint paint)
-    {
-        _glitchSemaphore.Wait();
-        try
-        {
-            PrepareBuffer(info);
-
-            if (_bufferBitmap == null) return;
-
-            using var bufCanvas = new SKCanvas(_bufferBitmap);
-            bufCanvas.Clear(SKColors.Black);
-
-            ProcessSpectrumPipeline(spectrum);
-            UpdateGlitchEffects(info);
-
-            DrawBaseSpectrumToBuffer(bufCanvas, info, paint);
-            ApplyRgbSplitToBuffer(bufCanvas, info);
-            DrawScanlineToBuffer(bufCanvas, info);
-            ApplyDigitalNoiseToBuffer(bufCanvas);
-        }
-        finally
-        {
-            _glitchSemaphore.Release();
-        }
-    }
-
-    private SKPaint CreateBlendPaint(SKColor baseColor)
-     => new()
-     {
-         Color = baseColor.WithAlpha(SCANLINE_ALPHA),
-         BlendMode = SKBlendMode.SrcOver,
-         IsAntialias = UseAntiAlias
-     };
 
     private void UpdateAntialiasing(SKPaint? paint)
     {
         if (paint != null)
-            paint.IsAntialias = UseAntiAlias;
+            paint.IsAntialias = _useAntiAlias;
     }
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                    return;
+
+                UpdateState(spectrum, info);
+                RenderFrame(canvas, info, paint);
+            },
+            nameof(RenderEffect),
+            "Error during rendering"
+        );
+
+    private bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint)
+    {
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
+        return true;
+    }
+
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
+
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
+        return false;
+    }
+
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
+        return true;
+    }
+
+    private void UpdateState(float[] spectrum, SKImageInfo info) =>
+        ExecuteSafely(
+            () =>
+            {
+                bool semaphoreAcquired = _glitchSemaphore.Wait(0);
+                try
+                {
+                    if (semaphoreAcquired)
+                    {
+                        PrepareBuffer(info);
+                        ProcessSpectrumData(spectrum);
+                        UpdateGlitchEffects(info);
+                    }
+                }
+                finally
+                {
+                    if (semaphoreAcquired)
+                        _glitchSemaphore.Release();
+                }
+            },
+            nameof(UpdateState),
+            "Error during state update"
+        );
+
+    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (!CanRenderFinal(info))
+                    return;
+
+                PopulateBuffer(info, paint);
+                RenderBufferToCanvas(canvas, info);
+            },
+            nameof(RenderFrame),
+            "Error during frame rendering"
+        );
 
     private void PrepareBuffer(SKImageInfo info)
     {
@@ -219,7 +372,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
     }
 
     [MethodImpl(AggressiveOptimization)]
-    private void ProcessSpectrumPipeline(float[] source)
+    private void ProcessSpectrumData(float[] source)
     {
         ResampleSpectrum(source);
         ComputeBandActivity(source);
@@ -238,9 +391,14 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             int baseIndex = (int)idx;
             float t = idx - baseIndex;
 
-            _glitchProcessedSpectrum[i] = baseIndex < source.Length / SPECTRUM_HALF_INDEX_DIVISOR - 1
-             ? Lerp(source[baseIndex], source[baseIndex + 1], t)
-             : source[source.Length / SPECTRUM_HALF_INDEX_DIVISOR - 1];
+            if (baseIndex < source.Length / SPECTRUM_HALF_INDEX_DIVISOR - 1)
+            {
+                _glitchProcessedSpectrum[i] = Lerp(source[baseIndex], source[baseIndex + 1], t);
+            }
+            else
+            {
+                _glitchProcessedSpectrum[i] = source[source.Length / SPECTRUM_HALF_INDEX_DIVISOR - 1];
+            }
 
             _glitchProcessedSpectrum[i] = MathF.Min(_glitchProcessedSpectrum[i] * SPECTRUM_SCALE, SPECTRUM_CLAMP);
         }
@@ -282,8 +440,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         float prev = _glitchProcessedSpectrum[band];
 
         return prev == 0
-         ? avg * SENSITIVITY
-         : prev + (avg * SENSITIVITY - prev) * SMOOTHING_FACTOR;
+             ? avg * SENSITIVITY
+             : prev + (avg * SENSITIVITY - prev) * SMOOTHING_FACTOR;
     }
 
     [MethodImpl(AggressiveOptimization)]
@@ -320,12 +478,12 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
                 if (_random.NextDouble() < GLITCH_XOFFSET_UPDATE_CHANCE)
                 {
                     float randomFactor = ((float)_random.NextDouble()
-                      * XOFFSET_RANDOM_RANGE_SCALE
-                      - XOFFSET_RANDOM_RANGE_OFFSET);
+                        * XOFFSET_RANDOM_RANGE_SCALE
+                        - XOFFSET_RANDOM_RANGE_OFFSET);
 
                     seg.XOffset = MAX_GLITCH_OFFSET
-                      * randomFactor
-                      * _glitchProcessedSpectrum[0];
+                        * randomFactor
+                        * _glitchProcessedSpectrum[0];
                 }
 
                 _glitchSegments[i] = seg;
@@ -340,27 +498,27 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             return;
 
         if (_glitchProcessedSpectrum[0] <= GLITCH_THRESHOLD ||
-         _glitchSegments.Count >= MAX_GLITCH_SEGMENTS ||
-         _random.NextDouble() >= _glitchProcessedSpectrum[0] * GLITCH_NEW_SEGMENT_CHANCE_SCALE)
+            _glitchSegments.Count >= MAX_GLITCH_SEGMENTS ||
+            _random.NextDouble() >= _glitchProcessedSpectrum[0] * GLITCH_NEW_SEGMENT_CHANCE_SCALE)
         {
             return;
         }
 
         int height = (int)(GLITCH_SEGMENT_BASE_HEIGHT
-          + _random.NextDouble() * GLITCH_SEGMENT_RANDOM_HEIGHT_RANGE);
+            + _random.NextDouble() * GLITCH_SEGMENT_RANDOM_HEIGHT_RANGE);
 
         int y = _random.Next(0, info.Height - height);
 
         float duration = MIN_GLITCH_DURATION
-          + (float)_random.NextDouble() * (MAX_GLITCH_DURATION - MIN_GLITCH_DURATION);
+            + (float)_random.NextDouble() * (MAX_GLITCH_DURATION - MIN_GLITCH_DURATION);
 
         float randomFactor = ((float)_random.NextDouble()
-          * XOFFSET_RANDOM_RANGE_SCALE
-          - XOFFSET_RANDOM_RANGE_OFFSET);
+            * XOFFSET_RANDOM_RANGE_SCALE
+            - XOFFSET_RANDOM_RANGE_OFFSET);
 
         float offset = MAX_GLITCH_OFFSET
-          * randomFactor
-          * _glitchProcessedSpectrum[0];
+            * randomFactor
+            * _glitchProcessedSpectrum[0];
 
         _glitchSegments.Add(new GlitchSegment
         {
@@ -372,28 +530,71 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         });
     }
 
-    private void RenderGlitchFromBuffer(SKCanvas canvas, SKImageInfo info)
-    {
-        if (!CanRenderFinal(info))
-            return;
+    private void PopulateBuffer(SKImageInfo info, SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_bufferBitmap == null) return;
 
-        RenderBufferSegments(canvas, info);
-        RenderActiveSegments(canvas, info);
+                using var bufCanvas = new SKCanvas(_bufferBitmap);
+                bufCanvas.Clear(SKColors.Black);
+
+                DrawBaseSpectrumToBuffer(bufCanvas, info, paint);
+
+                if (_useAdvancedEffects)
+                {
+                    ApplyAdvancedEffects(bufCanvas, info, paint);
+                }
+
+                DrawScanlineToBuffer(bufCanvas, info);
+            },
+            nameof(PopulateBuffer),
+            "Error during buffer population"
+        );
+
+    private void ApplyAdvancedEffects(
+        SKCanvas bufCanvas,
+        SKImageInfo info,
+        SKPaint paint)
+    {
+        if (_glitchProcessedSpectrum == null) return;
+
+        ApplyRgbSplitToBuffer(bufCanvas, info, paint);
+        ApplyDigitalNoiseToBuffer(bufCanvas);
     }
 
-    private bool CanRenderFinal(SKImageInfo info)
-     => _bufferBitmap != null
-      && _bitmapPaint != null
-      && _glitchSegments != null
-      && _glitchProcessedSpectrum != null
-      && _bufferBitmap.Width == info.Width
-      && _bufferBitmap.Height == info.Height;
+    private bool CanRenderFinal(SKImageInfo info) =>
+        _bufferBitmap != null
+        && _bitmapPaint != null
+        && _glitchSegments != null
+        && _glitchProcessedSpectrum != null
+        && _bufferBitmap.Width == info.Width
+        && _bufferBitmap.Height == info.Height;
 
-    [MethodImpl(AggressiveOptimization)]
+    private void RenderBufferToCanvas(SKCanvas canvas, SKImageInfo info) =>
+        ExecuteSafely(
+            () =>
+            {
+                RenderBufferSegments(canvas, info);
+                RenderActiveSegments(canvas, info);
+            },
+            nameof(RenderBufferToCanvas),
+            "Error during buffer rendering"
+        );
+
+    private SKPaint CreateBlendPaint(SKColor baseColor) =>
+        new()
+        {
+            Color = baseColor.WithAlpha(SCANLINE_ALPHA),
+            BlendMode = SKBlendMode.SrcOver,
+            IsAntialias = _useAntiAlias
+        };
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private void DrawBaseSpectrumToBuffer(
-      SKCanvas bufCanvas,
-      SKImageInfo info,
-      SKPaint paint)
+        SKCanvas bufCanvas,
+        SKImageInfo info,
+        SKPaint paint)
     {
         if (_glitchProcessedSpectrum == null) return;
 
@@ -416,20 +617,20 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
     }
 
     [MethodImpl(AggressiveOptimization)]
-    private void ApplyRgbSplitToBuffer(SKCanvas bufCanvas, SKImageInfo info)
+    private void ApplyRgbSplitToBuffer(SKCanvas bufCanvas, SKImageInfo info, SKPaint paint)
     {
         if (_glitchProcessedSpectrum == null || _redPaint == null || _bluePaint == null) return;
 
-        if (_glitchProcessedSpectrum[2] <= GLITCH_THRESHOLD * RGB_SPLIT_THRESHOLD_SCALE)
+        if (_glitchProcessedSpectrum[2] <= GLITCH_THRESHOLD * RGB_SPLIT_THRESHOLD_SCALE * _rgbSplitIntensity)
             return;
 
-        float split = _glitchProcessedSpectrum[2] * RGB_SPLIT_MAX;
+        float split = _glitchProcessedSpectrum[2] * RGB_SPLIT_MAX * _rgbSplitIntensity;
 
-        foreach (var (dx, dy, paint) in new[] { (-split, 0f, _redPaint), (split, 0f, _bluePaint) })
+        foreach (var (dx, dy, paintToUse) in new[] { (-split, 0f, _redPaint), (split, 0f, _bluePaint) })
         {
             bufCanvas.Save();
             bufCanvas.Translate(dx, dy);
-            DrawBaseSpectrumToBuffer(bufCanvas, info, paint);
+            DrawBaseSpectrumToBuffer(bufCanvas, info, paintToUse);
             bufCanvas.Restore();
         }
     }
@@ -446,11 +647,11 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
     {
         if (_glitchProcessedSpectrum == null || _noisePaint == null) return;
 
-        if (_glitchProcessedSpectrum[1] <= GLITCH_THRESHOLD * NOISE_THRESHOLD_SCALE)
+        if (_glitchProcessedSpectrum[1] <= GLITCH_THRESHOLD * NOISE_THRESHOLD_SCALE * _noiseIntensity)
             return;
 
-        _noisePaint.Color = SKColors.White.WithAlpha((byte)(_glitchProcessedSpectrum[1] * NOISE_ALPHA_SCALE));
-        int count = (int)(_glitchProcessedSpectrum[1] * NOISE_COUNT_SCALE);
+        _noisePaint.Color = SKColors.White.WithAlpha((byte)(_glitchProcessedSpectrum[1] * NOISE_ALPHA_SCALE * _noiseIntensity));
+        int count = (int)(_glitchProcessedSpectrum[1] * NOISE_COUNT_SCALE * _noiseIntensity);
 
         for (int i = 0; i < count; i++)
         {
@@ -465,8 +666,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
 
     [MethodImpl(AggressiveOptimization)]
     private void RenderBufferSegments(
-      SKCanvas canvas,
-      SKImageInfo info)
+        SKCanvas canvas,
+        SKImageInfo info)
     {
         if (_glitchSegments == null || _bufferBitmap == null || _bitmapPaint == null)
             return;
@@ -499,8 +700,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
 
     [MethodImpl(AggressiveOptimization)]
     private void RenderActiveSegments(
-      SKCanvas canvas,
-      SKImageInfo info)
+        SKCanvas canvas,
+        SKImageInfo info)
     {
         if (_glitchSegments == null || _bufferBitmap == null || _bitmapPaint == null)
             return;
@@ -517,7 +718,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         }
     }
 
-    [MethodImpl(AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void DrawBitmapSegment(
         SKCanvas canvas,
         SKBitmap bitmap,
@@ -530,12 +731,40 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         }
     }
 
-    protected override void OnDispose()
-     => ExecuteSafely(DisposeResources, "OnDispose", "Error during disposal");
-
-    private void DisposeResources()
+    public override void Dispose()
     {
-        _glitchSemaphore.Dispose();
+        if (_disposed) return;
+
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+    }
+
+    protected override void OnDispose() =>
+        ExecuteSafely(
+            () =>
+            {
+                DisposeManagedResources();
+                base.OnDispose();
+            },
+            nameof(OnDispose),
+            "Error during specific disposal"
+        );
+
+    private void DisposeManagedResources()
+    {
+        _glitchSemaphore?.Dispose();
+        _paintPool?.Dispose();
+
         _bufferBitmap?.Dispose();
         _bitmapPaint?.Dispose();
         _redPaint?.Dispose();
@@ -543,12 +772,11 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         _scanlinePaint?.Dispose();
         _noisePaint?.Dispose();
 
-        (_bitmapPaint, _redPaint, _bluePaint, _scanlinePaint, _noisePaint) = (null, null, null, null, null);
-
-        _paintPool.Dispose();
+        _bufferBitmap = null;
+        _bitmapPaint = _redPaint = _bluePaint = _scanlinePaint = _noisePaint = null;
         _glitchSegments = null;
         _glitchProcessedSpectrum = null;
-        base.OnDispose();
     }
+
     private static float Lerp(float a, float b, float t) => a + (b - a) * t;
 }

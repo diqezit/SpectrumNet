@@ -46,77 +46,85 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
         public static class Quality
         {
-            public const bool LOW_USE_ADVANCED_EFFECTS = false;
-            public const SKFilterMode LOW_FILTER_MODE = SKFilterMode.Nearest;
-            public const SKMipmapMode LOW_MIPMAP_MODE = SKMipmapMode.None;
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
 
-            public const bool MEDIUM_USE_ADVANCED_EFFECTS = true;
-            public const SKFilterMode MEDIUM_FILTER_MODE = SKFilterMode.Linear;
-            public const SKMipmapMode MEDIUM_MIPMAP_MODE = SKMipmapMode.Linear;
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
 
-            public const bool HIGH_USE_ADVANCED_EFFECTS = true;
-            public const SKFilterMode HIGH_FILTER_MODE = SKFilterMode.Linear;
-            public const SKMipmapMode HIGH_MIPMAP_MODE = SKMipmapMode.Linear;
+            public const SKFilterMode
+                LOW_FILTER_MODE = SKFilterMode.Nearest,
+                MEDIUM_FILTER_MODE = SKFilterMode.Linear,
+                HIGH_FILTER_MODE = SKFilterMode.Linear;
+
+            public const SKMipmapMode
+                LOW_MIPMAP_MODE = SKMipmapMode.None,
+                MEDIUM_MIPMAP_MODE = SKMipmapMode.Linear,
+                HIGH_MIPMAP_MODE = SKMipmapMode.Linear;
         }
     }
 
-    private float _animationPhase;
-    private float _vibrationOffset;
-    private float _previousLoudness;
-    private float _peakLoudness;
+    private new bool 
+        _useAdvancedEffects,
+        _useAntiAlias;
+
+    private float 
+        _animationPhase,
+        _vibrationOffset,
+        _previousLoudness,
+        _peakLoudness;
+
     private float? _cachedLoudness;
+
     private float[] _ledAnimationPhases = [];
 
-    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+    private int 
+        _currentWidth,
+        _currentHeight,
+        _ledCount = DEFAULT_LED_COUNT;
+
+    private SKImageInfo _lastImageInfo;
 
     private readonly SKPath _ledPath = new();
     private readonly SKPath _highlightPath = new();
     private readonly float[] _screwAngles = [45f, 120f, 10f, 80f];
-
     private SKBitmap? _screwBitmap;
     private SKBitmap? _brushedMetalBitmap;
-
     private readonly List<float> _ledVariations = new(30);
     private readonly List<SKColor> _ledColorVariations = new(30);
+
     private readonly object _loudnessLock = new();
 
-    private int _currentWidth;
-    private int _currentHeight;
-    private int _ledCount = DEFAULT_LED_COUNT;
-    private SKImageInfo _lastImageInfo;
-
-    public override void Initialize()
+    protected override void OnInitialize()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                base.Initialize();
+                base.OnInitialize();
                 InitializeResources();
                 ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            }
+            nameof(OnInitialize),
+            "Failed to initialize renderer"
         );
     }
 
     private void InitializeResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 InitializeVariationsAndTextures();
                 CreateCachedResources();
                 ResetState();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeResources",
-                ErrorMessage = "Failed to initialize renderer resources"
-            }
+            nameof(InitializeResources),
+            "Failed to initialize renderer resources"
         );
     }
 
@@ -313,7 +321,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
@@ -324,75 +332,90 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
                     OnConfigurationChanged();
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            }
+            nameof(Configure),
+            "Failed to configure renderer"
         );
     }
 
     protected override void OnConfigurationChanged()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                _smoothingFactor = _isOverlayActive ?
-                    SMOOTHING_FACTOR_OVERLAY :
-                    SMOOTHING_FACTOR_NORMAL;
-
                 base.OnConfigurationChanged();
+                UpdateSmoothingFactor();
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnConfigurationChanged",
-                ErrorMessage = "Failed to apply configuration changes"
-            }
+            nameof(OnConfigurationChanged),
+            "Failed to apply configuration changes"
         );
+    }
+
+    private void UpdateSmoothingFactor()
+    {
+        _smoothingFactor = _isOverlayActive ?
+            SMOOTHING_FACTOR_OVERLAY :
+            SMOOTHING_FACTOR_NORMAL;
     }
 
     protected override void ApplyQualitySettings()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 base.ApplyQualitySettings();
-
-                switch (Quality)
-                {
-                    case RenderQuality.Low:
-                        _useAntiAlias = false;
-                        _samplingOptions = new SKSamplingOptions(
-                            Constants.Quality.LOW_FILTER_MODE,
-                            Constants.Quality.LOW_MIPMAP_MODE);
-                        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-                        break;
-
-                    case RenderQuality.Medium:
-                        _useAntiAlias = true;
-                        _samplingOptions = new SKSamplingOptions(
-                            Constants.Quality.MEDIUM_FILTER_MODE,
-                            Constants.Quality.MEDIUM_MIPMAP_MODE);
-                        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-                        break;
-
-                    case RenderQuality.High:
-                        _useAntiAlias = true;
-                        _samplingOptions = new SKSamplingOptions(
-                            Constants.Quality.HIGH_FILTER_MODE,
-                            Constants.Quality.HIGH_MIPMAP_MODE);
-                        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-                        break;
-                }
-
+                ApplyQualityBasedSettings();
                 OnQualitySettingsApplied();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ApplyQualitySettings",
-                ErrorMessage = "Failed to apply quality settings"
-            }
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
         );
+    }
+
+    private void ApplyQualityBasedSettings()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                ApplyLowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                ApplyMediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                ApplyHighQualitySettings();
+                break;
+        }
+    }
+
+    private void ApplyLowQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+        _samplingOptions = new SKSamplingOptions(
+            Constants.Quality.LOW_FILTER_MODE,
+            Constants.Quality.LOW_MIPMAP_MODE);
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+        _samplingOptions = new SKSamplingOptions(
+            Constants.Quality.MEDIUM_FILTER_MODE,
+            Constants.Quality.MEDIUM_MIPMAP_MODE);
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+        _samplingOptions = new SKSamplingOptions(
+            Constants.Quality.HIGH_FILTER_MODE,
+            Constants.Quality.HIGH_MIPMAP_MODE);
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
     }
 
     protected override void RenderEffect(
@@ -407,28 +430,68 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             return;
 
-        Safe(
+        if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+            return;
+
+        ExecuteSafely(
+            () =>
+            {
+                UpdateState(info, spectrum);
+                RenderFrame(canvas, info);
+            },
+            nameof(RenderEffect),
+            "Error in RenderEffect method"
+        );
+    }
+
+    private void UpdateState(SKImageInfo info, float[] spectrum)
+    {
+        ExecuteSafely(
             () =>
             {
                 _lastImageInfo = info;
-
-                if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-                    return;
 
                 if (_currentWidth != info.Width || _currentHeight != info.Height)
                 {
                     UpdateDimensions(info);
                 }
 
-                float loudness = UpdateState(spectrum);
+                UpdateAnimationState(spectrum);
+            },
+            nameof(UpdateState),
+            "Error updating state"
+        );
+    }
+
+    private void RenderFrame(SKCanvas canvas, SKImageInfo info)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                float loudness = GetCurrentLoudness();
                 RenderMeter(canvas, info, loudness, _peakLoudness);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderEffect",
-                ErrorMessage = "Error in RenderEffect method"
-            }
+            nameof(RenderFrame),
+            "Error rendering frame"
         );
+    }
+
+    private float GetCurrentLoudness()
+    {
+        lock (_loudnessLock)
+        {
+            return _cachedLoudness ?? 0f;
+        }
+    }
+
+    private void UpdateAnimationState(float[] spectrum)
+    {
+        float loudness = CalculateAndSmoothLoudness(spectrum);
+        _cachedLoudness = loudness;
+
+        UpdateAnimationPhase();
+        UpdatePeakLoudness(loudness);
+        UpdateVibrationEffect(loudness);
     }
 
     private void UpdateDimensions(SKImageInfo info)
@@ -465,44 +528,48 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             return false;
         }
 
-        if (canvas == null || spectrum == null || paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Invalid render parameters: null values");
-            return false;
-        }
-
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
-
-        if (spectrum.Length == 0)
-        {
-            Log(LogLevel.Warning, LOG_PREFIX, "Empty spectrum data");
-            return false;
-        }
-
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
 
         return true;
     }
 
-    private float UpdateState(float[] spectrum)
+    private static bool IsCanvasValid(SKCanvas? canvas)
     {
-        UpdateAnimationPhase();
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
 
-        float loudness = CalculateAndSmoothLoudness(spectrum);
-        _cachedLoudness = loudness;
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Warning, LOG_PREFIX, "Empty spectrum data");
+        return false;
+    }
 
-        UpdatePeakLoudness(loudness);
-        UpdateVibrationEffect(loudness);
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
 
-        return loudness;
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
+        return true;
     }
 
     private void UpdateAnimationPhase()
@@ -576,7 +643,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         for (; i < vectorizedLength; i += vectorSize)
         {
             var values = new Vector<float>(spectrum.Slice(i, vectorSize));
-            values = Abs(values);
+            values = System.Numerics.Vector.Abs(values);
             sumVector += values;
         }
 
@@ -1376,34 +1443,45 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 base.OnInvalidateCachedResources();
                 _cachedLoudness = null;
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnInvalidateCachedResources",
-                ErrorMessage = "Failed to invalidate cached resources"
-            }
+            nameof(OnInvalidateCachedResources),
+            "Failed to invalidate cached resources"
         );
+    }
+
+    public override void Dispose()
+    {
+        if (_disposed) return;
+
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during renderer disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     protected override void OnDispose()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 DisposeManagedResources();
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnDispose",
-                ErrorMessage = "Error during disposal"
-            }
+            nameof(OnDispose),
+            "Error during disposal"
         );
     }
 

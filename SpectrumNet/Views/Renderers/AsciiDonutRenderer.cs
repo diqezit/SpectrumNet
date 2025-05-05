@@ -48,11 +48,6 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             BASE_ALPHA_INTENSITY = 0.7f,
             MAX_SPECTRUM_ALPHA_SCALE = 0.3f;
 
-        public const int
-            LOW_QUALITY_SKIP_FACTOR = 3,
-            MEDIUM_QUALITY_SKIP_FACTOR = 1,
-            HIGH_QUALITY_SKIP_FACTOR = 0;
-
         public const float
             CHAR_OFFSET_X = 4.0f,
             CHAR_OFFSET_Y = 4.0f,
@@ -60,6 +55,24 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         public const string DEFAULT_ASCII_CHARS = " .,-~:;=!*#$@";
 
         public const int BATCH_SIZE = 128;
+
+        public static class Quality
+        {
+            public const int
+                LOW_QUALITY_SKIP_FACTOR = 3,
+                MEDIUM_QUALITY_SKIP_FACTOR = 1,
+                HIGH_QUALITY_SKIP_FACTOR = 0;
+
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+        }
     }
 
     private readonly record struct Vertex(float X, float Y, float Z);
@@ -76,12 +89,12 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         float MaxSpectrum,
         float LogBarCount)
     {
-        public readonly float 
+        public readonly float
             DepthRange = MaxZ - MinZ + float.Epsilon,
             AlphaMultiplier = 1f + LogBarCount * 0.1f;
     }
 
-    private static readonly string[] _asciiCharStrings = [.. 
+    private static readonly string[] _asciiCharStrings = [..
         DEFAULT_ASCII_CHARS
         .ToCharArray()
         .Select(c => c.ToString())
@@ -93,6 +106,26 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         LIGHT_DIR_X,
         LIGHT_DIR_Y,
         LIGHT_DIR_Z));
+
+    private int _skipVertexCount;
+    private new bool _useAdvancedEffects;
+    private new bool _useAntiAlias;
+
+    private float _rotationAngleX, _rotationAngleY, _rotationAngleZ;
+    private float _currentRotationIntensity = DEFAULT_ROTATION_INTENSITY;
+    private Matrix4x4 _rotationMatrix = Matrix4x4.Identity;
+    private bool _dataReady;
+    private RenderData? _currentRenderData;
+    private SKImageInfo _lastImageInfo;
+
+    private Vertex[] _vertices = [];
+    private ProjectedVertex[] _projectedVertices = [];
+    private ProjectedVertex[] _renderedVertices = [];
+    private byte[] _alphaCache = [];
+
+    private SKFont? _font;
+    private readonly Dictionary<int, List<ProjectedVertex>> _verticesByCharIndex = [];
+    private readonly object _renderDataLock = new();
 
     static AsciiDonutRenderer()
     {
@@ -108,47 +141,24 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         }
     }
 
-    private Vertex[] _vertices = [];
-    private ProjectedVertex[] _projectedVertices = [];
-    private ProjectedVertex[] _renderedVertices = [];
-    private byte[] _alphaCache = [];
-
-    private SKFont? _font;
-    private readonly Dictionary<int, List<ProjectedVertex>> _verticesByCharIndex = [];
-
-    private readonly object _renderDataLock = new();
-
-    private float _rotationAngleX, _rotationAngleY, _rotationAngleZ;
-    private float _currentRotationIntensity = DEFAULT_ROTATION_INTENSITY;
-    private Matrix4x4 _rotationMatrix = Matrix4x4.Identity;
-
-    private int _skipVertexCount;
-
-    private bool _dataReady;
-    private RenderData? _currentRenderData;
-    private SKImageInfo _lastImageInfo;
-
-    public override void Initialize()
+    protected override void OnInitialize()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                base.Initialize();
+                base.OnInitialize();
                 InitializeResources();
                 ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            }
+            nameof(OnInitialize),
+            "Failed to initialize renderer"
         );
     }
 
     private void InitializeResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 int segments = DEFAULT_SEGMENTS;
@@ -166,11 +176,8 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                 InitializeVertices();
                 InitializeAlphaCache();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeResources",
-                ErrorMessage = "Failed to initialize renderer resources"
-            }
+            nameof(InitializeResources),
+            "Failed to initialize renderer resources"
         );
     }
 
@@ -178,11 +185,10 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-
                 base.Configure(isOverlayActive, quality);
 
                 if (configChanged)
@@ -190,49 +196,86 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                     OnConfigurationChanged();
                 }
             },
-            new ErrorHandlingOptions
+            nameof(Configure),
+            "Failed to configure renderer"
+        );
+    }
+
+    protected override void OnConfigurationChanged()
+    {
+        ExecuteSafely(
+            () =>
             {
-                Source = $"{LOG_PREFIX}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            }
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}");
+            },
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
         );
     }
 
     protected override void ApplyQualitySettings()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 base.ApplyQualitySettings();
-
-                int oldSkipVertexCount = _skipVertexCount;
-
-                _skipVertexCount = _quality switch
-                {
-                    RenderQuality.Low => LOW_QUALITY_SKIP_FACTOR,
-                    RenderQuality.Medium => MEDIUM_QUALITY_SKIP_FACTOR,
-                    RenderQuality.High => HIGH_QUALITY_SKIP_FACTOR,
-                    _ => MEDIUM_QUALITY_SKIP_FACTOR
-                };
-
-                if (_skipVertexCount != oldSkipVertexCount)
-                {
-                    lock (_renderDataLock)
-                    {
-                        _dataReady = false;
-                        _currentRenderData = null;
-                    }
-                    OnInvalidateCachedResources();
-                }
-
-                OnQualitySettingsApplied();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ApplyQualitySettings",
-                ErrorMessage = "Failed to apply quality settings"
-            }
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
         );
+    }
+
+    private void ApplyQualityBasedSettings()
+    {
+        int oldSkipVertexCount = _skipVertexCount;
+
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                ApplyLowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                ApplyMediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                ApplyHighQualitySettings();
+                break;
+        }
+
+        if (_skipVertexCount != oldSkipVertexCount)
+        {
+            lock (_renderDataLock)
+            {
+                _dataReady = false;
+                _currentRenderData = null;
+            }
+            OnInvalidateCachedResources();
+        }
+    }
+
+    private void ApplyLowQualitySettings()
+    {
+        _skipVertexCount = Constants.Quality.LOW_QUALITY_SKIP_FACTOR;
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _skipVertexCount = Constants.Quality.MEDIUM_QUALITY_SKIP_FACTOR;
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _skipVertexCount = Constants.Quality.HIGH_QUALITY_SKIP_FACTOR;
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
     }
 
     protected override void RenderEffect(
@@ -244,38 +287,20 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(
-            canvas,
-            spectrum,
-            info,
-            paint))
-        {
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             return;
-        }
 
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                _lastImageInfo = info;
-
-                UpdateState(
-                    spectrum,
-                    barCount,
-                    info);
-
+                UpdateState(spectrum, barCount, info);
                 if (_dataReady)
                 {
-                    RenderFrame(
-                        canvas,
-                        info,
-                        paint);
+                    RenderFrame(canvas, info, paint);
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderEffect",
-                ErrorMessage = "Error in RenderEffect method"
-            }
+            nameof(RenderEffect),
+            "Error in RenderEffect method"
         );
     }
 
@@ -290,30 +315,47 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
             return false;
         }
-        if (canvas == null || spectrum == null || paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Invalid render parameters: null values");
-            return false;
-        }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
 
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
+        return true;
+    }
 
-        if (spectrum.Length == 0)
-        {
-            Log(LogLevel.Warning, LOG_PREFIX, "Empty spectrum data");
-            return true;
-        }
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
 
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null");
+        return false;
+    }
 
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
         return true;
     }
 
@@ -322,31 +364,20 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         int barCount,
         SKImageInfo info)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                float[] processedSpectrum = ProcessSpectrumForDonut(
-                    spectrum!,
-                    barCount);
-
+                _lastImageInfo = info;
+                float[] processedSpectrum = ProcessSpectrumForDonut(spectrum, barCount);
                 UpdateRotation(processedSpectrum);
 
-                (float minZ, float maxZ, float maxSpectrum, float logBarCount) = ProjectAndSortVertices(
-                    info,
-                    barCount,
-                    processedSpectrum);
+                (float minZ, float maxZ, float maxSpectrum, float logBarCount) =
+                    ProjectAndSortVertices(info, barCount, processedSpectrum);
 
-                PrepareRenderData(
-                    minZ,
-                    maxZ,
-                    maxSpectrum,
-                    logBarCount);
+                PrepareRenderData(minZ, maxZ, maxSpectrum, logBarCount);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateState",
-                ErrorMessage = "Error updating renderer state"
-            }
+            nameof(UpdateState),
+            "Error updating renderer state"
         );
     }
 
@@ -393,6 +424,95 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         _rotationMatrix = CreateRotationMatrix();
     }
 
+    private void UpdateRotationIntensity(float[] spectrum)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                if (spectrum == null || spectrum.Length == 0)
+                {
+                    _currentRotationIntensity = DEFAULT_ROTATION_INTENSITY;
+                    return;
+                }
+
+                float sum = 0f;
+                for (int i = 0; i < spectrum.Length; i++)
+                    sum += spectrum[i];
+
+                float average = sum / spectrum.Length;
+                float newIntensity = DEFAULT_ROTATION_INTENSITY + average;
+
+                _currentRotationIntensity = _currentRotationIntensity * (1f - ROTATION_INTENSITY_SMOOTHING) +
+                                            newIntensity * ROTATION_INTENSITY_SMOOTHING;
+
+                _currentRotationIntensity = ClampF(
+                    _currentRotationIntensity,
+                    MIN_ROTATION_INTENSITY,
+                    MAX_ROTATION_INTENSITY);
+            },
+            nameof(UpdateRotationIntensity),
+            "Error updating rotation intensity"
+        );
+    }
+
+    private void UpdateRotationAngles()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                _rotationAngleX = UpdateAngle(
+                    _rotationAngleX,
+                    DEFAULT_ROTATION_SPEED_X * _currentRotationIntensity,
+                    ROTATION_SMOOTHING,
+                    MAX_ROTATION_ANGLE_CHANGE);
+
+                _rotationAngleY = UpdateAngle(
+                    _rotationAngleY,
+                    DEFAULT_ROTATION_SPEED_Y * _currentRotationIntensity,
+                    ROTATION_SMOOTHING,
+                    MAX_ROTATION_ANGLE_CHANGE);
+
+                _rotationAngleZ = UpdateAngle(
+                    _rotationAngleZ,
+                    DEFAULT_ROTATION_SPEED_Z * _currentRotationIntensity,
+                    ROTATION_SMOOTHING,
+                    MAX_ROTATION_ANGLE_CHANGE);
+            },
+            nameof(UpdateRotationAngles),
+            "Error updating rotation angles"
+        );
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float UpdateAngle(
+        float current,
+        float speed,
+        float smoothing,
+        float maxChange)
+    {
+        float target = current + speed;
+        float diff = MinimalAngleDiff(current, target);
+        float clampedDiff = ClampF(diff, -maxChange, maxChange);
+        return current + clampedDiff * smoothing;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float MinimalAngleDiff(
+        float a,
+        float b)
+    {
+        float diff = b - a;
+        while (diff < -MathF.PI) diff += MathF.PI * 2;
+        while (diff > MathF.PI) diff -= MathF.PI * 2;
+        return diff;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Matrix4x4 CreateRotationMatrix() =>
+        Matrix4x4.CreateRotationX(_rotationAngleX) *
+        Matrix4x4.CreateRotationY(_rotationAngleY) *
+        Matrix4x4.CreateRotationZ(_rotationAngleZ);
+
     private (float minZ, float maxZ, float maxSpectrum, float logBarCount) ProjectAndSortVertices(
         SKImageInfo info,
         int barCount,
@@ -411,12 +531,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             _renderedVertices = new ProjectedVertex[effectiveVertexCount];
         }
 
-        // Removed Safe wrapper from ProjectVertices
-        ProjectVerticesInternal(
-            scale,
-            centerX,
-            centerY,
-            step);
+        ProjectVerticesInternal(scale, centerX, centerY, step);
 
         Array.Sort(
             _projectedVertices,
@@ -429,8 +544,107 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         float maxSpectrum = effectiveVertexCount > 0 ? _projectedVertices.Max(v => v.LightIntensity) : 0f;
         float logBarCount = MathF.Log2(_projectedVertices.Length + 1);
 
-
         return (minZ, maxZ, maxSpectrum, logBarCount);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private void ProjectVerticesInternal(
+        float scale,
+        float centerX,
+        float centerY,
+        int step)
+    {
+        float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
+        float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
+        float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
+
+        int effectiveVertexCount = _vertices.Length / step;
+
+        if (_projectedVertices.Length != effectiveVertexCount)
+        {
+            _projectedVertices = new ProjectedVertex[effectiveVertexCount];
+            _renderedVertices = new ProjectedVertex[effectiveVertexCount];
+        }
+
+        if (Quality == RenderQuality.High || effectiveVertexCount > 1000)
+        {
+            Parallel.For(0, effectiveVertexCount, i =>
+            {
+                int vertexIndex = i * step;
+                var vertex = _vertices[vertexIndex];
+                ProjectSingleVertex(
+                    vertex,
+                    m11, m12, m13,
+                    m21, m22, m23,
+                    m31, m32, m33,
+                    scale,
+                    centerX,
+                    centerY,
+                    i);
+            });
+        }
+        else
+        {
+            for (int i = 0; i < effectiveVertexCount; i++)
+            {
+                int vertexIndex = i * step;
+                var vertex = _vertices[vertexIndex];
+                ProjectSingleVertex(
+                    vertex,
+                    m11, m12, m13,
+                    m21, m22, m23,
+                    m31, m32, m33,
+                    scale,
+                    centerX,
+                    centerY,
+                    i);
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ProjectSingleVertex(
+        Vertex vertex,
+        float m11, float m12, float m13,
+        float m21, float m22, float m23,
+        float m31, float m32, float m33,
+        float scale,
+        float centerX,
+        float centerY,
+        int targetIndex)
+    {
+        float rx = vertex.X * m11 + vertex.Y * m21 + vertex.Z * m31;
+        float ry = vertex.X * m12 + vertex.Y * m22 + vertex.Z * m32;
+        float rz = vertex.X * m13 + vertex.Y * m23 + vertex.Z * m33;
+
+        float rzScaled = rz * DEFAULT_DEPTH_SCALE_FACTOR;
+        float invDepth = 1f / (rzScaled + DEFAULT_DEPTH_OFFSET);
+
+        float lightIntensity;
+        if (_useAdvancedEffects)
+        {
+            float length = MathF.Sqrt(rx * rx + ry * ry + rz * rz);
+            float invLength = length > 0f ? 1f / length : 0f;
+            float normRx = rx * invLength;
+            float normRy = ry * invLength;
+            float normRz = rz * invLength;
+
+            lightIntensity = MathF.Max(0f, normRx * _lightDirection.X +
+                                           normRy * _lightDirection.Y +
+                                           normRz * _lightDirection.Z);
+        }
+        else
+        {
+            lightIntensity = 1f;
+        }
+
+        _projectedVertices[targetIndex] = new ProjectedVertex
+        {
+            X = rx * scale * invDepth + centerX,
+            Y = ry * scale * invDepth + centerY,
+            Depth = rzScaled + DEFAULT_DEPTH_OFFSET,
+            LightIntensity = lightIntensity
+        };
     }
 
     private void PrepareRenderData(
@@ -460,7 +674,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         SKPaint paint)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 RenderData renderData;
@@ -471,18 +685,10 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                     renderData = _currentRenderData.Value;
                 }
 
-                RenderDonutInternal(
-                    canvas,
-                    info,
-                    paint,
-                    renderData);
-
+                RenderDonutInternal(canvas, info, paint, renderData);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderFrame",
-                ErrorMessage = "Error rendering donut frame"
-            }
+            nameof(RenderFrame),
+            "Error rendering donut frame"
         );
     }
 
@@ -492,27 +698,19 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         SKPaint paint,
         RenderData renderData)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 paint.IsAntialias = _useAntiAlias;
                 var originalColor = paint.Color;
 
                 GroupVerticesByChar(renderData.Vertices, info, renderData);
-
-                DrawGroupedVertices(
-                    canvas,
-                    paint,
-                    originalColor,
-                    renderData);
+                DrawGroupedVertices(canvas, paint, originalColor, renderData);
 
                 paint.Color = originalColor;
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderDonutInternal",
-                ErrorMessage = "Error in internal donut rendering"
-            }
+            nameof(RenderDonutInternal),
+            "Error in internal donut rendering"
         );
     }
 
@@ -580,218 +778,20 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _dataReady = false;
                 _currentRenderData = null;
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnInvalidateCachedResources",
-                ErrorMessage = "Failed to invalidate cached resources"
-            }
+            nameof(OnInvalidateCachedResources),
+            "Failed to invalidate cached resources"
         );
-    }
-
-    private void UpdateRotationIntensity(float[] spectrum)
-    {
-        Safe(
-            () =>
-            {
-                if (spectrum == null || spectrum.Length == 0)
-                {
-                    _currentRotationIntensity = DEFAULT_ROTATION_INTENSITY;
-                    return;
-                }
-
-                float sum = 0f;
-                for (int i = 0; i < spectrum.Length; i++)
-                    sum += spectrum[i];
-
-                float average = sum / spectrum.Length;
-                float newIntensity = DEFAULT_ROTATION_INTENSITY + average;
-
-                _currentRotationIntensity = _currentRotationIntensity * (1f - ROTATION_INTENSITY_SMOOTHING) +
-                                             newIntensity * ROTATION_INTENSITY_SMOOTHING;
-
-                _currentRotationIntensity = ClampF(
-                    _currentRotationIntensity,
-                    MIN_ROTATION_INTENSITY,
-                    MAX_ROTATION_INTENSITY);
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateRotationIntensity",
-                ErrorMessage = "Error updating rotation intensity"
-            }
-        );
-    }
-
-    private void UpdateRotationAngles()
-    {
-        Safe(
-            () =>
-            {
-                _rotationAngleX = UpdateAngle(
-                    _rotationAngleX,
-                    DEFAULT_ROTATION_SPEED_X * _currentRotationIntensity,
-                    ROTATION_SMOOTHING,
-                    MAX_ROTATION_ANGLE_CHANGE);
-
-                _rotationAngleY = UpdateAngle(
-                    _rotationAngleY,
-                    DEFAULT_ROTATION_SPEED_Y * _currentRotationIntensity,
-                    ROTATION_SMOOTHING,
-                    MAX_ROTATION_ANGLE_CHANGE);
-
-                _rotationAngleZ = UpdateAngle(
-                    _rotationAngleZ,
-                    DEFAULT_ROTATION_SPEED_Z * _currentRotationIntensity,
-                    ROTATION_SMOOTHING,
-                    MAX_ROTATION_ANGLE_CHANGE);
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateRotationAngles",
-                ErrorMessage = "Error updating rotation angles"
-            }
-        );
-    }
-
-    [MethodImpl(AggressiveInlining)]
-    private static float UpdateAngle(
-        float current,
-        float speed,
-        float smoothing,
-        float maxChange)
-    {
-        float target = current + speed;
-        float diff = MinimalAngleDiff(current, target);
-        float clampedDiff = ClampF(diff, -maxChange, maxChange);
-        return current + clampedDiff * smoothing;
-    }
-
-    [MethodImpl(AggressiveInlining)]
-    private static float MinimalAngleDiff(
-        float a,
-        float b)
-    {
-        float diff = b - a;
-        while (diff < -MathF.PI) diff += MathF.PI * 2;
-        while (diff > MathF.PI) diff -= MathF.PI * 2;
-        return diff;
-    }
-
-    [MethodImpl(AggressiveInlining)]
-    private Matrix4x4 CreateRotationMatrix() =>
-        Matrix4x4.CreateRotationX(_rotationAngleX) *
-        Matrix4x4.CreateRotationY(_rotationAngleY) *
-        Matrix4x4.CreateRotationZ(_rotationAngleZ);
-
-    [MethodImpl(AggressiveOptimization)]
-    private void ProjectVerticesInternal( 
-        float scale,
-        float centerX,
-        float centerY,
-        int step)
-    {
-        float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
-        float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
-        float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
-
-        int effectiveVertexCount = _vertices.Length / step;
-
-        if (_projectedVertices.Length != effectiveVertexCount)
-        {
-            _projectedVertices = new ProjectedVertex[effectiveVertexCount];
-            _renderedVertices = new ProjectedVertex[effectiveVertexCount];
-        }
-
-        if (_quality == RenderQuality.High || effectiveVertexCount > 1000)
-        {
-            Parallel.For(0, effectiveVertexCount, i =>
-            {
-                int vertexIndex = i * step;
-                var vertex = _vertices[vertexIndex];
-                ProjectSingleVertex(
-                    vertex,
-                    m11, m12, m13,
-                    m21, m22, m23,
-                    m31, m32, m33,
-                    scale,
-                    centerX,
-                    centerY,
-                    i);
-            });
-        }
-        else
-        {
-            for (int i = 0; i < effectiveVertexCount; i++)
-            {
-                int vertexIndex = i * step;
-                var vertex = _vertices[vertexIndex];
-                ProjectSingleVertex(
-                    vertex,
-                    m11, m12, m13,
-                    m21, m22, m23,
-                    m31, m32, m33,
-                    scale,
-                    centerX,
-                    centerY,
-                    i);
-            }
-        }
-    }
-
-    [MethodImpl(AggressiveInlining)]
-    private void ProjectSingleVertex(
-        Vertex vertex,
-        float m11, float m12, float m13,
-        float m21, float m22, float m23,
-        float m31, float m32, float m33,
-        float scale,
-        float centerX,
-        float centerY,
-        int targetIndex)
-    {
-        float rx = vertex.X * m11 + vertex.Y * m21 + vertex.Z * m31;
-        float ry = vertex.X * m12 + vertex.Y * m22 + vertex.Z * m32;
-        float rz = vertex.X * m13 + vertex.Y * m23 + vertex.Z * m33;
-
-        float rzScaled = rz * DEFAULT_DEPTH_SCALE_FACTOR;
-        float invDepth = 1f / (rzScaled + DEFAULT_DEPTH_OFFSET);
-
-        float lightIntensity;
-        if (_useAdvancedEffects)
-        {
-            float length = MathF.Sqrt(rx * rx + ry * ry + rz * rz);
-            float invLength = length > 0f ? 1f / length : 0f;
-            float normRx = rx * invLength;
-            float normRy = ry * invLength;
-            float normRz = rz * invLength;
-
-            lightIntensity = MathF.Max(0f, normRx * _lightDirection.X +
-                                             normRy * _lightDirection.Y +
-                                             normRz * _lightDirection.Z);
-        }
-        else
-        {
-            lightIntensity = 1f;
-        }
-
-        _projectedVertices[targetIndex] = new ProjectedVertex
-        {
-            X = rx * scale * invDepth + centerX,
-            Y = ry * scale * invDepth + centerY,
-            Depth = rzScaled + DEFAULT_DEPTH_OFFSET,
-            LightIntensity = lightIntensity
-        };
     }
 
     private void InitializeVertices()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 int segments = DEFAULT_SEGMENTS;
@@ -809,17 +809,14 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                     }
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeVertices",
-                ErrorMessage = "Failed to initialize vertices"
-            }
+            nameof(InitializeVertices),
+            "Failed to initialize vertices"
         );
     }
 
     private void InitializeAlphaCache()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 for (int i = 0; i < _asciiCharStrings.Length; i++)
@@ -828,15 +825,12 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                     _alphaCache[i] = (byte)((MIN_ALPHA_VALUE + ALPHA_RANGE * normalizedIndex) * 255);
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeAlphaCache",
-                ErrorMessage = "Failed to initialize alpha cache"
-            }
+            nameof(InitializeAlphaCache),
+            "Failed to initialize alpha cache"
         );
     }
 
-    [MethodImpl(AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float ClampF(
         float value,
         float min,
@@ -845,41 +839,32 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
     public override void Dispose()
     {
-        if (!_disposed)
-        {
-            Safe(
-                () =>
-                {
-                    OnDispose();
-                },
-                new ErrorHandlingOptions
-                {
-                    Source = $"{LOG_PREFIX}.Dispose",
-                    ErrorMessage = "Error during renderer disposal"
-                }
-            );
+        if (_disposed) return;
 
-            _disposed = true;
-            GC.SuppressFinalize(this);
-        }
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during renderer disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     protected override void OnDispose()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 DisposeManagedResources();
-
                 base.OnDispose();
-
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnDispose",
-                ErrorMessage = "Error during OnDispose"
-            }
+            nameof(OnDispose),
+            "Error during OnDispose"
         );
     }
 

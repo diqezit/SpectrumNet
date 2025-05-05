@@ -1,7 +1,6 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.PolarRenderer.Constants;
-using static System.MathF;
 using Vector = System.Numerics.Vector;
 
 namespace SpectrumNet.Views.Renderers;
@@ -9,50 +8,6 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class PolarRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<PolarRenderer> _instance = new(() => new PolarRenderer());
-
-    private SKPath? _outerPath;
-    private SKPath? _innerPath;
-    private SKPaint? _fillPaint;
-    private SKPaint? _strokePaint;
-    private SKPaint? _centerPaint;
-    private SKPaint? _glowPaint;
-    private SKPaint? _highlightPaint;
-    private SKShader? _gradientShader;
-    private SKPathEffect? _dashEffect;
-    private SKImageFilter? _glowFilter;
-    private SKPicture? _cachedCenterCircle;
-
-    private SKPoint[]? _outerPoints;
-    private SKPoint[]? _innerPoints;
-    private SKColor _lastBaseColor;
-    private SKRect _centerCircleBounds;
-    private SKRect _clipBounds;
-    private float[]? _tempSpectrum;
-
-    private float _rotation;
-    private float _pulseEffect;
-    private bool _pathsNeedUpdate;
-    private int _currentPointCount;
-
-    private readonly new bool _isOverlayActive;
-    private new float _smoothingFactor = SMOOTHING_FACTOR_MEDIUM;
-    private new bool _useAntiAlias = true;
-    private new bool _useAdvancedEffects = true;
-    private bool _useGlow = false;
-    private bool _useHighlight = true;
-    private bool _usePulseEffect = true;
-    private bool _useDashEffect = true;
-    private float _pathSimplification = PATH_SIMPLIFICATION_MEDIUM;
-    private float _strokeMultiplier = STROKE_MULTIPLIER_MEDIUM;
-    private int _maxPoints = MAX_POINTS_MEDIUM;
-
-    private Vector<float> _smoothingVec;
-    private Vector<float> _oneMinusSmoothing;
-
-    private readonly SemaphoreSlim _pathUpdateSemaphore = new(1, 1);
-    private int _frameCounter;
-    private float _lastFrameTime;
-    private float _avgFrameTime;
 
     private PolarRenderer() { }
 
@@ -70,7 +25,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             MAX_SPECTRUM_VALUE = 1.0f,
             SPECTRUM_SCALE = 2.0f,
             CHANGE_THRESHOLD = 0.01f,
-            DEG_TO_RAD = (float)(MathF.PI / 180.0);
+            DEG_TO_RAD = (float)(PI / 180.0);
 
         // Animation constants
         public const float
@@ -169,19 +124,67 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         }
     }
 
-    protected override void OnInitialize()
-    {
+    // Resources for rendering
+    private readonly SemaphoreSlim _pathUpdateSemaphore = new(1, 1);
+
+    // Paint resources
+    private SKPath? _outerPath;
+    private SKPath? _innerPath;
+    private SKPaint? _fillPaint;
+    private SKPaint? _strokePaint;
+    private SKPaint? _centerPaint;
+    private SKPaint? _glowPaint;
+    private SKPaint? _highlightPaint;
+
+    // Shader and effect resources
+    private SKShader? _gradientShader;
+    private SKPathEffect? _dashEffect;
+    private SKImageFilter? _glowFilter;
+    private SKPicture? _cachedCenterCircle;
+
+    // Buffers and data
+    private SKPoint[]? _outerPoints;
+    private SKPoint[]? _innerPoints;
+    private SKColor _lastBaseColor;
+    private SKRect _centerCircleBounds;
+    private SKRect _clipBounds;
+    private float[]? _tempSpectrum;
+
+    // State
+    private float _rotation;
+    private float _pulseEffect;
+    private bool _pathsNeedUpdate;
+    private int _currentPointCount;
+
+    // Quality settings
+    private new bool _isOverlayActive;
+    private new float _smoothingFactor;
+    private new bool _useAntiAlias;
+    private new bool _useAdvancedEffects;
+    private bool _useGlow;
+    private bool _useHighlight;
+    private bool _usePulseEffect;
+    private bool _useDashEffect;
+    private float _pathSimplification;
+    private float _strokeMultiplier;
+    private int _maxPoints;
+
+    // SIMD optimization
+    private Vector<float> _smoothingVec;
+    private Vector<float> _oneMinusSmoothing;
+
+    protected override void OnInitialize() =>
         ExecuteSafely(
             () =>
             {
                 base.OnInitialize();
                 InitializeResources();
+                ApplyQualityBasedSettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed during renderer initialization"
         );
-    }
 
     private void InitializeResources()
     {
@@ -295,98 +298,96 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
-    {
+        RenderQuality quality = RenderQuality.Medium) =>
         ExecuteSafely(
             () =>
             {
                 bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
                 base.Configure(isOverlayActive, quality);
 
-                UpdateOverlayStateIfNeeded(isOverlayActive);
-
                 if (configChanged)
                 {
                     Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
                     OnConfigurationChanged();
                 }
+
+                if (_isOverlayActive != isOverlayActive)
+                {
+                    UpdateOverlayState(isOverlayActive);
+                }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
-    }
 
-    private void UpdateOverlayStateIfNeeded(bool isOverlayActive)
+    private void UpdateOverlayState(bool isOverlayActive)
     {
-        if (isOverlayActive != _isOverlayActive)
-        {
-            UpdatePointCountForOverlay(isOverlayActive);
-            MarkPathsForUpdate();
-        }
+        _isOverlayActive = isOverlayActive;
+        UpdatePointCountForOverlay();
+        MarkPathsForUpdate();
     }
 
-    private void UpdatePointCountForOverlay(bool isOverlayActive) =>
-        _currentPointCount = isOverlayActive
+    private void UpdatePointCountForOverlay() =>
+        _currentPointCount = _isOverlayActive
             ? POINT_COUNT_OVERLAY
-            : (int)MathF.Min(_maxPoints, MAX_POINT_COUNT);
+            : Min(_maxPoints, MAX_POINT_COUNT);
 
     private void MarkPathsForUpdate() =>
         _pathsNeedUpdate = true;
 
-    protected override void OnConfigurationChanged()
-    {
+    protected override void OnConfigurationChanged() =>
         ExecuteSafely(
             () =>
             {
                 base.OnConfigurationChanged();
                 InvalidateCachedResources();
             },
-            "OnConfigurationChanged",
+            nameof(OnConfigurationChanged),
             "Failed to handle configuration change"
         );
-    }
 
-    protected override void OnQualitySettingsApplied()
-    {
+    protected override void OnQualitySettingsApplied() =>
         ExecuteSafely(
             () =>
             {
                 base.OnQualitySettingsApplied();
-                ApplyQualitySpecificSettings();
+                ApplyQualityBasedSettings();
                 Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. New Quality: {Quality}");
             },
-            "OnQualitySettingsApplied",
+            nameof(OnQualitySettingsApplied),
             "Failed to apply specific quality settings"
         );
-    }
-
-    private void ApplyQualitySpecificSettings()
-    {
-        InvalidateCachedResources();
-        ApplyQualityBasedSettings();
-        UpdatePointCountBasedOnOverlay();
-        UpdateSmoothingVectors();
-        UpdatePaintSettings();
-        MarkPathsForUpdate();
-    }
 
     private void ApplyQualityBasedSettings()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                SetLowQualitySettings();
+                ApplyLowQualitySettings();
                 break;
+
             case RenderQuality.Medium:
-                SetMediumQualitySettings();
+                ApplyMediumQualitySettings();
                 break;
+
             case RenderQuality.High:
-                SetHighQualitySettings();
+                ApplyHighQualitySettings();
                 break;
         }
+
+        ApplyQualityDependentChanges();
     }
 
-    private void SetLowQualitySettings()
+    private void ApplyQualityDependentChanges()
+    {
+        InvalidateCachedResources();
+        UpdatePointCountBasedOnOverlay();
+        UpdateSmoothingVectors();
+        UpdatePaintSettings();
+        MarkPathsForUpdate();
+    }
+
+    private void ApplyLowQualitySettings()
     {
         _smoothingFactor = SMOOTHING_FACTOR_LOW;
         _maxPoints = MAX_POINTS_LOW;
@@ -401,7 +402,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _pathSimplification = PATH_SIMPLIFICATION_LOW;
     }
 
-    private void SetMediumQualitySettings()
+    private void ApplyMediumQualitySettings()
     {
         _smoothingFactor = SMOOTHING_FACTOR_MEDIUM;
         _maxPoints = MAX_POINTS_MEDIUM;
@@ -416,7 +417,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _pathSimplification = PATH_SIMPLIFICATION_MEDIUM;
     }
 
-    private void SetHighQualitySettings()
+    private void ApplyHighQualitySettings()
     {
         _smoothingFactor = SMOOTHING_FACTOR_HIGH;
         _maxPoints = MAX_POINTS_HIGH;
@@ -434,7 +435,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     private void UpdatePointCountBasedOnOverlay() =>
         _currentPointCount = _isOverlayActive
             ? POINT_COUNT_OVERLAY
-            : (int)MathF.Min(_maxPoints, MAX_POINT_COUNT);
+            : Min(_maxPoints, MAX_POINT_COUNT);
 
     private void UpdateSmoothingVectors()
     {
@@ -448,6 +449,11 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             _centerPaint == null || _glowPaint == null || _highlightPaint == null)
             return;
 
+        UpdateAllPaintSettings();
+    }
+
+    private void UpdateAllPaintSettings()
+    {
         UpdateFillPaintSettings();
         UpdateStrokePaintSettings();
         UpdateCenterPaintSettings();
@@ -481,11 +487,16 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private new void InvalidateCachedResources()
     {
+        DisposeAllCachedResources();
+        MarkPathsForUpdate();
+    }
+
+    private void DisposeAllCachedResources()
+    {
         DisposeCircleCache();
         DisposeDashEffect();
         DisposeGradientShader();
         DisposeGlowFilter();
-        MarkPathsForUpdate();
     }
 
     private void DisposeCircleCache()
@@ -512,207 +523,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _glowFilter = null;
     }
 
-    private void UpdateCenterCircle(SKColor baseColor)
-    {
-        if (_centerPaint == null) return;
-
-        DisposeCircleCache();
-        CreateGlowFilter();
-        DrawCenterCircle(baseColor);
-    }
-
-    private void CreateGlowFilter()
-    {
-        float effectiveGlowRadius = _useGlow ? GLOW_RADIUS : GLOW_RADIUS * 0.5f;
-        float effectiveGlowSigma = _useGlow ? GLOW_SIGMA : GLOW_SIGMA * 0.5f;
-
-        _glowFilter?.Dispose();
-        _glowFilter = SKImageFilter.CreateBlur(effectiveGlowRadius, effectiveGlowSigma);
-    }
-
-    private void DrawCenterCircle(SKColor baseColor)
-    {
-        using var recorder = new SKPictureRecorder();
-        SKCanvas pictureCanvas = recorder.BeginRecording(_centerCircleBounds);
-
-        DrawGlowCircleIfNeeded(pictureCanvas, baseColor);
-        DrawMainCenterCircle(pictureCanvas);
-        DrawHighlightCircleIfNeeded(pictureCanvas);
-
-        _cachedCenterCircle = recorder.EndRecording();
-    }
-
-    private void DrawGlowCircleIfNeeded(SKCanvas pictureCanvas, SKColor baseColor)
-    {
-        if (!_useGlow) return;
-
-        using var glowPaint = new SKPaint()
-        {
-            IsAntialias = _useAntiAlias,
-            Style = SKPaintStyle.Fill,
-            Color = baseColor.WithAlpha(GLOW_ALPHA),
-            ImageFilter = _glowFilter
-        };
-
-        pictureCanvas.DrawCircle(
-            0,
-            0,
-            CENTER_CIRCLE_SIZE * CENTER_CIRCLE_GLOW_MULTIPLIER,
-            glowPaint
-        );
-    }
-
-    private void DrawMainCenterCircle(SKCanvas pictureCanvas) =>
-        pictureCanvas.DrawCircle(
-            0,
-            0,
-            CENTER_CIRCLE_SIZE * CENTER_CIRCLE_MAIN_MULTIPLIER,
-            _centerPaint!
-        );
-
-    private void DrawHighlightCircleIfNeeded(SKCanvas pictureCanvas)
-    {
-        if (!_useHighlight) return;
-
-        using var highlightPaint = new SKPaint()
-        {
-            IsAntialias = _useAntiAlias,
-            Style = SKPaintStyle.Fill,
-            Color = SKColors.White.WithAlpha(HIGHLIGHT_ALPHA)
-        };
-
-        pictureCanvas.DrawCircle(
-            -CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_OFFSET_MULTIPLIER,
-            -CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_OFFSET_MULTIPLIER,
-            CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_SIZE_MULTIPLIER,
-            highlightPaint
-        );
-    }
-
-    private void UpdateVisualEffects(SKColor baseColor)
-    {
-        if (_fillPaint == null || _strokePaint == null ||
-            _glowPaint == null || _highlightPaint == null)
-            return;
-
-        if (!ShouldUpdateVisualEffects(baseColor)) return;
-
-        UpdateBaseColor(baseColor);
-        CreateGradientShader(baseColor);
-        UpdateStrokeColor(baseColor);
-        UpdateGlowEffectIfNeeded(baseColor);
-        UpdateHighlightEffectIfNeeded(baseColor);
-        UpdateDashEffectIfNeeded();
-        UpdateCenterPaintAndCircle(baseColor);
-    }
-
-    private bool ShouldUpdateVisualEffects(SKColor baseColor)
-    {
-        bool colorChanged =
-            baseColor.Red != _lastBaseColor.Red ||
-            baseColor.Green != _lastBaseColor.Green ||
-            baseColor.Blue != _lastBaseColor.Blue;
-
-        return colorChanged || _gradientShader == null;
-    }
-
-    private void UpdateBaseColor(SKColor baseColor) =>
-        _lastBaseColor = baseColor;
-
-    private void CreateGradientShader(SKColor baseColor)
-    {
-        SKColor gradientStart = baseColor.WithAlpha(FILL_ALPHA);
-        SKColor gradientEnd = new(
-            (byte)MathF.Min(255, baseColor.Red * GRADIENT_COLOR_MULTIPLIER),
-            (byte)MathF.Min(255, baseColor.Green * GRADIENT_COLOR_MULTIPLIER),
-            (byte)MathF.Min(255, baseColor.Blue * GRADIENT_COLOR_MULTIPLIER),
-            GRADIENT_END_ALPHA
-        );
-
-        _gradientShader?.Dispose();
-        _gradientShader = SKShader.CreateRadialGradient(
-            new SKPoint(0, 0),
-            MIN_RADIUS + MAX_SPECTRUM_VALUE * RADIUS_MULTIPLIER,
-            [gradientStart, gradientEnd],
-            SKShaderTileMode.Clamp
-        );
-
-        _fillPaint!.Shader = _gradientShader;
-    }
-
-    private void UpdateStrokeColor(SKColor baseColor) =>
-        _strokePaint!.Color = baseColor;
-
-    private void UpdateGlowEffectIfNeeded(SKColor baseColor)
-    {
-        if (!_useGlow) return;
-
-        _glowFilter?.Dispose();
-        _glowFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_SIGMA);
-        _glowPaint!.Color = baseColor.WithAlpha(GLOW_ALPHA);
-        _glowPaint!.ImageFilter = _glowFilter;
-    }
-
-    private void UpdateHighlightEffectIfNeeded(SKColor baseColor)
-    {
-        if (!_useHighlight) return;
-
-        _highlightPaint!.Color = new SKColor(
-            (byte)MathF.Min(255, baseColor.Red * HIGHLIGHT_FACTOR),
-            (byte)MathF.Min(255, baseColor.Green * HIGHLIGHT_FACTOR),
-            (byte)MathF.Min(255, baseColor.Blue * HIGHLIGHT_FACTOR),
-            HIGHLIGHT_ALPHA
-        );
-    }
-
-    private void UpdateDashEffectIfNeeded()
-    {
-        if (!_useDashEffect) return;
-
-        float[] intervals = [DASH_LENGTH, DASH_LENGTH * 2];
-        _dashEffect?.Dispose();
-        _dashEffect = SKPathEffect.CreateDash(
-            intervals,
-            _time * DASH_PHASE_SPEED % (DASH_LENGTH * 3)
-        );
-    }
-
-    private void UpdateCenterPaintAndCircle(SKColor baseColor)
-    {
-        if (_centerPaint == null) return;
-
-        _centerPaint.Color = baseColor;
-        UpdateCenterCircle(baseColor);
-    }
-
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
-    {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-        {
-            drawPerformanceInfo?.Invoke(canvas!, info);
-            return;
-        }
-
-        float frameStartTime = (float)Now.Ticks / TimeSpan.TicksPerSecond;
-
-        ExecuteSafely(
-            () => PerformRender(canvas!, spectrum!, info, barWidth, barCount, paint!),
-            "Render",
-            "Error during rendering"
-        );
-
-        drawPerformanceInfo?.Invoke(canvas!, info);
-        TrackFrameTime(frameStartTime);
-    }
-
     protected override void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
@@ -720,40 +530,61 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
-        float frameStartTime = (float)Now.Ticks / TimeSpan.TicksPerSecond;
-
+        SKPaint paint) =>
         ExecuteSafely(
-            () => PerformRender(canvas, spectrum, info, barWidth, barCount, paint),
-            "RenderEffect",
+            () =>
+            {
+                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                    return;
+
+                UpdateState(spectrum, info, barWidth, barCount, paint);
+                RenderFrame(canvas, info);
+            },
+            nameof(RenderEffect),
             "Error during rendering"
         );
 
-        TrackFrameTime(frameStartTime);
-    }
-
-    private void PerformRender(
-        SKCanvas canvas,
+    private void UpdateState(
         float[] spectrum,
         SKImageInfo info,
         float barWidth,
         int barCount,
-        SKPaint paint)
-    {
-        int safeBarCount = (int)MathF.Min(MathF.Max(barCount, MIN_POINT_COUNT), _maxPoints);
-        float safeBarWidth = Clamp(barWidth, MIN_BAR_WIDTH, MAX_BAR_WIDTH);
+        SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                int safeBarCount = GetSafeBarCount(barCount);
 
-        PrepareClipBounds();
+                PrepareClipBounds();
+                ProcessSpectrumAndUpdatePaths(spectrum, safeBarCount, info);
+                UpdateVisualEffects(paint.Color);
+                UpdateEffectParameters(barWidth);
+            },
+            nameof(UpdateState),
+            "Error during state update"
+        );
 
-        if (IsCanvasOutOfBounds(canvas, info)) return;
+    private int GetSafeBarCount(int barCount) =>
+        Min(Max(barCount, MIN_POINT_COUNT), _maxPoints);
 
-        ProcessSpectrumAndUpdatePaths(spectrum, safeBarCount, info);
-        UpdateVisualEffects(paint.Color);
-        RenderPolarGraph(canvas, info, paint, safeBarWidth);
-    }
+    private void RenderFrame(
+        SKCanvas canvas,
+        SKImageInfo info) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (!AreRenderResourcesValid()) return;
+                if (IsCanvasOutOfBounds(canvas, info)) return;
+
+                ApplyDashEffectIfNeeded();
+
+                canvas.Save();
+                RenderGraphWithTransform(canvas, info);
+                canvas.Restore();
+            },
+            nameof(RenderFrame),
+            "Error during frame rendering"
+        );
 
     private void PrepareClipBounds()
     {
@@ -801,22 +632,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void RenderPolarGraph(
-        SKCanvas canvas,
-        SKImageInfo info,
-        SKPaint basePaint,
-        float barWidth)
-    {
-        if (!AreRenderResourcesValid()) return;
-
-        UpdateEffectParameters(barWidth);
-        ApplyDashEffectIfNeeded();
-
-        canvas.Save();
-        RenderGraphWithTransform(canvas, info);
-        canvas.Restore();
-    }
-
     private bool AreRenderResourcesValid() =>
         _outerPath != null && _innerPath != null &&
         _fillPaint != null && _strokePaint != null &&
@@ -825,8 +640,9 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private void UpdateEffectParameters(float barWidth)
     {
+        float safeBarWidth = Clamp(barWidth, MIN_BAR_WIDTH, MAX_BAR_WIDTH);
         UpdatePulseEffect();
-        UpdateStrokeWidths(barWidth);
+        UpdateStrokeWidths(safeBarWidth);
     }
 
     private void UpdatePulseEffect() =>
@@ -836,23 +652,40 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private void UpdateStrokeWidths(float barWidth)
     {
+        if (_strokePaint == null) return;
+
+        UpdateMainStrokeWidth(barWidth);
+        UpdateGlowStrokeWidth(barWidth);
+        UpdateHighlightStrokeWidth(barWidth);
+    }
+
+    private void UpdateMainStrokeWidth(float barWidth) =>
         _strokePaint!.StrokeWidth = barWidth * _pulseEffect * _strokeMultiplier;
 
-        if (_useGlow)
+    private void UpdateGlowStrokeWidth(float barWidth)
+    {
+        if (_useGlow && _glowPaint != null)
         {
-            _glowPaint!.StrokeWidth = barWidth * 1.5f * _pulseEffect * _strokeMultiplier;
-        }
-
-        if (_useHighlight)
-        {
-            _highlightPaint!.StrokeWidth = barWidth * 0.5f * _pulseEffect * _strokeMultiplier;
+            _glowPaint.StrokeWidth = barWidth * 1.5f * _pulseEffect * _strokeMultiplier;
         }
     }
 
-    private void ApplyDashEffectIfNeeded() =>
-        _strokePaint!.PathEffect = (_useDashEffect && _dashEffect != null)
+    private void UpdateHighlightStrokeWidth(float barWidth)
+    {
+        if (_useHighlight && _highlightPaint != null)
+        {
+            _highlightPaint.StrokeWidth = barWidth * 0.5f * _pulseEffect * _strokeMultiplier;
+        }
+    }
+
+    private void ApplyDashEffectIfNeeded()
+    {
+        if (_strokePaint == null) return;
+
+        _strokePaint.PathEffect = (_useDashEffect && _dashEffect != null)
             ? _dashEffect
             : null;
+    }
 
     private void RenderGraphWithTransform(SKCanvas canvas, SKImageInfo info)
     {
@@ -899,31 +732,45 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private void RenderGlowEffectIfNeeded(SKCanvas canvas)
     {
-        if (_useGlow)
+        if (_useGlow && _glowPaint != null && _outerPath != null)
         {
-            canvas.DrawPath(_outerPath!, _glowPaint!);
+            canvas.DrawPath(_outerPath, _glowPaint);
         }
     }
 
     private void RenderOuterPath(SKCanvas canvas)
     {
-        canvas.DrawPath(_outerPath!, _fillPaint!);
-        canvas.DrawPath(_outerPath!, _strokePaint!);
+        if (_outerPath == null || _fillPaint == null || _strokePaint == null) return;
+
+        canvas.DrawPath(_outerPath, _fillPaint);
+        canvas.DrawPath(_outerPath, _strokePaint);
     }
 
     private void RenderInnerPathWithDash(SKCanvas canvas)
     {
-        SKPathEffect? originalEffect = _strokePaint!.PathEffect;
-        _strokePaint!.PathEffect = _dashEffect;
-        canvas.DrawPath(_innerPath!, _strokePaint!);
-        _strokePaint!.PathEffect = originalEffect;
+        if (_innerPath == null || _strokePaint == null) return;
+
+        SaveAndApplyDashEffect(canvas);
+    }
+
+    private void SaveAndApplyDashEffect(SKCanvas canvas)
+    {
+        if (_strokePaint == null || _innerPath == null) return;
+
+        SKPathEffect? originalEffect = _strokePaint.PathEffect;
+
+        if (_dashEffect != null)
+            _strokePaint.PathEffect = _dashEffect;
+
+        canvas.DrawPath(_innerPath, _strokePaint);
+        _strokePaint.PathEffect = originalEffect;
     }
 
     private void RenderHighlightIfNeeded(SKCanvas canvas)
     {
-        if (_useHighlight)
+        if (_useHighlight && _highlightPaint != null && _innerPath != null)
         {
-            canvas.DrawPath(_innerPath!, _highlightPaint!);
+            canvas.DrawPath(_innerPath, _highlightPaint);
         }
     }
 
@@ -936,24 +783,50 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private void RenderMainPaths(SKCanvas canvas)
     {
-        canvas.DrawPath(_outerPath!, _fillPaint!);
-        canvas.DrawPath(_outerPath!, _strokePaint!);
+        if (_outerPath == null || _innerPath == null ||
+            _fillPaint == null || _strokePaint == null) return;
+
+        DrawOuterPathWithFillAndStroke(canvas);
+        DrawInnerPathWithDash(canvas);
+    }
+
+    private void DrawOuterPathWithFillAndStroke(SKCanvas canvas)
+    {
+        if (_outerPath == null || _fillPaint == null || _strokePaint == null) return;
+
+        canvas.DrawPath(_outerPath, _fillPaint);
+        canvas.DrawPath(_outerPath, _strokePaint);
+    }
+
+    private void DrawInnerPathWithDash(SKCanvas canvas)
+    {
+        if (_innerPath == null || _strokePaint == null) return;
+
+        SKPathEffect? originalEffect = null;
 
         if (_useDashEffect && _dashEffect != null)
         {
-            _strokePaint!.PathEffect = _dashEffect;
+            originalEffect = _strokePaint.PathEffect;
+            _strokePaint.PathEffect = _dashEffect;
         }
-        canvas.DrawPath(_innerPath!, _strokePaint!);
-        _strokePaint!.PathEffect = null;
+
+        canvas.DrawPath(_innerPath, _strokePaint);
+
+        if (originalEffect != null)
+        {
+            _strokePaint.PathEffect = null;
+        }
     }
 
     private void RenderCenterCircleWithPulse(SKCanvas canvas)
     {
+        if (_cachedCenterCircle == null) return;
+
         float pulseScale = CalculatePulseScale();
 
         canvas.Save();
         canvas.Scale(pulseScale, pulseScale);
-        canvas.DrawPicture(_cachedCenterCircle!);
+        canvas.DrawPicture(_cachedCenterCircle);
         canvas.Restore();
     }
 
@@ -962,26 +835,12 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             ? 1.0f + MathF.Sin(_time * PULSE_SPEED * 0.5f) * PULSE_SCALE_MULTIPLIER
             : 1.0f;
 
-    private void TrackFrameTime(float frameStartTime)
-    {
-        float frameEndTime = (float)Now.Ticks / TimeSpan.TicksPerSecond;
-        float frameTime = frameEndTime - frameStartTime;
-
-        UpdateFrameTimeStatistics(frameTime);
-    }
-
-    private void UpdateFrameTimeStatistics(float frameTime)
-    {
-        _lastFrameTime = frameTime;
-        _avgFrameTime = (_avgFrameTime * _frameCounter + frameTime) / (_frameCounter + 1);
-        _frameCounter = (_frameCounter + 1) % FRAME_AVERAGE_COUNT;
-    }
-
-    private void UpdatePolarPaths(SKImageInfo info, int barCount)
+    private void UpdatePolarPaths(SKImageInfo _, int barCount)
     {
         if (!ArePathResourcesValid()) return;
 
         UpdateAnimationState();
+
         CalculatePathParameters(
             barCount,
             out int effectivePointCount,
@@ -989,7 +848,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             out int actualPoints,
             out float angleStep
         );
-        GeneratePointCoordinates(effectivePointCount, skipFactor, actualPoints, angleStep);
+
+        GeneratePathPoints(effectivePointCount, skipFactor, actualPoints, angleStep);
         CreatePathsFromPoints(effectivePointCount, skipFactor, actualPoints);
     }
 
@@ -1010,24 +870,30 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         out int actualPoints,
         out float angleStep)
     {
-        effectivePointCount = (int)MathF.Min(barCount, _currentPointCount);
+        effectivePointCount = Min(barCount, _currentPointCount);
 
-        skipFactor = _pathSimplification > 0
-            ? (int)MathF.Max(1, (int)(1.0f / (1.0f - _pathSimplification)))
-            : 1;
+        skipFactor = CalculateSkipFactor();
 
         actualPoints = effectivePointCount / skipFactor;
         angleStep = 360f / actualPoints;
     }
 
-    private void GeneratePointCoordinates(
+    private int CalculateSkipFactor() =>
+        _pathSimplification > 0
+            ? Max(1, (int)(1.0f / (1.0f - _pathSimplification)))
+            : 1;
+
+    private void GeneratePathPoints(
         int effectivePointCount,
         int skipFactor,
-        int actualPoints,
+        int _,
         float angleStep)
     {
         for (int i = 0, pointIndex = 0; i <= effectivePointCount; i += skipFactor, pointIndex++)
         {
+            if (pointIndex >= _outerPoints!.Length || pointIndex >= _innerPoints!.Length)
+                break;
+
             float angle = pointIndex * angleStep * DEG_TO_RAD;
             float cosAngle = MathF.Cos(angle);
             float sinAngle = MathF.Sin(angle);
@@ -1169,36 +1035,55 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private void CreatePathsUsingPoly(int actualPoints)
     {
-        int pointsToUse = (int)MathF.Min(actualPoints + 1, _outerPoints!.Length);
+        int pointsToUse = Min(actualPoints + 1, _outerPoints!.Length);
 
-        SKPoint[] outerPointsSlice = new SKPoint[pointsToUse];
-        SKPoint[] innerPointsSlice = new SKPoint[pointsToUse];
-
-        Array.Copy(_outerPoints!, outerPointsSlice, pointsToUse);
-        Array.Copy(_innerPoints!, innerPointsSlice, pointsToUse);
+        SKPoint[] outerPointsSlice = CreatePointsSlice(_outerPoints!, pointsToUse);
+        SKPoint[] innerPointsSlice = CreatePointsSlice(_innerPoints!, pointsToUse);
 
         _outerPath!.AddPoly(outerPointsSlice, true);
         _innerPath!.AddPoly(innerPointsSlice, true);
+    }
+
+    private static SKPoint[] CreatePointsSlice(SKPoint[] sourcePoints, int count)
+    {
+        SKPoint[] slice = new SKPoint[count];
+        Array.Copy(sourcePoints, slice, count);
+        return slice;
     }
 
     private void CreatePathsUsingLines(int effectivePointCount, int skipFactor)
     {
         for (int i = 0, pointIndex = 0; i <= effectivePointCount; i += skipFactor, pointIndex++)
         {
-            int safeIndex = (int)MathF.Min(pointIndex, _outerPoints!.Length - 1);
+            int safeIndex = Min(pointIndex, _outerPoints!.Length - 1);
 
             if (pointIndex == 0)
             {
-                _outerPath!.MoveTo(_outerPoints[safeIndex]);
-                _innerPath!.MoveTo(_innerPoints![safeIndex]);
+                InitializePathStartPoints(safeIndex);
             }
             else
             {
-                _outerPath!.LineTo(_outerPoints[safeIndex]);
-                _innerPath!.LineTo(_innerPoints![safeIndex]);
+                AddLineToPathPoints(safeIndex);
             }
         }
 
+        ClosePaths();
+    }
+
+    private void InitializePathStartPoints(int safeIndex)
+    {
+        _outerPath!.MoveTo(_outerPoints![safeIndex]);
+        _innerPath!.MoveTo(_innerPoints![safeIndex]);
+    }
+
+    private void AddLineToPathPoints(int safeIndex)
+    {
+        _outerPath!.LineTo(_outerPoints![safeIndex]);
+        _innerPath!.LineTo(_innerPoints![safeIndex]);
+    }
+
+    private void ClosePaths()
+    {
         _outerPath!.Close();
         _innerPath!.Close();
     }
@@ -1222,7 +1107,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private void ProcessAndSmoothSpectrum(float[] spectrum, int barCount)
     {
-        int pointCount = (int)MathF.Min(barCount, _currentPointCount);
+        int pointCount = Min(barCount, _currentPointCount);
         ExtractSpectrumPoints(spectrum, pointCount);
         float maxChange = SmoothSpectrumSIMD(pointCount);
 
@@ -1251,7 +1136,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         float fraction = spectrumIndex - baseIndex;
 
         _tempSpectrum![pointIndex] = CalculateInterpolatedValue(spectrum, baseIndex, fraction);
-        _tempSpectrum[pointIndex] = MathF.Min(_tempSpectrum[pointIndex] * SPECTRUM_SCALE, MAX_SPECTRUM_VALUE);
+        _tempSpectrum[pointIndex] = Min(_tempSpectrum[pointIndex] * SPECTRUM_SCALE, MAX_SPECTRUM_VALUE);
     }
 
     private static float CalculateInterpolatedValue(
@@ -1261,7 +1146,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         if (baseIndex >= spectrum.Length / 2 - 1)
         {
-            return spectrum[(int)MathF.Min(spectrum.Length / 2 - 1, spectrum.Length - 1)];
+            return spectrum[Min(spectrum.Length / 2 - 1, spectrum.Length - 1)];
         }
         else if (baseIndex + 1 < spectrum.Length)
         {
@@ -1283,13 +1168,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             return maxChange;
         }
 
-        int safePointCount = (int)MathF.Min(
-            pointCount,
-            MathF.Min(
-                _tempSpectrum.Length,
-                MathF.Min(_previousSpectrum.Length, _processedSpectrum.Length)
-            )
-        );
+        int safePointCount = GetSafeSpectrumPointCount(pointCount);
 
         if (IsHardwareAccelerated && safePointCount >= Vector<float>.Count)
         {
@@ -1303,11 +1182,20 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         return maxChange;
     }
 
+    private int GetSafeSpectrumPointCount(int pointCount) =>
+        Min(
+            pointCount,
+            Min(
+                _tempSpectrum!.Length,
+                Min(_previousSpectrum!.Length, _processedSpectrum!.Length)
+            )
+        );
+
     private void ProcessSpectrumSIMD(int safePointCount, ref float maxChange)
     {
         for (int i = 0; i < safePointCount; i += Vector<float>.Count)
         {
-            int remaining = (int)MathF.Min(Vector<float>.Count, safePointCount - i);
+            int remaining = Min(Vector<float>.Count, safePointCount - i);
 
             if (remaining < Vector<float>.Count)
             {
@@ -1345,7 +1233,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         Vector<float> change = Vector.Abs(smoothed - previous);
         float batchMaxChange = CalculateMaxChangeFromVector(change);
-        maxChange = MathF.Max(maxChange, batchMaxChange);
+        maxChange = Max(maxChange, batchMaxChange);
     }
 
     private static float CalculateMaxChangeFromVector(Vector<float> change)
@@ -1371,8 +1259,10 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         {
             float newValue = _previousSpectrum![startIndex + j] * (1 - _smoothingFactor) +
                            _tempSpectrum![startIndex + j] * _smoothingFactor;
-            float change = MathF.Abs(newValue - _previousSpectrum[startIndex + j]);
-            maxChange = MathF.Max(maxChange, change);
+
+            float change = Abs(newValue - _previousSpectrum[startIndex + j]);
+            maxChange = Max(maxChange, change);
+
             _processedSpectrum![startIndex + j] = newValue;
             _previousSpectrum[startIndex + j] = newValue;
         }
@@ -1384,11 +1274,197 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         {
             float newValue = _previousSpectrum![i] * (1 - _smoothingFactor) +
                            _tempSpectrum![i] * _smoothingFactor;
-            float change = MathF.Abs(newValue - _previousSpectrum[i]);
-            maxChange = MathF.Max(maxChange, change);
+
+            float change = Abs(newValue - _previousSpectrum[i]);
+            maxChange = Max(maxChange, change);
+
             _processedSpectrum![i] = newValue;
             _previousSpectrum[i] = newValue;
         }
+    }
+
+    private void UpdateCenterCircle(SKColor baseColor)
+    {
+        if (_centerPaint == null) return;
+
+        DisposeCircleCache();
+        CreateGlowFilter();
+        DrawCenterCircle(baseColor);
+    }
+
+    private void CreateGlowFilter()
+    {
+        float effectiveGlowRadius = _useGlow ? GLOW_RADIUS : GLOW_RADIUS * 0.5f;
+        float effectiveGlowSigma = _useGlow ? GLOW_SIGMA : GLOW_SIGMA * 0.5f;
+
+        _glowFilter?.Dispose();
+        _glowFilter = SKImageFilter.CreateBlur(effectiveGlowRadius, effectiveGlowSigma);
+    }
+
+    private void DrawCenterCircle(SKColor baseColor)
+    {
+        using var recorder = new SKPictureRecorder();
+        SKCanvas pictureCanvas = recorder.BeginRecording(_centerCircleBounds);
+
+        DrawGlowCircleIfNeeded(pictureCanvas, baseColor);
+        DrawMainCenterCircle(pictureCanvas);
+        DrawHighlightCircleIfNeeded(pictureCanvas);
+
+        _cachedCenterCircle = recorder.EndRecording();
+    }
+
+    private void DrawGlowCircleIfNeeded(SKCanvas pictureCanvas, SKColor baseColor)
+    {
+        if (!_useGlow) return;
+
+        using var glowPaint = new SKPaint()
+        {
+            IsAntialias = _useAntiAlias,
+            Style = SKPaintStyle.Fill,
+            Color = baseColor.WithAlpha(GLOW_ALPHA),
+            ImageFilter = _glowFilter
+        };
+
+        pictureCanvas.DrawCircle(
+            0,
+            0,
+            CENTER_CIRCLE_SIZE * CENTER_CIRCLE_GLOW_MULTIPLIER,
+            glowPaint
+        );
+    }
+
+    private void DrawMainCenterCircle(SKCanvas pictureCanvas) =>
+        pictureCanvas.DrawCircle(
+            0,
+            0,
+            CENTER_CIRCLE_SIZE * CENTER_CIRCLE_MAIN_MULTIPLIER,
+            _centerPaint!
+        );
+
+    private void DrawHighlightCircleIfNeeded(SKCanvas pictureCanvas)
+    {
+        if (!_useHighlight) return;
+
+        using var highlightPaint = new SKPaint()
+        {
+            IsAntialias = _useAntiAlias,
+            Style = SKPaintStyle.Fill,
+            Color = SKColors.White.WithAlpha(HIGHLIGHT_ALPHA)
+        };
+
+        pictureCanvas.DrawCircle(
+            -CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_OFFSET_MULTIPLIER,
+            -CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_OFFSET_MULTIPLIER,
+            CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_SIZE_MULTIPLIER,
+            highlightPaint
+        );
+    }
+
+    private void UpdateVisualEffects(SKColor baseColor)
+    {
+        if (_fillPaint == null || _strokePaint == null ||
+            _glowPaint == null || _highlightPaint == null)
+            return;
+
+        if (!ShouldUpdateVisualEffects(baseColor)) return;
+
+        UpdateAllVisualEffects(baseColor);
+    }
+
+    private void UpdateAllVisualEffects(SKColor baseColor)
+    {
+        UpdateBaseColor(baseColor);
+        CreateGradientShader(baseColor);
+        UpdateStrokeColor(baseColor);
+        UpdateGlowEffectIfNeeded(baseColor);
+        UpdateHighlightEffectIfNeeded(baseColor);
+        UpdateDashEffectIfNeeded();
+        UpdateCenterPaintAndCircle(baseColor);
+    }
+
+    private bool ShouldUpdateVisualEffects(SKColor baseColor)
+    {
+        bool colorChanged =
+            baseColor.Red != _lastBaseColor.Red ||
+            baseColor.Green != _lastBaseColor.Green ||
+            baseColor.Blue != _lastBaseColor.Blue;
+
+        return colorChanged || _gradientShader == null;
+    }
+
+    private void UpdateBaseColor(SKColor baseColor) =>
+        _lastBaseColor = baseColor;
+
+    private void CreateGradientShader(SKColor baseColor)
+    {
+        SKColor gradientStart = baseColor.WithAlpha(FILL_ALPHA);
+        SKColor gradientEnd = CreateGradientEndColor(baseColor);
+
+        _gradientShader?.Dispose();
+        _gradientShader = SKShader.CreateRadialGradient(
+            new SKPoint(0, 0),
+            MIN_RADIUS + MAX_SPECTRUM_VALUE * RADIUS_MULTIPLIER,
+            [gradientStart, gradientEnd],
+            SKShaderTileMode.Clamp
+        );
+
+        _fillPaint!.Shader = _gradientShader;
+    }
+
+    private static SKColor CreateGradientEndColor(SKColor baseColor) =>
+        new(
+            (byte)Min(255, baseColor.Red * GRADIENT_COLOR_MULTIPLIER),
+            (byte)Min(255, baseColor.Green * GRADIENT_COLOR_MULTIPLIER),
+            (byte)Min(255, baseColor.Blue * GRADIENT_COLOR_MULTIPLIER),
+            GRADIENT_END_ALPHA
+        );
+
+    private void UpdateStrokeColor(SKColor baseColor) =>
+        _strokePaint!.Color = baseColor;
+
+    private void UpdateGlowEffectIfNeeded(SKColor baseColor)
+    {
+        if (!_useGlow || _glowPaint == null) return;
+
+        _glowFilter?.Dispose();
+        _glowFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_SIGMA);
+        _glowPaint.Color = baseColor.WithAlpha(GLOW_ALPHA);
+        _glowPaint.ImageFilter = _glowFilter;
+    }
+
+    private void UpdateHighlightEffectIfNeeded(SKColor baseColor)
+    {
+        if (!_useHighlight || _highlightPaint == null) return;
+
+        _highlightPaint.Color = CreateHighlightColor(baseColor);
+    }
+
+    private static SKColor CreateHighlightColor(SKColor baseColor) =>
+        new(
+            (byte)Min(255, baseColor.Red * HIGHLIGHT_FACTOR),
+            (byte)Min(255, baseColor.Green * HIGHLIGHT_FACTOR),
+            (byte)Min(255, baseColor.Blue * HIGHLIGHT_FACTOR),
+            HIGHLIGHT_ALPHA
+        );
+
+    private void UpdateDashEffectIfNeeded()
+    {
+        if (!_useDashEffect) return;
+
+        float[] intervals = [DASH_LENGTH, DASH_LENGTH * 2];
+        _dashEffect?.Dispose();
+        _dashEffect = SKPathEffect.CreateDash(
+            intervals,
+            _time * DASH_PHASE_SPEED % (DASH_LENGTH * 3)
+        );
+    }
+
+    private void UpdateCenterPaintAndCircle(SKColor baseColor)
+    {
+        if (_centerPaint == null) return;
+
+        _centerPaint.Color = baseColor;
+        UpdateCenterCircle(baseColor);
     }
 
     private bool ValidateRenderParameters(
@@ -1440,29 +1516,45 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         return true;
     }
 
-    protected override void OnDispose()
+    public override void Dispose()
     {
+        if (_disposed) return;
+
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+    }
+
+    protected override void OnDispose() =>
         ExecuteSafely(
             () =>
             {
                 DisposeManagedResources();
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
-    }
 
     private void DisposeManagedResources()
     {
-        DisposeInternalResources();
-        ClearReferences();
-    }
-
-    private void DisposeInternalResources()
-    {
         _pathUpdateSemaphore?.Dispose();
 
+        DisposeRenderResources();
+        ClearResourceReferences();
+    }
+
+    private void DisposeRenderResources()
+    {
         _outerPath?.Dispose();
         _innerPath?.Dispose();
         _fillPaint?.Dispose();
@@ -1476,7 +1568,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _glowFilter?.Dispose();
     }
 
-    private void ClearReferences()
+    private void ClearResourceReferences()
     {
         _outerPath = null;
         _innerPath = null;
@@ -1494,21 +1586,5 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _gradientShader = null;
         _dashEffect = null;
         _glowFilter = null;
-    }
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            "Dispose",
-            "Error during disposal"
-        );
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

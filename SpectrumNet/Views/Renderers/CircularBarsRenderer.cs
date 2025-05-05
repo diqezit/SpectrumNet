@@ -9,10 +9,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<CircularBarsRenderer> _instance = new(() => new CircularBarsRenderer());
 
-    private CircularBarsRenderer()
-    {
-        InitializeFields();
-    }
+    private CircularBarsRenderer() { }
 
     public static CircularBarsRenderer GetInstance() => _instance.Value;
 
@@ -46,69 +43,119 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         {
             public const bool
                 LOW_USE_ADVANCED_EFFECTS = false,
+                LOW_USE_ANTI_ALIAS = false,
+
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
-                HIGH_USE_ADVANCED_EFFECTS = true;
+                MEDIUM_USE_ANTI_ALIAS = true,
+
+                HIGH_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ANTI_ALIAS = true;
         }
     }
 
+    // Rendering resources
     private Vector2[]? _barVectors;
     private int _previousBarCount;
-    private new bool _useAntiAlias = true;
-    private new bool _useAdvancedEffects = true;
 
-    private static void InitializeFields() { }
+    // Quality settings
+    private new bool _useAntiAlias;
+    private new bool _useAdvancedEffects;
+    private new bool _isOverlayActive;
 
-    public override void Initialize() => 
-        ExecuteSafely(PerformInitialization, "Initialize", "Failed to initialize renderer");
+    protected override void OnInitialize() =>
+        ExecuteSafely(
+            () =>
+            {
+                base.OnInitialize();
+                _barVectors = null;
+                _previousBarCount = 0;
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            nameof(OnInitialize),
+            "Failed to initialize renderer"
+        );
 
-    private void PerformInitialization()
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium) =>
+        ExecuteSafely(
+            () =>
+            {
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
+
+                _isOverlayActive = isOverlayActive;
+
+                if (configChanged)
+                {
+                    Log(LogLevel.Debug,
+                        LOG_PREFIX,
+                        $"Configuration changed. New Quality: {Quality}");
+                    OnConfigurationChanged();
+                }
+            },
+            nameof(Configure),
+            "Failed to configure renderer"
+        );
+
+    protected override void OnConfigurationChanged() =>
+        ExecuteSafely(
+            () =>
+            {
+                base.OnConfigurationChanged();
+                // any additional configuration changes here
+            },
+            nameof(OnConfigurationChanged),
+            "Failed to apply configuration changes"
+        );
+
+    protected override void OnQualitySettingsApplied() =>
+        ExecuteSafely(
+            () =>
+            {
+                base.OnQualitySettingsApplied();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. New Quality: {Quality}");
+            },
+            nameof(OnQualitySettingsApplied),
+            "Failed to apply specific quality settings"
+        );
+
+    private void ApplyQualityBasedSettings()
     {
-        base.Initialize();
-        if (_disposed) ResetRendererState();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-    }
-
-    private void ResetRendererState() => _disposed = false;
-
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium) => 
-        ExecuteSafely(() => PerformConfiguration(isOverlayActive, quality), "Configure", "Failed to configure renderer");
-
-    private void PerformConfiguration(bool isOverlayActive, RenderQuality quality)
-    {
-        base.Configure(isOverlayActive, quality);
-        if (_quality != quality) ApplyNewQuality(quality);
-    }
-
-    private void ApplyNewQuality(RenderQuality quality)
-    {
-        _quality = quality;
-        ApplyQualitySettings();
-    }
-
-    protected override void ApplyQualitySettings() => 
-        ExecuteSafely(ConfigureQualitySettings,
-            "ApplyQualitySettings",
-            "Failed to apply quality settings");
-
-    private void ConfigureQualitySettings()
-    {
-        base.ApplyQualitySettings();
-        switch (_quality)
+        switch (Quality)
         {
             case RenderQuality.Low:
-                _useAntiAlias = false;
-                _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+                ApplyLowQualitySettings();
                 break;
+
             case RenderQuality.Medium:
-                _useAntiAlias = true;
-                _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+                ApplyMediumQualitySettings();
                 break;
+
             case RenderQuality.High:
-                _useAntiAlias = true;
-                _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+                ApplyHighQualitySettings();
                 break;
         }
-        Log(LogLevel.Debug, LOG_PREFIX, $"Quality set to {_quality}");
+    }
+
+    private void ApplyLowQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTI_ALIAS;
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTI_ALIAS;
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTI_ALIAS;
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
     }
 
     protected override void RenderEffect(
@@ -118,213 +165,21 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        if (!AreRenderParametersValid(canvas, spectrum, info, paint)) return;
-        ExecuteSafely(() => PerformRenderEffect(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
-                      "RenderEffect", "Error during rendering");
-    }
-
-    private void PerformRenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint paint)
-    {
-        float centerX = info.Width / 2f;
-        float centerY = info.Height / 2f;
-        float mainRadius = MathF.Min(centerX, centerY) * RADIUS_PROPORTION;
-        float adjustedBarWidth = AdjustBarWidthForBarCount(barWidth, barCount, Min(info.Width, info.Height));
-        EnsureBarVectors(barCount);
-        RenderCircularBars(canvas, spectrum, barCount, centerX, centerY, mainRadius, adjustedBarWidth, paint);
-    }
-
-    private static float AdjustBarWidthForBarCount(float barWidth, int barCount, float minDimension)
-    {
-        float maxPossibleWidth = 2 * MathF.PI * RADIUS_PROPORTION * minDimension / 2 / barCount * BAR_SPACING_FACTOR;
-        return MathF.Max(MathF.Min(barWidth, maxPossibleWidth), MIN_STROKE_WIDTH);
-    }
-
-    private void RenderCircularBars(
-        SKCanvas canvas,
-        float[] spectrum,
-        int barCount,
-        float centerX,
-        float centerY,
-        float mainRadius,
-        float barWidth,
-        SKPaint basePaint)
-    {
-        using var innerCirclePaint = ConfigureInnerCirclePaint(basePaint, barWidth);
-        canvas.DrawCircle(centerX, centerY, mainRadius * INNER_RADIUS_FACTOR, innerCirclePaint);
-
-        if (_useAdvancedEffects)
-        {
-            RenderGlowEffects(canvas, spectrum, barCount, centerX, centerY, mainRadius, barWidth, basePaint);
-        }
-        RenderMainBars(canvas, spectrum, barCount, centerX, centerY, mainRadius, barWidth, basePaint);
-        if (_useAdvancedEffects)
-        {
-            RenderHighlights(canvas, spectrum, barCount, centerX, centerY, mainRadius, barWidth, basePaint);
-        }
-    }
-
-    private SKPaint ConfigureInnerCirclePaint(SKPaint basePaint, float barWidth)
-    {
-        var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
-        paint.Style = SKPaintStyle.Stroke;
-        paint.Color = basePaint.Color.WithAlpha(INNER_CIRCLE_ALPHA);
-        paint.StrokeWidth = barWidth * 0.5f;
-        return paint;
-    }
-
-    private void EnsureBarVectors(int barCount)
-    {
-        ExecuteSafely(() =>
-        {
-            if (_barVectors == null || _barVectors.Length != barCount || _previousBarCount != barCount)
+        SKPaint paint) =>
+        ExecuteSafely(
+            () =>
             {
-                _barVectors = new Vector2[barCount];
-                float angleStep = 2 * MathF.PI / barCount;
-                for (int i = 0; i < barCount; i++)
-                {
-                    _barVectors[i] = new Vector2(Cos(angleStep * i), Sin(angleStep * i));
-                }
-                _previousBarCount = barCount;
-            }
-        }, "EnsureBarVectors", "Error calculating bar vectors");
-    }
+                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                    return;
 
-    private void RenderGlowEffects(
-        SKCanvas canvas,
-        float[] spectrum,
-        int barCount,
-        float centerX,
-        float centerY,
-        float mainRadius,
-        float barWidth,
-        SKPaint basePaint)
-    {
-        using var batchPath = new SKPath();
-        for (int i = 0; i < barCount; i++)
-        {
-            if (spectrum[i] <= GLOW_THRESHOLD) continue;
-            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-            using var path = _pathPool.Get();
-            AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
-            batchPath.AddPath(path);
-        }
-        if (!batchPath.IsEmpty)
-        {
-            using var glowPaint = ConfigureGlowPaint(basePaint, barWidth);
-            canvas.DrawPath(batchPath, glowPaint);
-        }
-    }
+                UpdateState(canvas, spectrum, info, barCount);
+                RenderFrame(canvas, spectrum, info, barWidth, barSpacing, barCount, paint);
+            },
+            nameof(RenderEffect),
+            "Error during rendering"
+        );
 
-    private SKPaint ConfigureGlowPaint(SKPaint basePaint, float barWidth)
-    {
-        var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
-        paint.Style = SKPaintStyle.Stroke;
-        paint.Color = basePaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY));
-        paint.StrokeWidth = barWidth * 1.2f;
-        paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, GLOW_RADIUS);
-        return paint;
-    }
-
-    private void RenderMainBars(
-        SKCanvas canvas,
-        float[] spectrum,
-        int barCount,
-        float centerX,
-        float centerY,
-        float mainRadius,
-        float barWidth,
-        SKPaint basePaint)
-    {
-        using var batchPath = new SKPath();
-        for (int i = 0; i < barCount; i++)
-        {
-            if (spectrum[i] < MIN_MAGNITUDE_THRESHOLD) continue;
-            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-            using var path = _pathPool.Get();
-            AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
-            batchPath.AddPath(path);
-        }
-        if (!batchPath.IsEmpty)
-        {
-            using var barPaint = ConfigureBarPaint(basePaint, barWidth);
-            canvas.DrawPath(batchPath, barPaint);
-        }
-    }
-
-    private SKPaint ConfigureBarPaint(SKPaint basePaint, float barWidth)
-    {
-        var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
-        paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeCap = SKStrokeCap.Round;
-        paint.Color = basePaint.Color;
-        paint.StrokeWidth = barWidth;
-        return paint;
-    }
-
-    private void RenderHighlights(
-        SKCanvas canvas,
-        float[] spectrum,
-        int barCount,
-        float centerX,
-        float centerY,
-        float mainRadius,
-        float barWidth,
-        SKPaint basePaint)
-    {
-        using var batchPath = new SKPath();
-        for (int i = 0; i < barCount; i++)
-        {
-            if (spectrum[i] <= HIGHLIGHT_THRESHOLD) continue;
-            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-            float innerPoint = mainRadius + (radius - mainRadius) * HIGHLIGHT_POSITION;
-            using var path = _pathPool.Get();
-            AddBarToPath(path, i, centerX, centerY, innerPoint, radius);
-            batchPath.AddPath(path);
-        }
-        if (!batchPath.IsEmpty)
-        {
-            using var highlightPaint = ConfigureHighlightPaint(barWidth);
-            canvas.DrawPath(batchPath, highlightPaint);
-        }
-    }
-
-    private SKPaint ConfigureHighlightPaint(float barWidth)
-    {
-        var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
-        paint.Style = SKPaintStyle.Stroke;
-        paint.Color = SKColors.White.WithAlpha((byte)(255 * HIGHLIGHT_INTENSITY));
-        paint.StrokeWidth = barWidth * 0.6f;
-        return paint;
-    }
-
-    private void AddBarToPath(
-        SKPath path,
-        int index,
-        float centerX,
-        float centerY,
-        float innerRadius,
-        float outerRadius)
-    {
-        if (_barVectors == null) return;
-        Vector2 vector = _barVectors[index];
-        path.MoveTo(centerX + innerRadius * vector.X, centerY + innerRadius * vector.Y);
-        path.LineTo(centerX + outerRadius * vector.X, centerY + outerRadius * vector.Y);
-    }
-
-    private bool AreRenderParametersValid(
+    private bool ValidateRenderParameters(
         SKCanvas? canvas,
         float[]? spectrum,
         SKImageInfo info,
@@ -373,18 +228,315 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         return true;
     }
 
+    private void UpdateState(
+        SKCanvas ___,
+        float[] __,
+        SKImageInfo _,
+        int barCount) =>
+        ExecuteSafely(
+            () =>
+            {
+                EnsureBarVectors(barCount);
+            },
+            nameof(UpdateState),
+            "Error during state update"
+        );
+
+    private void RenderFrame(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float _,
+        int barCount,
+        SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                float centerX = info.Width / 2f;
+                float centerY = info.Height / 2f;
+                float mainRadius = MathF.Min(centerX, centerY) * RADIUS_PROPORTION;
+                float adjustedBarWidth = AdjustBarWidthForBarCount(barWidth, barCount, Min(info.Width, info.Height));
+
+                RenderCircularBars(canvas, spectrum, barCount, centerX, centerY, mainRadius, adjustedBarWidth, paint);
+            },
+            nameof(RenderFrame),
+            "Error during frame rendering"
+        );
+
+    private static float AdjustBarWidthForBarCount(float barWidth, int barCount, float minDimension)
+    {
+        float maxPossibleWidth = 2 * MathF.PI * RADIUS_PROPORTION * minDimension / 2 / barCount * BAR_SPACING_FACTOR;
+        return MathF.Max(MathF.Min(barWidth, maxPossibleWidth), MIN_STROKE_WIDTH);
+    }
+
+    private void RenderCircularBars(
+        SKCanvas canvas,
+        float[] spectrum,
+        int barCount,
+        float centerX,
+        float centerY,
+        float mainRadius,
+        float barWidth,
+        SKPaint basePaint) =>
+        ExecuteSafely(
+            () =>
+            {
+                RenderInnerCircle(canvas, centerX, centerY, mainRadius, barWidth, basePaint);
+
+                if (_useAdvancedEffects)
+                {
+                    RenderGlowEffects(canvas, spectrum, barCount, centerX, centerY, mainRadius, barWidth, basePaint);
+                }
+
+                RenderMainBars(canvas, spectrum, barCount, centerX, centerY, mainRadius, barWidth, basePaint);
+
+                if (_useAdvancedEffects)
+                {
+                    RenderHighlights(canvas, spectrum, barCount, centerX, centerY, mainRadius, barWidth, basePaint);
+                }
+            },
+            nameof(RenderCircularBars),
+            "Error rendering circular bars"
+        );
+
+    private void RenderInnerCircle(
+        SKCanvas canvas,
+        float centerX,
+        float centerY,
+        float mainRadius,
+        float barWidth,
+        SKPaint basePaint) =>
+        ExecuteSafely(
+            () =>
+            {
+                using var innerCirclePaint = ConfigureInnerCirclePaint(basePaint, barWidth);
+                canvas.DrawCircle(centerX, centerY, mainRadius * INNER_RADIUS_FACTOR, innerCirclePaint);
+            },
+            nameof(RenderInnerCircle),
+            "Error rendering inner circle"
+        );
+
+    private SKPaint ConfigureInnerCirclePaint(SKPaint basePaint, float barWidth)
+    {
+        var paint = _paintPool.Get();
+        paint.IsAntialias = _useAntiAlias;
+        paint.Style = SKPaintStyle.Stroke;
+        paint.Color = basePaint.Color.WithAlpha(INNER_CIRCLE_ALPHA);
+        paint.StrokeWidth = barWidth * 0.5f;
+        return paint;
+    }
+
+    private void EnsureBarVectors(int barCount) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_barVectors == null || _barVectors.Length != barCount || _previousBarCount != barCount)
+                {
+                    _barVectors = new Vector2[barCount];
+                    float angleStep = 2 * MathF.PI / barCount;
+
+                    for (int i = 0; i < barCount; i++)
+                    {
+                        _barVectors[i] = new Vector2(Cos(angleStep * i), Sin(angleStep * i));
+                    }
+
+                    _previousBarCount = barCount;
+                }
+            },
+            nameof(EnsureBarVectors),
+            "Error calculating bar vectors"
+        );
+
+    private void RenderGlowEffects(
+        SKCanvas canvas,
+        float[] spectrum,
+        int barCount,
+        float centerX,
+        float centerY,
+        float mainRadius,
+        float barWidth,
+        SKPaint basePaint) =>
+        ExecuteSafely(
+            () =>
+            {
+                using var batchPath = new SKPath();
+
+                for (int i = 0; i < barCount; i++)
+                {
+                    if (spectrum[i] <= GLOW_THRESHOLD)
+                        continue;
+
+                    float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+                    using var path = _pathPool.Get();
+                    AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
+                    batchPath.AddPath(path);
+                }
+
+                if (!batchPath.IsEmpty)
+                {
+                    using var glowPaint = ConfigureGlowPaint(basePaint, barWidth);
+                    canvas.DrawPath(batchPath, glowPaint);
+                }
+            },
+            nameof(RenderGlowEffects),
+            "Error rendering glow effects"
+        );
+
+    private SKPaint ConfigureGlowPaint(SKPaint basePaint, float barWidth)
+    {
+        var paint = _paintPool.Get();
+        paint.IsAntialias = _useAntiAlias;
+        paint.Style = SKPaintStyle.Stroke;
+        paint.Color = basePaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY));
+        paint.StrokeWidth = barWidth * 1.2f;
+        paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, GLOW_RADIUS);
+        return paint;
+    }
+
+    private void RenderMainBars(
+        SKCanvas canvas,
+        float[] spectrum,
+        int barCount,
+        float centerX,
+        float centerY,
+        float mainRadius,
+        float barWidth,
+        SKPaint basePaint) =>
+        ExecuteSafely(
+            () =>
+            {
+                using var batchPath = new SKPath();
+
+                for (int i = 0; i < barCount; i++)
+                {
+                    if (spectrum[i] < MIN_MAGNITUDE_THRESHOLD)
+                        continue;
+
+                    float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+                    using var path = _pathPool.Get();
+                    AddBarToPath(path, i, centerX, centerY, mainRadius, radius);
+                    batchPath.AddPath(path);
+                }
+
+                if (!batchPath.IsEmpty)
+                {
+                    using var barPaint = ConfigureBarPaint(basePaint, barWidth);
+                    canvas.DrawPath(batchPath, barPaint);
+                }
+            },
+            nameof(RenderMainBars),
+            "Error rendering main bars"
+        );
+
+    private SKPaint ConfigureBarPaint(SKPaint basePaint, float barWidth)
+    {
+        var paint = _paintPool.Get();
+        paint.IsAntialias = _useAntiAlias;
+        paint.Style = SKPaintStyle.Stroke;
+        paint.StrokeCap = SKStrokeCap.Round;
+        paint.Color = basePaint.Color;
+        paint.StrokeWidth = barWidth;
+        return paint;
+    }
+
+    private void RenderHighlights(
+        SKCanvas canvas,
+        float[] spectrum,
+        int barCount,
+        float centerX,
+        float centerY,
+        float mainRadius,
+        float barWidth,
+        SKPaint _) =>
+        ExecuteSafely(
+            () =>
+            {
+                using var batchPath = new SKPath();
+
+                for (int i = 0; i < barCount; i++)
+                {
+                    if (spectrum[i] <= HIGHLIGHT_THRESHOLD)
+                        continue;
+
+                    float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+                    float innerPoint = mainRadius + (radius - mainRadius) * HIGHLIGHT_POSITION;
+                    using var path = _pathPool.Get();
+                    AddBarToPath(path, i, centerX, centerY, innerPoint, radius);
+                    batchPath.AddPath(path);
+                }
+
+                if (!batchPath.IsEmpty)
+                {
+                    using var highlightPaint = ConfigureHighlightPaint(barWidth);
+                    canvas.DrawPath(batchPath, highlightPaint);
+                }
+            },
+            nameof(RenderHighlights),
+            "Error rendering highlights"
+        );
+
+    private SKPaint ConfigureHighlightPaint(float barWidth)
+    {
+        var paint = _paintPool.Get();
+        paint.IsAntialias = _useAntiAlias;
+        paint.Style = SKPaintStyle.Stroke;
+        paint.Color = SKColors.White.WithAlpha((byte)(255 * HIGHLIGHT_INTENSITY));
+        paint.StrokeWidth = barWidth * 0.6f;
+        return paint;
+    }
+
+    private void AddBarToPath(
+        SKPath path,
+        int index,
+        float centerX,
+        float centerY,
+        float innerRadius,
+        float outerRadius) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_barVectors == null) return;
+
+                Vector2 vector = _barVectors[index];
+                path.MoveTo(centerX + innerRadius * vector.X, centerY + innerRadius * vector.Y);
+                path.LineTo(centerX + outerRadius * vector.X, centerY + outerRadius * vector.Y);
+            },
+            nameof(AddBarToPath),
+            "Error adding bar to path"
+        );
+
     public override void Dispose()
     {
         if (_disposed) return;
-        ExecuteSafely(PerformDisposal, "Dispose", "Error during disposal");
-        FinalizeDisposal();
+
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
-    private void PerformDisposal() => base.Dispose();
+    protected override void OnDispose() =>
+        ExecuteSafely(
+            () =>
+            {
+                DisposeManagedResources();
+                base.OnDispose();
+            },
+            nameof(OnDispose),
+            "Error during specific disposal"
+        );
 
-    private void FinalizeDisposal()
+    private void DisposeManagedResources()
     {
-        _disposed = true;
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _barVectors = null;
     }
 }

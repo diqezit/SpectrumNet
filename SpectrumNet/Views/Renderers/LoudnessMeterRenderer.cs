@@ -40,8 +40,28 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
                 LOW_USE_ADVANCED_EFFECTS = false,
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
                 HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
         }
     }
+
+    private new bool 
+        _useAdvancedEffects,
+        _useAntiAlias;
+
+    private float 
+        _previousLoudness,
+        _peakLoudness;
+
+    private float? 
+        _cachedLoudness;
+
+    private int 
+        _currentWidth,
+        _currentHeight;
 
     private SKPaint? _backgroundPaint;
     private SKPaint? _markerPaint;
@@ -50,30 +70,22 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
     private SKPaint? _peakPaint;
     private SKPicture? _staticPicture;
 
-    private float _previousLoudness;
-    private float _peakLoudness;
-    private float? _cachedLoudness;
-
-    private int _currentWidth;
-    private int _currentHeight;
-
     private readonly SemaphoreSlim _loudnessSemaphore = new(1, 1);
     private readonly object _loudnessLock = new();
 
     protected override void OnInitialize()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
+                base.OnInitialize();
                 InitializeStateValues();
                 CreatePaints();
+                ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnInitialize",
-                ErrorMessage = "Failed to initialize renderer"
-            }
+            nameof(OnInitialize),
+            "Failed to initialize renderer"
         );
     }
 
@@ -102,7 +114,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             Style = SKPaintStyle.Stroke,
             StrokeWidth = BORDER_WIDTH,
             Color = SKColors.White.WithAlpha(100),
-            IsAntialias = UseAntiAlias
+            IsAntialias = _useAntiAlias
         };
     }
 
@@ -113,7 +125,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
             Color = SKColors.White.WithAlpha(150),
-            IsAntialias = UseAntiAlias
+            IsAntialias = _useAntiAlias
         };
     }
 
@@ -122,7 +134,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         _fillPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = UseAntiAlias
+            IsAntialias = _useAntiAlias
         };
     }
 
@@ -131,7 +143,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         _glowPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = UseAntiAlias,
+            IsAntialias = _useAntiAlias,
             MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BLUR_SIGMA)
         };
     }
@@ -141,23 +153,43 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         _peakPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = UseAntiAlias
+            IsAntialias = _useAntiAlias
         };
+    }
+
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
+
+                if (configChanged)
+                {
+                    OnConfigurationChanged();
+                }
+            },
+            nameof(Configure),
+            "Failed to configure renderer"
+        );
     }
 
     protected override void OnConfigurationChanged()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
+                base.OnConfigurationChanged();
                 UpdateSmoothingFactor();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed, overlay: {_isOverlayActive}");
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnConfigurationChanged",
-                ErrorMessage = "Failed to apply configuration changes"
-            }
+            nameof(OnConfigurationChanged),
+            "Failed to apply configuration changes"
         );
     }
 
@@ -168,35 +200,66 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             SMOOTHING_FACTOR_NORMAL;
     }
 
-    protected override void OnQualitySettingsApplied()
+    protected override void ApplyQualitySettings()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                UpdatePaintProperties();
-                ResetStaticCache();
+                base.ApplyQualitySettings();
+                ApplyQualityBasedSettings();
                 Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnQualitySettingsApplied",
-                ErrorMessage = "Failed to apply quality settings"
-            }
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
         );
     }
 
-    private void UpdatePaintProperties()
+    private void ApplyQualityBasedSettings()
     {
-        UpdatePaintAntialiasing();
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                ApplyLowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                ApplyMediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                ApplyHighQualitySettings();
+                break;
+        }
+
+        UpdatePaintProperties();
+        ResetStaticCache();
     }
+
+    private void ApplyLowQualitySettings()
+    {
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+    }
+
+    private void UpdatePaintProperties() => UpdatePaintAntialiasing();
 
     private void UpdatePaintAntialiasing()
     {
-        if (_backgroundPaint != null) _backgroundPaint.IsAntialias = UseAntiAlias;
-        if (_markerPaint != null) _markerPaint.IsAntialias = UseAntiAlias;
-        if (_fillPaint != null) _fillPaint.IsAntialias = UseAntiAlias;
-        if (_glowPaint != null) _glowPaint.IsAntialias = UseAntiAlias;
-        if (_peakPaint != null) _peakPaint.IsAntialias = UseAntiAlias;
+        if (_backgroundPaint != null) _backgroundPaint.IsAntialias = _useAntiAlias;
+        if (_markerPaint != null) _markerPaint.IsAntialias = _useAntiAlias;
+        if (_fillPaint != null) _fillPaint.IsAntialias = _useAntiAlias;
+        if (_glowPaint != null) _glowPaint.IsAntialias = _useAntiAlias;
+        if (_peakPaint != null) _peakPaint.IsAntialias = _useAntiAlias;
     }
 
     private void ResetStaticCache()
@@ -217,7 +280,20 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             return;
 
-        Safe(
+        ExecuteSafely(
+            () =>
+            {
+                UpdateState(spectrum, info);
+                RenderFrame(canvas, info, paint);
+            },
+            nameof(RenderEffect),
+            "Error during rendering"
+        );
+    }
+
+    private void UpdateState(float[] spectrum, SKImageInfo info)
+    {
+        ExecuteSafely(
             () =>
             {
                 float loudness = ProcessLoudnessData(spectrum);
@@ -227,19 +303,31 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
                     UpdateCanvasDimensions(info);
                     UpdateStaticElements();
                 }
-
-                RenderMeter(
-                    canvas,
-                    info,
-                    loudness,
-                    _peakLoudness);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderEffect",
-                ErrorMessage = "Error during rendering"
-            }
+            nameof(UpdateState),
+            "Error updating state"
         );
+    }
+
+    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                float loudness = GetCurrentLoudness();
+                RenderMeter(canvas, info, loudness, _peakLoudness);
+            },
+            nameof(RenderFrame),
+            "Error rendering frame"
+        );
+    }
+
+    private float GetCurrentLoudness()
+    {
+        lock (_loudnessLock)
+        {
+            return _cachedLoudness ?? 0f;
+        }
     }
 
     private bool ValidateRenderParameters(
@@ -248,50 +336,47 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         SKPaint? paint)
     {
-        return ValidateCanvas(canvas) &&
-               ValidateSpectrum(spectrum) &&
-               ValidatePaint(paint) &&
-               ValidateDimensions(info) &&
-               !_disposed;
-    }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
 
-    private static bool ValidateCanvas(SKCanvas? canvas)
-    {
-        if (canvas == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-            return false;
-        }
         return true;
     }
 
-    private static bool ValidateSpectrum(float[]? spectrum)
+    private static bool IsCanvasValid(SKCanvas? canvas)
     {
-        if (spectrum == null || spectrum.Length == 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-            return false;
-        }
-        return true;
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
     }
 
-    private static bool ValidatePaint(SKPaint? paint)
+    private static bool IsSpectrumValid(float[]? spectrum)
     {
-        if (paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-            return false;
-        }
-        return true;
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
+        return false;
     }
 
-    private static bool ValidateDimensions(SKImageInfo info)
+    private static bool IsPaintValid(SKPaint? paint)
     {
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Invalid canvas dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid canvas dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
         return true;
     }
 
@@ -361,7 +446,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
 
     private void UpdateStaticElements()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 if (!ValidateCanvasDimensions())
@@ -370,11 +455,8 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
                 CreateGradientShader();
                 RecordStaticElements();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateStaticElements",
-                ErrorMessage = "Failed to update static elements"
-            }
+            nameof(UpdateStaticElements),
+            "Failed to update static elements"
         );
     }
 
@@ -591,7 +673,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         float loudness,
         float meterHeight)
     {
-        if (!UseAdvancedEffects ||
+        if (!_useAdvancedEffects ||
             loudness <= HIGH_LOUDNESS_THRESHOLD ||
             _glowPaint == null)
             return;
@@ -650,7 +732,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             _peakPaint.Color = SKColors.Green;
     }
 
-    [MethodImpl(AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private float CalculateAndSmoothLoudness(float[] spectrum)
     {
         float rawLoudness = CalculateLoudness(spectrum.AsSpan());
@@ -669,13 +751,13 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         return smoothedLoudness;
     }
 
-    [MethodImpl(AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private float CalculateLoudness(ReadOnlySpan<float> spectrum)
     {
         if (spectrum.IsEmpty)
             return 0f;
 
-        float sum = UseAdvancedEffects && spectrum.Length >= Vector<float>.Count
+        float sum = _useAdvancedEffects && spectrum.Length >= Vector<float>.Count
             ? CalculateLoudnessVectorized(spectrum)
             : CalculateLoudnessSequential(spectrum);
 
@@ -716,29 +798,41 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         return sum;
     }
 
+    public override void Dispose()
+    {
+        if (_disposed) return;
+
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during renderer disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+    }
+
     protected override void OnDispose()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 DisposeSynchronizationObjects();
                 DisposeRenderingResources();
                 ClearCachedData();
 
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+                base.OnDispose();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnDispose",
-                ErrorMessage = "Error during disposal"
-            }
+            nameof(OnDispose),
+            "Error during disposal"
         );
     }
 
-    private void DisposeSynchronizationObjects()
-    {
-        _loudnessSemaphore?.Dispose();
-    }
+    private void DisposeSynchronizationObjects() => _loudnessSemaphore?.Dispose();
 
     private void DisposeRenderingResources()
     {

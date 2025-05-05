@@ -8,7 +8,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<SphereRenderer> _instance = new(() => new SphereRenderer());
 
-    private SphereRenderer() => InitialiseConfigs();
+    private SphereRenderer() { }
 
     public static SphereRenderer GetInstance() => _instance.Value;
 
@@ -54,24 +54,26 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         }
     }
 
+    // Ресурсы для рендеринга
     private readonly new ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
-    private readonly ThreadLocal<SKPath> _spherePath = new(() => new SKPath());
+    private readonly new SemaphoreSlim _spectrumSemaphore = new(1, 1);
 
+    // Настройки рендеринга
     private new bool _isOverlayActive;
     private float _sphereRadius = DEFAULT_RADIUS;
     private float _sphereSpacing = DEFAULT_SPACING;
     private int _sphereCount = DEFAULT_COUNT;
 
+    // Настройки качества
     private float _alphaSmoothingFactor;
     private new bool _useAntiAlias;
     private int _sphereSegments;
 
+    // Буферы и кэшированные данные
     private float[]? _cosValues;
     private float[]? _sinValues;
     private float[]? _currentAlphas;
     private new float[]? _processedSpectrum;
-
-    private readonly new SemaphoreSlim _spectrumSemaphore = new(1, 1);
 
     protected override void OnInitialize() =>
         ExecuteSafely(
@@ -82,11 +84,9 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 ApplyQualitySpecificSettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed to initialize renderer"
         );
-
-    private void InitialiseConfigs() => MediumQualityConfigs();
 
     public override void Configure(
         bool isOverlayActive,
@@ -107,7 +107,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                         $"Configuration changed. New Quality: {Quality}");
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
 
@@ -121,7 +121,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                     LOG_PREFIX,
                     $"Quality settings applied. New Quality: {Quality}");
             },
-            "OnQualitySettingsApplied",
+            nameof(OnQualitySettingsApplied),
             "Failed to apply specific quality settings"
         );
 
@@ -130,34 +130,34 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         switch (Quality)
         {
             case RenderQuality.Low:
-                LowQualityConfigs();
+                ApplyLowQualitySettings();
                 break;
 
             case RenderQuality.Medium:
-                MediumQualityConfigs();
+                ApplyMediumQualitySettings();
                 break;
 
             case RenderQuality.High:
-                HighQualityConfigs();
+                ApplyHighQualitySettings();
                 break;
         }
     }
 
-    private void LowQualityConfigs()
+    private void ApplyLowQualitySettings()
     {
         _alphaSmoothingFactor = Constants.Quality.LOW_SMOOTHING_FACTOR;
         _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
         _sphereSegments = Constants.Quality.LOW_SPHERE_SEGMENTS;
     }
 
-    private void MediumQualityConfigs()
+    private void ApplyMediumQualitySettings()
     {
         _alphaSmoothingFactor = Constants.Quality.MEDIUM_SMOOTHING_FACTOR;
         _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
         _sphereSegments = Constants.Quality.MEDIUM_SPHERE_SEGMENTS;
     }
 
-    private void HighQualityConfigs()
+    private void ApplyHighQualitySettings()
     {
         _alphaSmoothingFactor = Constants.Quality.HIGH_SMOOTHING_FACTOR;
         _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
@@ -174,7 +174,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
                 PrecomputeTrigValues();
             },
-            "UpdateConfiguration",
+            nameof(UpdateConfiguration),
             "Failed to update configuration"
         );
 
@@ -200,7 +200,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
                 PrecomputeTrigValues();
             },
-            "AdjustConfiguration",
+            nameof(AdjustConfiguration),
             "Failed to adjust configuration"
         );
 
@@ -224,14 +224,14 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 UpdateState(spectrum, info, barWidth, barSpacing, barCount);
                 RenderFrame(canvas, spectrum, info, paint);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
 
     private void UpdateState(
         float[] spectrum,
         SKImageInfo info,
-        float _, // bar width
+        float _,
         float barSpacing,
         int barCount)
     {
@@ -242,7 +242,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
             if (semaphoreAcquired)
             {
                 AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
-                ProcessSpectrum(spectrum, barCount);
+                ProcessSpectrum(spectrum);
             }
         }
         finally
@@ -366,7 +366,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                         maxRadius);
                 }
             },
-            "RenderSpheres",
+            nameof(RenderSpheres),
             "Error during sphere rendering"
         );
 
@@ -561,7 +561,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         groups.Add((currentStart, length, currentAlpha));
     }
 
-    private void ProcessSpectrum(float[] spectrum, int _) =>
+    private void ProcessSpectrum(float[] spectrum) =>
         ExecuteSafely(
             () =>
             {
@@ -571,13 +571,13 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 ScaleSpectrumData(spectrum, sphereCount);
                 UpdateAlphas(sphereCount);
             },
-            "ProcessSpectrum",
+            nameof(ProcessSpectrum),
             "Error processing spectrum data"
         );
 
     private void ScaleSpectrumData(float[] spectrum, int sphereCount)
     {
-        if (IsHardwareAccelerated && spectrum.Length >= System.Numerics.Vector<float>.Count)
+        if (IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
         {
             ProcessSpectrumSIMD(spectrum, _processedSpectrum!, sphereCount);
         }
@@ -628,7 +628,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         float sum = 0;
         int count = end - start;
 
-        int vectorSize = System.Numerics.Vector<float>.Count;
+        int vectorSize = Vector<float>.Count;
         int vectorizableLength = (end - start) / vectorSize * vectorSize;
 
         CalculateVectorizedSum(source, start, vectorizableLength, ref sum);
@@ -643,11 +643,11 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         int vectorizableLength,
         ref float sum)
     {
-        int vectorSize = System.Numerics.Vector<float>.Count;
+        int vectorSize = Vector<float>.Count;
 
         for (int j = 0; j < vectorizableLength; j += vectorSize)
         {
-            var vec = new System.Numerics.Vector<float>(source, start + j);
+            var vec = new Vector<float>(source, start + j);
             sum += System.Numerics.Vector.Sum(vec);
         }
     }
@@ -676,7 +676,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
 
                 _processedSpectrum = ArrayPool<float>.Shared.Rent(requiredSize);
             },
-            "EnsureProcessedSpectrumCapacity",
+            nameof(EnsureProcessedSpectrumCapacity),
             "Failed to ensure spectrum capacity"
         );
 
@@ -725,7 +725,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                     UpdateSingleAlpha(i);
                 }
             },
-            "UpdateAlphas",
+            nameof(UpdateAlphas),
             "Failed to update alpha values"
         );
 
@@ -751,11 +751,11 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 for (int i = 0; i < _sphereCount; i++)
                 {
                     float angle = i * angleStepRad;
-                    _cosValues![i] = MathF.Cos(angle);
-                    _sinValues![i] = MathF.Sin(angle);
+                    _cosValues![i] = (float)Cos(angle);
+                    _sinValues![i] = (float)Sin(angle);
                 }
             },
-            "PrecomputeTrigValues",
+            nameof(PrecomputeTrigValues),
             "Failed to precompute trigonometric values"
         );
 
@@ -774,11 +774,13 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
     public override void Dispose()
     {
         if (_disposed) return;
+
         ExecuteSafely(
             OnDispose,
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
+
         _disposed = true;
         GC.SuppressFinalize(this);
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
@@ -791,24 +793,17 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 DisposeManagedResources();
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
 
     private void DisposeManagedResources()
     {
         _spectrumSemaphore.Dispose();
-
-        if (_spherePath.IsValueCreated && _spherePath.Value != null)
-        {
-            _spherePath.Value.Dispose();
-        }
-        _spherePath.Dispose();
+        _paintPool.Dispose();
 
         if (_processedSpectrum != null)
             ArrayPool<float>.Shared.Return(_processedSpectrum);
-
-        _paintPool.Dispose();
 
         _cosValues = _sinValues = _currentAlphas = _processedSpectrum = null;
     }

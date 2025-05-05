@@ -9,53 +9,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<WaterRenderer> _instance = new(() => new WaterRenderer());
 
-    private readonly List<WaterPoint> _points = [];
-    private readonly SKPath _fillPath = new();
-    private readonly Random _random = new();
-    private readonly object _syncRoot = new();
-    private readonly TaskFactory _physicsTaskFactory;
-    private readonly Stopwatch _frameTimeStopwatch = new();
-    private readonly bool _adaptivePhysics = true;
-    private readonly int[] _qualityBasedPointCount = [400, 800, 1600];
-    private readonly int _updateFrameSkip = 3;
-    private readonly float _spectrumImpactFactor;
-
-    private float[]? _lastSpectrum;
-    private Vector2[] _forces = [];
-    private SKPaint? _pointPaint;
-    private SKPaint? _linePaint;
-    private SKPaint? _fillPaint;
-    private SKPaint? _highlightPaint;
-    private SKPaint? _reflectionPaint;
-    private SKShader? _waterShader;
-
-    private int _columns;
-    private int _rows;
-    private float _spacing;
-    private new bool _useAntiAlias = true;
-    private float _timeFactor = 1.0f;
-    private new bool _useAdvancedEffects = true;
-    private new bool _isOverlayActive;
-    private float _physicsTimeAccumulator;
-    private bool _needsGridRebuild = true;
-    private float _animationTime;
-    private float _lastBarWidth;
-    private float _lastBarSpacing;
-    private int _lastBarCount;
-    private SKImageInfo _lastImageInfo;
-    private int _currentFrame;
-    private float _xOffset;
-    private float _yOffset;
-    private bool _showConnections;
-    private Task? _physicsTask;
-    private bool _physicsTaskRunning;
-    private bool _pendingPhysicsUpdate;
-    private float[] _spectrumForPhysics = [];
-    private float _avgFrameTime = 0.016f;
-    private float _currentWaterAlpha = WATER_ALPHA_BASE;
-    private float _currentBrightness = 0.5f;
-    private float _lastLoudness;
-
     private WaterRenderer()
     {
         _spectrumImpactFactor = SPECTRUM_IMPACT_MIN;
@@ -155,10 +108,66 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         }
     }
 
+    // Данные моделирования
+    private readonly List<WaterPoint> _points = [];
+    private readonly SKPath _fillPath = new();
+    private Vector2[] _forces = [];
+    private float[]? _lastSpectrum;
+    private float[] _spectrumForPhysics = [];
+    private float _animationTime;
+    private float _physicsTimeAccumulator;
+    private float _lastLoudness;
+    private readonly float _spectrumImpactFactor;
+
+    // Визуальные объекты
+    private SKPaint? _pointPaint;
+    private SKPaint? _linePaint;
+    private SKPaint? _fillPaint;
+    private SKPaint? _highlightPaint;
+    private SKPaint? _reflectionPaint;
+    private SKShader? _waterShader;
+
+    // Настройки качества
+    private new bool _useAntiAlias = true;
+    private new bool _useAdvancedEffects = true;
+    private new bool _isOverlayActive;
+    private bool _showConnections;
+    private float _timeFactor = 1.0f;
+    private float _currentWaterAlpha = WATER_ALPHA_BASE;
+    private float _currentBrightness = 0.5f;
+
+    // Система многопоточности
+    private readonly Random _random = new();
+    private readonly object _syncRoot = new();
+    private readonly TaskFactory _physicsTaskFactory;
+    private readonly Stopwatch _frameTimeStopwatch = new();
+    private Task? _physicsTask;
+    private bool _physicsTaskRunning;
+    private bool _pendingPhysicsUpdate;
+
+    // Параметры сетки и адаптивности
+    private int _columns;
+    private int _rows;
+    private float _spacing;
+    private float _xOffset;
+    private float _yOffset;
+    private bool _needsGridRebuild = true;
+    private readonly bool _adaptivePhysics = true;
+    private readonly int[] _qualityBasedPointCount = [400, 800, 1600];
+    private readonly int _updateFrameSkip = 3;
+    private int _currentFrame;
+    private float _avgFrameTime = 0.016f;
+
+    // Состояние рендеринга
+    private float _lastBarWidth;
+    private float _lastBarSpacing;
+    private int _lastBarCount;
+    private SKImageInfo _lastImageInfo;
+
     protected override void OnInitialize() =>
         ExecuteSafely(
             PerformInitialization,
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed during renderer initialization"
         );
 
@@ -237,7 +246,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             BlendMode = SKBlendMode.SrcOver
         };
 
-    private static SKShader CreateWaterShader(float width, float height, float alpha)
+    private static SKShader CreateWaterShader(float _, float height, float alpha)
     {
         var colors = new[]
         {
@@ -330,7 +339,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         RenderQuality quality = RenderQuality.Medium) =>
         ExecuteSafely(
             () => PerformConfiguration(isOverlayActive, quality),
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
 
@@ -352,7 +361,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied() =>
         ExecuteSafely(
             PerformQualitySettingsApplication,
-            "OnQualitySettingsApplied",
+            nameof(OnQualitySettingsApplied),
             "Failed to apply specific quality settings"
         );
 
@@ -434,37 +443,40 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-        {
-            return;
-        }
-
+        SKPaint paint) =>
         ExecuteSafely(
-            () => PerformRender(
-                canvas,
-                spectrum,
-                info,
-                barWidth,
-                barSpacing,
-                barCount,
-                paint),
-            "RenderEffect",
+            () =>
+            {
+                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                {
+                    return;
+                }
+
+                UpdateState(spectrum, info, barWidth, barSpacing, barCount);
+                RenderFrame(canvas, spectrum, info, paint);
+            },
+            nameof(RenderEffect),
             "Error during rendering"
         );
 
-        UpdateFrameTimeMeasurement();
-    }
+    private static bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint) =>
+        canvas != null &&
+        spectrum != null &&
+        spectrum.Length > 0 &&
+        paint != null &&
+        info.Width > 0 &&
+        info.Height > 0;
 
-    private void PerformRender(
-        SKCanvas canvas,
+    private void UpdateState(
         float[] spectrum,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
-        int barCount,
-        SKPaint paint)
+        int barCount)
     {
         BuildWaterGrid(
             info.Width,
@@ -475,6 +487,15 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         UpdatePhysicsIfNeeded(spectrum);
         UpdateVisualParameters(spectrum, info);
+        UpdateFrameTimeMeasurement();
+    }
+
+    private void RenderFrame(
+        SKCanvas canvas,
+        float[] _,
+        SKImageInfo __,
+        SKPaint paint)
+    {
         RenderWaterGrid(canvas, paint);
     }
 
@@ -780,18 +801,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         }
     }
 
-    private static bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint) =>
-        canvas != null &&
-        spectrum != null &&
-        spectrum.Length > 0 &&
-        paint != null &&
-        info.Width > 0 &&
-        info.Height > 0;
-
     private void BuildWaterGrid(
         float width,
         float height,
@@ -806,12 +815,19 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         UpdateGridParameters(width, height, barWidth, barSpacing, barCount);
         CalculateAdaptiveGridDimensions(width, height);
-        ClearCurrentGrid();
-        CreateGridPoints();
-        ConnectGridPoints();
-        InitializeForces();
 
-        _needsGridRebuild = false;
+        ExecuteSafely(
+            () =>
+            {
+                ClearCurrentGrid();
+                CreateGridPoints();
+                ConnectGridPoints();
+                InitializeForces();
+                _needsGridRebuild = false;
+            },
+            "BuildWaterGrid",
+            "Error building water grid"
+        );
     }
 
     private bool IsGridUpToDate(
@@ -1179,7 +1195,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void CalculateSpectrumForces(
         int pointIndex,
-        WaterPoint point,
+        WaterPoint _,
         float[] spectrum)
     {
         int spectrumIndex = CalculateSpectrumIndex(pointIndex, spectrum.Length);
@@ -1251,7 +1267,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     protected override void OnDispose() =>
         ExecuteSafely(
             PerformDispose,
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
 
@@ -1298,12 +1314,13 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         ExecuteSafely(
             OnDispose,
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
 
         _disposed = true;
         GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     private class WaterPoint(float x, float y)

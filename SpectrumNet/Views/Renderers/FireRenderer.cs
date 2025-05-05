@@ -8,23 +8,9 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<FireRenderer> _instance = new(() => new FireRenderer());
 
-    // Заменяем стандартный пул ObjectPool из базового класса
-    private new readonly ObjectPool<SKPath> _pathPool = new(
-        () => new SKPath(),
-        path => path.Reset(),
-        10);
+    private FireRenderer() { }
 
-    private float[] _flameHeights = [];
-    private readonly Random _random = new();
-
-    private SKPicture? _cachedBasePicture;
-    private readonly object _renderDataLock = new();
-    private new readonly object _spectrumLock = new();
-
-    private bool _dataReady;
-    private new float[]? _processedSpectrum;
-    private int _maxDetailLevel = 4;
-    private float _glowRadius = GLOW_RADIUS_MEDIUM;
+    public static FireRenderer GetInstance() => _instance.Value;
 
     public record Constants
     {
@@ -32,86 +18,113 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 
         public const float
             TIME_STEP = 0.016f,
-            DECAY_RATE = 0.08f;
-
-        public const float
+            DECAY_RATE = 0.08f,
             CONTROL_POINT_PROPORTION = 0.4f,
             RANDOM_OFFSET_PROPORTION = 0.5f,
             RANDOM_OFFSET_CENTER = 0.25f,
             FLAME_BOTTOM_PROPORTION = 0.25f,
             FLAME_BOTTOM_MAX = 6f,
-            MIN_BOTTOM_ALPHA = 0.3f;
-
-        public const float
+            MIN_BOTTOM_ALPHA = 0.3f,
             WAVE_SPEED = 2.0f,
             WAVE_AMPLITUDE = 0.2f,
-            HORIZONTAL_WAVE_FACTOR = 0.15f;
-
-        public const float
+            HORIZONTAL_WAVE_FACTOR = 0.15f,
             CUBIC_CONTROL_POINT1 = 0.33f,
-            CUBIC_CONTROL_POINT2 = 0.66f;
-
-        public const float
+            CUBIC_CONTROL_POINT2 = 0.66f,
             OPACITY_WAVE_SPEED = 3.0f,
             OPACITY_PHASE_SHIFT = 0.2f,
             OPACITY_WAVE_AMPLITUDE = 0.1f,
-            OPACITY_BASE = 0.9f;
-
-        public const float POSITION_PHASE_SHIFT = 0.5f;
-        public const int MIN_BAR_COUNT = 10;
-
-        public const float
+            OPACITY_BASE = 0.9f,
+            POSITION_PHASE_SHIFT = 0.5f,
             GLOW_INTENSITY = 0.3f,
-            HIGH_INTENSITY_THRESHOLD = 0.7f;
+            HIGH_INTENSITY_THRESHOLD = 0.7f,
+            GLOW_RADIUS_LOW = 1.5f,
+            GLOW_RADIUS_MEDIUM = 3f,
+            GLOW_RADIUS_HIGH = 5f;
 
-        public const float GLOW_RADIUS_LOW = 1.5f;
-        public const int MAX_DETAIL_LEVEL_LOW = 2;
+        public const int
+            MIN_BAR_COUNT = 10,
+            MAX_DETAIL_LEVEL_LOW = 2,
+            MAX_DETAIL_LEVEL_MEDIUM = 4,
+            MAX_DETAIL_LEVEL_HIGH = 8,
+            SPECTRUM_PROCESSING_CHUNK_SIZE = 128;
 
-        public const float GLOW_RADIUS_MEDIUM = 3f;
-        public const int MAX_DETAIL_LEVEL_MEDIUM = 4;
+        public static class Quality
+        {
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
 
-        public const float GLOW_RADIUS_HIGH = 5f;
-        public const int MAX_DETAIL_LEVEL_HIGH = 8;
+            public const bool
+                LOW_USE_ANTI_ALIAS = false,
+                MEDIUM_USE_ANTI_ALIAS = true,
+                HIGH_USE_ANTI_ALIAS = true;
 
-        public const int SPECTRUM_PROCESSING_CHUNK_SIZE = 128;
+            public const int
+                LOW_MAX_DETAIL_LEVEL = MAX_DETAIL_LEVEL_LOW,
+                MEDIUM_MAX_DETAIL_LEVEL = MAX_DETAIL_LEVEL_MEDIUM,
+                HIGH_MAX_DETAIL_LEVEL = MAX_DETAIL_LEVEL_HIGH;
+
+            public const float
+                LOW_GLOW_RADIUS = GLOW_RADIUS_LOW,
+                MEDIUM_GLOW_RADIUS = GLOW_RADIUS_MEDIUM,
+                HIGH_GLOW_RADIUS = GLOW_RADIUS_HIGH;
+        }
     }
 
-    private FireRenderer() { }
+    private readonly record struct FlameParameters(
+        float X,
+        float CurrentHeight,
+        float PreviousHeight,
+        float BarWidth,
+        float CanvasHeight,
+        int Index,
+        float BaselinePosition
+    );
 
-    public static FireRenderer GetInstance() => _instance.Value;
+    private float[] _flameHeights = [];
+    private float _glowRadius = GLOW_RADIUS_MEDIUM;
+    private int _maxDetailLevel = Constants.Quality.MEDIUM_MAX_DETAIL_LEVEL;
+    private new bool _useAntiAlias = true;
+    private new bool _useAdvancedEffects = true;
 
-    public override void Initialize()
+    private SKPicture? _cachedBasePicture;
+    private bool _dataReady;
+    private new float[]? _processedSpectrum;
+
+    private readonly Random _random = new();
+
+    private new readonly ObjectPool<SKPath> _pathPool = new(
+        () => new SKPath(),
+        path => path.Reset(),
+        10);
+
+    protected override void OnInitialize()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                base.Initialize();
+                base.OnInitialize();
                 _time = 0f;
                 InitializeResources();
                 ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            }
+            "OnInitialize",
+            "Failed to initialize renderer"
         );
     }
 
     private void InitializeResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _flameHeights = [];
                 InvalidateCachedResources();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeResources",
-                ErrorMessage = "Failed to initialize resources"
-            }
+            "InitializeResources",
+            "Failed to initialize resources"
         );
     }
 
@@ -119,11 +132,10 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-
                 base.Configure(isOverlayActive, quality);
 
                 if (configChanged)
@@ -131,72 +143,82 @@ public sealed class FireRenderer : EffectSpectrumRenderer
                     OnConfigurationChanged();
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            }
+            "Configure",
+            "Failed to configure renderer"
         );
     }
 
     protected override void OnConfigurationChanged()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 InvalidateCachedResources();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnConfigurationChanged",
-                ErrorMessage = "Failed to handle configuration change"
-            }
+            "OnConfigurationChanged",
+            "Failed to handle configuration change"
         );
     }
 
     protected override void ApplyQualitySettings()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 base.ApplyQualitySettings();
-
-                ConfigureQualityDependentSettings();
-
+                ApplyQualityBasedSettings();
                 InvalidateCachedResources();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ApplyQualitySettings",
-                ErrorMessage = "Failed to apply quality settings"
-            }
+            "ApplyQualitySettings",
+            "Failed to apply quality settings"
         );
     }
 
-    private void ConfigureQualityDependentSettings()
+    private void ApplyQualityBasedSettings()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                _maxDetailLevel = MAX_DETAIL_LEVEL_LOW;
-                _glowRadius = GLOW_RADIUS_LOW;
+                ApplyLowQualitySettings();
                 break;
-
             case RenderQuality.Medium:
-                _maxDetailLevel = MAX_DETAIL_LEVEL_MEDIUM;
-                _glowRadius = GLOW_RADIUS_MEDIUM;
+                ApplyMediumQualitySettings();
                 break;
-
             case RenderQuality.High:
-                _maxDetailLevel = MAX_DETAIL_LEVEL_HIGH;
-                _glowRadius = GLOW_RADIUS_HIGH;
+                ApplyHighQualitySettings();
                 break;
         }
     }
 
+    private void ApplyLowQualitySettings()
+    {
+        _maxDetailLevel = Constants.Quality.LOW_MAX_DETAIL_LEVEL;
+        _glowRadius = Constants.Quality.LOW_GLOW_RADIUS;
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTI_ALIAS;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _maxDetailLevel = Constants.Quality.MEDIUM_MAX_DETAIL_LEVEL;
+        _glowRadius = Constants.Quality.MEDIUM_GLOW_RADIUS;
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTI_ALIAS;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _maxDetailLevel = Constants.Quality.HIGH_MAX_DETAIL_LEVEL;
+        _glowRadius = Constants.Quality.HIGH_GLOW_RADIUS;
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTI_ALIAS;
+    }
+
     private new void InvalidateCachedResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _cachedBasePicture?.Dispose();
@@ -204,11 +226,8 @@ public sealed class FireRenderer : EffectSpectrumRenderer
                 _dataReady = false;
                 _processedSpectrum = null;
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InvalidateCachedResources",
-                ErrorMessage = "Failed to invalidate cached resources"
-            }
+            "InvalidateCachedResources",
+            "Failed to invalidate cached resources"
         );
     }
 
@@ -221,104 +240,84 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-        {
-            return;
-        }
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
 
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 UpdateState(spectrum, barCount);
-
-                if (_dataReady)
-                {
-                    RenderFrame(
-                        canvas,
-                        info,
-                        barWidth,
-                        barSpacing,
-                        barCount,
-                        paint);
-                }
+                RenderFrame(canvas, info, barWidth, barSpacing, barCount, paint);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderEffect",
-                ErrorMessage = "Error in RenderEffect method"
-            }
+            "RenderEffect",
+            "Error during rendering"
         );
     }
 
     private bool ValidateRenderParameters(
-        SKCanvas canvas,
-        float[] spectrum,
+        SKCanvas? canvas,
+        float[]? spectrum,
         SKImageInfo info,
-        SKPaint paint)
+        SKPaint? paint)
     {
-        if (!_isInitialized)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
-            return false;
-        }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
+        return true;
+    }
 
-        if (canvas == null || spectrum == null || paint == null)
-        {
-            Log(
-                LogLevel.Error,
-                LOG_PREFIX,
-                "Invalid render parameters: null values");
-            return false;
-        }
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
 
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(
-                LogLevel.Error,
-                LOG_PREFIX,
-                $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
+        return false;
+    }
 
-        if (spectrum.Length == 0)
-        {
-            Log(LogLevel.Warning, LOG_PREFIX, "Empty spectrum data");
-            return false;
-        }
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
 
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
 
-        if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
-        {
-            return false;
-        }
-
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
         return true;
     }
 
     private void UpdateState(float[] spectrum, int barCount)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _time += TIME_STEP;
                 ProcessSpectrumData(spectrum, barCount);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateState",
-                ErrorMessage = "Error updating renderer state"
-            }
+            "UpdateState",
+            "Error updating renderer state"
         );
     }
 
     private void ProcessSpectrumData(float[] spectrum, int barCount)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 EnsureSpectrumBuffer(spectrum.Length);
@@ -339,11 +338,8 @@ public sealed class FireRenderer : EffectSpectrumRenderer
                     _dataReady = true;
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ProcessSpectrumData",
-                ErrorMessage = "Error processing spectrum data"
-            }
+            "ProcessSpectrumData",
+            "Error processing spectrum data"
         );
     }
 
@@ -355,8 +351,8 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private new float[] ScaleSpectrum(
+    [MethodImpl(AggressiveOptimization)]
+    private new static float[] ScaleSpectrum(
         float[] spectrum,
         int targetCount,
         int spectrumLength)
@@ -475,10 +471,10 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         float barWidth,
         float barSpacing,
-        int _,  // Unused barCount parameter 
+        int barCount,
         SKPaint paint)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 float[]? spectrum = GetCurrentSpectrum();
@@ -500,11 +496,8 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 
                 renderScope.RenderFlames();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderFrame",
-                ErrorMessage = "Error rendering flame frame"
-            }
+            "RenderFrame",
+            "Error rendering flame frame"
         );
     }
 
@@ -530,16 +523,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             ? totalBarWidth * MIN_BAR_COUNT / actualBarCount
             : totalBarWidth;
     }
-
-    private readonly record struct FlameParameters(
-        float X,
-        float CurrentHeight,
-        float PreviousHeight,
-        float BarWidth,
-        float CanvasHeight,
-        int Index,
-        float BaselinePosition
-    );
 
     private class FlameRenderScope : IDisposable
     {
@@ -579,7 +562,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             _glowPaint = renderer._paintPool.Get();
             ConfigureGlowPaint();
 
-            _useAdvancedEffects = renderer.UseAdvancedEffects;
+            _useAdvancedEffects = renderer._useAdvancedEffects;
         }
 
         private void ConfigureWorkingPaint()
@@ -588,7 +571,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             _workingPaint.Style = _basePaint.Style;
             _workingPaint.StrokeWidth = _basePaint.StrokeWidth;
             _workingPaint.IsStroke = _basePaint.IsStroke;
-            _workingPaint.IsAntialias = _renderer.UseAntiAlias;
+            _workingPaint.IsAntialias = _renderer._useAntiAlias;
             _workingPaint.ImageFilter = _basePaint.ImageFilter;
             _workingPaint.Shader = _basePaint.Shader;
         }
@@ -599,7 +582,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             _glowPaint.Style = _basePaint.Style;
             _glowPaint.StrokeWidth = _basePaint.StrokeWidth;
             _glowPaint.IsStroke = _basePaint.IsStroke;
-            _glowPaint.IsAntialias = _renderer.UseAntiAlias;
+            _glowPaint.IsAntialias = _renderer._useAntiAlias;
             _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
                 SKBlurStyle.Normal,
                 _renderer._glowRadius);
@@ -662,19 +645,18 @@ public sealed class FireRenderer : EffectSpectrumRenderer
                 baselinePosition);
         }
 
-        private float CalculateWaveOffset(int index) => 
+        private float CalculateWaveOffset(int index) =>
             MathF.Sin(_renderer._time * WAVE_SPEED + index * POSITION_PHASE_SHIFT)
                 * WAVE_AMPLITUDE;
-        
-        private float CalculateFlameHeight(float spectrumValue, float waveOffset) => 
-            spectrumValue * _info.Height * (1 + waveOffset);
-        
 
-        private float GetPreviousFlameHeight(int index) => 
-            _renderer._flameHeights.Length > index 
-            ? _renderer._flameHeights[index] * _info.Height 
+        private float CalculateFlameHeight(float spectrumValue, float waveOffset) =>
+            spectrumValue * _info.Height * (1 + waveOffset);
+
+        private float GetPreviousFlameHeight(int index) =>
+            _renderer._flameHeights.Length > index
+            ? _renderer._flameHeights[index] * _info.Height
             : 0;
-        
+
         private void DrawFlameGroups()
         {
             foreach (var (flames, _) in _flameGroups.OrderBy(g => g.Intensity))
@@ -724,9 +706,9 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             }
         }
 
-        private bool ShouldRenderGlow(FlameParameters parameters) => 
-            _useAdvancedEffects 
-            && parameters.CurrentHeight 
+        private bool ShouldRenderGlow(FlameParameters parameters) =>
+            _useAdvancedEffects
+            && parameters.CurrentHeight
             / parameters.CanvasHeight > HIGH_INTENSITY_THRESHOLD;
 
         private static (float flameTop, float flameBottom) CalculateFlameVerticalPositions(
@@ -904,7 +886,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             _workingPaint.Color = _workingPaint.Color.WithAlpha(alpha);
         }
 
-        private float CalculateOpacityWave(int index) => 
+        private float CalculateOpacityWave(int index) =>
             MathF.Sin(_renderer._time * OPACITY_WAVE_SPEED + index * OPACITY_PHASE_SHIFT)
             * OPACITY_WAVE_AMPLITUDE
             + OPACITY_BASE;
@@ -918,39 +900,32 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 
     public override void Dispose()
     {
-        if (!_disposed)
-        {
-            Safe(
-                () =>
-                {
-                    OnDispose();
-                },
-                new ErrorHandlingOptions
-                {
-                    Source = $"{LOG_PREFIX}.Dispose",
-                    ErrorMessage = "Error during renderer disposal"
-                }
-            );
+        if (_disposed) return;
 
-            _disposed = true;
-            GC.SuppressFinalize(this);
-        }
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            "Dispose",
+            "Error during disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     protected override void OnDispose()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 DisposeManagedResources();
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnDispose",
-                ErrorMessage = "Error during OnDispose"
-            }
+            "OnDispose",
+            "Error during specific disposal"
         );
     }
 

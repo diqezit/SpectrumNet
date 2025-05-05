@@ -9,6 +9,50 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<DotsRenderer> _instance = new(() => new DotsRenderer());
 
+    private DotsRenderer() { }
+
+    public static DotsRenderer GetInstance() => _instance.Value;
+
+    public record Constants
+    {
+        public const string LOG_PREFIX = "DotsRenderer";
+
+        public const float
+            BASE_DOT_RADIUS = 4.0f,
+            MIN_DOT_RADIUS = 1.5f,
+            MAX_DOT_RADIUS = 8.0f,
+            DOT_RADIUS_SCALE_FACTOR = 0.8f,
+            DOT_SPEED_BASE = 80.0f,
+            DOT_SPEED_SCALE = 120.0f,
+            DOT_VELOCITY_DAMPING = 0.95f,
+            SPECTRUM_INFLUENCE_FACTOR = 2.0f,
+            SPECTRUM_VELOCITY_FACTOR = 1.5f,
+            ALPHA_BASE = 0.85f,
+            ALPHA_RANGE = 0.15f,
+            GLOW_RADIUS_FACTOR = 0.3f,
+            BASE_GLOW_ALPHA = 0.6f;
+
+        public const int
+            LOW_QUALITY_DOT_COUNT = 75,
+            MEDIUM_QUALITY_DOT_COUNT = 150,
+            HIGH_QUALITY_DOT_COUNT = 300,
+            DEFAULT_DOT_COUNT = MEDIUM_QUALITY_DOT_COUNT,
+            MIN_BAR_COUNT = 32;
+
+        public static class Quality
+        {
+            public const int
+                LOW_DOT_COUNT = LOW_QUALITY_DOT_COUNT,
+                MEDIUM_DOT_COUNT = MEDIUM_QUALITY_DOT_COUNT,
+                HIGH_DOT_COUNT = HIGH_QUALITY_DOT_COUNT;
+
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
+        }
+    }
+
     private readonly record struct Dot(
         float X, float Y,
         float VelocityX, float VelocityY,
@@ -32,6 +76,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     private float _maxSpectrum;
     private int _dotCount = DEFAULT_DOT_COUNT;
     private float _globalRadiusMultiplier = 1.0f;
+    private new bool _useAdvancedEffects;
 
     private readonly object _renderDataLock = new();
     private bool _dataReady;
@@ -40,46 +85,6 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     private readonly SKPaint _dotPaint = new();
     private readonly SKPaint _glowPaint = new();
 
-    private DotsRenderer() { }
-
-    public static DotsRenderer GetInstance() => _instance.Value;
-
-    public record Constants
-    {
-        public const string LOG_PREFIX = "DotsRenderer";
-
-        public const float
-            BASE_DOT_RADIUS = 4.0f,
-            MIN_DOT_RADIUS = 1.5f,
-            MAX_DOT_RADIUS = 8.0f,
-            DOT_RADIUS_SCALE_FACTOR = 0.8f;
-
-        public const float
-            DOT_SPEED_BASE = 80.0f,
-            DOT_SPEED_SCALE = 120.0f,
-            DOT_VELOCITY_DAMPING = 0.95f;
-
-        public const float
-            SPECTRUM_INFLUENCE_FACTOR = 2.0f,
-            SPECTRUM_VELOCITY_FACTOR = 1.5f;
-
-        public const float
-            ALPHA_BASE = 0.85f,
-            ALPHA_RANGE = 0.15f;
-
-        public const int
-            LOW_QUALITY_DOT_COUNT = 75,
-            MEDIUM_QUALITY_DOT_COUNT = 150,
-            HIGH_QUALITY_DOT_COUNT = 300,
-            DEFAULT_DOT_COUNT = MEDIUM_QUALITY_DOT_COUNT;
-
-        public const float
-            GLOW_RADIUS_FACTOR = 0.3f,
-            BASE_GLOW_ALPHA = 0.6f;
-
-        public const int MIN_BAR_COUNT = 32;
-    }
-
     protected override void OnInitialize()
     {
         ExecuteSafely(
@@ -87,6 +92,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 InitializeResources();
+                ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             "OnInitialize",
@@ -149,9 +155,9 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             {
                 bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
                 base.Configure(isOverlayActive, quality);
+
                 if (configChanged)
                 {
-                    Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
                     OnConfigurationChanged();
                 }
             },
@@ -160,47 +166,82 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         );
     }
 
-    protected override void OnQualitySettingsApplied()
+    protected override void OnConfigurationChanged()
     {
         ExecuteSafely(
             () =>
             {
-                base.OnQualitySettingsApplied();
-                ApplyQualitySpecificSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. New Quality: {Quality}");
+                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
             },
-            "OnQualitySettingsApplied",
-            "Failed to apply specific quality settings"
+            "OnConfigurationChanged",
+            "Failed to handle configuration change"
         );
     }
 
-    private void ApplyQualitySpecificSettings()
+    protected override void ApplyQualitySettings()
     {
-        int oldDotCount = _dotCount;
-        _dotCount = Quality switch
-        {
-            RenderQuality.Low => LOW_QUALITY_DOT_COUNT,
-            RenderQuality.Medium => MEDIUM_QUALITY_DOT_COUNT,
-            RenderQuality.High => HIGH_QUALITY_DOT_COUNT,
-            _ => MEDIUM_QUALITY_DOT_COUNT
-        };
+        ExecuteSafely(
+            () =>
+            {
+                base.ApplyQualitySettings();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+            },
+            "ApplyQualitySettings",
+            "Failed to apply quality settings"
+        );
+    }
 
-        _glowPaint.MaskFilter = UseAdvancedEffects
+    private void ApplyQualityBasedSettings()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                ApplyLowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                ApplyMediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                ApplyHighQualitySettings();
+                break;
+        }
+
+        UpdateQualityDependentResources();
+    }
+
+    private void ApplyLowQualitySettings()
+    {
+        _dotCount = Constants.Quality.LOW_DOT_COUNT;
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _dotCount = Constants.Quality.MEDIUM_DOT_COUNT;
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _dotCount = Constants.Quality.HIGH_DOT_COUNT;
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+    }
+
+    private void UpdateQualityDependentResources()
+    {
+        _glowPaint.MaskFilter = _useAdvancedEffects
             ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR)
             : null;
 
-        if (oldDotCount != _dotCount)
+        if (_lastImageInfo.Width > 0 && _lastImageInfo.Height > 0)
         {
             lock (_renderDataLock)
             {
                 _dataReady = false;
                 _currentRenderData = null;
             }
-
-            if (_lastImageInfo.Width > 0 && _lastImageInfo.Height > 0)
-            {
-                ResetDots(_lastImageInfo);
-            }
+            ResetDots(_lastImageInfo);
         }
     }
 
@@ -459,7 +500,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
 
     private void DrawDotWithGlow(SKCanvas canvas, Dot dot, byte alpha)
     {
-        if (UseAdvancedEffects)
+        if (_useAdvancedEffects)
         {
             _glowPaint.Color = dot.Color.WithAlpha((byte)(BASE_GLOW_ALPHA * alpha));
             float glowRadius = dot.Radius * (1.0f + GLOW_RADIUS_FACTOR);

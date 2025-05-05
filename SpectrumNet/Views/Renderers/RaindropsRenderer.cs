@@ -1,8 +1,6 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.RaindropsRenderer.Constants;
-using static System.MathF;
-using Vector = System.Numerics.Vector;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -10,9 +8,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<RaindropsRenderer> _instance = new(() => new RaindropsRenderer());
 
-#pragma warning disable CS8618 // ill use in InitializeFields(); - so its ok here
     private RaindropsRenderer()
-#pragma warning restore CS8618 
     {
         InitializeFields();
         SubscribeToSettingsChanges();
@@ -31,11 +27,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             TRAIL_LENGTH_SIZE_FACTOR = 5f,
             TRAIL_STROKE_MULTIPLIER = 0.6f,
             TRAIL_OPACITY_MULTIPLIER = 150f,
-            TRAIL_INTENSITY_THRESHOLD = 0.3f;
-
-        public const int INITIAL_DROP_COUNT = 30;
-
-        public const float
+            TRAIL_INTENSITY_THRESHOLD = 0.3f,
             GRAVITY = 9.8f,
             LIFETIME_DECAY = 0.4f,
             SPLASH_REBOUND = 0.5f,
@@ -46,13 +38,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             RAINDROP_SIZE_HIGHLIGHT_THRESHOLD = 0.8f,
             INTENSITY_HIGHLIGHT_THRESHOLD = 0.4f,
             HIGHLIGHT_SIZE_MULTIPLIER = 0.4f,
-            HIGHLIGHT_OFFSET_MULTIPLIER = 0.2f;
-
-        public const int
-            SPLASH_PARTICLE_COUNT_MIN = 3,
-            SPLASH_PARTICLE_COUNT_MAX = 8;
-
-        public const float
+            HIGHLIGHT_OFFSET_MULTIPLIER = 0.2f,
             PARTICLE_VELOCITY_BASE_MULTIPLIER = 0.7f,
             PARTICLE_VELOCITY_INTENSITY_MULTIPLIER = 0.3f,
             SPLASH_UPWARD_BASE_MULTIPLIER = 0.8f,
@@ -62,27 +48,66 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             SPLASH_PARTICLE_SIZE_INTENSITY_MULTIPLIER = 0.5f,
             SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET = 0.8f;
 
+        public const int
+            INITIAL_DROP_COUNT = 30,
+            SPLASH_PARTICLE_COUNT_MIN = 3,
+            SPLASH_PARTICLE_COUNT_MAX = 8;
+
+        public const byte MAX_ALPHA_BYTE = 255;
+
         public static class Quality
         {
-            public const bool 
+            public const bool
                 LOW_USE_ADVANCED_EFFECTS = false,
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
                 HIGH_USE_ADVANCED_EFFECTS = true;
 
-            public const int 
+            public const int
                 LOW_EFFECTS_THRESHOLD = 4,
                 MEDIUM_EFFECTS_THRESHOLD = 3,
                 HIGH_EFFECTS_THRESHOLD = 2;
         }
     }
 
-    private readonly struct RenderCache(float width, float height, bool isOverlay)
+    // Quality settings (changed when quality changes)
+    private int _effectsThreshold = Constants.Quality.MEDIUM_EFFECTS_THRESHOLD;
+    private new bool _useAntiAlias = true;
+    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+    private new bool _useAdvancedEffects = true;
+    private new bool _isOverlayActive;
+
+    // Caches and states
+    private RenderCache _renderCache;
+    private float _timeSinceLastSpawn;
+    private bool _firstRender = true;
+    private float _actualDeltaTime = TARGET_DELTA_TIME;
+    private float _averageLoudness = 0f;
+    private int _frameCounter = 0;
+    private bool _cacheNeedsUpdate;
+
+    // Readonly fields
+    private readonly SKPath _trailPath = new();
+    private readonly Random _random = new();
+    private readonly Stopwatch _frameTimer = new();
+    private readonly int _particleUpdateSkip = 1;
+    private readonly float[] _emptySpectrum = [];
+
+    // Buffers and data
+    private Raindrop[] _raindrops = null!;
+    private int _raindropCount;
+    private float[] _smoothedSpectrumCache = null!;
+    private ParticleBuffer _particleBuffer = null!;
+
+    private readonly struct RenderCache(
+        float width,
+        float height,
+        bool isOverlay)
     {
-        public readonly float 
-            Width = width, 
-            Height = height, 
-            LowerBound = isOverlay ? height * Settings.Instance.OverlayHeightMultiplier : height, 
-            UpperBound = 0f, 
+        public readonly float
+            Width = width,
+            Height = height,
+            LowerBound = isOverlay ? height * Settings.Instance.OverlayHeightMultiplier : height,
+            UpperBound = 0f,
             StepSize = width / Settings.Instance.MaxRaindrops;
     }
 
@@ -97,10 +122,10 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             float fallSpeed,
             float size,
             float intensity,
-            int spectrumIndex) => 
+            int spectrumIndex) =>
             (X, Y, FallSpeed, Size, Intensity, SpectrumIndex) = (x, y, fallSpeed, size, intensity, spectrumIndex);
 
-        public Raindrop WithNewY(float newY) => 
+        public Raindrop WithNewY(float newY) =>
             new(X, newY, FallSpeed, Size, Intensity, SpectrumIndex);
     }
 
@@ -115,7 +140,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             float velocityX,
             float velocityY,
             float size,
-            bool isSplash) => 
+            bool isSplash) =>
             (X, Y, VelocityX, VelocityY, Lifetime, Size, IsSplash) = (x, y, velocityX, velocityY, 1.0f, size, isSplash);
 
         public bool Update(float deltaTime, float lowerBound)
@@ -132,7 +157,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             Y += VelocityY * deltaTime;
         }
 
-        private void ApplyGravity(float deltaTime) => 
+        private void ApplyGravity(float deltaTime) =>
             VelocityY += deltaTime * GRAVITY;
 
         private void HandleSplashCollision(float lowerBound)
@@ -140,28 +165,26 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             if (!IsSplash || Y < lowerBound) return;
             Y = lowerBound;
             VelocityY = -VelocityY * SPLASH_REBOUND;
-            if (MathF.Abs(VelocityY) < SPLASH_VELOCITY_THRESHOLD) VelocityY = 0;
+            if (Abs(VelocityY) < SPLASH_VELOCITY_THRESHOLD) VelocityY = 0;
         }
 
         private readonly bool IsAlive() => Lifetime > 0;
 
-        public void DecayLifetime(float deltaTime) => 
+        public void DecayLifetime(float deltaTime) =>
             Lifetime -= deltaTime * LIFETIME_DECAY;
     }
 
-    private sealed class ParticleBuffer(
-        int capacity,
-        float lowerBound)
+    private sealed class ParticleBuffer(int capacity, float lowerBound)
     {
         private Particle[] _particles = new Particle[capacity];
         private int _count = 0;
         private float _lowerBound = lowerBound;
         private readonly Random _random = new();
 
-        public void UpdateLowerBound(float lowerBound) => 
+        public void UpdateLowerBound(float lowerBound) =>
             _lowerBound = lowerBound;
 
-        public void ResizeBuffer(int newCapacity) => 
+        public void ResizeBuffer(int newCapacity) =>
             AdjustBufferSize(newCapacity);
 
         private void AdjustBufferSize(int newCapacity)
@@ -181,7 +204,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
         public void Clear() => _count = 0;
 
-        public void UpdateParticles(float deltaTime) => 
+        public void UpdateParticles(float deltaTime) =>
             FilterAndUpdateParticles(deltaTime);
 
         private void FilterAndUpdateParticles(float deltaTime)
@@ -200,7 +223,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             _count = writeIndex;
         }
 
-        public void RenderParticles(SKCanvas canvas, SKPaint basePaint) => 
+        public void RenderParticles(SKCanvas canvas, SKPaint basePaint) =>
             DrawParticles(canvas, basePaint);
 
         private void DrawParticles(SKCanvas canvas, SKPaint basePaint)
@@ -219,10 +242,11 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             return paint;
         }
 
-        private static void RenderSingleParticle(SKCanvas canvas,
-                                         SKPaint paint,
-                                         ref Particle p,
-                                         SKPaint basePaint)
+        private static void RenderSingleParticle(
+            SKCanvas canvas,
+            SKPaint paint,
+            ref Particle p,
+            SKPaint basePaint)
         {
             float clampedLifetime = Clamp(p.Lifetime, 0f, 1f);
             paint.Color = basePaint.Color.WithAlpha(CalculateParticleAlpha(clampedLifetime));
@@ -249,7 +273,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 AddSplashParticle(x, y, velocityMax, upwardForce, intensity, random);
         }
 
-        private int CalculateSplashParticleCount(Random random, float _) // intensity
+        private int CalculateSplashParticleCount(Random random, float _)
             => Min(random.Next(SPLASH_PARTICLE_COUNT_MIN, SPLASH_PARTICLE_COUNT_MAX),
                    Settings.Instance.MaxParticles - _count);
 
@@ -268,7 +292,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         }
 
         private static float GenerateParticleAngle(Random random)
-            => (float)(random.NextDouble() * MathF.PI * 2);
+            => (float)(random.NextDouble() * PI * 2);
 
         private static float GenerateParticleSpeed(Random random, float velocityMax)
             => (float)(random.NextDouble() * velocityMax);
@@ -279,11 +303,11 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             float angle,
             float speed,
             float upwardForce,
-            float size) => 
+            float size) =>
             new(x,
                 y,
-                Cos(angle) * speed,
-                Sin(angle) * speed - upwardForce,
+                MathF.Cos(angle) * speed,
+                MathF.Sin(angle) * speed - upwardForce,
                 size,
                 true);
 
@@ -303,49 +327,35 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET);
     }
 
-    private readonly SKPath _trailPath = new();
-    private RenderCache _renderCache;
-    private Raindrop[] _raindrops;
-    private int _raindropCount;
-    private readonly Random _random = new();
-    private float[] _smoothedSpectrumCache;
-    private float _timeSinceLastSpawn;
-    private bool _firstRender = true;
-    private readonly Stopwatch _frameTimer = new();
-    private float _actualDeltaTime = TARGET_DELTA_TIME;
-    private float _averageLoudness = 0f;
-    private ParticleBuffer _particleBuffer;
-    private int _frameCounter = 0;
-    private readonly int _particleUpdateSkip = 1;
-    private int _effectsThreshold = Constants.Quality.MEDIUM_EFFECTS_THRESHOLD;
-    private new bool _useAntiAlias = true;
-    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-    private new bool _useAdvancedEffects = true;
-    private new bool _isOverlayActive;
-    private bool _cacheNeedsUpdate;
-    private readonly float[] _emptySpectrum = [];
+    protected override void OnInitialize()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                base.OnInitialize();
+                if (_disposed) ResetRendererState();
+                _firstRender = true;
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            "OnInitialize",
+            "Failed to initialize renderer"
+        );
+    }
 
     private void InitializeFields()
     {
-        _raindrops = new Raindrop[Settings.Instance.MaxRaindrops];
-        _smoothedSpectrumCache = new float[Settings.Instance.MaxRaindrops];
-        _particleBuffer = new ParticleBuffer(Settings.Instance.MaxParticles, 1);
-        _renderCache = new RenderCache(1, 1, false);
-        _frameTimer.Start();
-    }
-
-    private void SubscribeToSettingsChanges() => Settings.Instance.PropertyChanged += OnSettingsChanged;
-
-    public override void Initialize() => ExecuteSafely(PerformInitialization,
-                                                      "Initialize",
-                                                      "Failed to initialize renderer");
-
-    private void PerformInitialization()
-    {
-        base.Initialize();
-        if (_disposed) ResetRendererState();
-        _firstRender = true;
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        ExecuteSafely(
+            () =>
+            {
+                _raindrops = new Raindrop[Settings.Instance.MaxRaindrops];
+                _smoothedSpectrumCache = new float[Settings.Instance.MaxRaindrops];
+                _particleBuffer = new ParticleBuffer(Settings.Instance.MaxParticles, 1);
+                _renderCache = new RenderCache(1, 1, false);
+                _frameTimer.Start();
+            },
+            "InitializeFields",
+            "Failed to initialize fields"
+        );
     }
 
     private void ResetRendererState()
@@ -355,16 +365,45 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _disposed = false;
     }
 
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-        => ExecuteSafely(() => PerformConfiguration(isOverlayActive, quality),
-                         "Configure",
-                         "Failed to configure renderer");
+    private void SubscribeToSettingsChanges() => 
+        Settings.Instance.PropertyChanged += OnSettingsChanged;
 
-    private void PerformConfiguration(bool isOverlayActive, RenderQuality quality)
+    public override void Configure(bool isOverlayActive,
+                                   RenderQuality quality = RenderQuality.Medium)
     {
-        base.Configure(isOverlayActive, quality);
-        if (_isOverlayActive != isOverlayActive) UpdateOverlayState(isOverlayActive);
-        if (_quality != quality) ApplyNewQuality(quality);
+        ExecuteSafely(
+            () =>
+            {
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
+
+                if (configChanged)
+                {
+                    OnConfigurationChanged();
+                }
+
+                if (_isOverlayActive != isOverlayActive)
+                {
+                    UpdateOverlayState(isOverlayActive);
+                }
+            },
+            "Configure",
+            "Failed to configure renderer"
+        );
+    }
+
+    protected override void OnConfigurationChanged()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}");
+            },
+            "OnConfigurationChanged",
+            "Failed to handle configuration change"
+        );
     }
 
     private void UpdateOverlayState(bool isOverlayActive)
@@ -376,35 +415,37 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _particleBuffer.Clear();
     }
 
-    private void ApplyNewQuality(RenderQuality quality)
+    protected override void ApplyQualitySettings()
     {
-        _quality = quality;
-        ApplyQualitySettings();
+        ExecuteSafely(
+            () =>
+            {
+                base.ApplyQualitySettings();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+            },
+            "ApplyQualitySettings",
+            "Failed to apply quality settings"
+        );
     }
 
-    protected override void ApplyQualitySettings()
-        => ExecuteSafely(ConfigureQualitySettings,
-                         "ApplyQualitySettings",
-                         "Failed to apply quality settings");
-
-    private void ConfigureQualitySettings()
+    private void ApplyQualityBasedSettings()
     {
-        base.ApplyQualitySettings();
-        switch (_quality)
+        switch (Quality)
         {
             case RenderQuality.Low:
-                SetLowQualitySettings();
+                ApplyLowQualitySettings();
                 break;
             case RenderQuality.Medium:
-                SetMediumQualitySettings();
+                ApplyMediumQualitySettings();
                 break;
             case RenderQuality.High:
-                SetHighQualitySettings();
+                ApplyHighQualitySettings();
                 break;
         }
     }
 
-    private void SetLowQualitySettings()
+    private void ApplyLowQualitySettings()
     {
         _useAntiAlias = false;
         _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
@@ -412,7 +453,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _effectsThreshold = Constants.Quality.LOW_EFFECTS_THRESHOLD;
     }
 
-    private void SetMediumQualitySettings()
+    private void ApplyMediumQualitySettings()
     {
         _useAntiAlias = true;
         _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
@@ -420,7 +461,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _effectsThreshold = Constants.Quality.MEDIUM_EFFECTS_THRESHOLD;
     }
 
-    private void SetHighQualitySettings()
+    private void ApplyHighQualitySettings()
     {
         _useAntiAlias = true;
         _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
@@ -437,164 +478,20 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!AreRenderParametersValid(canvas, spectrum, info, paint)) return;
-        ExecuteSafely(() => PerformRenderEffect(canvas, spectrum, info, barCount, paint),
-                      "RenderEffect",
-                      "Error during rendering");
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
+
+        ExecuteSafely(
+            () =>
+            {
+                UpdateState(spectrum, info, barCount);
+                RenderFrame(canvas, spectrum, paint);
+            },
+            "RenderEffect",
+            "Error during rendering"
+        );
     }
 
-    private void PerformRenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        int barCount,
-        SKPaint paint)
-    {
-        UpdateFrameState(info);
-        IncrementSpawnTimer();
-        UpdateSimulation(spectrum, barCount);
-        RenderFullScene(canvas, spectrum, paint);
-    }
-
-    private void IncrementSpawnTimer() => _timeSinceLastSpawn += _actualDeltaTime;
-
-    public override void Render(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint? paint,
-        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
-    {
-        if (!AreRenderParametersValid(canvas, spectrum, info, paint))
-        {
-            drawPerformanceInfo?.Invoke(canvas!, info);
-            return;
-        }
-        if (IsCanvasClipped(canvas!, info))
-        {
-            drawPerformanceInfo?.Invoke(canvas!, info);
-            return;
-        }
-        ExecuteSafely(() => ProcessAndRender(
-            canvas!,
-            spectrum!,
-            info,
-            barCount,
-            paint!,
-            drawPerformanceInfo),
-                      "Render",
-                      "Error during rendering");
-        drawPerformanceInfo?.Invoke(canvas!, info);
-    }
-
-    private static bool IsCanvasClipped(SKCanvas canvas, SKImageInfo info)
-        => canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height));
-
-    private void ProcessAndRender(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        int barCount,
-        SKPaint paint,
-        Action<SKCanvas, SKImageInfo>? _) // drawPerformanceInfo
-    {
-        float[] renderSpectrum = AcquireRenderSpectrum(spectrum, barCount);
-        UpdateFrameCounter();
-        UpdateAndRenderScene(canvas, renderSpectrum, info, barCount, paint);
-    }
-
-    private float[] AcquireRenderSpectrum(float[] spectrum, int barCount)
-    {
-        bool semaphoreAcquired = TryAcquireSemaphore();
-        try
-        {
-            if (semaphoreAcquired) ProcessSpectrum(spectrum, barCount);
-            return GetProcessedSpectrum(spectrum, barCount);
-        }
-        finally
-        {
-            if (semaphoreAcquired) ReleaseSemaphore();
-        }
-    }
-
-    private bool TryAcquireSemaphore() => 
-        _spectrumSemaphore.Wait(0);
-
-    private void ReleaseSemaphore() => 
-        _spectrumSemaphore.Release();
-
-    private float[] GetProcessedSpectrum(float[] spectrum, int barCount)
-    {
-        lock (_spectrumLock)
-            return _processedSpectrum ?? ProcessSpectrumSynchronously(spectrum, barCount);
-    }
-
-    private void UpdateFrameCounter() => 
-        _frameCounter = (_frameCounter + 1) % (_particleUpdateSkip + 1);
-
-    private void UpdateAndRenderScene(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        int barCount,
-        SKPaint basePaint)
-        => ExecuteSafely(() => PerformSceneUpdateAndRender(canvas, spectrum, info, barCount, basePaint),
-                         "UpdateAndRenderScene",
-                         "Error during scene update and rendering");
-
-    private void PerformSceneUpdateAndRender(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        int barCount,
-        SKPaint basePaint)
-    {
-        UpdateRenderCacheIfNeeded(info);
-        InitializeDropsOnFirstRender(barCount);
-        IncrementSpawnTimer();
-        UpdateSimulation(spectrum, barCount);
-        RenderParticles(canvas, basePaint);
-        RenderScene(canvas, spectrum, basePaint);
-    }
-
-    private void UpdateFrameState(SKImageInfo info)
-    {
-        UpdateDeltaTime();
-        UpdateRenderCacheIfNeeded(info);
-    }
-
-    private void UpdateRenderCacheIfNeeded(SKImageInfo info)
-    {
-        if (NeedsCacheUpdate(info)) UpdateRenderCache(info);
-    }
-
-    private bool NeedsCacheUpdate(SKImageInfo info)
-        => _cacheNeedsUpdate || _renderCache.Width != info.Width || _renderCache.Height != info.Height;
-
-    private void UpdateRenderCache(SKImageInfo info)
-    {
-        _renderCache = new RenderCache(info.Width, info.Height, _isOverlayActive);
-        _particleBuffer.UpdateLowerBound(_renderCache.LowerBound);
-        _cacheNeedsUpdate = false;
-    }
-
-    private void UpdateDeltaTime() => 
-        _actualDeltaTime = CalculateDeltaTime();
-
-    private float CalculateDeltaTime()
-    {
-        float elapsed = (float)_frameTimer.Elapsed.TotalSeconds;
-        _frameTimer.Restart();
-        float speedMultiplier = elapsed / TARGET_DELTA_TIME;
-        return Clamp(TARGET_DELTA_TIME * speedMultiplier,
-                     Settings.Instance.MinTimeStep,
-                     Settings.Instance.MaxTimeStep);
-    }
-
-    private bool AreRenderParametersValid(
+    private bool ValidateRenderParameters(
         SKCanvas? canvas,
         float[]? spectrum,
         SKImageInfo info,
@@ -632,9 +529,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private static bool AreDimensionsValid(SKImageInfo info)
     {
         if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error,
-            LOG_PREFIX,
-            $"Invalid image dimensions: {info.Width}x{info.Height}");
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
         return false;
     }
 
@@ -645,13 +540,168 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         return true;
     }
 
+    public override void Render(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint? paint,
+        Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                {
+                    drawPerformanceInfo?.Invoke(canvas!, info);
+                    return;
+                }
+
+                if (IsCanvasClipped(canvas!, info))
+                {
+                    drawPerformanceInfo?.Invoke(canvas!, info);
+                    return;
+                }
+
+                ProcessAndRender(canvas!, spectrum!, info, barCount, paint!, drawPerformanceInfo);
+                drawPerformanceInfo?.Invoke(canvas!, info);
+            },
+            "Render",
+            "Error during rendering"
+        );
+    }
+
+    private static bool IsCanvasClipped(SKCanvas canvas, SKImageInfo info) =>
+        canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height));
+
+    private void ProcessAndRender(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        int barCount,
+        SKPaint paint,
+        Action<SKCanvas, SKImageInfo>? _)
+    {
+        float[] renderSpectrum = AcquireRenderSpectrum(spectrum, barCount);
+        UpdateFrameCounter();
+        UpdateAndRenderScene(canvas, renderSpectrum, info, barCount, paint);
+    }
+
+    private float[] AcquireRenderSpectrum(float[] spectrum, int barCount)
+    {
+        bool semaphoreAcquired = TryAcquireSemaphore();
+        try
+        {
+            if (semaphoreAcquired) ProcessSpectrum(spectrum, barCount);
+            return GetProcessedSpectrum(spectrum, barCount);
+        }
+        finally
+        {
+            if (semaphoreAcquired) ReleaseSemaphore();
+        }
+    }
+
+    private bool TryAcquireSemaphore() =>
+        _spectrumSemaphore.Wait(0);
+
+    private void ReleaseSemaphore() =>
+        _spectrumSemaphore.Release();
+
+    private float[] GetProcessedSpectrum(float[] spectrum, int barCount)
+    {
+        lock (_spectrumLock)
+            return _processedSpectrum ?? ProcessSpectrumSynchronously(spectrum, barCount);
+    }
+
+    private void UpdateFrameCounter() =>
+        _frameCounter = (_frameCounter + 1) % (_particleUpdateSkip + 1);
+
+    private void UpdateAndRenderScene(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        int barCount,
+        SKPaint basePaint)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                UpdateRenderCacheIfNeeded(info);
+                InitializeDropsOnFirstRender(barCount);
+                IncrementSpawnTimer();
+                UpdateSimulation(spectrum, barCount);
+                RenderParticles(canvas, basePaint);
+                RenderScene(canvas, spectrum, basePaint);
+            },
+            "UpdateAndRenderScene",
+            "Error during scene update and rendering"
+        );
+    }
+
+    private void UpdateState(
+        float[] spectrum,
+        SKImageInfo info,
+        int barCount)
+    {
+        UpdateFrameState(info);
+        IncrementSpawnTimer();
+        UpdateSimulation(spectrum, barCount);
+    }
+
+    private void UpdateFrameState(SKImageInfo info)
+    {
+        UpdateDeltaTime();
+        UpdateRenderCacheIfNeeded(info);
+    }
+
+    private void UpdateRenderCacheIfNeeded(SKImageInfo info)
+    {
+        if (NeedsCacheUpdate(info)) UpdateRenderCache(info);
+    }
+
+    private bool NeedsCacheUpdate(SKImageInfo info) =>
+        _cacheNeedsUpdate || _renderCache.Width != info.Width || _renderCache.Height != info.Height;
+
+    private void UpdateRenderCache(SKImageInfo info)
+    {
+        _renderCache = new RenderCache(info.Width, info.Height, _isOverlayActive);
+        _particleBuffer.UpdateLowerBound(_renderCache.LowerBound);
+        _cacheNeedsUpdate = false;
+    }
+
+    private void UpdateDeltaTime() => 
+        _actualDeltaTime = CalculateDeltaTime();
+
+    private float CalculateDeltaTime()
+    {
+        float elapsed = (float)_frameTimer.Elapsed.TotalSeconds;
+        _frameTimer.Restart();
+        float speedMultiplier = elapsed / TARGET_DELTA_TIME;
+        return Clamp(TARGET_DELTA_TIME * speedMultiplier,
+                     Settings.Instance.MinTimeStep,
+                     Settings.Instance.MaxTimeStep);
+    }
+
+    private void IncrementSpawnTimer() =>
+        _timeSinceLastSpawn += _actualDeltaTime;
+
+    private void RenderFrame(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKPaint paint)
+    {
+        RenderFullScene(canvas, spectrum, paint);
+    }
+
     private void RenderFullScene(SKCanvas canvas, float[] spectrum, SKPaint paint)
     {
         RenderParticles(canvas, paint);
         RenderScene(canvas, spectrum, paint);
     }
 
-    private void RenderParticles(SKCanvas canvas, SKPaint paint) => 
+    private void RenderParticles(SKCanvas canvas, SKPaint paint) =>
         _particleBuffer.RenderParticles(canvas, paint);
 
     private void RenderScene(SKCanvas canvas, float[] spectrum, SKPaint paint)
@@ -660,20 +710,22 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         RenderRaindrops(canvas, spectrum, paint);
     }
 
-    private bool ShouldRenderTrails() => 
+    private bool ShouldRenderTrails() =>
         _effectsThreshold < 3 && _averageLoudness > 0.3f;
 
     private void ProcessSpectrum(float[] spectrum, int barCount)
-        => ExecuteSafely(() => ProcessSpectrumDataIfValid(spectrum, barCount),
-                         "ProcessSpectrum",
-                         "Error processing spectrum data");
-
-    private void ProcessSpectrumDataIfValid(float[] spectrum, int barCount)
     {
-        if (barCount <= 0) return;
-        ProcessSpectrumData(spectrum.AsSpan(0, Min(spectrum.Length, barCount)),
-                            _smoothedSpectrumCache.AsSpan(0, barCount));
-        _processedSpectrum = _smoothedSpectrumCache;
+        ExecuteSafely(
+            () =>
+            {
+                if (barCount <= 0) return;
+                ProcessSpectrumData(spectrum.AsSpan(0, Min(spectrum.Length, barCount)),
+                                  _smoothedSpectrumCache.AsSpan(0, barCount));
+                _processedSpectrum = _smoothedSpectrumCache;
+            },
+            "ProcessSpectrum",
+            "Error processing spectrum data"
+        );
     }
 
     private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
@@ -695,11 +747,11 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         UpdateAverageLoudness(sum, dst.Length);
     }
 
-    private void UpdateAverageLoudness(float sum, int length)
-        => _averageLoudness = Clamp(sum / length * 4.0f, 0f, 1f);
+    private void UpdateAverageLoudness(float sum, int length) =>
+        _averageLoudness = Clamp(sum / length * 4.0f, 0f, 1f);
 
-    private static float ProcessSpectrumBlocks(ReadOnlySpan<float> src, Span<float> dst)
-        => ComputeSpectrumBlocks(src, dst);
+    private static float ProcessSpectrumBlocks(ReadOnlySpan<float> src, Span<float> dst) =>
+        ComputeSpectrumBlocks(src, dst);
 
     private static float ComputeSpectrumBlocks(ReadOnlySpan<float> src, Span<float> dst)
     {
@@ -717,7 +769,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         float blockSize)
     {
         int start = (int)(index * blockSize);
-        int end = (int)MathF.Min((index + 1) * blockSize, src.Length);
+        int end = (int)Min((index + 1) * blockSize, src.Length);
         if (end <= start) return SmoothEmptyBlock(dst, index);
         return SmoothSpectrumBlock(src, dst, index, start, end - start);
     }
@@ -740,13 +792,14 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         return dst[index];
     }
 
-    private static float ProcessSpectrumBlock(ReadOnlySpan<float> src, int start, int count)
-        => count >= Vector<float>.Count && Vector.IsHardwareAccelerated
+    private static float ProcessSpectrumBlock(ReadOnlySpan<float> src, int start, int count) =>
+        count >= Vector<float>.Count && IsHardwareAccelerated
             ? ProcessSpectrumBlockVectorized(src, start, count)
             : ProcessSpectrumBlockSequential(src, start, count);
 
-    private static float ProcessSpectrumBlockVectorized(ReadOnlySpan<float> src, int start, int count)
-        => ComputeVectorizedSum(src, start, count);
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static float ProcessSpectrumBlockVectorized(ReadOnlySpan<float> src, int start, int count) =>
+        ComputeVectorizedSum(src, start, count);
 
     private static float ComputeVectorizedSum(ReadOnlySpan<float> src, int start, int count)
     {
@@ -759,8 +812,9 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         return value;
     }
 
-    private static Vector<float> ReadVector(ReadOnlySpan<float> src, int start)
-        => MemoryMarshal.Read<Vector<float>>(MemoryMarshal.AsBytes(src.Slice(start, Vector<float>.Count)));
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector<float> ReadVector(ReadOnlySpan<float> src, int start) =>
+        MemoryMarshal.Read<Vector<float>>(MemoryMarshal.AsBytes(src.Slice(start, Vector<float>.Count)));
 
     private static float SumVector(Vector<float> vSum)
     {
@@ -776,8 +830,8 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         return value;
     }
 
-    private static float ProcessSpectrumBlockSequential(ReadOnlySpan<float> src, int start, int count)
-        => ComputeSequentialSum(src, start, count);
+    private static float ProcessSpectrumBlockSequential(ReadOnlySpan<float> src, int start, int count) =>
+        ComputeSequentialSum(src, start, count);
 
     private static float ComputeSequentialSum(ReadOnlySpan<float> src, int start, int count)
     {
@@ -794,16 +848,18 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     }
 
     private void InitializeInitialDrops(int barCount)
-        => ExecuteSafely(() => CreateInitialDrops(barCount),
-                         "InitializeInitialDrops",
-                         "Error during initializing initial drops");
-
-    private void CreateInitialDrops(int barCount)
     {
-        _raindropCount = 0;
-        int initialCount = Min(INITIAL_DROP_COUNT, Settings.Instance.MaxRaindrops);
-        for (int i = 0; i < initialCount; i++)
-            AddInitialDrop(barCount, _renderCache.Width, _renderCache.Height);
+        ExecuteSafely(
+            () =>
+            {
+                _raindropCount = 0;
+                int initialCount = Min(INITIAL_DROP_COUNT, Settings.Instance.MaxRaindrops);
+                for (int i = 0; i < initialCount; i++)
+                    AddInitialDrop(barCount, _renderCache.Width, _renderCache.Height);
+            },
+            "InitializeInitialDrops",
+            "Error during initializing initial drops"
+        );
     }
 
     private void AddInitialDrop(int barCount, float width, float height)
@@ -817,13 +873,13 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _raindrops[_raindropCount++] = new Raindrop(x, y, fallSpeed, size, intensity, spectrumIndex);
     }
 
-    private int GenerateRandomIndex(int barCount) => 
+    private int GenerateRandomIndex(int barCount) =>
         _random.Next(barCount);
 
-    private float GenerateInitialX(float width) => 
+    private float GenerateInitialX(float width) =>
         width * (float)_random.NextDouble();
 
-    private float GenerateInitialY(float height) => 
+    private float GenerateInitialY(float height) =>
         height * (float)_random.NextDouble() * 0.5f;
 
     private float CalculateInitialFallSpeed()
@@ -832,10 +888,10 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         return Settings.Instance.BaseFallSpeed + speedVariation;
     }
 
-    private float CalculateInitialSize()
-        => Settings.Instance.RaindropSize * (0.7f + (float)_random.NextDouble() * 0.6f);
+    private float CalculateInitialSize() =>
+        Settings.Instance.RaindropSize * (0.7f + (float)_random.NextDouble() * 0.6f);
 
-    private float GenerateInitialIntensity() => 
+    private float GenerateInitialIntensity() =>
         0.3f + (float)_random.NextDouble() * 0.3f;
 
     private void UpdateSimulation(float[] spectrum, int barCount)
@@ -845,7 +901,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         SpawnDropsIfNeeded(spectrum, barCount);
     }
 
-    private void UpdateRaindrops(float[] spectrum) => 
+    private void UpdateRaindrops(float[] spectrum) =>
         FilterAndMoveRaindrops(spectrum);
 
     private void FilterAndMoveRaindrops(float[] spectrum)
@@ -875,14 +931,14 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         if (ShouldCreateSplash(intensity)) GenerateSplash(drop.X, intensity);
     }
 
-    private static float GetDropIntensity(Raindrop drop, float[] spectrum)
-        => drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
+    private static float GetDropIntensity(Raindrop drop, float[] spectrum) =>
+        drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
 
-    private static bool ShouldCreateSplash(float intensity) => 
+    private static bool ShouldCreateSplash(float intensity) =>
         intensity > 0.2f;
 
-    private void GenerateSplash(float x, float intensity)
-        => _particleBuffer.CreateSplashParticles(x, _renderCache.LowerBound, intensity, _random);
+    private void GenerateSplash(float x, float intensity) =>
+        _particleBuffer.CreateSplashParticles(x, _renderCache.LowerBound, intensity, _random);
 
     private void UpdateParticlesIfNeeded()
     {
@@ -891,7 +947,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _particleBuffer.UpdateParticles(adjustedDelta);
     }
 
-    private float CalculateAdjustedDeltaTime() => 
+    private float CalculateAdjustedDeltaTime() =>
         _actualDeltaTime * (_particleUpdateSkip + 1);
 
     private void SpawnDropsIfNeeded(float[] spectrum, int barCount)
@@ -901,10 +957,10 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         ResetSpawnTimer();
     }
 
-    private bool ShouldSpawnDrops() => 
+    private bool ShouldSpawnDrops() =>
         _timeSinceLastSpawn >= SPAWN_INTERVAL;
 
-    private void ResetSpawnTimer() => 
+    private void ResetSpawnTimer() =>
         _timeSinceLastSpawn = 0;
 
     private void SpawnNewDrops(float[] spectrum, int barCount)
@@ -914,7 +970,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         TrySpawnMultipleDrops(spectrum, barCount, ref spawnParams);
     }
 
-    private static bool CanSpawnDrops(int barCount, float[] spectrum) => 
+    private static bool CanSpawnDrops(int barCount, float[] spectrum) =>
         barCount > 0 && spectrum.Length > 0;
 
     private void TrySpawnMultipleDrops(
@@ -942,7 +998,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             => (StepWidth, Threshold, SpawnBoost, MaxSpawns, SpawnsThisFrame)
             = (stepWidth, threshold, spawnBoost, maxSpawns, spawnsThisFrame);
 
-        public SpawnParameters WithSpawnsIncrease() => 
+        public SpawnParameters WithSpawnsIncrease() =>
             new(
             StepWidth,
             Threshold,
@@ -958,13 +1014,13 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         3
     );
 
-    private float CalculateStepWidth(int barCount) => 
+    private float CalculateStepWidth(int barCount) =>
         _renderCache.Width / barCount;
 
-    private float GetSpawnThreshold()
-        => _isOverlayActive ? Settings.Instance.SpawnThresholdOverlay : Settings.Instance.SpawnThresholdNormal;
+    private float GetSpawnThreshold() =>
+        _isOverlayActive ? Settings.Instance.SpawnThresholdOverlay : Settings.Instance.SpawnThresholdNormal;
 
-    private float CalculateSpawnBoost() => 
+    private float CalculateSpawnBoost() =>
         1.0f + _averageLoudness * 2.0f;
 
     private void TrySpawnSingleDrop(
@@ -977,10 +1033,10 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         spawnParams = spawnParams.WithSpawnsIncrease();
     }
 
-    private bool ShouldSpawnDrop(float intensity, SpawnParameters spawnParams)
-        => intensity > spawnParams.Threshold &&
-           _random.NextDouble() < Settings.Instance.SpawnProbability * intensity * spawnParams.SpawnBoost &&
-           _raindropCount < _raindrops.Length;
+    private bool ShouldSpawnDrop(float intensity, SpawnParameters spawnParams) =>
+        intensity > spawnParams.Threshold &&
+        _random.NextDouble() < Settings.Instance.SpawnProbability * intensity * spawnParams.SpawnBoost &&
+        _raindropCount < _raindrops.Length;
 
     private void AddNewDrop(
         float intensity,
@@ -1000,9 +1056,9 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             index);
     }
 
-    private static float CalculateRaindropX(int index, float stepWidth)
-        => index * stepWidth + stepWidth * 0.5f +
-           (float)(Random.Shared.NextDouble() * stepWidth * 0.5f - stepWidth * 0.25f);
+    private static float CalculateRaindropX(int index, float stepWidth) =>
+        index * stepWidth + stepWidth * 0.5f +
+        (float)(Random.Shared.NextDouble() * stepWidth * 0.5f - stepWidth * 0.25f);
 
     private float CalculateRaindropFallSpeed(float intensity)
     {
@@ -1011,20 +1067,24 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                speedVariation;
     }
 
-    private float CalculateRaindropSize(float intensity)
-        => Settings.Instance.RaindropSize * (0.8f + intensity * 0.4f) *
-           (0.9f + (float)_random.NextDouble() * 0.2f);
+    private float CalculateRaindropSize(float intensity) =>
+        Settings.Instance.RaindropSize * (0.8f + intensity * 0.4f) *
+        (0.9f + (float)_random.NextDouble() * 0.2f);
+
+    // RENDERING METHODS
 
     private void RenderRaindropTrails(SKCanvas canvas, float[] spectrum, SKPaint basePaint)
-        => ExecuteSafely(() => DrawRaindropTrails(canvas, spectrum, basePaint),
-                         "RenderRaindropTrails",
-                         "Error rendering raindrop trails");
-
-    private void DrawRaindropTrails(SKCanvas canvas, float[] spectrum, SKPaint basePaint)
     {
-        using var trailPaint = ConfigureTrailPaint(basePaint);
-        if (_useAdvancedEffects) ApplyAdvancedTrailEffects(trailPaint, basePaint);
-        RenderAllTrails(canvas, trailPaint, spectrum, basePaint.Color);
+        ExecuteSafely(
+            () =>
+            {
+                using var trailPaint = ConfigureTrailPaint(basePaint);
+                if (_useAdvancedEffects) ApplyAdvancedTrailEffects(trailPaint, basePaint);
+                RenderAllTrails(canvas, trailPaint, spectrum, basePaint.Color);
+            },
+            "RenderRaindropTrails",
+            "Error rendering raindrop trails"
+        );
     }
 
     private SKPaint ConfigureTrailPaint(SKPaint basePaint)
@@ -1085,16 +1145,16 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         return trailLength >= TRAIL_INTENSITY_THRESHOLD;
     }
 
-    private static bool IsTrailEligible(Raindrop drop)
-        => drop.FallSpeed >= Settings.Instance.BaseFallSpeed * FALLSPEED_THRESHOLD_MULTIPLIER &&
-           drop.Size >= Settings.Instance.RaindropSize * RAINDROP_SIZE_THRESHOLD_MULTIPLIER;
+    private static bool IsTrailEligible(Raindrop drop) =>
+        drop.FallSpeed >= Settings.Instance.BaseFallSpeed * FALLSPEED_THRESHOLD_MULTIPLIER &&
+        drop.Size >= Settings.Instance.RaindropSize * RAINDROP_SIZE_THRESHOLD_MULTIPLIER;
 
-    private static float GetTrailIntensity(Raindrop drop, float[] spectrum)
-        => drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
+    private static float GetTrailIntensity(Raindrop drop, float[] spectrum) =>
+        drop.SpectrumIndex < spectrum.Length ? spectrum[drop.SpectrumIndex] : drop.Intensity;
 
-    private static float CalculateTrailLength(Raindrop drop, float intensity)
-        => MathF.Min(drop.FallSpeed * TRAIL_LENGTH_MULTIPLIER * intensity,
-               drop.Size * TRAIL_LENGTH_SIZE_FACTOR);
+    private static float CalculateTrailLength(Raindrop drop, float intensity) =>
+        Min(drop.FallSpeed * TRAIL_LENGTH_MULTIPLIER * intensity,
+            drop.Size * TRAIL_LENGTH_SIZE_FACTOR);
 
     private static void ConfigureTrailPaintForDrop(
         SKPaint paint,
@@ -1121,16 +1181,18 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private void RenderRaindrops(
         SKCanvas canvas,
         float[] spectrum,
-        SKPaint basePaint) => 
-        ExecuteSafely(() => DrawRaindrops(canvas, spectrum, basePaint),
-                         "RenderRaindrops",
-                         "Error rendering raindrops");
-
-    private void DrawRaindrops(SKCanvas canvas, float[] spectrum, SKPaint basePaint)
+        SKPaint basePaint)
     {
-        using var dropPaint = ConfigureDropPaint(basePaint);
-        using var highlightPaint = ConfigureHighlightPaintBase();
-        RenderAllRaindrops(canvas, dropPaint, highlightPaint, spectrum, basePaint.Color);
+        ExecuteSafely(
+            () =>
+            {
+                using var dropPaint = ConfigureDropPaint(basePaint);
+                using var highlightPaint = ConfigureHighlightPaintBase();
+                RenderAllRaindrops(canvas, dropPaint, highlightPaint, spectrum, basePaint.Color);
+            },
+            "RenderRaindrops",
+            "Error rendering raindrops"
+        );
     }
 
     private SKPaint ConfigureDropPaint(SKPaint basePaint)
@@ -1179,8 +1241,8 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         }
     }
 
-    private static float CalculateRaindropIntensity(Raindrop drop, float[] spectrum)
-        => drop.SpectrumIndex < spectrum.Length
+    private static float CalculateRaindropIntensity(Raindrop drop, float[] spectrum) =>
+        drop.SpectrumIndex < spectrum.Length
             ? spectrum[drop.SpectrumIndex] * 0.7f + drop.Intensity * 0.3f
             : drop.Intensity;
 
@@ -1195,14 +1257,14 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         dropRect = CalculateDropRect(drop);
     }
 
-    private static byte CalculateDropAlpha(float intensity)
-        => (byte)(255 * MathF.Min(0.7f + intensity * 0.3f, 1.0f));
+    private static byte CalculateDropAlpha(float intensity) =>
+        (byte)(255 * Min(0.7f + intensity * 0.3f, 1.0f));
 
-    private static SKRect CalculateDropRect(Raindrop drop)
-        => new(drop.X - drop.Size, drop.Y - drop.Size, drop.X + drop.Size, drop.Y + drop.Size);
+    private static SKRect CalculateDropRect(Raindrop drop) =>
+        new(drop.X - drop.Size, drop.Y - drop.Size, drop.X + drop.Size, drop.Y + drop.Size);
 
-    private static void DrawRaindrop(SKCanvas canvas, SKPaint dropPaint, Raindrop drop)
-        => canvas.DrawCircle(drop.X, drop.Y, drop.Size, dropPaint);
+    private static void DrawRaindrop(SKCanvas canvas, SKPaint dropPaint, Raindrop drop) =>
+        canvas.DrawCircle(drop.X, drop.Y, drop.Size, dropPaint);
 
     private void RenderHighlightIfNeeded(
         SKCanvas canvas,
@@ -1215,13 +1277,13 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         DrawRaindropHighlight(canvas, highlightPaint, drop);
     }
 
-    private bool ShouldRenderHighlight(Raindrop drop, float intensity)
-        => _effectsThreshold < 2 &&
-           drop.Size > Settings.Instance.RaindropSize * RAINDROP_SIZE_HIGHLIGHT_THRESHOLD &&
-           intensity > INTENSITY_HIGHLIGHT_THRESHOLD;
+    private bool ShouldRenderHighlight(Raindrop drop, float intensity) =>
+        _effectsThreshold < 2 &&
+        drop.Size > Settings.Instance.RaindropSize * RAINDROP_SIZE_HIGHLIGHT_THRESHOLD &&
+        intensity > INTENSITY_HIGHLIGHT_THRESHOLD;
 
-    private static void ConfigureHighlightPaint(SKPaint paint, float intensity)
-        => paint.Color = SKColors.White.WithAlpha((byte)(150 * intensity));
+    private static void ConfigureHighlightPaint(SKPaint paint, float intensity) =>
+        paint.Color = SKColors.White.WithAlpha((byte)(150 * intensity));
 
     private static void DrawRaindropHighlight(
         SKCanvas canvas,
@@ -1235,9 +1297,13 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     }
 
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
-        => ExecuteSafely(() => HandleSettingsChange(e.PropertyName),
-                         "OnSettingsChanged",
-                         "Failed to process settings change");
+    {
+        ExecuteSafely(
+            () => HandleSettingsChange(e.PropertyName),
+            "OnSettingsChanged",
+            "Failed to process settings change"
+        );
+    }
 
     private void HandleSettingsChange(string? propertyName)
     {
@@ -1263,14 +1329,32 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     public override void Dispose()
     {
         if (_disposed) return;
-        ExecuteSafely(PerformDisposal, "Dispose", "Error during disposal");
-        FinalizeDisposal();
+
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            "Dispose",
+            "Error during disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
-    private void PerformDisposal()
+    protected override void OnDispose()
     {
-        CleanupResources();
-        base.Dispose();
+        ExecuteSafely(
+            () =>
+            {
+                CleanupResources();
+                base.OnDispose();
+            },
+            "OnDispose",
+            "Error during specific disposal"
+        );
     }
 
     private void CleanupResources()
@@ -1279,19 +1363,15 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         DisposeRenderingResources();
     }
 
-    private void UnsubscribeFromSettingsChanges() => 
+    private void UnsubscribeFromSettingsChanges()
+    {
         Settings.Instance.PropertyChanged -= OnSettingsChanged;
+    }
 
     private void DisposeRenderingResources()
     {
         _spectrumSemaphore?.Dispose();
         _trailPath?.Dispose();
         _processedSpectrum = null;
-    }
-
-    private void FinalizeDisposal()
-    {
-        _disposed = true;
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

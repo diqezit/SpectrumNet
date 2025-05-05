@@ -9,11 +9,6 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<BarsRenderer> _instance = new(() => new BarsRenderer());
 
-    private float _glowRadius = GLOW_BLUR_RADIUS_MEDIUM;
-    private bool _useGlowEffect = true;
-    private new bool _useAntiAlias = true;
-    private new bool _useAdvancedEffects = true;
-
     private BarsRenderer() { }
 
     public static BarsRenderer GetInstance() => _instance.Value;
@@ -43,95 +38,133 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         {
             public const bool
                 LOW_USE_ADVANCED_EFFECTS = false,
+                LOW_USE_ANTI_ALIAS = false,
+                LOW_USE_GLOW_EFFECT = false;
+
+            public const bool
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
-                HIGH_USE_ADVANCED_EFFECTS = true;
+                MEDIUM_USE_ANTI_ALIAS = true,
+                MEDIUM_USE_GLOW_EFFECT = true;
+
+            public const bool
+                HIGH_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ANTI_ALIAS = true,
+                HIGH_USE_GLOW_EFFECT = true;
+
+            public const float
+                LOW_GLOW_RADIUS = GLOW_BLUR_RADIUS_LOW,
+                MEDIUM_GLOW_RADIUS = GLOW_BLUR_RADIUS_MEDIUM,
+                HIGH_GLOW_RADIUS = GLOW_BLUR_RADIUS_HIGH;
         }
     }
 
-    public override void Initialize()
+    private float _glowRadius;
+    private bool _useGlowEffect;
+    private new bool _useAntiAlias;
+    private new bool _useAdvancedEffects;
+
+    private SKRect _lastRenderArea = SKRect.Empty;
+    private SKMatrix _lastTransform = SKMatrix.Identity;
+
+    protected override void OnInitialize()
     {
-        ExecuteSafely(PerformInitialization,
-                      "Initialize",
-                      "Failed to initialize renderer");
+        ExecuteSafely(
+            () =>
+            {
+                base.OnInitialize();
+                ApplyQualitySettings();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
+            "OnInitialize",
+            "Failed to initialize renderer"
+        );
     }
 
-    private void PerformInitialization()
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium)
     {
-        base.Initialize();
-        if (_disposed) ResetRendererState();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        ExecuteSafely(
+            () =>
+            {
+                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                base.Configure(isOverlayActive, quality);
+
+                if (configChanged)
+                {
+                    OnConfigurationChanged();
+                }
+            },
+            "Configure",
+            "Failed to configure renderer"
+        );
     }
 
-    private void ResetRendererState()
+    protected override void OnConfigurationChanged()
     {
-        _disposed = false;
-    }
-
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
-    {
-        ExecuteSafely(() => PerformConfiguration(isOverlayActive, quality),
-                      "Configure",
-                      "Failed to configure renderer");
-    }
-
-    private void PerformConfiguration(bool isOverlayActive, RenderQuality quality)
-    {
-        base.Configure(isOverlayActive, quality);
-        if (_quality != quality) ApplyNewQuality(quality);
-    }
-
-    private void ApplyNewQuality(RenderQuality quality)
-    {
-        _quality = quality;
-        ApplyQualitySettings();
+        ExecuteSafely(
+            () =>
+            {
+            },
+            "OnConfigurationChanged",
+            "Failed to apply configuration changes"
+        );
     }
 
     protected override void ApplyQualitySettings()
     {
-        ExecuteSafely(ConfigureQualitySettings,
-                      "ApplyQualitySettings",
-                      "Failed to apply quality settings");
+        ExecuteSafely(
+            () =>
+            {
+                base.ApplyQualitySettings();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+            },
+            "ApplyQualitySettings",
+            "Failed to apply quality settings"
+        );
     }
 
-    private void ConfigureQualitySettings()
+    private void ApplyQualityBasedSettings()
     {
-        base.ApplyQualitySettings();
-        switch (_quality)
+        switch (Quality)
         {
             case RenderQuality.Low:
-                SetLowQualitySettings();
+                ApplyLowQualitySettings();
                 break;
+
             case RenderQuality.Medium:
-                SetMediumQualitySettings();
+                ApplyMediumQualitySettings();
                 break;
+
             case RenderQuality.High:
-                SetHighQualitySettings();
+                ApplyHighQualitySettings();
                 break;
         }
     }
 
-    private void SetLowQualitySettings()
+    private void ApplyLowQualitySettings()
     {
-        _useAntiAlias = false;
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTI_ALIAS;
         _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _useGlowEffect = false;
-        _glowRadius = GLOW_BLUR_RADIUS_LOW;
+        _useGlowEffect = Constants.Quality.LOW_USE_GLOW_EFFECT;
+        _glowRadius = Constants.Quality.LOW_GLOW_RADIUS;
     }
 
-    private void SetMediumQualitySettings()
+    private void ApplyMediumQualitySettings()
     {
-        _useAntiAlias = true;
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTI_ALIAS;
         _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _useGlowEffect = true;
-        _glowRadius = GLOW_BLUR_RADIUS_MEDIUM;
+        _useGlowEffect = Constants.Quality.MEDIUM_USE_GLOW_EFFECT;
+        _glowRadius = Constants.Quality.MEDIUM_GLOW_RADIUS;
     }
 
-    private void SetHighQualitySettings()
+    private void ApplyHighQualitySettings()
     {
-        _useAntiAlias = true;
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTI_ALIAS;
         _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _useGlowEffect = true;
-        _glowRadius = GLOW_BLUR_RADIUS_HIGH;
+        _useGlowEffect = Constants.Quality.HIGH_USE_GLOW_EFFECT;
+        _glowRadius = Constants.Quality.HIGH_GLOW_RADIUS;
     }
 
     protected override void RenderEffect(
@@ -143,187 +176,31 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!AreRenderParametersValid(canvas, spectrum, info, paint)) return;
-        ExecuteSafely(() => PerformRenderEffect(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
-                      "RenderEffect",
-                      "Error during rendering");
-    }
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint, barCount)) return;
 
-    private void PerformRenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int _, // barcount
-        SKPaint paint)
-    {
-        float canvasHeight = info.Height;
-        float cornerRadius = CalculateCornerRadius(barWidth);
-        RenderBars(canvas, spectrum, barWidth, barSpacing, canvasHeight, cornerRadius, paint);
-    }
-
-    private void RenderBars(
-        SKCanvas canvas,
-        float[] spectrum,
-        float barWidth,
-        float barSpacing,
-        float canvasHeight,
-        float cornerRadius,
-        SKPaint basePaint)
-    {
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            float magnitude = spectrum[i];
-            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
-            float x = i * (barWidth + barSpacing);
-            if (IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight))
+        ExecuteSafely(
+            () =>
             {
-                RenderSingleBar(canvas,
-                    i,
-                    magnitude,
-                    barWidth,
-                    barSpacing,
-                    canvasHeight,
-                    cornerRadius,
-                    basePaint);
-            }
-        }
+                UpdateState(canvas, spectrum, info, barCount);
+                RenderFrame(canvas, spectrum, info, barWidth, barSpacing, barCount, paint);
+            },
+            "RenderEffect",
+            "Error during rendering"
+        );
     }
 
-    private void RenderSingleBar(
-        SKCanvas canvas,
-        int index,
-        float magnitude,
-        float barWidth,
-        float barSpacing,
-        float canvasHeight,
-        float cornerRadius,
-        SKPaint basePaint)
-    {
-        float barHeight = CalculateBarHeight(magnitude, canvasHeight);
-        byte alpha = CalculateBarAlpha(magnitude);
-        float x = index * (barWidth + barSpacing);
-        using var barPaint = ConfigureBarPaint(basePaint, alpha);
-        if (_useGlowEffect && _useAdvancedEffects && magnitude > HIGH_INTENSITY_THRESHOLD)
-        {
-            using var glowPaint = ConfigureGlowPaint(magnitude);
-            RenderGlowEffect(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, glowPaint);
-        }
-        RenderBar(canvas, x, barWidth, barHeight, canvasHeight, cornerRadius, barPaint);
-        if (barHeight > cornerRadius * 2 && _quality != RenderQuality.Low)
-        {
-            using var highlightPaint = ConfigureHighlightPaint(barPaint.Color.Alpha);
-            RenderBarHighlight(canvas, x, barWidth, barHeight, canvasHeight, highlightPaint);
-        }
-    }
-
-    private SKPaint ConfigureBarPaint(SKPaint basePaint, byte alpha)
-    {
-        var paint = _paintPool.Get();
-        paint.Color = basePaint.Color.WithAlpha(alpha);
-        paint.IsAntialias = _useAntiAlias;
-        return paint;
-    }
-
-    private SKPaint ConfigureGlowPaint(float magnitude)
-    {
-        var paint = _paintPool.Get();
-        paint.Color = SKColors.White.WithAlpha((byte)(magnitude * 255f * GLOW_EFFECT_ALPHA));
-        paint.ImageFilter = SKImageFilter.CreateBlur(_glowRadius, _glowRadius);
-        paint.IsAntialias = _useAntiAlias;
-        return paint;
-    }
-
-    private SKPaint ConfigureHighlightPaint(byte baseAlpha)
-    {
-        var paint = _paintPool.Get();
-        paint.Color = SKColors.White.WithAlpha((byte)(baseAlpha / HIGHLIGHT_ALPHA_DIVISOR));
-        paint.IsAntialias = _useAntiAlias;
-        return paint;
-    }
-
-    private static void RenderGlowEffect(
-        SKCanvas canvas,
-        float x,
-        float barWidth,
-        float barHeight,
-        float canvasHeight,
-        float cornerRadius,
-        SKPaint glowPaint)
-    {
-        DrawRoundedRect(canvas,
-            x,
-            canvasHeight - barHeight,
-            barWidth,
-            barHeight,
-            cornerRadius,
-            glowPaint);
-    }
-
-    private static void RenderBar(
-        SKCanvas canvas,
-        float x,
-        float barWidth,
-        float barHeight,
-        float canvasHeight,
-        float cornerRadius,
-        SKPaint barPaint)
-    {
-        DrawRoundedRect(canvas,
-            x,
-            canvasHeight - barHeight,
-            barWidth,
-            barHeight,
-            cornerRadius,
-            barPaint);
-    }
-
-    private static void RenderBarHighlight(
-        SKCanvas canvas,
-        float x,
-        float barWidth,
-        float barHeight,
-        float canvasHeight,
-        SKPaint highlightPaint)
-    {
-        float highlightWidth = barWidth * HIGHLIGHT_WIDTH_PROPORTION;
-        float highlightHeight = MathF.Min(barHeight * HIGHLIGHT_HEIGHT_PROPORTION, MAX_HIGHLIGHT_HEIGHT);
-        float highlightX = x + (barWidth - highlightWidth) / 2;
-        canvas.DrawRect(highlightX, canvasHeight - barHeight, highlightWidth, highlightHeight, highlightPaint);
-    }
-
-    private static float CalculateCornerRadius(float barWidth) => 
-        MathF.Min(barWidth * DEFAULT_CORNER_RADIUS_FACTOR, MAX_CORNER_RADIUS);
-
-    private static float CalculateBarHeight(float magnitude, float canvasHeight) =>
-        MathF.Max(magnitude * canvasHeight, MIN_BAR_HEIGHT);
-
-    private static byte CalculateBarAlpha(float magnitude) => 
-        (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * 255f, 255f);
-
-    private static void DrawRoundedRect(
-        SKCanvas canvas,
-        float x,
-        float y,
-        float width,
-        float height,
-        float cornerRadius,
-        SKPaint paint)
-    {
-        canvas.DrawRoundRect(new SKRect(x, y, x + width, y + height), cornerRadius, cornerRadius, paint);
-    }
-
-    private bool AreRenderParametersValid(
+    private bool ValidateRenderParameters(
         SKCanvas? canvas,
         float[]? spectrum,
         SKImageInfo info,
-        SKPaint? paint)
+        SKPaint? paint,
+        int barCount)
     {
         if (!IsCanvasValid(canvas)) return false;
         if (!IsSpectrumValid(spectrum)) return false;
         if (!IsPaintValid(paint)) return false;
         if (!AreDimensionsValid(info)) return false;
+        if (barCount <= 0) return false;
         if (IsDisposed()) return false;
         return true;
     }
@@ -363,18 +240,275 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         return true;
     }
 
+    private void UpdateState(
+        SKCanvas canvas,
+        float[] _,
+        SKImageInfo info,
+        int ___)
+    {
+        if (canvas.TotalMatrix != _lastTransform)
+        {
+            _lastTransform = canvas.TotalMatrix;
+        }
+
+        bool canvasSizeChanged =
+            MathF.Abs(_lastRenderArea.Width - info.Width) > 0.5f ||
+            MathF.Abs(_lastRenderArea.Height - info.Height) > 0.5f;
+
+        if (canvasSizeChanged)
+        {
+            _lastRenderArea = info.Rect;
+        }
+    }
+
+    private void RenderFrame(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint basePaint)
+    {
+        float canvasHeight = info.Height;
+        float cornerRadius = CalculateCornerRadius(barWidth);
+
+        int batchSize = Constants.BATCH_SIZE;
+        int spectrumLength = Min(barCount, spectrum.Length);
+
+        for (int batchStart = 0; batchStart < spectrumLength; batchStart += batchSize)
+        {
+            int batchEnd = Min(batchStart + batchSize, spectrumLength);
+            RenderBarsBatch(
+                canvas,
+                spectrum,
+                batchStart,
+                batchEnd,
+                basePaint,
+                barWidth,
+                barSpacing,
+                canvasHeight,
+                cornerRadius);
+        }
+    }
+
+    private void RenderBarsBatch(
+        SKCanvas canvas,
+        float[] spectrum,
+        int startIndex,
+        int endIndex,
+        SKPaint basePaint,
+        float barWidth,
+        float barSpacing,
+        float canvasHeight,
+        float cornerRadius)
+    {
+        for (int i = startIndex; i < endIndex; i++)
+        {
+            float x = i * (barWidth + barSpacing);
+            float barValue = spectrum[i];
+
+            if (barValue < MIN_MAGNITUDE_THRESHOLD) continue;
+
+            if (IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight))
+            {
+                RenderSingleBar(
+                    canvas,
+                    i,
+                    barValue,
+                    barWidth,
+                    barSpacing,
+                    canvasHeight,
+                    cornerRadius,
+                    basePaint);
+            }
+        }
+    }
+
+    private void RenderSingleBar(
+        SKCanvas canvas,
+        int index,
+        float magnitude,
+        float barWidth,
+        float barSpacing,
+        float canvasHeight,
+        float cornerRadius,
+        SKPaint basePaint)
+    {
+        float barHeight = CalculateBarHeight(magnitude, canvasHeight);
+        byte alpha = CalculateBarAlpha(magnitude);
+        float x = index * (barWidth + barSpacing);
+
+        using var barPaint = ConfigureBarPaint(basePaint, alpha);
+
+        if (_useGlowEffect && _useAdvancedEffects && magnitude > HIGH_INTENSITY_THRESHOLD)
+        {
+            using var glowPaint = ConfigureGlowPaint(magnitude);
+            RenderGlowEffect(
+                canvas,
+                x,
+                barWidth,
+                barHeight,
+                canvasHeight,
+                cornerRadius,
+                glowPaint);
+        }
+
+        RenderBar(
+            canvas,
+            x,
+            barWidth,
+            barHeight,
+            canvasHeight,
+            cornerRadius,
+            barPaint);
+
+        if (barHeight > cornerRadius * 2 && Quality != RenderQuality.Low)
+        {
+            using var highlightPaint = ConfigureHighlightPaint(barPaint.Color.Alpha);
+            RenderBarHighlight(
+                canvas,
+                x,
+                barWidth,
+                barHeight,
+                canvasHeight,
+                highlightPaint);
+        }
+    }
+
+    private SKPaint ConfigureBarPaint(SKPaint basePaint, byte alpha)
+    {
+        var paint = _paintPool.Get();
+        paint.Color = basePaint.Color.WithAlpha(alpha);
+        paint.IsAntialias = _useAntiAlias;
+        return paint;
+    }
+
+    private SKPaint ConfigureGlowPaint(float magnitude)
+    {
+        var paint = _paintPool.Get();
+        paint.Color = SKColors.White.WithAlpha((byte)(magnitude * 255f * GLOW_EFFECT_ALPHA));
+        paint.ImageFilter = SKImageFilter.CreateBlur(_glowRadius, _glowRadius);
+        paint.IsAntialias = _useAntiAlias;
+        return paint;
+    }
+
+    private SKPaint ConfigureHighlightPaint(byte baseAlpha)
+    {
+        var paint = _paintPool.Get();
+        paint.Color = SKColors.White.WithAlpha((byte)(baseAlpha / HIGHLIGHT_ALPHA_DIVISOR));
+        paint.IsAntialias = _useAntiAlias;
+        return paint;
+    }
+
+    private static void RenderGlowEffect(
+        SKCanvas canvas,
+        float x,
+        float barWidth,
+        float barHeight,
+        float canvasHeight,
+        float cornerRadius,
+        SKPaint glowPaint)
+    {
+        DrawRoundedRect(
+            canvas,
+            x,
+            canvasHeight - barHeight,
+            barWidth,
+            barHeight,
+            cornerRadius,
+            glowPaint);
+    }
+
+    private static void RenderBar(
+        SKCanvas canvas,
+        float x,
+        float barWidth,
+        float barHeight,
+        float canvasHeight,
+        float cornerRadius,
+        SKPaint barPaint)
+    {
+        DrawRoundedRect(
+            canvas,
+            x,
+            canvasHeight - barHeight,
+            barWidth,
+            barHeight,
+            cornerRadius,
+            barPaint);
+    }
+
+    private static void RenderBarHighlight(
+        SKCanvas canvas,
+        float x,
+        float barWidth,
+        float barHeight,
+        float canvasHeight,
+        SKPaint highlightPaint)
+    {
+        float highlightWidth = barWidth * HIGHLIGHT_WIDTH_PROPORTION;
+        float highlightHeight = MathF.Min(barHeight * HIGHLIGHT_HEIGHT_PROPORTION, MAX_HIGHLIGHT_HEIGHT);
+        float highlightX = x + (barWidth - highlightWidth) / 2;
+
+        canvas.DrawRect(
+            highlightX,
+            canvasHeight - barHeight,
+            highlightWidth,
+            highlightHeight,
+            highlightPaint);
+    }
+
+    private static float CalculateCornerRadius(float barWidth) =>
+        MathF.Min(barWidth * DEFAULT_CORNER_RADIUS_FACTOR, MAX_CORNER_RADIUS);
+
+    private static float CalculateBarHeight(float magnitude, float canvasHeight) =>
+        MathF.Max(magnitude * canvasHeight, MIN_BAR_HEIGHT);
+
+    private static byte CalculateBarAlpha(float magnitude) =>
+        (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * 255f, 255f);
+
+    private static void DrawRoundedRect(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        float cornerRadius,
+        SKPaint paint)
+    {
+        canvas.DrawRoundRect(
+            new SKRect(x, y, x + width, y + height),
+            cornerRadius,
+            cornerRadius,
+            paint);
+    }
+
     public override void Dispose()
     {
         if (_disposed) return;
-        ExecuteSafely(PerformDisposal, "Dispose", "Error during disposal");
-        FinalizeDisposal();
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            "Dispose",
+            "Error during disposal"
+        );
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
-    private void PerformDisposal() => base.Dispose();
-    
-    private void FinalizeDisposal()
+    protected override void OnDispose()
     {
-        _disposed = true;
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        ExecuteSafely(
+            () =>
+            {
+                base.OnDispose();
+            },
+            "OnDispose",
+            "Error during specific disposal"
+        );
     }
 }

@@ -86,6 +86,19 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         public const int
             MINOR_MARKS_DIVISOR = 3,
             PEAK_HOLD_DURATION = 15;
+
+        public static class Quality
+        {
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+        }
     }
 
     private readonly record struct GaugeState(
@@ -134,7 +147,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     private static readonly List<float> _minorMarkValues = [];
 
-    // reused shader color arrays
     private static readonly SKColor[] _gaugeBackgroundColors = [new(250, 250, 240), new(230, 230, 215)];
     private static readonly SKColor[] _needleCenterColors = [SKColors.White, new(180, 180, 180), new(60, 60, 60)];
     private static readonly float[] _centerColorStops = [0.0f, 0.3f, 1.0f];
@@ -143,24 +155,28 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     private static readonly SKColor[] _activeLampColors = [SKColors.White, new(255, 180, 180), SKColors.Red];
     private static readonly SKColor[] _inactiveLampColors = [new(220, 220, 220), new(180, 0, 0), new(80, 0, 0)];
 
-    private readonly object _stateLock = new();
-    private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
+    private new bool 
+        _useAdvancedEffects,
+        _useAntiAlias;
 
     private GaugeState _state = new();
     private GaugeConfig _config = GaugeConfig.Default;
     private int _peakHoldCounter;
+
+    private readonly object _stateLock = new();
+    private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
 
     static GaugeRenderer()
     {
         InitializeMinorMarks();
     }
 
-    public override void Initialize()
+    protected override void OnInitialize()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                base.Initialize();
+                base.OnInitialize();
 
                 lock (_stateLock)
                 {
@@ -171,11 +187,8 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            }
+            nameof(OnInitialize),
+            "Failed to initialize renderer"
         );
     }
 
@@ -183,10 +196,10 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                bool configChanged = Quality != quality;
+                bool configChanged = Quality != quality || _isOverlayActive != isOverlayActive;
                 base.Configure(isOverlayActive, quality);
 
                 _config = _config.WithOverlayMode(isOverlayActive);
@@ -196,12 +209,72 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                     OnConfigurationChanged();
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            }
+            nameof(Configure),
+            "Failed to configure renderer"
         );
+    }
+
+    protected override void OnConfigurationChanged()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                base.OnConfigurationChanged();
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
+            },
+            nameof(OnConfigurationChanged),
+            "Failed to apply configuration changes"
+        );
+    }
+
+    protected override void ApplyQualitySettings()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                base.ApplyQualitySettings();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+            },
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
+        );
+    }
+
+    private void ApplyQualityBasedSettings()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                ApplyLowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                ApplyMediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                ApplyHighQualitySettings();
+                break;
+        }
+    }
+
+    private void ApplyLowQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
     }
 
     protected override void RenderEffect(
@@ -214,11 +287,22 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         SKPaint paint)
     {
         if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-        {
             return;
-        }
 
-        Safe(
+        ExecuteSafely(
+            () =>
+            {
+                UpdateState(spectrum);
+                RenderFrame(canvas, info, paint);
+            },
+            nameof(RenderEffect),
+            "Error during rendering"
+        );
+    }
+
+    private void UpdateState(float[] spectrum)
+    {
+        ExecuteSafely(
             () =>
             {
                 bool semaphoreAcquired = false;
@@ -229,8 +313,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                     {
                         UpdateGaugeState(spectrum);
                     }
-
-                    RenderGaugeComponents(canvas, info, paint);
                 }
                 finally
                 {
@@ -238,11 +320,20 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                         _renderSemaphore.Release();
                 }
             },
-            new ErrorHandlingOptions
+            nameof(UpdateState),
+            "Error updating state"
+        );
+    }
+
+    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint)
+    {
+        ExecuteSafely(
+            () =>
             {
-                Source = $"{LOG_PREFIX}.RenderEffect",
-                ErrorMessage = "Error during rendering"
-            }
+                RenderGaugeComponents(canvas, info, paint);
+            },
+            nameof(RenderFrame),
+            "Error rendering frame"
         );
     }
 
@@ -257,32 +348,47 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
             return false;
         }
-        if (canvas == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-            return false;
-        }
-        if (spectrum == null || spectrum.Length == 0)
-        {
-            Log(LogLevel.Warning, LOG_PREFIX, "Spectrum is null or empty");
-            return false;
-        }
-        if (paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-            return false;
-        }
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
 
+        return true;
+    }
+
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
+
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Warning, LOG_PREFIX, "Spectrum is null or empty");
+        return false;
+    }
+
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
         return true;
     }
 
@@ -337,7 +443,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         var paint = _paintPool.Get();
         paint.Style = SKPaintStyle.Fill;
         paint.Color = new SKColor(80, 80, 80);
-        paint.IsAntialias = UseAntiAlias;
+        paint.IsAntialias = _useAntiAlias;
         return paint;
     }
 
@@ -355,7 +461,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         var paint = _paintPool.Get();
         paint.Style = SKPaintStyle.Fill;
         paint.Color = new SKColor(105, 105, 105);
-        paint.IsAntialias = UseAntiAlias;
+        paint.IsAntialias = _useAntiAlias;
         return paint;
     }
 
@@ -372,7 +478,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     {
         var paint = _paintPool.Get();
         paint.Style = SKPaintStyle.Fill;
-        paint.IsAntialias = UseAntiAlias;
+        paint.IsAntialias = _useAntiAlias;
         paint.Shader = SKShader.CreateLinearGradient(
             new SKPoint(backgroundRect.Left, backgroundRect.Top),
             new SKPoint(backgroundRect.Left, backgroundRect.Bottom),
@@ -386,7 +492,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     {
         using var textPaint = _paintPool.Get();
         textPaint.Color = SKColors.Black;
-        textPaint.IsAntialias = UseAntiAlias;
+        textPaint.IsAntialias = _useAntiAlias;
 
         using var font = new SKFont(
             SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold),
@@ -432,17 +538,17 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     private void ConfigureScalePaints(SKPaint tickPaint, SKPaint textPaint)
     {
-        tickPaint.IsAntialias = UseAntiAlias;
+        tickPaint.IsAntialias = _useAntiAlias;
         tickPaint.StrokeWidth = SCALE_TICK_STROKE_WIDTH;
 
         textPaint.Color = SKColors.Black;
-        textPaint.IsAntialias = UseAntiAlias;
-        if (UseAdvancedEffects)
+        textPaint.IsAntialias = _useAntiAlias;
+        if (_useAdvancedEffects)
             textPaint.ImageFilter = SKImageFilter.CreateDropShadow(
                 0.5f, 0.5f, 0.5f, 0.5f, new SKColor(255, 255, 255, 180));
     }
 
-    private void DrawMark(
+    private static void DrawMark(
         SKCanvas canvas,
         (float centerX, float centerY, float radiusX, float radiusY) scaleParams,
         float value,
@@ -558,7 +664,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         float textX = centerX + (radiusX + textOffset) * Cos(radian);
         float textY = centerY + (radiusY + textOffset) * Sin(radian) + font.Metrics.Descent;
 
-        // Adjust text alignment based on angle for better positioning
         SKTextAlign textAlign = SKTextAlign.Center;
         if (angle < -120f)
             textAlign = SKTextAlign.Right;
@@ -573,7 +678,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         SKRect rect,
         float needlePosition,
         bool isOverlayActive,
-        SKPaint basePaint)
+        SKPaint _)
     {
         var needleParams = GetNeedleParameters(rect, needlePosition, isOverlayActive);
 
@@ -594,11 +699,18 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return (centerX, centerY, radiusX, radiusY, angle, needleLength);
     }
 
-    private void DrawNeedleShape(SKCanvas canvas, (float centerX, float centerY, float radiusX, float radiusY, float angle, float needleLength) needleParams)
+    private void DrawNeedleShape(
+        SKCanvas canvas,
+        (float centerX,
+        float centerY, 
+        float radiusX, 
+        float radiusY, 
+        float angle, 
+        float needleLength) 
+        needleParams)
     {
         var (centerX, centerY, radiusX, radiusY, angle, needleLength) = needleParams;
 
-        // Calculate needle points
         var (ellipseX, ellipseY) = CalculatePointOnEllipse(centerX, centerY, radiusX, radiusY, angle);
         var (unitX, unitY, _) = NormalizeVector(ellipseX - centerX, ellipseY - centerY);
 
@@ -641,7 +753,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         float normalizedAngle = (angle - ANGLE_START) / ANGLE_TOTAL_RANGE;
 
         needlePaint.Style = SKPaintStyle.Fill;
-        needlePaint.IsAntialias = UseAntiAlias;
+        needlePaint.IsAntialias = _useAntiAlias;
         needlePaint.Shader = SKShader.CreateLinearGradient(
             new SKPoint(centerX, centerY),
             new SKPoint(tipX, tipY),
@@ -649,7 +761,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             null,
             SKShaderTileMode.Clamp);
 
-        if (UseAdvancedEffects)
+        if (_useAdvancedEffects)
             needlePaint.ImageFilter = SKImageFilter.CreateDropShadow(
                 2f, 2f, 1.5f, 1.5f, SKColors.Black.WithAlpha(100));
     }
@@ -659,7 +771,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         outlinePaint.Style = SKPaintStyle.Stroke;
         outlinePaint.StrokeWidth = 0.8f;
         outlinePaint.Color = SKColors.Black.WithAlpha(180);
-        outlinePaint.IsAntialias = UseAntiAlias;
+        outlinePaint.IsAntialias = _useAntiAlias;
     }
 
     private void DrawNeedleCenter(
@@ -675,7 +787,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         // Draw center circle
         using var centerCirclePaint = _paintPool.Get();
         centerCirclePaint.Style = SKPaintStyle.Fill;
-        centerCirclePaint.IsAntialias = UseAntiAlias;
+        centerCirclePaint.IsAntialias = _useAntiAlias;
         centerCirclePaint.Shader = SKShader.CreateRadialGradient(
             new SKPoint(centerX - centerCircleRadius * 0.3f, centerY - centerCircleRadius * 0.3f),
             centerCircleRadius * 2,
@@ -689,7 +801,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         using var highlightPaint = _paintPool.Get();
         highlightPaint.Color = SKColors.White.WithAlpha(150);
         highlightPaint.Style = SKPaintStyle.Fill;
-        highlightPaint.IsAntialias = UseAntiAlias;
+        highlightPaint.IsAntialias = _useAntiAlias;
 
         canvas.DrawCircle(
             centerX - centerCircleRadius * 0.25f,
@@ -702,7 +814,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     {
         var lampParams = GetPeakLampParameters(rect, isOverlayActive);
 
-        if (_state.PeakActive && UseAdvancedEffects)
+        if (_state.PeakActive && _useAdvancedEffects)
         {
             DrawPeakLampGlow(canvas, lampParams);
         }
@@ -744,7 +856,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
             SKBlurStyle.Normal,
             lampRadius * PEAK_LAMP_GLOW_RADIUS_MULTIPLIER);
-        glowPaint.IsAntialias = UseAntiAlias;
+        glowPaint.IsAntialias = _useAntiAlias;
 
         canvas.DrawCircle(
             lampX,
@@ -761,7 +873,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
         using var innerPaint = _paintPool.Get();
         innerPaint.Style = SKPaintStyle.Fill;
-        innerPaint.IsAntialias = UseAntiAlias;
+        innerPaint.IsAntialias = _useAntiAlias;
         innerPaint.Shader = SKShader.CreateRadialGradient(
             new SKPoint(lampX - lampRadius * 0.2f, lampY - lampRadius * 0.2f),
             lampRadius * PEAK_LAMP_INNER_RADIUS_MULTIPLIER,
@@ -778,7 +890,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         using var reflectionPaint = _paintPool.Get();
         reflectionPaint.Color = SKColors.White.WithAlpha(180);
         reflectionPaint.Style = SKPaintStyle.Fill;
-        reflectionPaint.IsAntialias = UseAntiAlias;
+        reflectionPaint.IsAntialias = _useAntiAlias;
 
         canvas.DrawCircle(
             lampX - lampRadius * 0.3f,
@@ -790,7 +902,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         rimPaint.Color = new SKColor(40, 40, 40);
         rimPaint.Style = SKPaintStyle.Stroke;
         rimPaint.StrokeWidth = PEAK_LAMP_RIM_STROKE_WIDTH * 1.2f;
-        rimPaint.IsAntialias = UseAntiAlias;
+        rimPaint.IsAntialias = _useAntiAlias;
 
         canvas.DrawCircle(lampX, lampY, lampRadius, rimPaint);
     }
@@ -804,9 +916,9 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
         using var peakTextPaint = _paintPool.Get();
         peakTextPaint.Color = _state.PeakActive ? SKColors.Red : new SKColor(180, 0, 0);
-        peakTextPaint.IsAntialias = UseAntiAlias;
+        peakTextPaint.IsAntialias = _useAntiAlias;
 
-        if (UseAdvancedEffects)
+        if (_useAdvancedEffects)
             peakTextPaint.ImageFilter = SKImageFilter.CreateDropShadow(
                 1, 1, 1, 1, SKColors.Black.WithAlpha(150));
 
@@ -865,7 +977,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         }
     }
 
-    private float CalculateLoudness(float[] spectrum)
+    private static float CalculateLoudness(float[] spectrum)
     {
         if (spectrum.Length == 0) return DB_MIN;
 
@@ -970,39 +1082,32 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     public override void Dispose()
     {
-        if (!_disposed)
-        {
-            Safe(
-                () =>
-                {
-                    OnDispose();
-                },
-                new ErrorHandlingOptions
-                {
-                    Source = $"{LOG_PREFIX}.Dispose",
-                    ErrorMessage = "Error during renderer disposal"
-                }
-            );
+        if (_disposed) return;
 
-            _disposed = true;
-            GC.SuppressFinalize(this);
-        }
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during renderer disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     protected override void OnDispose()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 DisposeManagedResources();
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnDispose",
-                ErrorMessage = "Error during OnDispose"
-            }
+            nameof(OnDispose),
+            "Error during OnDispose"
         );
     }
 

@@ -10,36 +10,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<ConstellationRenderer> _instance = new(() => new ConstellationRenderer());
 
-    private static readonly SKColor[] _starGlowColors = [new(255, 255, 255, 128), SKColors.Transparent];
-    private static readonly float[] _starGlowPositions = [0.0f, 1.0f];
-
-    private readonly Random _random = new();
-    private readonly object _starsLock = new();
-
-    private Star[]? _stars;
-    private SKPaint? _starPaint;
-    private SKPaint? _glowPaint;
-    private SKShader? _glowShader;
-    private SKSurface? _renderSurface;
-    private SKImageInfo _lastRenderInfo;
-    private int _starCount;
-
-    private float _lowSpectrum;
-    private float _midSpectrum;
-    private float _highSpectrum;
-    private new float _processedSpectrum;
-    private float _spectrumEnergy;
-    private float _spawnAccumulator;
-    private float _lastSpectrumUpdateTime;
-    private float _timeSinceLastSpectrum;
-    private bool _hasActiveSpectrum;
-
-    private CancellationTokenSource _updateTokenSource = new();
-    private Task? _updateTask;
-    private volatile bool _needsUpdate;
-
-    private bool _useGlowEffects = true;
-
     private ConstellationRenderer() { }
 
     public static ConstellationRenderer GetInstance() => _instance.Value;
@@ -111,34 +81,67 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 LOW_USE_GLOW_EFFECTS = false,
                 MEDIUM_USE_GLOW_EFFECTS = true,
                 HIGH_USE_GLOW_EFFECTS = true;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
         }
     }
 
-    public override void Initialize()
+    // Static resources
+    private static readonly SKColor[] _starGlowColors = [new(255, 255, 255, 128), SKColors.Transparent];
+    private static readonly float[] _starGlowPositions = [0.0f, 1.0f];
+
+    // Quality settings
+    private bool _useGlowEffects = true;
+    private new bool _useAntiAlias = true;
+
+    // Renderer state
+    private float _lowSpectrum;
+    private float _midSpectrum;
+    private float _highSpectrum;
+    private new float _processedSpectrum;
+    private float _spectrumEnergy;
+    private float _spawnAccumulator;
+    private float _lastSpectrumUpdateTime;
+    private float _timeSinceLastSpectrum;
+    private bool _hasActiveSpectrum;
+    private volatile bool _needsUpdate;
+    private int _starCount;
+
+    // Rendering resources
+    private Star[]? _stars;
+    private SKPaint? _starPaint;
+    private SKPaint? _glowPaint;
+    private SKShader? _glowShader;
+    private SKSurface? _renderSurface;
+    private SKImageInfo _lastRenderInfo;
+
+    // Thread synchronization and control
+    private readonly Random _random = new();
+    private readonly object _starsLock = new();
+    private CancellationTokenSource _updateTokenSource = new();
+    private Task? _updateTask;
+
+    protected override void OnInitialize()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                base.Initialize();
+                base.OnInitialize();
                 InitializeResources();
                 ApplyQualitySettings();
-                Log(
-                    LogLevel.Debug,
-                    LOG_PREFIX,
-                    "Initialized"
-                );
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Initialize",
-                ErrorMessage = "Failed to initialize renderer"
-            }
+            nameof(OnInitialize),
+            "Failed to initialize renderer"
         );
     }
 
     private void InitializeResources()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _starCount = _isOverlayActive
@@ -149,17 +152,14 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 InitializeShadersAndPaints();
                 StartUpdateLoop();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeResources",
-                ErrorMessage = "Failed to initialize resources"
-            }
+            nameof(InitializeResources),
+            "Failed to initialize resources"
         );
     }
 
     private void InitializeShadersAndPaints()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _starPaint = CreateBasicPaint(SKColors.White);
@@ -184,11 +184,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     _glowPaint.Shader = _glowShader;
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeShadersAndPaints",
-                ErrorMessage = "Failed to initialize shaders and paints"
-            }
+            nameof(InitializeShadersAndPaints),
+            "Failed to initialize shaders and paints"
         );
     }
 
@@ -206,32 +203,25 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-
-                base.Configure(
-                    isOverlayActive,
-                    quality
-                );
+                base.Configure(isOverlayActive, quality);
 
                 if (configChanged)
                 {
                     OnConfigurationChanged();
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.Configure",
-                ErrorMessage = "Failed to configure renderer"
-            }
+            nameof(Configure),
+            "Failed to configure renderer"
         );
     }
 
     protected override void OnConfigurationChanged()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _starCount = _isOverlayActive
@@ -239,50 +229,73 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     : DEFAULT_STAR_COUNT;
 
                 InitializeStars(_starCount);
+                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnConfigurationChanged",
-                ErrorMessage = "Failed to handle configuration change"
-            }
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
         );
     }
 
     protected override void ApplyQualitySettings()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 base.ApplyQualitySettings();
-
-                _useGlowEffects = Quality switch
-                {
-                    RenderQuality.Low => Constants.Quality.LOW_USE_GLOW_EFFECTS,
-                    RenderQuality.Medium => Constants.Quality.MEDIUM_USE_GLOW_EFFECTS,
-                    RenderQuality.High => Constants.Quality.HIGH_USE_GLOW_EFFECTS,
-                    _ => true
-                };
-
-                UpdatePaintQualitySettings();
+                ApplyQualityBasedSettings();
+                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ApplyQualitySettings",
-                ErrorMessage = "Failed to apply quality settings"
-            }
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
         );
+    }
+
+    private void ApplyQualityBasedSettings()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                ApplyLowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                ApplyMediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                ApplyHighQualitySettings();
+                break;
+        }
+
+        UpdatePaintQualitySettings();
+    }
+
+    private void ApplyLowQualitySettings()
+    {
+        _useGlowEffects = Constants.Quality.LOW_USE_GLOW_EFFECTS;
+        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+    }
+
+    private void ApplyMediumQualitySettings()
+    {
+        _useGlowEffects = Constants.Quality.MEDIUM_USE_GLOW_EFFECTS;
+        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+    }
+
+    private void ApplyHighQualitySettings()
+    {
+        _useGlowEffects = Constants.Quality.HIGH_USE_GLOW_EFFECTS;
+        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
     }
 
     private void UpdatePaintQualitySettings()
     {
         if (_starPaint != null)
         {
-            _starPaint.IsAntialias = UseAntiAlias;
+            _starPaint.IsAntialias = _useAntiAlias;
         }
 
         if (_glowPaint != null)
         {
-            _glowPaint.IsAntialias = UseAntiAlias;
+            _glowPaint.IsAntialias = _useAntiAlias;
         }
     }
 
@@ -293,40 +306,61 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint _)
+        SKPaint paint)
     {
-        if (!ValidateRenderParameters(
-            canvas,
-            spectrum,
-            info))
-        {
+        if (!ValidateRenderParameters(canvas, spectrum, info))
             return;
-        }
 
         if (IsCanvasAreaOutsideView(canvas, info))
-        {
             return;
-        }
 
-        Safe(
+        ExecuteSafely(
             () =>
             {
-                ProcessSpectrumAndUpdateState(
-                    spectrum,
-                    info
-                );
-
-                RenderStarField(
-                    canvas,
-                    info
-                );
+                UpdateState(spectrum, info);
+                RenderFrame(canvas, info);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderEffect",
-                ErrorMessage = "Error during rendering"
-            }
+            nameof(RenderEffect),
+            "Error during rendering"
         );
+    }
+
+    private bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? _,
+        SKImageInfo info)
+    {
+        if (!_isInitialized)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
+            return false;
+        }
+        if (!IsCanvasValid(canvas)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        if (IsDisposed()) return false;
+
+        return true;
+    }
+
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Warning, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Warning, LOG_PREFIX, "Invalid canvas dimensions");
+        return false;
+    }
+
+    private bool IsDisposed()
+    {
+        if (!_disposed) return false;
+        Log(LogLevel.Warning, LOG_PREFIX, "Renderer is disposed");
+        return false;
     }
 
     private static bool IsCanvasAreaOutsideView(SKCanvas canvas, SKImageInfo info)
@@ -335,7 +369,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         return canvas.QuickReject(renderBounds);
     }
 
-    private void ProcessSpectrumAndUpdateState(
+    private void UpdateState(
         float[] spectrum,
         SKImageInfo info)
     {
@@ -359,6 +393,20 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         }
     }
 
+    private void RenderFrame(
+        SKCanvas canvas,
+        SKImageInfo info)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                RenderStarField(canvas, info);
+            },
+            nameof(RenderFrame),
+            "Error rendering frame"
+        );
+    }
+
     private void UpdateTimeSinceLastSpectrum()
     {
         _timeSinceLastSpectrum += TIME_STEP;
@@ -380,6 +428,16 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         }
     }
 
+    private void HandleNoSpectrumData()
+    {
+        _spectrumEnergy = 0;
+        if (_time - _lastSpectrumUpdateTime > SPECTRUM_TIMEOUT)
+        {
+            _hasActiveSpectrum = false;
+            _processedSpectrum = 0;
+        }
+    }
+
     private void FlagForUpdate()
     {
         _needsUpdate = true;
@@ -393,16 +451,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void HandleNoSpectrumData()
-    {
-        _spectrumEnergy = 0;
-        if (_time - _lastSpectrumUpdateTime > SPECTRUM_TIMEOUT)
-        {
-            _hasActiveSpectrum = false;
-            _processedSpectrum = 0;
-        }
-    }
-
     private void UpdateRenderSurfaceIfNeeded(SKImageInfo info)
     {
         if (info.Width != _lastRenderInfo.Width ||
@@ -413,57 +461,23 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         }
     }
 
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info)
+    private void UpdateRenderSurface(SKImageInfo info)
     {
-        if (!_isInitialized)
-        {
-            Log(
-                LogLevel.Error,
-                LOG_PREFIX,
-                "Renderer is not initialized"
-            );
-            return false;
-        }
-
-        if (canvas == null)
-        {
-            Log(
-                LogLevel.Warning,
-                LOG_PREFIX,
-                "Canvas is null"
-            );
-            return false;
-        }
-
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(
-                LogLevel.Warning,
-                LOG_PREFIX,
-                "Invalid canvas dimensions"
-            );
-            return false;
-        }
-
-        if (_disposed)
-        {
-            Log(
-                LogLevel.Warning,
-                LOG_PREFIX,
-                "Renderer is disposed"
-            );
-            return false;
-        }
-
-        return true;
+        ExecuteSafely(
+            () =>
+            {
+                _lastRenderInfo = info;
+                _renderSurface?.Dispose();
+                _renderSurface = SKSurface.Create(info);
+            },
+            nameof(UpdateRenderSurface),
+            "Failed to update render surface"
+        );
     }
 
     private void ClearAllStars()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 if (_stars == null) return;
@@ -480,34 +494,14 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     }
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ClearAllStars",
-                ErrorMessage = "Failed to clear stars"
-            }
-        );
-    }
-
-    private void UpdateRenderSurface(SKImageInfo info)
-    {
-        Safe(
-            () =>
-            {
-                _lastRenderInfo = info;
-                _renderSurface?.Dispose();
-                _renderSurface = SKSurface.Create(info);
-            },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateRenderSurface",
-                ErrorMessage = "Failed to update render surface"
-            }
+            nameof(ClearAllStars),
+            "Failed to clear stars"
         );
     }
 
     private void RenderStarField(SKCanvas canvas, SKImageInfo info)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 if (!AreRenderResourcesValid())
@@ -519,26 +513,18 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 RenderStarsToSurface(info);
                 DrawFinalComposite(canvas);
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.RenderStarField",
-                ErrorMessage = "Error rendering star field"
-            }
+            nameof(RenderStarField),
+            "Error rendering star field"
         );
     }
 
-    private bool AreRenderResourcesValid()
-    {
-        return _stars != null &&
-               _starPaint != null &&
-               _glowPaint != null &&
-               _renderSurface != null;
-    }
+    private bool AreRenderResourcesValid() => 
+        _stars != null
+        && _starPaint != null
+        && _glowPaint != null
+        && _renderSurface != null;
 
-    private void PrepareRenderSurface()
-    {
-        _renderSurface?.Canvas.Clear(SKColors.Transparent);
-    }
+    private void PrepareRenderSurface() => _renderSurface?.Canvas.Clear(SKColors.Transparent);
 
     private void RenderStarsToSurface(SKImageInfo info)
     {
@@ -546,10 +532,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
         lock (_starsLock)
         {
-            RenderActiveStars(
-                _renderSurface.Canvas,
-                info
-            );
+            RenderActiveStars(_renderSurface.Canvas, info);
         }
     }
 
@@ -636,10 +619,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         return (finalOpacity, alpha);
     }
 
-    private static float CalculateFadeEffect(float lifetimeRatio)
-    {
-        return lifetimeRatio < 0.2f ? lifetimeRatio / 0.2f : 1.0f;
-    }
+    private static float CalculateFadeEffect(float lifetimeRatio) => 
+        lifetimeRatio < 0.2f ? lifetimeRatio / 0.2f : 1.0f;
 
     private static float CalculateStarSize(Star star)
     {
@@ -647,11 +628,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         return star.Size * (0.7f + lifetimeRatio * 0.3f);
     }
 
-    private bool ShouldRenderGlowEffect(Star star)
-    {
-        return _useGlowEffects &&
-               (star.Brightness > DEFAULT_BRIGHTNESS || _spectrumEnergy > 0.45f);
-    }
+    private bool ShouldRenderGlowEffect(Star star) => 
+        _useGlowEffects
+        && (star.Brightness > DEFAULT_BRIGHTNESS
+        || _spectrumEnergy > 0.45f);
 
     private void RenderStarGlow(
         SKCanvas canvas,
@@ -675,10 +655,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         canvas.Restore();
     }
 
-    private float CalculateGlowSize(float dynamicSize, float finalOpacity)
-    {
-        return dynamicSize * (2.2f + _spectrumEnergy * 1.2f) * finalOpacity;
-    }
+    private float CalculateGlowSize(float dynamicSize, float finalOpacity) => 
+        dynamicSize * (2.2f + _spectrumEnergy * 1.2f) * finalOpacity;
 
     private void RenderStarCore(
         SKCanvas canvas,
@@ -699,18 +677,15 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void StartUpdateLoop()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 StopExistingUpdateTask();
                 RecreateTokenSource();
                 StartNewUpdateTask();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.StartUpdateLoop",
-                ErrorMessage = "Failed to start update loop"
-            }
+            nameof(StartUpdateLoop),
+            "Failed to start update loop"
         );
     }
 
@@ -729,7 +704,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             }
             catch
             {
-                // Ignore cancellation exceptions
+                // ignore
             }
         }
     }
@@ -743,13 +718,11 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void StartNewUpdateTask()
-    {
+    private void StartNewUpdateTask() => 
         _updateTask = Task.Run(
             UpdateLoopAsync,
             _updateTokenSource.Token
-        );
-    }
+            );
 
     private async Task UpdateLoopAsync()
     {
@@ -783,12 +756,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         accumulatedTime += TIME_STEP;
     }
 
-    private bool ShouldUpdateStars(float accumulatedTime)
-    {
-        return accumulatedTime >= TIME_STEP &&
-               _stars != null &&
-               _lastRenderInfo.Width > 0;
-    }
+    private bool ShouldUpdateStars(float accumulatedTime) => 
+        accumulatedTime >= TIME_STEP
+        && _stars != null
+        && _lastRenderInfo.Width > 0;
 
     private void UpdateStarsBasedOnState()
     {
@@ -804,7 +775,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void FadeOutStars()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 if (_stars == null) return;
@@ -820,21 +791,13 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     }
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.FadeOutStars",
-                ErrorMessage = "Error fading out stars"
-            }
+            nameof(FadeOutStars),
+            "Error fading out stars"
         );
     }
 
-    private static float CalculateReducedOpacity(Star star)
-    {
-        return MathF.Max(
-            star.Opacity - TIME_STEP * FADE_OUT_SPEED,
-            0
-        );
-    }
+    private static float CalculateReducedOpacity(Star star) => 
+        MathF.Max(star.Opacity - TIME_STEP * FADE_OUT_SPEED, 0);
 
     private void UpdateStarDuringFadeOut(int starIndex, float newOpacity)
     {
@@ -889,7 +852,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void UpdateStars(SKImageInfo info)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 if (_stars == null) return;
@@ -905,11 +868,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     ApplyRandomDirectionChanges();
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.UpdateStars",
-                ErrorMessage = "Error updating stars"
-            }
+            nameof(UpdateStars),
+            "Error updating stars"
         );
     }
 
@@ -981,13 +941,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         );
     }
 
-    private static float CalculateFadeInOpacity(Star star)
-    {
-        return MathF.Min(
-            star.Opacity + TIME_STEP * FADE_IN_SPEED,
-            1.0f
-        );
-    }
+    private static float CalculateFadeInOpacity(Star star) => 
+        MathF.Min(star.Opacity + TIME_STEP * FADE_IN_SPEED, 1.0f);
 
     private float CalculateTargetBrightness(Star star)
     {
@@ -1242,7 +1197,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void SpawnNewStars(float screenWidth, float screenHeight)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 if (_stars == null || _midSpectrum < SPAWN_THRESHOLD)
@@ -1265,11 +1220,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     }
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.SpawnNewStars",
-                ErrorMessage = "Error spawning new stars"
-            }
+            nameof(SpawnNewStars),
+            "Error spawning new stars"
         );
     }
 
@@ -1344,10 +1296,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         return (vx, vy);
     }
 
-    [MethodImpl(AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private void ProcessSpectrum(float[] spectrum)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 if (spectrum.Length < 3) return;
@@ -1355,11 +1307,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 ProcessSpectrumBands(spectrum);
                 CalculateSpectrumEnergy();
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ProcessSpectrum",
-                ErrorMessage = "Error processing spectrum data"
-            }
+            nameof(ProcessSpectrum),
+            "Error processing spectrum data"
         );
     }
 
@@ -1428,7 +1377,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void InitializeStars(int count)
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 ObjectDisposedException.ThrowIf(_disposed, nameof(ConstellationRenderer));
@@ -1443,11 +1392,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     }
                 }
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.InitializeStars",
-                ErrorMessage = "Failed to initialize stars"
-            }
+            nameof(InitializeStars),
+            "Failed to initialize stars"
         );
     }
 
@@ -1480,17 +1426,34 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         };
     }
 
-    [MethodImpl(AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float ClampF(float value, float min, float max) =>
         value < min ? min : value > max ? max : value;
 
-    [MethodImpl(AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ClampInt(int value, int min, int max) =>
         value < min ? min : value > max ? max : value;
 
+    public override void Dispose()
+    {
+        if (_disposed) return;
+
+        ExecuteSafely(
+            () =>
+            {
+                OnDispose();
+            },
+            nameof(Dispose),
+            "Error during renderer disposal"
+        );
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+    }
+
     protected override void OnDispose()
     {
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 DisposeUpdateResources();
@@ -1499,17 +1462,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
                 base.OnDispose();
 
-                Log(
-                    LogLevel.Debug,
-                    LOG_PREFIX,
-                    "Disposed"
-                );
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.OnDispose",
-                ErrorMessage = "Error during disposal"
-            }
+            nameof(OnDispose),
+            "Error during disposal"
         );
     }
 
