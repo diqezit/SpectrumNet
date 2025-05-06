@@ -37,6 +37,18 @@ public sealed class Renderer : AsyncDisposableBase
         set => _shouldShowPlaceholder = value;
     }
 
+    private static void ExecuteSafely(
+        Action action,
+        string source,
+        string errorMessage) =>
+        Safe(
+            action,
+            new ErrorHandlingOptions
+            {
+                Source = $"{Renderer.LogPrefix}.{source}",
+                ErrorMessage = errorMessage
+            });
+
     public Renderer(
         SpectrumBrushes styles,
         IMainController controller,
@@ -85,9 +97,7 @@ public sealed class Renderer : AsyncDisposableBase
         if (_isDisposed)
             return;
 
-        bool needsUpdate = SynchronizeRenderSettings();
-
-        if (needsUpdate)
+        if (SynchronizeRenderSettings())
             RequestRender();
     }
 
@@ -574,7 +584,7 @@ public sealed class Renderer : AsyncDisposableBase
     private void ApplySpectrumStyleUpdate(string styleName, SKPaint brush)
     {
         var oldPaint = _currentState.Paint;
-        Safe(
+        ExecuteSafely(
             () =>
             {
                 _currentState = _currentState with
@@ -584,11 +594,8 @@ public sealed class Renderer : AsyncDisposableBase
                 };
                 oldPaint?.Dispose();
             },
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating spectrum style"
-            });
+            nameof(ApplySpectrumStyleUpdate),
+            "Error updating spectrum style");
     }
 
     private void UnsubscribeFromEvents()
@@ -604,25 +611,24 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void DisposeResources()
     {
-        _currentState.Paint?.Dispose();
-        _placeholder.Dispose();
+        ExecuteSafely(
+             () => _currentState.Paint?.Dispose(),
+             "CurrentStatePaintDispose",
+             "Error disposing current state paint");
 
-        SafeDispose(
-            _renderLock,
-            "RenderLock",
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing render lock"
-            });
+        ExecuteSafely(
+            () => _placeholder.Dispose(),
+            "PlaceholderDispose",
+            "Error disposing placeholder");
 
-        SafeDispose(
-            _disposalTokenSource,
-            "DisposalTokenSource",
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error disposing disposal token source"
-            });
+        ExecuteSafely(
+            () => _renderLock.Dispose(),
+            "RenderLockDispose",
+            "Error disposing render lock");
+
+        ExecuteSafely(
+            () => _disposalTokenSource.Dispose(),
+            "DisposalTokenSourceDispose",
+            "Error disposing disposal token source");
     }
 }
