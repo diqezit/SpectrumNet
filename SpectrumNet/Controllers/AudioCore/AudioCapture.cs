@@ -227,6 +227,13 @@ public sealed class AudioCapture : AsyncDisposableBase
 
     public async Task StartCaptureAsync()
     {
+
+#if DEBUG
+        Log(LogLevel.Debug,
+            "AudioCapture",
+            "StartCaptureAsync called");
+#endif
+
         ThrowIfDisposed();
 
         if (_isReinitializing || _controller.IsTransitioning || IsRecording) return;
@@ -245,6 +252,12 @@ public sealed class AudioCapture : AsyncDisposableBase
         }
 
         await MonitorCaptureAsync(token);
+
+#if DEBUG
+        Log(LogLevel.Debug,
+            "AudioCapture",
+            "Audio capture started successfully");
+#endif
     }
 
     private void InitializeCaptureCore()

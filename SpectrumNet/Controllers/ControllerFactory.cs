@@ -166,7 +166,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
     }
 
-    public bool CanStartCapture => !IsRecording;
+    public bool CanStartCapture => !IsRecording
+        && (!_audioController.IsValueCreated || AudioController.CanStartCapture);
 
     public bool IsTransitioning
     {
@@ -231,10 +232,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
     }
 
-    public async Task StartCaptureAsync() =>
-        await (_audioController.IsValueCreated ?
-            AudioController.StartCaptureAsync() :
-            Task.CompletedTask);
+    public async Task StartCaptureAsync() => 
+        await AudioController.StartCaptureAsync();
 
     public async Task StopCaptureAsync() =>
         await (_audioController.IsValueCreated ?
