@@ -27,8 +27,6 @@ public sealed class Renderer : AsyncDisposableBase
     private volatile bool _isAnalyzerDisposed;
     private volatile bool _shouldShowPlaceholder = true;
     private bool _updatingQuality;
-    private int _width, _height;
-    private DateTime _lastRenderTime = DateTime.Now;
 
     public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
 
@@ -62,9 +60,6 @@ public sealed class Renderer : AsyncDisposableBase
         AttachUIElementEvents();
 
         FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
-
-        if (_controller.IsRecording)
-            CompositionTarget.Rendering += OnRendering;
     }
 
     private void InitializeRenderState()
@@ -131,7 +126,9 @@ public sealed class Renderer : AsyncDisposableBase
 
     public void UpdateRenderQuality(RenderQuality quality)
     {
-        if (_isDisposed || _currentState.Quality == quality || _updatingQuality) return;
+        if (_isDisposed
+            || _currentState.Quality == quality
+            || _updatingQuality) return;
 
         try
         {
@@ -164,27 +161,18 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    private bool ShouldSkipRenderingFrame(object? sender)
-    {
-        if (_isDisposed) return true;
-        return IsSkipRendering(sender);
-    }
+    private bool ShouldSkipRenderingFrame(object? sender) =>
+        _isDisposed || IsSkipRendering(sender);
 
-    private bool ShouldRenderNewFrame()
-    {
-        if (FpsLimiter.Instance.IsEnabled)
-        {
-            return FpsLimiter.Instance.ShouldRenderFrame() ||
-                   _frameCache.IsDirty ||
-                   ShouldShowPlaceholder ||
-                   _frameCache.ShouldForceRefresh();
-        }
-        return true;
-    }
+    private bool ShouldRenderNewFrame() =>
+        _frameCache.IsDirty ||
+        ShouldShowPlaceholder ||
+        _frameCache.ShouldForceRefresh();
 
     private void RenderNewFrame(object? sender, SKPaintSurfaceEventArgs e)
     {
         ClearCanvas(e.Surface.Canvas);
+
         Safe(
             () => RenderFrameInternal(e.Surface.Canvas, e.Info),
             new ErrorHandlingOptions
@@ -213,8 +201,6 @@ public sealed class Renderer : AsyncDisposableBase
     private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
     {
         if (_isDisposed) return;
-
-        _lastRenderTime = DateTime.Now;
 
         if (ShouldRenderPlaceholder())
         {
@@ -281,13 +267,11 @@ public sealed class Renderer : AsyncDisposableBase
             DrawPerformanceInfoOnCanvas);
     }
 
-    private ISpectrumRenderer GetConfiguredRenderer(RenderStyle style)
-    {
-        return _rendererFactory.CreateRenderer(
+    private ISpectrumRenderer GetConfiguredRenderer(RenderStyle style) =>
+        _rendererFactory.CreateRenderer(
             style,
             _controller.IsOverlayActive,
             _currentState.Quality);
-    }
 
     private static void RenderSpectrumWithRenderer(
         ISpectrumRenderer renderer,
@@ -298,8 +282,7 @@ public sealed class Renderer : AsyncDisposableBase
         float barSpacing,
         int barCount,
         SKPaint paint,
-        Action<SKCanvas, SKImageInfo> drawPerformanceInfo)
-    {
+        Action<SKCanvas, SKImageInfo> drawPerformanceInfo) =>
         renderer.Render(
             canvas,
             spectrum.Spectrum,
@@ -309,7 +292,6 @@ public sealed class Renderer : AsyncDisposableBase
             barCount,
             paint,
             drawPerformanceInfo);
-    }
 
     private void ValidateStyleConsistency(RenderStyle expectedStyle)
     {
@@ -353,12 +335,10 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    private static void LogSpectrumDataError(Exception ex)
-    {
+    private static void LogSpectrumDataError(Exception ex) =>
         Log(LogLevel.Error,
             LogPrefix,
             $"Error getting spectrum data: {ex.Message}");
-    }
 
     private bool TryCalculateRenderParameters(
         SKImageInfo info,
@@ -418,11 +398,8 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    private void HandleObjectDisposedException()
-    {
+    private void HandleObjectDisposedException() =>
         _isAnalyzerDisposed = true;
-        CompositionTarget.Rendering -= OnRendering;
-    }
 
     private void UpdatePaintAndStyleName(string styleName, SKPaint brush)
     {
@@ -498,25 +475,7 @@ public sealed class Renderer : AsyncDisposableBase
         RequestRender();
     }
 
-    private void UpdateRecordingState(bool isRecording)
-    {
-        if (_isDisposed) return;
-
-        ManageRenderingSubscription(isRecording);
-        ShouldShowPlaceholder = !isRecording;
-        _frameCache.MarkDirty();
-        RequestRender();
-    }
-
-    private void ManageRenderingSubscription(bool isRecording)
-    {
-        if (isRecording)
-            CompositionTarget.Rendering += OnRendering;
-        else
-            CompositionTarget.Rendering -= OnRendering;
-    }
-
-    private bool ValidateAndSetDimensions(int width, int height)
+    private static bool ValidateAndSetDimensions(int width, int height)
     {
         if (!AreDimensionsValid(width, height))
         {
@@ -524,29 +483,22 @@ public sealed class Renderer : AsyncDisposableBase
             return false;
         }
 
-        _width = width;
-        _height = height;
         return true;
     }
 
     private static bool AreDimensionsValid(int width, int height) =>
         width > 0 && height > 0;
 
-    private static void LogInvalidDimensions(int width, int height)
-    {
+    private static void LogInvalidDimensions(int width, int height) =>
         Log(LogLevel.Warning,
             LogPrefix,
             $"Invalid dimensions: {width}x{height}");
-    }
 
     private bool IsSkipRendering(object? sender) =>
         _controller.IsOverlayActive && sender == _controller.SpectrumCanvas;
 
-    private void SafeInvalidate()
-    {
-        if (!_controller.IsOverlayActive || _skElement != _controller.SpectrumCanvas)
-            _skElement?.InvalidateVisual();
-    }
+    private void SafeInvalidate() =>
+        _skElement?.InvalidateVisual();
 
     private void SubscribeToEvents()
     {
@@ -578,8 +530,6 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void OnAnalyzerDisposed(object? sender, EventArgs e) => _isAnalyzerDisposed = true;
 
-    private void OnRendering(object? sender, EventArgs e) => RequestRender();
-
     private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics) =>
         PerformanceUpdate?.Invoke(this, metrics);
 
@@ -599,7 +549,6 @@ public sealed class Renderer : AsyncDisposableBase
     private void OnElementUnloaded(object? sender, RoutedEventArgs e)
     {
         if (_isDisposed) return;
-        CompositionTarget.Rendering -= OnRendering;
     }
 
     private void HandlePropertyChange(string propertyName)
@@ -611,7 +560,9 @@ public sealed class Renderer : AsyncDisposableBase
                 break;
 
             case nameof(IMainController.IsRecording):
-                UpdateRecordingState(_controller.IsRecording);
+                ShouldShowPlaceholder = !_controller.IsRecording;
+                _frameCache.MarkDirty();
+                RequestRender();
                 break;
 
             case nameof(IMainController.IsOverlayActive):
@@ -674,7 +625,6 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void UnsubscribeFromEvents()
     {
-        CompositionTarget.Rendering -= OnRendering;
         PerformanceMetricsManager.PerformanceMetricsUpdated -= OnPerformanceMetricsUpdated;
 
         if (_controller is INotifyPropertyChanged notifier)
@@ -688,19 +638,19 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void DisposeResources()
     {
-        ExecuteSafely(() => _currentState?.Paint?.Dispose(), 
+        ExecuteSafely(() => _currentState?.Paint?.Dispose(),
             nameof(DisposeResources), "Error disposing paint");
 
         ExecuteSafely(() => _placeholder?.Dispose(),
             nameof(DisposeResources), "Error disposing placeholder");
 
-        ExecuteSafely(() => _frameCache?.Dispose(), 
+        ExecuteSafely(() => _frameCache?.Dispose(),
             nameof(DisposeResources), "Error disposing frame cache");
 
-        ExecuteSafely(() => _renderLock?.Dispose(), 
+        ExecuteSafely(() => _renderLock?.Dispose(),
             nameof(DisposeResources), "Error disposing lock");
 
-        ExecuteSafely(() => _disposalTokenSource?.Dispose(), 
+        ExecuteSafely(() => _disposalTokenSource?.Dispose(),
             nameof(DisposeResources), "Error disposing token source");
     }
 
@@ -724,7 +674,7 @@ public sealed class Renderer : AsyncDisposableBase
         using var paint = new SKPaint
         {
             IsAntialias = true,
-            Color = GetPerformanceTextColor(level) 
+            Color = GetPerformanceTextColor(level)
         };
 
         string fpsLimiterInfo = FpsLimiter.Instance.IsEnabled ? " [60 FPS Lock]" : "";
@@ -735,15 +685,13 @@ public sealed class Renderer : AsyncDisposableBase
         canvas.DrawText(infoText, 10, info.Height - 10, font, paint);
     }
 
-    private static SKColor GetPerformanceTextColor(PerformanceLevel level)
-    {
-        return level switch
+    private static SKColor GetPerformanceTextColor(PerformanceLevel level) =>
+        level switch
         {
             PerformanceLevel.Excellent => SKColors.LimeGreen,
             PerformanceLevel.Good => SKColors.DodgerBlue,
             PerformanceLevel.Fair => SKColors.Orange,
             PerformanceLevel.Poor => SKColors.Red,
-            _ => SKColors.Gray 
+            _ => SKColors.Gray
         };
-    }
 }

@@ -122,8 +122,6 @@ public partial class MainWindow : Window, IAsyncDisposable
         if (_isClosing || _isDisposed)
             return;
 
-        FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
-
         bool shouldRender = !FpsLimiter.Instance.IsEnabled
             || FpsLimiter.Instance.ShouldRenderFrame();
 

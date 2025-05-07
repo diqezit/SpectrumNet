@@ -11,7 +11,7 @@ public sealed class OverlayWindow : Window, IDisposable
         SKElement SkElement,
         DispatcherTimer RenderTimer,
         IRendererFactory RendererFactory);
-    
+
     private readonly OverlayConfiguration _configuration;
     private readonly CancellationTokenSource _disposalTokenSource = new();
     private RenderContext? _renderContext;
@@ -43,7 +43,13 @@ public sealed class OverlayWindow : Window, IDisposable
         }
     }
 
-    public void ForceRedraw() => TryInvalidateVisual();
+    public void ForceRedraw()
+    {
+        if (!_isDisposed && _renderContext != null)
+        {
+            _renderContext.Value.SkElement.InvalidateVisual();
+        }
+    }
 
     private void ConfigureRenderingOptions()
     {
@@ -88,25 +94,20 @@ public sealed class OverlayWindow : Window, IDisposable
         controller.PropertyChanged += OnControllerPropertyChanged;
     }
 
-    private static SKElement CreateSkElement()
-    {
-        return new SKElement
+    private static SKElement CreateSkElement() =>
+        new()
         {
             VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
             HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
             SnapsToDevicePixels = true,
             UseLayoutRounding = true
         };
-    }
 
-    private static DispatcherTimer CreateRenderTimer()
-    {
-        var timer = new DispatcherTimer(DispatcherPriority.Render)
+    private static DispatcherTimer CreateRenderTimer() =>
+        new(DispatcherPriority.Render)
         {
             Interval = FromMilliseconds(1000.0 / 60.0)
         };
-        return timer;
-    }
 
     private void SubscribeToEvents()
     {
@@ -129,9 +130,7 @@ public sealed class OverlayWindow : Window, IDisposable
         SourceInitialized += OnSourceInitialized;
 
         if (_configuration.EnableEscapeToClose)
-        {
             KeyDown += OnKeyDown;
-        }
 
         DpiChanged += OnDpiChanged;
         IsVisibleChanged += OnIsVisibleChanged;
@@ -146,25 +145,20 @@ public sealed class OverlayWindow : Window, IDisposable
         if (e.PropertyName == nameof(IMainController.LimitFpsTo60))
         {
             _fpsLimiter.IsEnabled = _renderContext?.Controller.LimitFpsTo60 ?? false;
+            _fpsLimiter.Reset();
+            ForceRedraw();
         }
     }
 
-    private void TryInvalidateVisual()
+    private void RenderTimerTick(object? sender, EventArgs e)
     {
-        if (!_isDisposed && _renderContext != null && _renderLock.Wait(0))
+        if (ShouldSkipRendering()) return;
+
+        if (_fpsLimiter.ShouldRenderFrame())
         {
-            try
-            {
-                _renderContext.Value.SkElement.InvalidateVisual();
-            }
-            finally
-            {
-                _renderLock.Release();
-            }
+            ForceRedraw();
         }
     }
-
-    private void RenderTimerTick(object? sender, EventArgs e) => ForceRedraw();
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
@@ -172,17 +166,21 @@ public sealed class OverlayWindow : Window, IDisposable
         Dispose();
     }
 
-    private void StopRenderTimer() => _renderContext?.RenderTimer.Stop();
+    private void StopRenderTimer() =>
+        _renderContext?.RenderTimer.Stop();
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         ConfigureWindowStyleEx();
         StartRenderTimer();
+        ForceRedraw();
     }
 
-    private void StartRenderTimer() => _renderContext?.RenderTimer.Start();
+    private void StartRenderTimer() =>
+        _renderContext?.RenderTimer.Start();
 
-    private void OnKeyDown(object sender, KeyEventArgs e) => HandleEscapeKey(e);
+    private void OnKeyDown(object sender, KeyEventArgs e) =>
+        HandleEscapeKey(e);
 
     private void HandleEscapeKey(KeyEventArgs e)
     {
@@ -202,13 +200,21 @@ public sealed class OverlayWindow : Window, IDisposable
     private void OnIsVisibleChanged(object? sender, DependencyPropertyChangedEventArgs e)
     {
         if (IsVisible)
+        {
             StartRenderTimer();
+            ForceRedraw();
+        }
         else
+        {
             StopRenderTimer();
+        }
     }
 
-    private void OnSizeChanged(object? sender, SizeChangedEventArgs e) =>
+    private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
         InvalidateRenderCache();
+        ForceRedraw();
+    }
 
     private void InvalidateRenderCache()
     {
@@ -234,10 +240,13 @@ public sealed class OverlayWindow : Window, IDisposable
             if (IsRenderingTakingTooLong())
             {
                 RenderDirectly(sender, args);
-                return;
+            }
+            else
+            {
+                RenderWithOrWithoutCaching(sender, args, info, canvas);
             }
 
-            RenderWithOrWithoutCaching(sender, args, info, canvas);
+            PerformanceMetricsManager.RecordFrameTime();
         }
         catch (Exception ex)
         {
@@ -255,7 +264,8 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private void ReleaseRenderLock() => _renderLock.Release();
 
-    private static void ClearCanvas(SKCanvas canvas) => canvas.Clear(SKColors.Transparent);
+    private static void ClearCanvas(SKCanvas canvas) =>
+        canvas.Clear(SKColors.Transparent);
 
     private bool IsRenderingTakingTooLong() =>
         _frameTimeWatch.ElapsedMilliseconds > _configuration.RenderInterval * 2;
@@ -300,11 +310,10 @@ public sealed class OverlayWindow : Window, IDisposable
 
         EnsureCacheBitmapCreated(info);
 
-        using (var tempSurface = SKSurface.Create(info, _cacheBitmap!.GetPixels(), _cacheBitmap.RowBytes))
-        {
-            tempSurface.Canvas.Clear(SKColors.Transparent);
-            _renderContext.Value.Controller.OnPaintSurface(sender, args);
-        }
+        using var tempSurface = SKSurface.Create(info, _cacheBitmap!.GetPixels(), _cacheBitmap.RowBytes);
+        tempSurface.Canvas.Clear(SKColors.Transparent);
+        _renderContext.Value.Controller.OnPaintSurface(sender, args);
+
 
         canvas.DrawBitmap(_cacheBitmap!, 0, 0);
     }
@@ -369,9 +378,7 @@ public sealed class OverlayWindow : Window, IDisposable
         SourceInitialized -= OnSourceInitialized;
 
         if (_configuration.EnableEscapeToClose)
-        {
             KeyDown -= OnKeyDown;
-        }
 
         DpiChanged -= OnDpiChanged;
         IsVisibleChanged -= OnIsVisibleChanged;
@@ -381,9 +388,7 @@ public sealed class OverlayWindow : Window, IDisposable
     private void UnregisterControllerEvents()
     {
         if (_renderContext?.Controller is INotifyPropertyChanged controller)
-        {
             controller.PropertyChanged -= OnControllerPropertyChanged;
-        }
     }
 
     private void DisposeResources()
