@@ -54,6 +54,7 @@ public interface ISettings
     float UIMaxDbLevel { get; set; }
     float UIAmplificationFactor { get; set; }
     bool IsDarkTheme { get; set; }
+    bool LimitFpsTo60 { get; set; }
 
     // Настройки для AsciiDonutRenderer
     int DonutSegments { get; set; }

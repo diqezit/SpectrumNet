@@ -13,7 +13,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
-    private bool 
+    private bool
         _isDisposed,
         _isClosing;
 
@@ -82,12 +82,6 @@ public partial class MainWindow : Window, IAsyncDisposable
             return;
         }
 
-        Log(
-            LogLevel.Information,
-            LogPrefix,
-            "Window closing event received, beginning resource cleanup"
-        );
-
         _closingCts = new CancellationTokenSource();
 
         _ = Task.Run(async () =>
@@ -95,14 +89,8 @@ public partial class MainWindow : Window, IAsyncDisposable
             try
             {
                 await CleanupResourcesAsync();
-
                 Dispatcher.Invoke(() =>
                 {
-                    Log(
-                        LogLevel.Information,
-                        LogPrefix,
-                        "Resource cleanup completed, closing window"
-                    );
                     Close();
                 });
             }
@@ -134,7 +122,17 @@ public partial class MainWindow : Window, IAsyncDisposable
         if (_isClosing || _isDisposed)
             return;
 
-        _controller.RequestRender();
+        FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
+        FpsLimiter.Instance.TargetFps = 60.0;
+
+        bool shouldRender = !FpsLimiter.Instance.IsEnabled || FpsLimiter.Instance.ShouldRenderFrame();
+
+        if (shouldRender)
+        {
+            _controller.RequestRender();
+
+            PerformanceMetricsManager.RecordFrameTime();
+        }
     }
 
     private void OnStateChanged(
@@ -346,12 +344,6 @@ public partial class MainWindow : Window, IAsyncDisposable
         object? sender,
         EventArgs e)
     {
-        Log(
-            LogLevel.Information,
-            LogPrefix,
-            "Window closed event received"
-        );
-
         UnsubscribeFromEvents();
 
         if (_disposeCompleted.IsSet &&
@@ -381,12 +373,6 @@ public partial class MainWindow : Window, IAsyncDisposable
             if (_isDisposed) return;
             _isDisposed = true;
 
-            Log(
-                LogLevel.Information,
-                LogPrefix,
-                "Starting window cleanup process"
-            );
-
             await SaveSettingsDuringCleanupAsync();
             await StopCaptureDuringCleanupAsync();
             await CloseChildWindowsAsync();
@@ -395,12 +381,6 @@ public partial class MainWindow : Window, IAsyncDisposable
             UnsubscribePostCleanupEvents();
 
             _disposeCompleted.Set();
-
-            Log(
-                LogLevel.Information,
-                LogPrefix,
-                "Window resources cleaned up successfully"
-            );
         }
         catch (Exception ex)
         {
@@ -452,21 +432,11 @@ public partial class MainWindow : Window, IAsyncDisposable
             if (_controller.IsOverlayActive)
             {
                 _controller.CloseOverlay();
-                Log(
-                    LogLevel.Information,
-                    LogPrefix,
-                    "Overlay window closed"
-                );
             }
 
             if (_controller.IsControlPanelOpen)
             {
                 _controller.CloseControlPanel();
-                Log(
-                    LogLevel.Information,
-                    LogPrefix,
-                    "Control panel window closed"
-                );
             }
         });
     }

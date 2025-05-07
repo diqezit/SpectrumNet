@@ -6,71 +6,72 @@ public readonly record struct PerformanceMetrics(
     double FrameTime,
     double Fps);
 
+public enum PerformanceLevel { Excellent, Good, Fair, Poor }
+
 public static class PerformanceMetricsManager
 {
-    #region Types and Constants
-    private static class Constants
-    {
-        // Thresholds
-        public const double HighCpuThreshold = 80.0,
-                           MediumCpuThreshold = 60.0,
-                           HighMemoryThreshold = 1000.0,
-                           MediumMemoryThreshold = 500.0,
-                           MinTimeDelta = 0.001,
-                           MaxRealisticFps = 1000.0;
-
-        // FPS related
-        public const float DefaultFps = 60f,
-                          MinGoodFps = 50f,
-                          MinFairFps = 30f,
-                          CpuSmoothing = 0.2f,
-                          FpsSmoothing = 0.1f;
-
-        // Configuration
-        public const int MaxFrames = 120,
-                         LogFrequency = 300,
-                         HistoryLength = 60;
-
-        public const string LogPrefix = "PerformanceMetrics";
-    }
-
-    public enum PerformanceLevel { Excellent, Good, Fair, Poor }
-    private enum ResourceType { Ram, ManagedRam }
-    private record struct PerformanceSnapshot(float Fps, double CpuUsage, double RamUsageMb, DateTime Timestamp, PerformanceLevel Level);
-    #endregion
-
-    #region Fields
     private static readonly object _syncLock = new();
-    private static readonly int _processorCount = ProcessorCount;
-    private static readonly double[] _frameTimes = new double[Constants.MaxFrames];
+    private static readonly int _processorCount = Environment.ProcessorCount;
+    private static readonly double[] _frameTimes = new double[Constants.MAX_FRAMES];
     private static readonly Stopwatch _timer = Stopwatch.StartNew();
-    private static readonly TimeSpan _cpuUpdateInterval = FromMilliseconds(100);
-    private static readonly Queue<PerformanceSnapshot> _performanceHistory = new(Constants.HistoryLength);
-    private static readonly TimeSpan _snapshotInterval = FromSeconds(1);
+    private static readonly TimeSpan _cpuUpdateInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly Queue<PerformanceSnapshot> _performanceHistory = new(Constants.HISTORY_LENGTH);
+    private static readonly TimeSpan _snapshotInterval = TimeSpan.FromSeconds(1);
 
     private static int _frameIndex;
-    private static float _fpsCache = Constants.DefaultFps;
-    private static TimeSpan _lastCpuTime = Zero;
+    private static float _fpsCache = Constants.DEFAULT_FPS;
+    private static TimeSpan _lastCpuTime = TimeSpan.Zero;
     private static double _lastTotalTime;
-    private static DateTime _lastCpuUpdate = UtcNow;
     private static double _cpuUsage;
+    private static double _ramUsage;
     private static PerformanceLevel _currentLevel = PerformanceLevel.Good;
-    private static DateTime _lastSnapshotTime = UtcNow;
+    private static DateTime _lastSnapshotTime = DateTime.UtcNow;
     private static bool _isInitialized;
-    #endregion
+    private static CancellationTokenSource _cts = new();
 
-    #region Properties and Events
     public static event EventHandler<PerformanceMetrics>? PerformanceUpdated;
     public static event EventHandler<PerformanceLevel>? PerformanceLevelChanged;
     public static PerformanceLevel CurrentPerformanceLevel => _currentLevel;
     public static float CurrentFps => _fpsCache;
     public static double CurrentCpuUsage => _cpuUsage;
     public static TimeSpan UpTime => _timer.Elapsed;
-    #endregion
+
+    private record struct PerformanceSnapshot(
+        float Fps,
+        double CpuUsage,
+        double RamUsageMb,
+        DateTime Timestamp,
+        PerformanceLevel Level);
+
+    private enum ResourceType { Ram, ManagedRam }
+
+    private record Constants
+    {
+        public const double
+            HIGH_CPU_THRESHOLD = 80.0,
+            MEDIUM_CPU_THRESHOLD = 60.0,
+            HIGH_MEMORY_THRESHOLD = 1000.0,
+            MEDIUM_MEMORY_THRESHOLD = 500.0,
+            MIN_TIME_DELTA = 0.001,
+            MAX_REALISTIC_FPS = 1000.0;
+
+        public const float
+            DEFAULT_FPS = 60f,
+            MIN_GOOD_FPS = 50f,
+            MIN_FAIR_FPS = 30f,
+            CPU_SMOOTHING = 0.2f,
+            FPS_SMOOTHING = 0.1f;
+
+        public const int
+            MAX_FRAMES = 120,
+            LOG_FREQUENCY = 300,
+            HISTORY_LENGTH = 60;
+
+        public const string LOG_PREFIX = "PerformanceMetrics";
+    }
 
     static PerformanceMetricsManager() => Initialize();
 
-    #region Public Methods
     public static void Initialize()
     {
         if (_isInitialized) return;
@@ -80,126 +81,232 @@ public static class PerformanceMetricsManager
             if (_isInitialized) return;
             _isInitialized = true;
             _timer.Start();
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => Cleanup();
-            Log(LogLevel.Information, Constants.LogPrefix, "Performance monitoring initialized", forceLog: true);
+            AppDomain.CurrentDomain.ProcessExit += HandleApplicationExit;
+            Log(LogLevel.Information,
+                Constants.LOG_PREFIX,
+                "Performance monitoring initialized",
+                forceLog: true);
+
+            _cts = new CancellationTokenSource();
+            Task.Run(() => UpdateMetricsAsync(_cts.Token));
         }
     }
 
-    public static PerformanceMetrics UpdateMetrics()
-    {
-        float fps = CalculateFps();
-        UpdateCpuUsage();
-        double ramUsage = GetResourceUsage(ResourceType.Ram);
+    private static void HandleApplicationExit(object? sender, EventArgs e) =>
+        Cleanup();
 
-        if (fps <= 0) fps = _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
-
-        var metrics = new PerformanceMetrics(_timer.Elapsed.TotalMilliseconds / Max(1, _frameIndex), fps);
-        UpdatePerformanceHistory(fps, _cpuUsage, ramUsage);
-        PerformanceUpdated?.Invoke(null, metrics);
-        return metrics;
-    }
-
-    public static void DrawPerformanceInfo(SKCanvas? canvas, SKImageInfo info, bool showPerformanceInfo)
-    {
-        if (canvas == null || info.Width <= 0 || info.Height <= 0 || !showPerformanceInfo) return;
-
-        Safe(() =>
-        {
-            float fps = CalculateFps();
-            UpdateCpuUsage();
-            double ramUsage = GetResourceUsage(ResourceType.Ram);
-
-            if (fps <= 0) fps = _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
-
-            using var font = new SKFont { Size = 12, Edging = SKFontEdging.SubpixelAntialias };
-            using var paint = new SKPaint { IsAntialias = true, Color = GetPerformanceColor(_currentLevel) };
-
-            string infoText = Invariant($"RAM: {ramUsage:F1} MB | CPU: {_cpuUsage:F1}% | FPS: {fps:F0} | {_currentLevel}");
-
-            canvas.DrawText(infoText, 10, 20, SKTextAlign.Left, font, paint);
-
-            if (_frameIndex % 60 == 0)
-                Log(LogLevel.Debug, Constants.LogPrefix, $"Current FPS: {fps:F1} | Level: {_currentLevel}", forceLog: false);
-        }, new ErrorHandlingOptions { Source = Constants.LogPrefix, ErrorMessage = "Error drawing performance info" });
-    }
-    #endregion
-
-    #region Private Methods
-    private static float CalculateFps()
+    public static void RecordFrameTime()
     {
         lock (_syncLock)
         {
             double now = _timer.Elapsed.TotalSeconds;
             int currentIndex = _frameIndex++;
-            _frameTimes[currentIndex % Constants.MaxFrames] = now;
-
-            if (currentIndex < Constants.MaxFrames)
-                return _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
-
-            int firstFrameIndex = (currentIndex - Constants.MaxFrames + 1) % Constants.MaxFrames;
-            double firstFrameTime = _frameTimes[firstFrameIndex];
-            double delta = now - firstFrameTime;
-
-            if (delta <= Constants.MinTimeDelta)
-            {
-                Log(LogLevel.Warning, Constants.LogPrefix, $"Very small time delta detected: {delta}", forceLog: false);
-                return _fpsCache > 0 ? _fpsCache : Constants.DefaultFps;
-            }
-
-            float newFps = (float)(Constants.MaxFrames / delta);
-
-            if (newFps > 0 && newFps < Constants.MaxRealisticFps)
-                _fpsCache = _fpsCache * (1 - Constants.FpsSmoothing) + newFps * Constants.FpsSmoothing;
-
-            if (currentIndex % Constants.LogFrequency == 0)
-                Log(LogLevel.Debug, Constants.LogPrefix,
-                    $"FPS calculation: frames={Constants.MaxFrames}, delta={delta:F3}s, raw={newFps:F1}, smoothed={_fpsCache:F1}", forceLog: false);
-
-            return _fpsCache;
+            _frameTimes[currentIndex % Constants.MAX_FRAMES] = now;
         }
     }
 
-    private static void UpdateCpuUsage()
+    private static async Task UpdateMetricsAsync(CancellationToken token)
     {
-        var now = UtcNow;
-        if (now - _lastCpuUpdate < _cpuUpdateInterval) return;
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(100, token);
+
+                lock (_syncLock)
+                {
+                    float fps = CalculateFpsInternal();
+                    double cpuUsage = CalculateCpuUsage();
+                    _ramUsage = GetResourceUsage(ResourceType.Ram);
+
+                    _fpsCache = fps;
+                    _cpuUsage = cpuUsage;
+
+                    UpdatePerformanceHistory(fps, cpuUsage, _ramUsage);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error, Constants.LOG_PREFIX, $"Error in background metrics update: {ex.Message}", forceLog: true);
+            }
+        }
+    }
+
+    private static float CalculateFpsInternal()
+    {
+        if (_frameIndex < Constants.MAX_FRAMES)
+            return Constants.DEFAULT_FPS;
+
+        int oldestIndex = (_frameIndex - Constants.MAX_FRAMES) % Constants.MAX_FRAMES;
+        int newestIndex = (_frameIndex - 1) % Constants.MAX_FRAMES;
+
+        double oldestTime = _frameTimes[oldestIndex];
+        double newestTime = _frameTimes[newestIndex];
+
+        double delta = newestTime - oldestTime;
+
+        if (delta <= Constants.MIN_TIME_DELTA)
+            return Constants.DEFAULT_FPS;
+
+        return (float)(Constants.MAX_FRAMES / delta);
+    }
+
+    private static double CalculateCpuUsage()
+    {
+        using var process = Process.GetCurrentProcess();
+        var cpuTime = process.TotalProcessorTime;
+        double elapsed = _timer.Elapsed.TotalSeconds;
+
+        double cpuUsage = 0;
+
+        if (_lastCpuTime != TimeSpan.Zero)
+        {
+            double cpuDelta = (cpuTime - _lastCpuTime).TotalSeconds;
+            double timeDelta = elapsed - _lastTotalTime;
+
+            if (timeDelta > 0)
+            {
+                double instantUsage = cpuDelta / (timeDelta * _processorCount) * 100;
+                cpuUsage = _cpuUsage * (1 - Constants.CPU_SMOOTHING) + instantUsage * Constants.CPU_SMOOTHING;
+            }
+        }
+
+        _lastCpuTime = cpuTime;
+        _lastTotalTime = elapsed;
+
+        return cpuUsage;
+    }
+
+    public static void DrawPerformanceInfo(
+        SKCanvas? canvas,
+        SKImageInfo info,
+        bool showPerformanceInfo)
+    {
+        if (!CanDrawPerformanceInfo(canvas, info, showPerformanceInfo)) return;
 
         Safe(() =>
         {
             lock (_syncLock)
             {
-                using var process = Process.GetCurrentProcess();
-                var cpuTime = process.TotalProcessorTime;
-                double elapsed = _timer.Elapsed.TotalSeconds;
+                float fps = _fpsCache;
+                double cpuUsage = _cpuUsage;
+                double ramUsage = _ramUsage;
 
-                if (_lastCpuTime != Zero)
-                {
-                    double cpuDelta = (cpuTime - _lastCpuTime).TotalSeconds;
-                    double timeDelta = elapsed - _lastTotalTime;
+                string fpsLimiterInfo = IsFpsLimiterEnabled() ? " [60 FPS Lock]" : "";
 
-                    if (timeDelta > 0)
-                    {
-                        double instantUsage = cpuDelta / (timeDelta * _processorCount) * 100;
-                        _cpuUsage = _cpuUsage * (1 - Constants.CpuSmoothing) + instantUsage * Constants.CpuSmoothing;
-
-                        if (_cpuUsage > Constants.HighCpuThreshold)
-                            Log(LogLevel.Warning, Constants.LogPrefix, $"High CPU usage: {_cpuUsage:F1}%", forceLog: false);
-                    }
-                    else
-                        Log(LogLevel.Warning, Constants.LogPrefix, "Invalid time delta in CPU calculation", forceLog: false);
-                }
-
-                _lastCpuTime = cpuTime;
-                _lastTotalTime = elapsed;
-                _lastCpuUpdate = now;
+                DrawMetricsText(canvas!, info, fps, ramUsage, fpsLimiterInfo);
             }
-        }, new ErrorHandlingOptions { Source = Constants.LogPrefix, ErrorMessage = "Error updating CPU usage" });
+        },
+        new ErrorHandlingOptions
+        {
+            Source = Constants.LOG_PREFIX,
+            ErrorMessage = "Error drawing performance info"
+        });
+    }
+
+    private static bool IsFpsLimiterEnabled()
+    {
+        var controller = TryGetController();
+        if (controller != null)
+        {
+            return controller.LimitFpsTo60;
+        }
+
+        try
+        {
+            return Settings.Instance.LimitFpsTo60;
+        }
+        catch
+        {
+            Log(LogLevel.Warning, Constants.LOG_PREFIX,
+                "Failed to get FPS limiter status from settings",
+                forceLog: true);
+            return false;
+        }
+    }
+
+    private static IMainController? TryGetController()
+    {
+        try
+        {
+            if (Application.Current?.MainWindow?.DataContext is IMainController mainController)
+            {
+                return mainController;
+            }
+
+            if (Application.Current?.MainWindow != null)
+            {
+                foreach (Window window in Application.Current.Windows)
+                {
+                    if (window.DataContext is IMainController controller)
+                    {
+                        return controller;
+                    }
+                }
+            }
+
+            Log(LogLevel.Warning, Constants.LOG_PREFIX,
+                "Cannot determine FPS limiter status - controller not found in any window",
+                forceLog: true);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, Constants.LOG_PREFIX,
+                $"Error trying to get controller: {ex.Message}",
+                forceLog: true);
+            return null;
+        }
+    }
+
+    private static bool CanDrawPerformanceInfo(
+        SKCanvas? canvas,
+        SKImageInfo info,
+        bool showPerformanceInfo) =>
+        canvas != null && info.Width > 0 && info.Height > 0 && showPerformanceInfo;
+
+    private static void DrawMetricsText(
+        SKCanvas canvas,
+        SKImageInfo info,
+        float fps,
+        double ramUsage,
+        string fpsLimiterInfo)
+    {
+        using var font = new SKFont { Size = 12, Edging = SKFontEdging.SubpixelAntialias };
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Color = GetPerformanceColor(_currentLevel)
+        };
+
+        string infoText = string.Create(CultureInfo.InvariantCulture,
+            $"RAM: {ramUsage:F1} MB | CPU: {_cpuUsage:F1}% | FPS: {fps:F0}{fpsLimiterInfo} | {_currentLevel}");
+
+        canvas.DrawText(infoText, 10, 20, SKTextAlign.Left, font, paint);
     }
 
     private static double GetResourceUsage(ResourceType type)
     {
         using var process = Process.GetCurrentProcess();
-        double usage = type switch
+        double usage = CalculateResourceUsage(type, process);
+
+        if (usage > Constants.HIGH_MEMORY_THRESHOLD)
+        {
+            Log(LogLevel.Warning,
+                Constants.LOG_PREFIX,
+                $"High memory usage: {usage:F1} MB",
+                forceLog: false);
+        }
+
+        return usage;
+    }
+
+    private static double CalculateResourceUsage(ResourceType type, Process process) =>
+        type switch
         {
             ResourceType.Ram => process.PagedMemorySize64 / (1024.0 * 1024.0),
             ResourceType.ManagedRam => Max(
@@ -207,12 +314,6 @@ public static class PerformanceMetricsManager
                 GetTotalMemory(false) / (1024.0 * 1024.0)),
             _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown resource type")
         };
-
-        if (usage > Constants.HighMemoryThreshold)
-            Log(LogLevel.Warning, Constants.LogPrefix, $"High memory usage: {usage:F1} MB", forceLog: false);
-
-        return usage;
-    }
 
     private static SKColor GetTextColor()
     {
@@ -223,59 +324,91 @@ public static class PerformanceMetricsManager
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, Constants.LogPrefix, $"Error determining text color: {ex.Message}", forceLog: true);
+            Log(LogLevel.Error,
+                Constants.LOG_PREFIX,
+                $"Error determining text color: {ex.Message}",
+                forceLog: true);
             return SKColors.White;
         }
     }
 
-    private static SKColor GetPerformanceColor(PerformanceLevel level) => level switch
-    {
-        PerformanceLevel.Excellent => SKColors.LimeGreen,
-        PerformanceLevel.Good => SKColors.DodgerBlue,
-        PerformanceLevel.Fair => SKColors.Orange,
-        PerformanceLevel.Poor => SKColors.Red,
-        _ => GetTextColor()
-    };
+    private static SKColor GetPerformanceColor(PerformanceLevel level) =>
+        level switch
+        {
+            PerformanceLevel.Excellent => SKColors.LimeGreen,
+            PerformanceLevel.Good => SKColors.DodgerBlue,
+            PerformanceLevel.Fair => SKColors.Orange,
+            PerformanceLevel.Poor => SKColors.Red,
+            _ => GetTextColor()
+        };
 
     private static void UpdatePerformanceHistory(float fps, double cpuUsage, double ramUsage)
     {
-        var now = UtcNow;
+        var now = DateTime.UtcNow;
         if (now - _lastSnapshotTime < _snapshotInterval) return;
 
         lock (_syncLock)
         {
             PerformanceLevel newLevel = CalculatePerformanceLevel(fps, cpuUsage, ramUsage);
-            var snapshot = new PerformanceSnapshot(fps, cpuUsage, ramUsage, now, newLevel);
+            var snapshot = CreatePerformanceSnapshot(fps, cpuUsage, ramUsage, now, newLevel);
 
-            if (_performanceHistory.Count >= Constants.HistoryLength)
-                _performanceHistory.Dequeue();
-
-            _performanceHistory.Enqueue(snapshot);
-
-            if (newLevel != _currentLevel)
-            {
-                _currentLevel = newLevel;
-                Log(LogLevel.Information, Constants.LogPrefix,
-                    $"Performance level changed to {newLevel}: FPS={fps:F1}, CPU={cpuUsage:F1}%, RAM={ramUsage:F1}MB", forceLog: false);
-                PerformanceLevelChanged?.Invoke(null, newLevel);
-            }
-
+            UpdateHistoryQueue(snapshot);
+            UpdatePerformanceLevel(newLevel, fps, cpuUsage, ramUsage);
             _lastSnapshotTime = now;
         }
     }
 
-    private static PerformanceLevel CalculatePerformanceLevel(float fps, double cpuUsage, double ramUsage)
+    private static PerformanceSnapshot CreatePerformanceSnapshot(
+        float fps,
+        double cpuUsage,
+        double ramUsage,
+        DateTime timestamp,
+        PerformanceLevel level) =>
+        new(fps, cpuUsage, ramUsage, timestamp, level);
+
+    private static void UpdateHistoryQueue(PerformanceSnapshot snapshot)
     {
-        bool hasHighCpu = cpuUsage > Constants.HighCpuThreshold;
-        bool hasMediumCpu = cpuUsage > Constants.MediumCpuThreshold;
-        bool hasHighMemory = ramUsage > Constants.HighMemoryThreshold;
-        bool hasMediumMemory = ramUsage > Constants.MediumMemoryThreshold;
+        if (_performanceHistory.Count >= Constants.HISTORY_LENGTH)
+        {
+            _performanceHistory.Dequeue();
+        }
+
+        _performanceHistory.Enqueue(snapshot);
+    }
+
+    private static void UpdatePerformanceLevel(
+        PerformanceLevel newLevel,
+        float fps,
+        double cpuUsage,
+        double ramUsage)
+    {
+        if (newLevel != _currentLevel)
+        {
+            _currentLevel = newLevel;
+            Log(LogLevel.Information,
+                Constants.LOG_PREFIX,
+                $"Performance level changed to {newLevel}: " +
+                $"FPS={fps:F1}, CPU={cpuUsage:F1}%, RAM={ramUsage:F1}MB",
+                forceLog: false);
+            PerformanceLevelChanged?.Invoke(null, newLevel);
+        }
+    }
+
+    private static PerformanceLevel CalculatePerformanceLevel(
+        float fps,
+        double cpuUsage,
+        double ramUsage)
+    {
+        bool hasHighCpu = cpuUsage > Constants.HIGH_CPU_THRESHOLD;
+        bool hasMediumCpu = cpuUsage > Constants.MEDIUM_CPU_THRESHOLD;
+        bool hasHighMemory = ramUsage > Constants.HIGH_MEMORY_THRESHOLD;
+        bool hasMediumMemory = ramUsage > Constants.MEDIUM_MEMORY_THRESHOLD;
 
         return (fps, hasHighCpu, hasMediumCpu, hasHighMemory, hasMediumMemory) switch
         {
-            ( >= Constants.MinGoodFps, false, false, false, false) => PerformanceLevel.Excellent,
-            ( >= Constants.MinGoodFps, false, _, false, _) => PerformanceLevel.Good,
-            ( >= Constants.MinFairFps, false, _, _, _) => PerformanceLevel.Fair,
+            ( >= Constants.MIN_GOOD_FPS, false, false, false, false) => PerformanceLevel.Excellent,
+            ( >= Constants.MIN_GOOD_FPS, false, _, false, _) => PerformanceLevel.Good,
+            ( >= Constants.MIN_FAIR_FPS, false, _, _, _) => PerformanceLevel.Fair,
             _ => PerformanceLevel.Poor
         };
     }
@@ -284,11 +417,33 @@ public static class PerformanceMetricsManager
     {
         Safe(() =>
         {
-            PerformanceUpdated = null;
-            PerformanceLevelChanged = null;
-            lock (_syncLock) _performanceHistory.Clear();
-            Log(LogLevel.Information, Constants.LogPrefix, "Performance monitoring resources cleaned up", forceLog: true);
-        }, new ErrorHandlingOptions { Source = Constants.LogPrefix, ErrorMessage = "Error during cleanup" });
+            _cts.Cancel();
+            _cts.Dispose();
+            ClearEventHandlers();
+            ClearPerformanceHistory();
+            Log(LogLevel.Information,
+                Constants.LOG_PREFIX,
+                "Performance monitoring resources cleaned up",
+                forceLog: true);
+        },
+        new ErrorHandlingOptions
+        {
+            Source = Constants.LOG_PREFIX,
+            ErrorMessage = "Error during cleanup"
+        });
     }
-    #endregion
+
+    private static void ClearEventHandlers()
+    {
+        PerformanceUpdated = null;
+        PerformanceLevelChanged = null;
+    }
+
+    private static void ClearPerformanceHistory()
+    {
+        lock (_syncLock)
+        {
+            _performanceHistory.Clear();
+        }
+    }
 }

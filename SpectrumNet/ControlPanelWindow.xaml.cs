@@ -151,19 +151,6 @@ public partial class ControlPanelWindow : Window, IDisposable
             }
         }, GetLoggerOptions("Error handling key down"));
 
-    private void OnCheckBoxChanged(object sender, RoutedEventArgs e) =>
-        Safe(() =>
-        {
-            if (sender is CheckBox { Name: var cbName, IsChecked: var isChecked } checkbox &&
-                _checkBoxActions.TryGetValue(cbName, out var action))
-            {
-#if DEBUG
-                Log(LogLevel.Debug, LogPrefix, string.Format("CheckBox changed: {0}, Value: {1}", cbName, isChecked));
-#endif
-                action(isChecked == true);
-            }
-        }, GetLoggerOptions("Error handling checkbox change"));
-
     private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
         Safe(() =>
         {

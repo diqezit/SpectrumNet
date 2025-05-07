@@ -52,7 +52,8 @@ public class DefaultSettings
         IsControlPanelVisible = true,
         IsOverlayTopmost = true,
         IsDarkTheme = true,
-        ShowPerformanceInfo = true;
+        ShowPerformanceInfo = true,
+        LimitFpsTo60 = false;
     public static readonly RenderStyle SelectedRenderStyle = RenderStyle.Bars;
     public static readonly FftWindowType SelectedFftWindowType = FftWindowType.Hann;
     public static readonly SpectrumScale SelectedScaleType = SpectrumScale.Linear;

@@ -5,7 +5,7 @@
     xmlns:local="clr-namespace:SpectrumNet"
     xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     Title="Control Panel"
-    Height="350" Width="750"
+    Height="380" Width="750"
     WindowStartupLocation="CenterOwner"
     Background="Transparent"
     AllowsTransparency="True"
@@ -372,6 +372,35 @@
                                         Grid.Column="2"
                                         Visibility="Hidden"/>
                                 </Grid>
+
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="120"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="40"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock 
+                                        Grid.Column="0"
+                                        Text="Frame Rate:"
+                                        Foreground="{DynamicResource TextPrimaryBrush}"
+                                        Margin="0,0,10,0"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"/>
+
+                                    <CheckBox 
+                                        x:Name="LimitFpsCheckBox"
+                                        Grid.Column="1"
+                                        Style="{DynamicResource ModernCheckBoxStyle}"
+                                        Content="Limit to 60 FPS"
+                                        IsChecked="{Binding LimitFpsTo60, Mode=TwoWay}"
+                                        VerticalAlignment="Center"/>
+
+                                    <TextBlock 
+                                    Grid.Column="2"
+                                    Visibility="Hidden"/>
+                                </Grid>
+
                             </StackPanel>
                         </Border>
 

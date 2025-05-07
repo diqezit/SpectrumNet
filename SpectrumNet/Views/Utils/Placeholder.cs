@@ -4,7 +4,7 @@ namespace SpectrumNet.Views.Utils;
 
 public sealed class RendererPlaceholder : IDisposable
 {
-    private const string 
+    private const string
         DEFAULT_MESSAGE = "Push SPACE to begin...";
 
     private static readonly SKColor DefaultColor1 = SKColors.OrangeRed;
@@ -21,7 +21,8 @@ public sealed class RendererPlaceholder : IDisposable
 
     private SKPoint _position;
     private SKPoint _velocity;
-    private DateTime _lastUpdateTime = Now;
+    private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+    private double _lastElapsedTime = 0;
     private bool _isDisposed;
     private SKColor _gradientColor1;
     private SKColor _gradientColor2;
@@ -40,6 +41,7 @@ public sealed class RendererPlaceholder : IDisposable
         _textWidth = _font.MeasureText(_message, _paint);
         _textHeight = _font.Size;
         _position = new(0, DefaultFontSize);
+        _lastElapsedTime = _stopwatch.Elapsed.TotalSeconds;
     }
 
     public void Render(SKCanvas canvas, SKImageInfo info)
@@ -68,9 +70,10 @@ public sealed class RendererPlaceholder : IDisposable
 
     private float CalculateDeltaTime()
     {
-        var deltaTime = (float)(Now - _lastUpdateTime).TotalSeconds;
-        _lastUpdateTime = Now;
-        return deltaTime;
+        var currentTime = _stopwatch.Elapsed.TotalSeconds;
+        var deltaTime = currentTime - _lastElapsedTime;
+        _lastElapsedTime = currentTime;
+        return (float)deltaTime;
     }
 
     private void UpdatePosition(float deltaTime)
@@ -80,7 +83,7 @@ public sealed class RendererPlaceholder : IDisposable
           _position.Y + _velocity.Y * deltaTime);
     }
 
-    private void UpdateGradientOffset(float deltaTime) => 
+    private void UpdateGradientOffset(float deltaTime) =>
         _gradientOffset = (_gradientOffset + GRADIENT_SPEED * deltaTime) % 1.0f;
 
     private void HandleBoundsCollision(float width, float height)
@@ -163,7 +166,7 @@ public sealed class RendererPlaceholder : IDisposable
           new SKPoint(_position.X, _position.Y),
           new SKPoint(_position.X + _textWidth, _position.Y),
           [_gradientColor1, _gradientColor2, _gradientColor1],
-                GradientPositions,
+          GradientPositions,
           SKShaderTileMode.Clamp,
           SKMatrix.CreateTranslation(_gradientOffset * _textWidth, 0)
         );

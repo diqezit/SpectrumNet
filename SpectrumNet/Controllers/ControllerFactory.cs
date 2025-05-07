@@ -143,6 +143,32 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public void OpenOverlay() => UIController.OpenOverlay();
     public void CloseOverlay() => UIController.CloseOverlay();
 
+    public bool LimitFpsTo60
+    {
+        get => Settings.Instance.LimitFpsTo60;
+        set
+        {
+            if (Settings.Instance.LimitFpsTo60 == value) return;
+
+            Log(LogLevel.Information, LOG_PREFIX,
+                $"LimitFpsTo60 changing from {Settings.Instance.LimitFpsTo60} to {value}",
+                forceLog: true);
+
+            var originalStyle = Settings.Instance.SelectedRenderStyle;
+            Settings.Instance.LimitFpsTo60 = value;
+            OnPropertyChanged(nameof(LimitFpsTo60));
+
+            if (originalStyle != Settings.Instance.SelectedRenderStyle)
+            {
+                Log(LogLevel.Warning, LOG_PREFIX,
+                    $"Render style changed after updating LimitFpsTo60: {originalStyle} -> {Settings.Instance.SelectedRenderStyle}",
+                    forceLog: true);
+
+                Settings.Instance.SelectedRenderStyle = originalStyle;
+            }
+        }
+    }
+
     public GainParameters GainParameters =>
         _audioController.IsValueCreated ?
             AudioController.GainParameters :
@@ -232,7 +258,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
     }
 
-    public async Task StartCaptureAsync() => 
+    public async Task StartCaptureAsync() =>
         await AudioController.StartCaptureAsync();
 
     public async Task StopCaptureAsync() =>

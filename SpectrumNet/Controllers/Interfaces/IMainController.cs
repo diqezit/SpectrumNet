@@ -1,5 +1,4 @@
-﻿// IMainController.cs
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet.Controllers.Interfaces;
 
@@ -17,6 +16,9 @@ public interface IMainController :
     IAudioController AudioController { get; }
     IViewController ViewController { get; }
     IInputController InputController { get; }
+
+    bool LimitFpsTo60 { get; set; }
+
     void OnPropertyChanged(params string[] propertyNames);
     void DisposeResources();
 }

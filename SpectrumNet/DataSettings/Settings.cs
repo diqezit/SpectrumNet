@@ -36,7 +36,7 @@ public class Settings : ISettings, INotifyPropertyChanged
     // Поля для UI настроек
     private double _windowLeft, _windowTop, _windowWidth, _windowHeight, _uiBarSpacing;
     private WindowState _windowState;
-    private bool _isControlPanelVisible, _isOverlayTopmost, _isDarkTheme, _showPerformanceInfo;
+    private bool _isControlPanelVisible, _isOverlayTopmost, _isDarkTheme, _showPerformanceInfo, _limitFpsTo60;
     private int _uiBarCount;
     private RenderStyle _selectedRenderStyle = DefaultSettings.SelectedRenderStyle;
     private FftWindowType _selectedFftWindowType = DefaultSettings.SelectedFftWindowType;
@@ -160,6 +160,7 @@ public class Settings : ISettings, INotifyPropertyChanged
     public float UIMaxDbLevel { get => _uiMaxDbLevel; set => SetProperty(ref _uiMaxDbLevel, value); }
     public float UIAmplificationFactor { get => _uiAmplificationFactor; set => SetProperty(ref _uiAmplificationFactor, value); }
     public bool IsDarkTheme { get => _isDarkTheme; set => SetProperty(ref _isDarkTheme, value); }
+    public bool LimitFpsTo60 { get => _limitFpsTo60; set => SetProperty(ref _limitFpsTo60, value); }
 
     // Сброс настроек к значениям по умолчанию с использованием SmartLogger.Safe для обработки ошибок
     public void ResetToDefaults() => Safe(() =>
@@ -246,6 +247,7 @@ public class Settings : ISettings, INotifyPropertyChanged
         UIMaxDbLevel = DefaultSettings.UIMaxDbLevel;
         UIAmplificationFactor = DefaultSettings.UIAmplificationFactor;
         IsDarkTheme = DefaultSettings.IsDarkTheme;
+        LimitFpsTo60 = DefaultSettings.LimitFpsTo60;
 
         Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
     },

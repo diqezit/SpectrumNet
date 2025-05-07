@@ -7,7 +7,6 @@ public class ViewController : IViewController, IDisposable
     private const string LogPrefix = "ViewController";
 
     private readonly IMainController _mainController;
-    private readonly Dictionary<string, Action> _windowButtonActions;
 
     private Renderer? _renderer;
     private SpectrumBrushes? _spectrumStyles;
