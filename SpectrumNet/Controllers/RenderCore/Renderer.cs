@@ -179,7 +179,6 @@ public sealed class Renderer : AsyncDisposableBase
                    ShouldShowPlaceholder ||
                    _frameCache.ShouldForceRefresh();
         }
-
         return true;
     }
 
@@ -258,12 +257,12 @@ public sealed class Renderer : AsyncDisposableBase
         _controller.IsTransitioning || ShouldShowPlaceholder;
 
     private void RenderSpectrum(
-        SKCanvas canvas,
-        SKImageInfo info,
-        SpectralData spectrum,
-        float barWidth,
-        float barSpacing,
-        int barCount)
+       SKCanvas canvas,
+       SKImageInfo info,
+       SpectralData spectrum,
+       float barWidth,
+       float barSpacing,
+       int barCount)
     {
         var currentStyle = _currentState.Style;
         var renderer = GetConfiguredRenderer(currentStyle);
@@ -279,7 +278,7 @@ public sealed class Renderer : AsyncDisposableBase
             barSpacing,
             barCount,
             _currentState.Paint,
-            (c, i) => PerformanceMetricsManager.DrawPerformanceInfo(c, i, _controller.ShowPerformanceInfo));
+            DrawPerformanceInfoOnCanvas);
     }
 
     private ISpectrumRenderer GetConfiguredRenderer(RenderStyle style)
@@ -551,7 +550,7 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void SubscribeToEvents()
     {
-        PerformanceMetricsManager.PerformanceUpdated += OnPerformanceMetricsUpdated;
+        PerformanceMetricsManager.PerformanceMetricsUpdated += OnPerformanceMetricsUpdated;
         _controller.PropertyChanged += OnControllerPropertyChanged;
         if (_analyzer is IComponent comp)
             comp.Disposed += OnAnalyzerDisposed;
@@ -594,7 +593,7 @@ public sealed class Renderer : AsyncDisposableBase
     {
         if (_isDisposed) return;
         UpdateRenderDimensions((int)(_skElement?.ActualWidth ?? 0),
-                             (int)(_skElement?.ActualHeight ?? 0));
+                               (int)(_skElement?.ActualHeight ?? 0));
     }
 
     private void OnElementUnloaded(object? sender, RoutedEventArgs e)
@@ -676,38 +675,75 @@ public sealed class Renderer : AsyncDisposableBase
     private void UnsubscribeFromEvents()
     {
         CompositionTarget.Rendering -= OnRendering;
-        PerformanceMetricsManager.PerformanceUpdated -= OnPerformanceMetricsUpdated;
+        PerformanceMetricsManager.PerformanceMetricsUpdated -= OnPerformanceMetricsUpdated;
 
         if (_controller is INotifyPropertyChanged notifier)
             notifier.PropertyChanged -= OnControllerPropertyChanged;
+
+        if (_analyzer is IComponent comp)
+            comp.Disposed -= OnAnalyzerDisposed;
 
         DetachUIElementEvents();
     }
 
     private void DisposeResources()
     {
-        ExecuteSafely(() => _currentState.Paint.Dispose(),
+        ExecuteSafely(() => _currentState?.Paint?.Dispose(), 
             nameof(DisposeResources), "Error disposing paint");
 
-        ExecuteSafely(() => _placeholder.Dispose(),
+        ExecuteSafely(() => _placeholder?.Dispose(),
             nameof(DisposeResources), "Error disposing placeholder");
 
-        ExecuteSafely(() => _frameCache.Dispose(),
+        ExecuteSafely(() => _frameCache?.Dispose(), 
             nameof(DisposeResources), "Error disposing frame cache");
 
-        ExecuteSafely(() => _renderLock.Dispose(),
+        ExecuteSafely(() => _renderLock?.Dispose(), 
             nameof(DisposeResources), "Error disposing lock");
 
-        ExecuteSafely(() => _disposalTokenSource.Dispose(),
+        ExecuteSafely(() => _disposalTokenSource?.Dispose(), 
             nameof(DisposeResources), "Error disposing token source");
     }
 
     private static void ExecuteSafely(Action action, string source, string errorMessage) =>
-        Safe(
-            action,
-            new ErrorHandlingOptions
-            {
-                Source = $"{LogPrefix}.{source}",
-                ErrorMessage = errorMessage
-            });
+        Safe(action, new ErrorHandlingOptions
+        {
+            Source = $"{LogPrefix}.{source}",
+            ErrorMessage = errorMessage
+        });
+
+    private void DrawPerformanceInfoOnCanvas(SKCanvas canvas, SKImageInfo info)
+    {
+        if (!_controller.ShowPerformanceInfo || _isDisposed) return;
+
+        float fps = PerformanceMetricsManager.GetCurrentFps();
+        double cpu = PerformanceMetricsManager.GetCurrentCpuUsagePercent();
+        double ram = PerformanceMetricsManager.GetCurrentRamUsageMb();
+        PerformanceLevel level = PerformanceMetricsManager.GetCurrentPerformanceLevel();
+
+        using var font = new SKFont { Size = 12, Edging = SKFontEdging.SubpixelAntialias };
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Color = GetPerformanceTextColor(level) 
+        };
+
+        string fpsLimiterInfo = FpsLimiter.Instance.IsEnabled ? " [60 FPS Lock]" : "";
+
+        string infoText = string.Create(CultureInfo.InvariantCulture,
+            $"RAM: {ram:F1} MB | CPU: {cpu:F1}% | FPS: {fps:F0}{fpsLimiterInfo} | {level}");
+
+        canvas.DrawText(infoText, 10, info.Height - 10, font, paint);
+    }
+
+    private static SKColor GetPerformanceTextColor(PerformanceLevel level)
+    {
+        return level switch
+        {
+            PerformanceLevel.Excellent => SKColors.LimeGreen,
+            PerformanceLevel.Good => SKColors.DodgerBlue,
+            PerformanceLevel.Fair => SKColors.Orange,
+            PerformanceLevel.Poor => SKColors.Red,
+            _ => SKColors.Gray 
+        };
+    }
 }
