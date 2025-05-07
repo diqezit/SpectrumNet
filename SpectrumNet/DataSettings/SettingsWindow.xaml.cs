@@ -10,6 +10,7 @@ public partial class SettingsWindow : Window
 
     private readonly Settings _settings = Settings.Instance;
     private Dictionary<string, object?>? _originalValues;
+    private readonly IRendererFactory _rendererFactory = RendererFactory.Instance;
 
     public SettingsWindow()
     {
@@ -154,29 +155,22 @@ public partial class SettingsWindow : Window
             _settings.GetType().GetProperty(key)?.SetValue(_settings, value);
     }
 
-    private static void UpdateRenderers() => Safe(() =>
+    private void UpdateRenderers() => Safe(() =>
     {
-        var renderer = RaindropsRenderer.GetInstance();
-        if (renderer == null) return;
-
-        var field = renderer.GetType().GetField("_isOverlayActive",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-
-        bool isOverlayActive = field?.GetValue(renderer) is bool boolValue && boolValue;
-        renderer.Configure(isOverlayActive);
+        var renderers = _rendererFactory.GetAllRenderers();
+        foreach (var renderer in renderers)
+        {
+            bool isOverlayActive = renderer.IsOverlayActive;
+            renderer.Configure(isOverlayActive);
+        }
     }, new() { Source = LogPrefix, ErrorMessage = "Error updating renderer" });
 
     private void UpdateAllRenderers() => Safe(() =>
     {
-        foreach (var renderer in RendererFactory.GetAllRenderers())
+        var renderers = _rendererFactory.GetAllRenderers();
+        foreach (var renderer in renderers)
         {
-            bool isOverlayActive = false;
-            var field = renderer.GetType().GetField("_isOverlayActive",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-
-            if (field?.GetValue(renderer) is bool boolValue)
-                isOverlayActive = boolValue;
-
+            bool isOverlayActive = renderer.IsOverlayActive;
             renderer.Configure(isOverlayActive, _settings.SelectedRenderQuality);
         }
     }, new() { Source = LogPrefix, ErrorMessage = "Error updating renderers" });

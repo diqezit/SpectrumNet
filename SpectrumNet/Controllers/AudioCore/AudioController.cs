@@ -8,6 +8,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
 
     private readonly IMainController _mainController;
     private readonly GainParameters _gainParameters;
+    private readonly IRendererFactory _rendererFactory;
     private AudioCapture? _captureManager;
 
     private bool _isTransitioning;
@@ -27,7 +28,9 @@ public class AudioController : AsyncDisposableBase, IAudioController
             Settings.Instance.UIAmplificationFactor
         ) ?? throw new InvalidOperationException("Failed to create gain parameters");
 
-        _captureManager = new AudioCapture(_mainController) ??
+        _rendererFactory = RendererFactory.Instance;
+
+        _captureManager = new AudioCapture(_mainController, _rendererFactory) ??
             throw new InvalidOperationException("Failed to create AudioCapture");
     }
 

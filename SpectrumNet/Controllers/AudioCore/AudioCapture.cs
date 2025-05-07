@@ -15,6 +15,7 @@ public sealed class AudioCapture : AsyncDisposableBase
     private readonly MMDeviceEnumerator _deviceEnumerator;
     private readonly AudioEndpointNotificationHandler _notificationHandler;
     private readonly int _deviceCheckIntervalMs;
+    private readonly IRendererFactory _rendererFactory;
 
     private MMDevice? _currentDevice;
     private string _lastDeviceId = string.Empty;
@@ -22,7 +23,6 @@ public sealed class AudioCapture : AsyncDisposableBase
     private bool _isReinitializing;
 
     public bool IsRecording { get; private set; }
-    public bool IsDeviceAvailable => GetDefaultAudioDevice() != null;
 
     private record CaptureState(
         SpectrumAnalyzer Analyzer,
@@ -32,11 +32,14 @@ public sealed class AudioCapture : AsyncDisposableBase
 
     public AudioCapture(
         IMainController controller,
+        IRendererFactory rendererFactory,
         int deviceCheckIntervalMs = DefaultDeviceCheckIntervalMs)
     {
         ArgumentNullException.ThrowIfNull(controller);
+        ArgumentNullException.ThrowIfNull(rendererFactory);
 
         _controller = controller;
+        _rendererFactory = rendererFactory;
         _deviceEnumerator = new MMDeviceEnumerator()
                              ?? throw new InvalidOperationException(
                                  "Failed to create MMDeviceEnumerator");
@@ -146,7 +149,9 @@ public sealed class AudioCapture : AsyncDisposableBase
 
     private async Task ReinitializeCaptureCoreAsync()
     {
+        _isReinitializing = true;
         _controller.IsTransitioning = true;
+
         try
         {
             await StopCaptureAsync(true);
@@ -165,6 +170,7 @@ public sealed class AudioCapture : AsyncDisposableBase
         finally
         {
             _controller.IsTransitioning = false;
+            _isReinitializing = false;
         }
     }
 
@@ -183,7 +189,8 @@ public sealed class AudioCapture : AsyncDisposableBase
                 _controller.SpectrumStyles,
                 _controller,
                 _controller.Analyzer,
-                canvas
+                canvas,
+                _rendererFactory
             );
             _controller.SynchronizeVisualization();
         }
@@ -217,7 +224,8 @@ public sealed class AudioCapture : AsyncDisposableBase
                     _controller.SpectrumStyles,
                     _controller,
                     analyzer,
-                    canvas
+                    canvas,
+                    _rendererFactory
                 );
                 _controller.SynchronizeVisualization();
             }

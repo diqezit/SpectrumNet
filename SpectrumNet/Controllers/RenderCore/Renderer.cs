@@ -20,11 +20,13 @@ public sealed class Renderer : AsyncDisposableBase
     private readonly CancellationTokenSource _disposalTokenSource = new();
     private readonly RendererPlaceholder _placeholder = new() { CanvasSize = new SKSize(1, 1) };
     private readonly FrameCache _frameCache = new();
+    private readonly IRendererFactory _rendererFactory;
 
     private readonly SKElement? _skElement;
     private RenderState _currentState = default!;
     private volatile bool _isAnalyzerDisposed;
     private volatile bool _shouldShowPlaceholder = true;
+    private bool _updatingQuality;
     private int _width, _height;
     private DateTime _lastRenderTime = DateTime.Now;
 
@@ -40,12 +42,14 @@ public sealed class Renderer : AsyncDisposableBase
         SpectrumBrushes styles,
         IMainController controller,
         SpectrumAnalyzer analyzer,
-        SKElement element)
+        SKElement element,
+        IRendererFactory rendererFactory)
     {
         _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
         _skElement = element ?? throw new ArgumentNullException(nameof(element));
+        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
 
         ShouldShowPlaceholder = !_controller.IsRecording;
         InitializeRenderer();
@@ -58,7 +62,6 @@ public sealed class Renderer : AsyncDisposableBase
         AttachUIElementEvents();
 
         FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
-        FpsLimiter.Instance.TargetFps = 60.0;
 
         if (_controller.IsRecording)
             CompositionTarget.Rendering += OnRendering;
@@ -128,12 +131,19 @@ public sealed class Renderer : AsyncDisposableBase
 
     public void UpdateRenderQuality(RenderQuality quality)
     {
-        if (_isDisposed || _currentState.Quality == quality) return;
+        if (_isDisposed || _currentState.Quality == quality || _updatingQuality) return;
 
-        _currentState = _currentState with { Quality = quality };
-        _frameCache.MarkDirty();
-        RendererFactory.GlobalQuality = quality;
-        RequestRender();
+        try
+        {
+            _updatingQuality = true;
+            _currentState = _currentState with { Quality = quality };
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+        finally
+        {
+            _updatingQuality = false;
+        }
     }
 
     public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
@@ -186,7 +196,7 @@ public sealed class Renderer : AsyncDisposableBase
             });
 
         UpdateFrameCache(e);
-        RecordFrameMetrics(); // Оставляем этот вызов здесь, он записывает метрики только для реально отрисованного нового кадра
+        RecordFrameMetrics();
     }
 
     private void RenderCachedFrame(SKPaintSurfaceEventArgs e) =>
@@ -274,7 +284,7 @@ public sealed class Renderer : AsyncDisposableBase
 
     private ISpectrumRenderer GetConfiguredRenderer(RenderStyle style)
     {
-        return RendererFactory.CreateRenderer(
+        return _rendererFactory.CreateRenderer(
             style,
             _controller.IsOverlayActive,
             _currentState.Quality);
@@ -470,7 +480,7 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void UpdateOverlayState()
     {
-        RendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
+        _rendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
         _frameCache.MarkDirty();
         RequestRender();
     }
@@ -638,7 +648,6 @@ public sealed class Renderer : AsyncDisposableBase
     private void HandleFpsLimitChange()
     {
         FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
-        FpsLimiter.Instance.TargetFps = 60.0;
         FpsLimiter.Instance.Reset();
     }
 

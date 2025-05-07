@@ -10,6 +10,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     private readonly InputController _inputController;
     private readonly Lazy<AudioController> _audioController;
     private readonly Lazy<ViewController> _viewController;
+    private readonly IRendererFactory _rendererFactory;
 
     private readonly CancellationTokenSource _cleanupCts = new();
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
@@ -31,6 +32,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         {
             throw new InvalidOperationException("No synchronization context. Controller must be created in UI thread.");
         }
+
+        _rendererFactory = RendererFactory.Instance;
 
         _uiController = new Lazy<UIController>(CreateUIController);
         _audioController = new Lazy<AudioController>(CreateAudioController);
@@ -72,7 +75,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             SpectrumStyles,
             this,
             analyzer,
-            _renderElement
+            _renderElement,
+            _rendererFactory
         );
 
         Renderer = renderer;
@@ -82,7 +86,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private UIController CreateUIController() => new(this);
     private AudioController CreateAudioController() => new(this, SynchronizationContext.Current!);
-    private ViewController CreateViewController() => new(this, _renderElement);
+    private ViewController CreateViewController() => new(this, _renderElement, _rendererFactory);
 
     public IUIController UIController => _uiController.Value;
     public IAudioController AudioController => _audioController.Value;

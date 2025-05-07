@@ -7,6 +7,7 @@ public class ViewController : IViewController, IDisposable
     private const string LogPrefix = "ViewController";
 
     private readonly IMainController _mainController;
+    private readonly IRendererFactory _rendererFactory;
 
     private Renderer? _renderer;
     private SpectrumBrushes? _spectrumStyles;
@@ -20,15 +21,22 @@ public class ViewController : IViewController, IDisposable
 
     private bool
         _showPerformanceInfo = true,
-        _isDisposed;
+        _isDisposed,
+        _updatingQuality;
 
-    public ViewController(IMainController mainController, SKElement renderElement)
+    public ViewController(
+        IMainController mainController,
+        SKElement renderElement,
+        IRendererFactory rendererFactory)
     {
         _mainController = mainController ??
             throw new ArgumentNullException(nameof(mainController));
 
         _renderElement = renderElement ??
             throw new ArgumentNullException(nameof(renderElement));
+
+        _rendererFactory = rendererFactory ??
+            throw new ArgumentNullException(nameof(rendererFactory));
 
         // Инициализация доступных типов рендеринга
         AvailableDrawingTypes = [.. Enum.GetValues<RenderStyle>()
@@ -100,19 +108,26 @@ public class ViewController : IViewController, IDisposable
         get => _renderQuality;
         set
         {
-            if (_renderQuality == value) return;
+            if (_renderQuality == value
+                || _updatingQuality) return;
 
-            _renderQuality = value;
-            Settings.Instance.SelectedRenderQuality = value;
-            _mainController.OnPropertyChanged(nameof(RenderQuality));
-
-            if (_renderer != null)
+            try
             {
-                RendererFactory.GlobalQuality = value;
-                _renderer.UpdateRenderQuality(value);
-            }
+                _updatingQuality = true;
+                _renderQuality = value;
+                Settings.Instance.SelectedRenderQuality = value;
+                _mainController.OnPropertyChanged(nameof(RenderQuality));
 
-            Log(LogLevel.Information, LogPrefix, $"Render quality set to {value}");
+                _renderer?.UpdateRenderQuality(value);
+
+                Log(LogLevel.Information,
+                    LogPrefix,
+                    $"Render quality set to {value}");
+            }
+            finally
+            {
+                _updatingQuality = false;
+            }
         }
     }
 

@@ -2,21 +2,35 @@
 
 namespace SpectrumNet.Views;
 
-public static class RendererFactory
+public class RendererFactory : IRendererFactory
 {
-    private const string LogPrefix = "SpectrumRendererFactory";
+    private const string LogPrefix = "RendererFactory";
 
-    private static readonly object _lock = new();
-    private static readonly Dictionary<RenderStyle, ISpectrumRenderer> _rendererCache = [];
-    private static readonly HashSet<RenderStyle> _initializedRenderers = [];
-    private static RenderQuality _globalQuality;
+    private static readonly Lazy<RendererFactory> _instance =
+        new(() => new RendererFactory(RenderQuality.Medium),
+            LazyThreadSafetyMode.ExecutionAndPublication);
 
-    public static RenderQuality GlobalQuality
+    public static RendererFactory Instance => _instance.Value;
+
+    private readonly object _lock = new();
+
+    private readonly ConcurrentDictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
+    private readonly ConcurrentDictionary<RenderStyle, bool> _initializedRenderers = new();
+
+    private RenderQuality _globalQuality;
+    private bool _isApplyingGlobalQuality;
+
+    private RendererFactory(RenderQuality initialQuality = RenderQuality.Medium)
+    {
+        _globalQuality = initialQuality;
+    }
+
+    public RenderQuality GlobalQuality
     {
         get => _globalQuality;
         set
         {
-            if (_globalQuality == value) return;
+            if (_globalQuality == value || _isApplyingGlobalQuality) return;
 
             var oldQuality = _globalQuality;
             _globalQuality = value;
@@ -26,7 +40,7 @@ public static class RendererFactory
         }
     }
 
-    public static ISpectrumRenderer CreateRenderer(
+    public ISpectrumRenderer CreateRenderer(
         RenderStyle style,
         bool isOverlayActive,
         RenderQuality? quality = null,
@@ -40,16 +54,18 @@ public static class RendererFactory
         return EnsureConfigured(renderer, isOverlayActive, actualQuality);
     }
 
-    public static IEnumerable<ISpectrumRenderer> GetAllRenderers()
+    public IEnumerable<ISpectrumRenderer> GetAllRenderers()
     {
         lock (_lock)
             return [.. _rendererCache.Values];
     }
 
-    public static void ConfigureAllRenderers(
+    public void ConfigureAllRenderers(
         bool? isOverlayActive,
         RenderQuality? quality = null)
     {
+        if (_isApplyingGlobalQuality) return;
+
         lock (_lock)
         {
             foreach (var renderer in _rendererCache.Values)
@@ -64,7 +80,7 @@ public static class RendererFactory
         }
     }
 
-    private static ISpectrumRenderer GetCachedOrCreateRenderer(
+    private ISpectrumRenderer GetCachedOrCreateRenderer(
         RenderStyle style,
         CancellationToken cancellationToken)
     {
@@ -77,26 +93,12 @@ public static class RendererFactory
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (_rendererCache.TryGetValue(style, out cachedRenderer))
-            {
-                return cachedRenderer;
-            }
-
-            return CreateAndCacheRenderer(style);
+            return _rendererCache.GetOrAdd(style, _ => 
+            CreateAndInitializeRenderer(style));
         }
     }
 
-    private static ISpectrumRenderer CreateAndCacheRenderer(RenderStyle style)
-    {
-        var createdRenderer = CreateAndInitializeRenderer(style);
-        _rendererCache[style] = createdRenderer;
-
-        LogRendererCreation(style);
-
-        return createdRenderer;
-    }
-
-    private static ISpectrumRenderer CreateAndInitializeRenderer(RenderStyle style)
+    private ISpectrumRenderer CreateAndInitializeRenderer(RenderStyle style)
     {
         ISpectrumRenderer renderer;
 
@@ -109,19 +111,9 @@ public static class RendererFactory
 
             return renderer;
         }
-        catch (ArgumentException argEx)
+        catch (Exception ex)
         {
-            LogRendererCreationError(style, "Argument error", argEx);
-            throw;
-        }
-        catch (InvalidOperationException ioEx)
-        {
-            LogRendererCreationError(style, "Operation error", ioEx);
-            throw;
-        }
-        catch (Exception unexpectedEx)
-        {
-            LogRendererCreationError(style, "Unexpected error", unexpectedEx);
+            LogRendererCreationError(style, "Error", ex);
             throw;
         }
     }
@@ -146,9 +138,9 @@ public static class RendererFactory
         RenderQuality quality) =>
         renderer.IsOverlayActive != isOverlayActive || renderer.Quality != quality;
 
-    private static void EnsureInitialized(RenderStyle style, ISpectrumRenderer renderer)
+    private void EnsureInitialized(RenderStyle style, ISpectrumRenderer renderer)
     {
-        if (!_initializedRenderers.Contains(style))
+        if (_initializedRenderers.TryAdd(style, true))
         {
             InitializeRenderer(style, renderer);
         }
@@ -158,7 +150,9 @@ public static class RendererFactory
         }
     }
 
-    private static void InitializeRenderer(RenderStyle style, ISpectrumRenderer renderer)
+    private static void InitializeRenderer(
+        RenderStyle style,
+        ISpectrumRenderer renderer)
     {
         ExecuteSafely(
             () => renderer.Initialize(),
@@ -166,7 +160,6 @@ public static class RendererFactory
             $"Initialization error for style {style}"
         );
 
-        _initializedRenderers.Add(style);
         LogRendererInitialized(style);
     }
 
@@ -236,10 +229,8 @@ public static class RendererFactory
     private static void ConfigureOverlayAndQuality(
         ISpectrumRenderer renderer,
         bool isOverlayActive,
-        RenderQuality quality)
-    {
+        RenderQuality quality) =>
         renderer.Configure(isOverlayActive, quality);
-    }
 
     private static void ConfigureOverlayOnly(
         ISpectrumRenderer renderer,
@@ -251,10 +242,28 @@ public static class RendererFactory
         RenderQuality quality) =>
         renderer.Configure(renderer.IsOverlayActive, quality);
 
-    private static void ApplyGlobalQualityToRenderers()
+    private void ApplyGlobalQualityToRenderers()
     {
+        if (_isApplyingGlobalQuality) return;
+
         ExecuteSafely(
-            () => ConfigureAllRenderers(null, _globalQuality),
+            () => {
+                _isApplyingGlobalQuality = true;
+                try
+                {
+                    lock (_lock)
+                    {
+                        foreach (var renderer in _rendererCache.Values)
+                        {
+                            ConfigureRendererSafe(renderer, null, _globalQuality);
+                        }
+                    }
+                }
+                finally
+                {
+                    _isApplyingGlobalQuality = false;
+                }
+            },
             "GlobalQualitySetter",
             $"Failed to apply global quality {_globalQuality}"
         );
@@ -265,14 +274,6 @@ public static class RendererFactory
         Log(LogLevel.Information,
             LogPrefix,
             $"Global quality changed from {oldQuality} to {newQuality}",
-            forceLog: true);
-    }
-
-    private static void LogRendererCreation(RenderStyle style)
-    {
-        Log(LogLevel.Information,
-            LogPrefix,
-            $"Created and initialized renderer for style {style}",
             forceLog: true);
     }
 
@@ -332,8 +333,8 @@ public static class RendererFactory
     }
 
     private static void Safe(
-        Action action,
-        ErrorHandlingOptions options)
+    Action action,
+    ErrorHandlingOptions options)
     {
         try
         {

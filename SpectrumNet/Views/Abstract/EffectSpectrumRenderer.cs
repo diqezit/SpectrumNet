@@ -43,7 +43,11 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
-    protected virtual void OnInitialize() { }
+    protected virtual void OnInitialize() 
+    {
+        if (_isInitialized) return;
+        _isInitialized = true;
+    }
 
     public override void Configure(
         bool isOverlayActive,

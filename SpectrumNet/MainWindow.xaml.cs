@@ -123,9 +123,9 @@ public partial class MainWindow : Window, IAsyncDisposable
             return;
 
         FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
-        FpsLimiter.Instance.TargetFps = 60.0;
 
-        bool shouldRender = !FpsLimiter.Instance.IsEnabled || FpsLimiter.Instance.ShouldRenderFrame();
+        bool shouldRender = !FpsLimiter.Instance.IsEnabled
+            || FpsLimiter.Instance.ShouldRenderFrame();
 
         if (shouldRender)
         {

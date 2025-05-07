@@ -14,7 +14,6 @@ public static class PerformanceMetricsManager
     private static readonly int _processorCount = Environment.ProcessorCount;
     private static readonly double[] _frameTimes = new double[Constants.MAX_FRAMES];
     private static readonly Stopwatch _timer = Stopwatch.StartNew();
-    private static readonly TimeSpan _cpuUpdateInterval = TimeSpan.FromMilliseconds(100);
     private static readonly Queue<PerformanceSnapshot> _performanceHistory = new(Constants.HISTORY_LENGTH);
     private static readonly TimeSpan _snapshotInterval = TimeSpan.FromSeconds(1);
 
@@ -31,10 +30,6 @@ public static class PerformanceMetricsManager
 
     public static event EventHandler<PerformanceMetrics>? PerformanceUpdated;
     public static event EventHandler<PerformanceLevel>? PerformanceLevelChanged;
-    public static PerformanceLevel CurrentPerformanceLevel => _currentLevel;
-    public static float CurrentFps => _fpsCache;
-    public static double CurrentCpuUsage => _cpuUsage;
-    public static TimeSpan UpTime => _timer.Elapsed;
 
     private record struct PerformanceSnapshot(
         float Fps,
@@ -63,7 +58,7 @@ public static class PerformanceMetricsManager
             FPS_SMOOTHING = 0.1f;
 
         public const int
-            MAX_FRAMES = 120,
+            MAX_FRAMES = 360,
             LOG_FREQUENCY = 300,
             HISTORY_LENGTH = 60;
 

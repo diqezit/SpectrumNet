@@ -9,8 +9,9 @@ public sealed class OverlayWindow : Window, IDisposable
     private readonly record struct RenderContext(
         IMainController Controller,
         SKElement SkElement,
-        DispatcherTimer RenderTimer);
-
+        DispatcherTimer RenderTimer,
+        IRendererFactory RendererFactory);
+    
     private readonly OverlayConfiguration _configuration;
     private readonly CancellationTokenSource _disposalTokenSource = new();
     private RenderContext? _renderContext;
@@ -79,8 +80,9 @@ public sealed class OverlayWindow : Window, IDisposable
     {
         var skElement = CreateSkElement();
         var renderTimer = CreateRenderTimer();
+        var rendererFactory = RendererFactory.Instance;
 
-        _renderContext = new(controller, skElement, renderTimer);
+        _renderContext = new(controller, skElement, renderTimer, rendererFactory);
         Content = skElement;
 
         controller.PropertyChanged += OnControllerPropertyChanged;
