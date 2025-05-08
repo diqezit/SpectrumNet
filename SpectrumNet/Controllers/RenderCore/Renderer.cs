@@ -24,9 +24,14 @@ public sealed class Renderer : AsyncDisposableBase
 
     private readonly SKElement? _skElement;
     private RenderState _currentState = default!;
-    private volatile bool _isAnalyzerDisposed;
-    private volatile bool _shouldShowPlaceholder = true;
-    private bool _updatingQuality;
+
+    private volatile bool 
+        _isAnalyzerDisposed,
+        _shouldShowPlaceholder = true;
+
+    private bool 
+        _updatingQuality,
+        _isStyleUpdateInProgress;
 
     public event EventHandler<PerformanceMetrics>? PerformanceUpdate;
 
@@ -99,11 +104,21 @@ public sealed class Renderer : AsyncDisposableBase
 
     public void UpdateRenderStyle(RenderStyle style)
     {
-        if (_isDisposed || _currentState.Style == style) return;
+        if (_isDisposed
+            || _currentState.Style == style
+            || _isStyleUpdateInProgress) return;
 
-        _currentState = _currentState with { Style = style };
-        _frameCache.MarkDirty();
-        RequestRender();
+        try
+        {
+            _isStyleUpdateInProgress = true;
+            _currentState = _currentState with { Style = style };
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+        finally
+        {
+            _isStyleUpdateInProgress = false;
+        }
     }
 
     public void UpdateSpectrumStyle(
@@ -113,20 +128,31 @@ public sealed class Renderer : AsyncDisposableBase
     {
         if (_isDisposed
             || string.IsNullOrEmpty(styleName)
-            || styleName == _currentState.StyleName) return;
+            || styleName == _currentState.StyleName
+            || _isStyleUpdateInProgress) return;
 
-        ExecuteSafely(
-            () => UpdatePaintAndStyleName(styleName, brush),
-            nameof(UpdateSpectrumStyle),
-            "Error updating spectrum style");
+        try
+        {
+            _isStyleUpdateInProgress = true;
+            ExecuteSafely(
+                () => UpdatePaintAndStyleName(styleName, brush),
+                nameof(UpdateSpectrumStyle),
+                "Error updating spectrum style");
 
-        _frameCache.MarkDirty();
-        RequestRender();
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+        finally
+        {
+            _isStyleUpdateInProgress = false;
+        }
     }
 
     public void UpdateRenderQuality(RenderQuality quality)
     {
-        if (_isDisposed || _currentState.Quality == quality || _updatingQuality)
+        if (_isDisposed
+            || _currentState.Quality == quality
+            || _updatingQuality)
             return;
 
         try
@@ -411,7 +437,8 @@ public sealed class Renderer : AsyncDisposableBase
 
     private bool SynchronizeRenderStyle()
     {
-        if (_currentState.Style != _controller.SelectedDrawingType)
+        if (_currentState.Style != _controller.SelectedDrawingType
+            && !_isStyleUpdateInProgress)
         {
             UpdateRenderStyle(_controller.SelectedDrawingType);
             return true;
@@ -422,7 +449,8 @@ public sealed class Renderer : AsyncDisposableBase
     private bool SynchronizeStyleName()
     {
         if (!string.IsNullOrEmpty(_controller.SelectedStyle) &&
-            _controller.SelectedStyle != _currentState.StyleName)
+            _controller.SelectedStyle != _currentState.StyleName &&
+            !_isStyleUpdateInProgress)
         {
             var (clr, br) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
             UpdateSpectrumStyle(_controller.SelectedStyle, clr, br);
@@ -433,7 +461,8 @@ public sealed class Renderer : AsyncDisposableBase
 
     private bool SynchronizeRenderQuality()
     {
-        if (_currentState.Quality != _controller.RenderQuality)
+        if (_currentState.Quality != _controller.RenderQuality
+            && !_updatingQuality)
         {
             UpdateRenderQuality(_controller.RenderQuality);
             return true;
@@ -450,6 +479,7 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void UpdateStyleFromController()
     {
+        if (_isStyleUpdateInProgress) return;
         var (clr, br) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
         UpdateSpectrumStyle(_controller.SelectedStyle, clr, br);
     }
@@ -558,16 +588,18 @@ public sealed class Renderer : AsyncDisposableBase
                 break;
 
             case nameof(IMainController.SelectedDrawingType):
-                UpdateRenderStyle(_controller.SelectedDrawingType);
+                if (!_isStyleUpdateInProgress)
+                    UpdateRenderStyle(_controller.SelectedDrawingType);
                 break;
 
             case nameof(IMainController.SelectedStyle)
-            when !string.IsNullOrEmpty(_controller.SelectedStyle):
+            when !string.IsNullOrEmpty(_controller.SelectedStyle) && !_isStyleUpdateInProgress:
                 UpdateStyleFromController();
                 break;
 
             case nameof(IMainController.RenderQuality):
-                UpdateRenderQuality(_controller.RenderQuality);
+                if (!_updatingQuality)
+                    UpdateRenderQuality(_controller.RenderQuality);
                 break;
 
             case nameof(IMainController.WindowType):

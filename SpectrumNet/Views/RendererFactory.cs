@@ -2,7 +2,7 @@
 
 namespace SpectrumNet.Views;
 
-public class RendererFactory : IRendererFactory
+public sealed class RendererFactory : IRendererFactory
 {
     private const string LOG_PREFIX = "RendererFactory";
 
@@ -16,9 +16,13 @@ public class RendererFactory : IRendererFactory
 
     private readonly ConcurrentDictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
     private readonly ConcurrentDictionary<RenderStyle, bool> _initializedRenderers = new();
+    private readonly ConcurrentDictionary<ISpectrumRenderer, RenderQuality> _rendererQualityState = new();
 
     private RenderQuality _globalQuality;
-    private bool _isApplyingGlobalQuality;
+
+    private bool 
+        _isApplyingGlobalQuality,
+        _suppressConfigEvents;
 
     private RendererFactory(RenderQuality initialQuality = RenderQuality.Medium)
     {
@@ -52,7 +56,23 @@ public class RendererFactory : IRendererFactory
         var actualQuality = quality ?? _globalQuality;
         var renderer = GetCachedOrCreateRenderer(style, cancellationToken);
 
-        return EnsureConfigured(renderer, isOverlayActive, actualQuality);
+        if (!_suppressConfigEvents
+            && ShouldConfigureRenderer(renderer, isOverlayActive, actualQuality))
+        {
+            var oldSuppress = _suppressConfigEvents;
+            try
+            {
+                _suppressConfigEvents = true;
+                ConfigureRendererSafe(renderer, isOverlayActive, actualQuality);
+                _rendererQualityState[renderer] = actualQuality;
+            }
+            finally
+            {
+                _suppressConfigEvents = oldSuppress;
+            }
+        }
+
+        return renderer;
     }
 
     public IEnumerable<ISpectrumRenderer> GetAllRenderers()
@@ -65,14 +85,37 @@ public class RendererFactory : IRendererFactory
         bool? isOverlayActive,
         RenderQuality? quality = null)
     {
-        if (_isApplyingGlobalQuality) return;
+        if (_isApplyingGlobalQuality || _suppressConfigEvents)
+            return;
 
-        lock (_lock)
+        var oldSuppress = _suppressConfigEvents;
+        try
         {
-            foreach (var renderer in _rendererCache.Values)
-                ConfigureRendererSafe(renderer, isOverlayActive, quality);
+            _suppressConfigEvents = true;
+
+            lock (_lock)
+            {
+                foreach (var renderer in _rendererCache.Values)
+                {
+                    var actualQuality = quality ??
+                        (_rendererQualityState.TryGetValue(renderer, out var currentQuality) ?
+                            currentQuality : _globalQuality);
+
+                    var actualOverlay = isOverlayActive ?? renderer.IsOverlayActive;
+
+                    if (ShouldConfigureRenderer(renderer, actualOverlay, actualQuality))
+                    {
+                        ConfigureRendererSafe(renderer, actualOverlay, actualQuality);
+                        _rendererQualityState[renderer] = actualQuality;
+                    }
+                }
+            }
 
             LogRendererConfiguration();
+        }
+        finally
+        {
+            _suppressConfigEvents = oldSuppress;
         }
     }
 
@@ -110,25 +153,21 @@ public class RendererFactory : IRendererFactory
         }
     }
 
-    private static ISpectrumRenderer EnsureConfigured(
+    private bool ShouldConfigureRenderer(
         ISpectrumRenderer renderer,
         bool isOverlayActive,
         RenderQuality quality)
     {
-        if (NeedsConfiguration(renderer, isOverlayActive, quality))
-        {
-            ConfigureRendererSafe(renderer, isOverlayActive, quality);
-            LogRendererConfigured(isOverlayActive, quality);
-        }
+        if (_isApplyingGlobalQuality)
+            return false;
 
-        return renderer;
+        if (_rendererQualityState.TryGetValue(renderer, out var currentQuality) &&
+            currentQuality == quality &&
+            renderer.IsOverlayActive == isOverlayActive)
+            return false;
+
+        return true;
     }
-
-    private static bool NeedsConfiguration(
-        ISpectrumRenderer renderer,
-        bool isOverlayActive,
-        RenderQuality quality) =>
-        renderer.IsOverlayActive != isOverlayActive || renderer.Quality != quality;
 
     private void EnsureInitialized(RenderStyle style, ISpectrumRenderer renderer)
     {
@@ -227,21 +266,29 @@ public class RendererFactory : IRendererFactory
 
     private void ApplyGlobalQualityToRenderers()
     {
-        if (_isApplyingGlobalQuality) return;
+        if (_isApplyingGlobalQuality)
+            return;
 
         Safe(() =>
         {
+            var oldSuppress = _suppressConfigEvents;
             _isApplyingGlobalQuality = true;
             try
             {
+                _suppressConfigEvents = true;
+
                 lock (_lock)
                 {
                     foreach (var renderer in _rendererCache.Values)
+                    {
                         ConfigureRendererSafe(renderer, null, _globalQuality);
+                        _rendererQualityState[renderer] = _globalQuality;
+                    }
                 }
             }
             finally
             {
+                _suppressConfigEvents = oldSuppress;
                 _isApplyingGlobalQuality = false;
             }
         },
@@ -282,14 +329,6 @@ public class RendererFactory : IRendererFactory
             LOG_PREFIX,
             $"Renderer for style {style} already initialized",
             forceLog: true);
-    }
-
-    private static void LogRendererConfigured(bool isOverlayActive, RenderQuality quality)
-    {
-        Log(LogLevel.Debug,
-            LOG_PREFIX,
-            $"Configured renderer to overlay={isOverlayActive}, quality={quality}",
-            forceLog: false);
     }
 
     private static void LogRendererConfiguration()
