@@ -5,8 +5,11 @@ namespace SpectrumNet.Views.Abstract;
 public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 {
     private const string LOG_PREFIX = nameof(BaseSpectrumRenderer);
-    private const float DEFAULT_SMOOTHING_FACTOR = 0.3f;
-    private const float OVERLAY_SMOOTHING_FACTOR = 0.5f;
+
+    private const float 
+        DEFAULT_SMOOTHING_FACTOR = 0.3f,
+        OVERLAY_SMOOTHING_FACTOR = 0.5f;
+
     private const int PARALLEL_BATCH_SIZE = 32;
 
     protected const float MIN_MAGNITUDE_THRESHOLD = 0.01f;
@@ -14,7 +17,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected bool
         _isInitialized,
         _disposed,
-        _isOverlayActive;
+        _isOverlayActive,
+        _updatingQuality;
 
     protected float[]? _previousSpectrum;
     protected float[]? _processedSpectrum;
@@ -35,10 +39,18 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         get => _quality;
         set
         {
-            if (_quality != value)
+            if (_quality != value && !_updatingQuality)
             {
-                _quality = value;
-                ApplyQualitySettings();
+                try
+                {
+                    _updatingQuality = true;
+                    _quality = value;
+                    ApplyQualitySettings();
+                }
+                finally
+                {
+                    _updatingQuality = false;
+                }
             }
         }
     }
@@ -49,7 +61,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected SKSamplingOptions SamplingOptions => _samplingOptions;
 
     public virtual void Initialize() => ExecuteSafely(
-        action: () =>
+        () =>
         {
             if (!_isInitialized)
             {
@@ -59,22 +71,35 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                     "Initialized");
             }
         },
-        source: nameof(Initialize),
-        errorMessage: "Failed to initialize renderer");
+        nameof(Initialize),
+        "Failed to initialize renderer");
 
     public virtual void Configure(
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium) => ExecuteSafely(
-        action: () =>
+        () =>
         {
             _isOverlayActive = isOverlayActive;
             _smoothingFactor = isOverlayActive
                 ? OVERLAY_SMOOTHING_FACTOR
                 : DEFAULT_SMOOTHING_FACTOR;
-            Quality = quality;
+
+            if (_quality != quality && !_updatingQuality)
+            {
+                try
+                {
+                    _updatingQuality = true;
+                    _quality = quality;
+                    ApplyQualitySettings();
+                }
+                finally
+                {
+                    _updatingQuality = false;
+                }
+            }
         },
-        source: nameof(Configure),
-        errorMessage: "Failed to configure renderer");
+        nameof(Configure),
+        "Failed to configure renderer");
 
     public abstract void Render(
         SKCanvas? canvas,
@@ -87,7 +112,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo);
 
     public virtual void Dispose() => ExecuteSafely(
-        action: () =>
+        () =>
         {
             if (!_disposed)
             {
@@ -101,8 +126,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                 GC.SuppressFinalize(this);
             }
         },
-        source: nameof(Dispose),
-        errorMessage: "Error during base disposal");
+        nameof(Dispose),
+        "Error during base disposal");
 
     protected static void ExecuteSafely(
         Action action,
@@ -115,6 +140,75 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                 Source = $"{LOG_PREFIX}.{source}",
                 ErrorMessage = errorMessage
             });
+
+    protected virtual void ApplyQualitySettings() => ExecuteSafely(
+        () =>
+        {
+            if (_updatingQuality)
+                return;
+
+            try
+            {
+                _updatingQuality = true;
+                (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
+                _samplingOptions = QualityBasedSamplingOptions();
+            }
+            finally
+            {
+                _updatingQuality = false;
+            }
+        },
+        nameof(ApplyQualitySettings),
+        "Failed to apply quality settings");
+
+    protected virtual (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
+        Quality switch
+        {
+            RenderQuality.Low => (false, false),
+            RenderQuality.Medium => (true, true),
+            RenderQuality.High => (true, true),
+            _ => (true, true)
+        };
+
+    protected virtual SKSamplingOptions QualityBasedSamplingOptions() =>
+        Quality switch
+        {
+            RenderQuality.Low => new SKSamplingOptions(
+                SKFilterMode.Nearest,
+                SKMipmapMode.None),
+            RenderQuality.Medium => new SKSamplingOptions(
+                SKFilterMode.Linear,
+                SKMipmapMode.Linear),
+            RenderQuality.High => new SKSamplingOptions(
+                SKFilterMode.Linear,
+                SKMipmapMode.Linear),
+            _ => new SKSamplingOptions(
+                SKFilterMode.Linear,
+                SKMipmapMode.Linear)
+        };
+
+    protected bool QuickValidate(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint) =>
+        _isInitialized
+        && canvas != null
+        && spectrum != null
+        && spectrum.Length > 0
+        && paint != null
+        && info.Width > 0
+        && info.Height > 0;
+
+    protected static bool IsRenderAreaVisible(
+        SKCanvas? canvas,
+        float x,
+        float y,
+        float width,
+        float height) =>
+        canvas == null ||
+        !canvas.QuickReject(
+            new SKRect(x, y, x + width, y + height));
 
     protected (bool isValid, float[]? processedSpectrum) PrepareRender(
         SKCanvas? canvas,
@@ -256,65 +350,6 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
             }
         }
     }
-
-    protected virtual void ApplyQualitySettings() => ExecuteSafely(
-        action: () =>
-        {
-            (_useAntiAlias,
-             _useAdvancedEffects) = QualityBasedSettings();
-            _samplingOptions = QualityBasedSamplingOptions();
-        },
-        source: nameof(ApplyQualitySettings),
-        errorMessage: "Failed to apply quality settings");
-
-    protected virtual (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
-        Quality switch
-        {
-            RenderQuality.Low => (false, false),
-            RenderQuality.Medium => (true, true),
-            RenderQuality.High => (true, true),
-            _ => (true, true)
-        };
-
-    protected virtual SKSamplingOptions QualityBasedSamplingOptions() =>
-        Quality switch
-        {
-            RenderQuality.Low => new SKSamplingOptions(
-                SKFilterMode.Nearest,
-                SKMipmapMode.None),
-            RenderQuality.Medium => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear),
-            RenderQuality.High => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear),
-            _ => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear)
-        };
-
-    protected bool QuickValidate(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint) =>
-        _isInitialized
-        && canvas != null
-        && spectrum != null
-        && spectrum.Length > 0
-        && paint != null
-        && info.Width > 0
-        && info.Height > 0;
-
-    protected static bool IsRenderAreaVisible(
-        SKCanvas? canvas,
-        float x,
-        float y,
-        float width,
-        float height) =>
-        canvas == null ||
-        !canvas.QuickReject(
-            new SKRect(x, y, x + width, y + height));
 
     private static void ScaleSpectrumParallel(
         float[] spectrum,

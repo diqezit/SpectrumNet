@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.BarsRenderer.Constants;
+using static SpectrumNet.Views.Renderers.BarsRenderer.Constants.Quality;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
@@ -60,8 +61,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
     private float _glowRadius;
     private bool _useGlowEffect;
-    private new bool _useAntiAlias;
-    private new bool _useAdvancedEffects;
+    private volatile bool _isConfiguring;
 
     private SKRect _lastRenderArea = SKRect.Empty;
     private SKMatrix _lastTransform = SKMatrix.Identity;
@@ -84,15 +84,30 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium)
     {
+        if (_isConfiguring) return;
+
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
-
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                    || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettings();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
             "Configure",
@@ -103,9 +118,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     protected override void OnConfigurationChanged()
     {
         ExecuteSafely(
-            () =>
-            {
-            },
+            () => { },
             "OnConfigurationChanged",
             "Failed to apply configuration changes"
         );
@@ -113,59 +126,78 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
     protected override void ApplyQualitySettings()
     {
+        if (_isConfiguring) return;
+
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                try
+                {
+                    _isConfiguring = true;
+
+                    switch (Quality)
+                    {
+                        case RenderQuality.Low:
+                            LowQualitySettings();
+                            break;
+
+                        case RenderQuality.Medium:
+                            MediumQualitySettings();
+                            break;
+
+                        case RenderQuality.High:
+                            HighQualitySettings();
+                            break;
+                    }
+
+                    _samplingOptions = QualityBasedSamplingOptions();
+
+                    Log(LogLevel.Debug,
+                        LOG_PREFIX,
+                        $"Quality changed to {Quality}");
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
             "ApplyQualitySettings",
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualityBasedSettings()
+    private void HighQualitySettings()
     {
-        switch (Quality)
+        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useGlowEffect = HIGH_USE_GLOW_EFFECT;
+        _glowRadius = HIGH_GLOW_RADIUS;
+    }
+
+    private void MediumQualitySettings()
+    {
+        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useGlowEffect = MEDIUM_USE_GLOW_EFFECT;
+        _glowRadius = MEDIUM_GLOW_RADIUS;
+    }
+
+    private void LowQualitySettings()
+    {
+        _useAntiAlias = LOW_USE_ANTI_ALIAS;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useGlowEffect = LOW_USE_GLOW_EFFECT;
+        _glowRadius = LOW_GLOW_RADIUS;
+    }
+
+    protected override SKSamplingOptions QualityBasedSamplingOptions() =>
+        Quality switch
         {
-            case RenderQuality.Low:
-                ApplyLowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                ApplyHighQualitySettings();
-                break;
-        }
-    }
-
-    private void ApplyLowQualitySettings()
-    {
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTI_ALIAS;
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _useGlowEffect = Constants.Quality.LOW_USE_GLOW_EFFECT;
-        _glowRadius = Constants.Quality.LOW_GLOW_RADIUS;
-    }
-
-    private void ApplyMediumQualitySettings()
-    {
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTI_ALIAS;
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _useGlowEffect = Constants.Quality.MEDIUM_USE_GLOW_EFFECT;
-        _glowRadius = Constants.Quality.MEDIUM_GLOW_RADIUS;
-    }
-
-    private void ApplyHighQualitySettings()
-    {
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTI_ALIAS;
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _useGlowEffect = Constants.Quality.HIGH_USE_GLOW_EFFECT;
-        _glowRadius = Constants.Quality.HIGH_GLOW_RADIUS;
-    }
+            RenderQuality.Low => new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None),
+            RenderQuality.Medium => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
+            RenderQuality.High => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
+            _ => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear)
+        };
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -487,26 +519,24 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     public override void Dispose()
     {
         if (_disposed) return;
+
         ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
+            () => OnDispose(),
             "Dispose",
             "Error during disposal"
         );
+
         _disposed = true;
+        base.Dispose();
         GC.SuppressFinalize(this);
+
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     protected override void OnDispose()
     {
         ExecuteSafely(
-            () =>
-            {
-                base.OnDispose();
-            },
+            () => base.OnDispose(),
             "OnDispose",
             "Error during specific disposal"
         );
