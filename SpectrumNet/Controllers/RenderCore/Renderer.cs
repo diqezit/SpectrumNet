@@ -5,7 +5,7 @@ namespace SpectrumNet.Controllers.RenderCore;
 public sealed class Renderer : AsyncDisposableBase
 {
     private const string DEFAULT_STYLE = "Solid";
-    private const string LogPrefix = "Renderer";
+    private const string LOG_PREFIX = "Renderer";
 
     private record RenderState(
         SKPaint Paint,
@@ -67,7 +67,7 @@ public sealed class Renderer : AsyncDisposableBase
         var (_, brush) = _spectrumStyles.GetColorAndBrush(DEFAULT_STYLE);
         _currentState = new RenderState(
             brush.Clone()
-            ?? throw new InvalidOperationException($"{LogPrefix} Failed to initialize {DEFAULT_STYLE} style"),
+            ?? throw new InvalidOperationException($"{LOG_PREFIX} Failed to initialize {DEFAULT_STYLE} style"),
             _controller.SelectedDrawingType,
             DEFAULT_STYLE,
             RenderQuality.Medium);
@@ -126,9 +126,8 @@ public sealed class Renderer : AsyncDisposableBase
 
     public void UpdateRenderQuality(RenderQuality quality)
     {
-        if (_isDisposed
-            || _currentState.Quality == quality
-            || _updatingQuality) return;
+        if (_isDisposed || _currentState.Quality == quality || _updatingQuality)
+            return;
 
         try
         {
@@ -152,13 +151,9 @@ public sealed class Renderer : AsyncDisposableBase
         }
 
         if (ShouldRenderNewFrame())
-        {
             RenderNewFrame(sender, e);
-        }
         else
-        {
             RenderCachedFrame(e);
-        }
     }
 
     private bool ShouldSkipRenderingFrame(object? sender) =>
@@ -177,7 +172,7 @@ public sealed class Renderer : AsyncDisposableBase
             () => RenderFrameInternal(e.Surface.Canvas, e.Info),
             new ErrorHandlingOptions
             {
-                Source = LogPrefix,
+                Source = LOG_PREFIX,
                 ErrorMessage = "Error rendering frame",
                 ExceptionHandler = ex => HandleRenderFrameException(ex, e.Surface.Canvas, e.Info)
             });
@@ -298,7 +293,7 @@ public sealed class Renderer : AsyncDisposableBase
         if (_currentState.Style != expectedStyle)
         {
             Log(LogLevel.Warning,
-                LogPrefix,
+                LOG_PREFIX,
                 $"RenderFrameInternal: " +
                 $"Style changed from {expectedStyle} " +
                 $"to {_currentState.Style} after getting renderer, resetting",
@@ -337,7 +332,7 @@ public sealed class Renderer : AsyncDisposableBase
 
     private static void LogSpectrumDataError(Exception ex) =>
         Log(LogLevel.Error,
-            LogPrefix,
+            LOG_PREFIX,
             $"Error getting spectrum data: {ex.Message}");
 
     private bool TryCalculateRenderParameters(
@@ -365,13 +360,9 @@ public sealed class Renderer : AsyncDisposableBase
         barWidth = MathF.Max((totalWidth - (barCount - 1) * barSpacing) / barCount, 1.0f);
 
         if (barCount > 1)
-        {
             barSpacing = (totalWidth - barCount * barWidth) / (barCount - 1);
-        }
         else
-        {
             barSpacing = 0;
-        }
 
         return barWidth >= 1.0f;
     }
@@ -389,13 +380,9 @@ public sealed class Renderer : AsyncDisposableBase
     private void HandleRenderFrameException(Exception ex, SKCanvas canvas, SKImageInfo info)
     {
         if (ex is ObjectDisposedException)
-        {
             HandleObjectDisposedException();
-        }
         else if (!_isDisposed)
-        {
             RenderPlaceholder(canvas, info);
-        }
     }
 
     private void HandleObjectDisposedException() =>
@@ -491,7 +478,7 @@ public sealed class Renderer : AsyncDisposableBase
 
     private static void LogInvalidDimensions(int width, int height) =>
         Log(LogLevel.Warning,
-            LogPrefix,
+            LOG_PREFIX,
             $"Invalid dimensions: {width}x{height}");
 
     private bool IsSkipRendering(object? sender) =>
@@ -528,7 +515,8 @@ public sealed class Renderer : AsyncDisposableBase
         });
     }
 
-    private void OnAnalyzerDisposed(object? sender, EventArgs e) => _isAnalyzerDisposed = true;
+    private void OnAnalyzerDisposed(object? sender, EventArgs e) =>
+        _isAnalyzerDisposed = true;
 
     private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics) =>
         PerformanceUpdate?.Invoke(this, metrics);
@@ -607,7 +595,8 @@ public sealed class Renderer : AsyncDisposableBase
         RequestRender();
     }
 
-    protected override void DisposeManaged() => CleanUp("Renderer disposed");
+    protected override void DisposeManaged() =>
+        CleanUp("Renderer disposed");
 
     protected override ValueTask DisposeAsyncManagedResources()
     {
@@ -657,7 +646,7 @@ public sealed class Renderer : AsyncDisposableBase
     private static void ExecuteSafely(Action action, string source, string errorMessage) =>
         Safe(action, new ErrorHandlingOptions
         {
-            Source = $"{LogPrefix}.{source}",
+            Source = $"{LOG_PREFIX}.{source}",
             ErrorMessage = errorMessage
         });
 

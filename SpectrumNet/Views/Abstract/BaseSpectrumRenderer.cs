@@ -6,7 +6,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 {
     private const string LOG_PREFIX = nameof(BaseSpectrumRenderer);
 
-    private const float 
+    private const float
         DEFAULT_SMOOTHING_FACTOR = 0.3f,
         OVERLAY_SMOOTHING_FACTOR = 0.5f;
 
@@ -17,8 +17,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected bool
         _isInitialized,
         _disposed,
-        _isOverlayActive,
-        _updatingQuality;
+        _isOverlayActive;
 
     protected float[]? _previousSpectrum;
     protected float[]? _processedSpectrum;
@@ -29,7 +28,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         SKFilterMode.Linear,
         SKMipmapMode.Linear);
     protected bool _useAdvancedEffects = true;
-    protected RenderQuality _quality = RenderQuality.Medium;
+    protected RenderQuality _quality;
+    protected bool _updatingQuality;
 
     protected readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
     protected readonly object _spectrumLock = new();
@@ -39,18 +39,18 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         get => _quality;
         set
         {
-            if (_quality != value && !_updatingQuality)
+            if (_quality == value || _updatingQuality)
+                return;
+
+            try
             {
-                try
-                {
-                    _updatingQuality = true;
-                    _quality = value;
-                    ApplyQualitySettings();
-                }
-                finally
-                {
-                    _updatingQuality = false;
-                }
+                _updatingQuality = true;
+                _quality = value;
+                ApplyQualitySettings();
+            }
+            finally
+            {
+                _updatingQuality = false;
             }
         }
     }
@@ -60,46 +60,46 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected bool UseAdvancedEffects => _useAdvancedEffects;
     protected SKSamplingOptions SamplingOptions => _samplingOptions;
 
-    public virtual void Initialize() => ExecuteSafely(
-        () =>
-        {
-            if (!_isInitialized)
+    public virtual void Initialize() =>
+        ExecuteSafely(
+            () =>
             {
-                _isInitialized = true;
-                Log(LogLevel.Debug,
-                    GetType().Name,
-                    "Initialized");
-            }
-        },
-        nameof(Initialize),
-        "Failed to initialize renderer");
+                if (!_isInitialized)
+                {
+                    _isInitialized = true;
+                    Log(LogLevel.Debug, GetType().Name, "Initialized");
+                }
+            },
+            nameof(Initialize),
+            "Failed to initialize renderer");
 
     public virtual void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium) => ExecuteSafely(
-        () =>
-        {
-            _isOverlayActive = isOverlayActive;
-            _smoothingFactor = isOverlayActive
-                ? OVERLAY_SMOOTHING_FACTOR
-                : DEFAULT_SMOOTHING_FACTOR;
-
-            if (_quality != quality && !_updatingQuality)
+        RenderQuality quality = RenderQuality.Medium) =>
+        ExecuteSafely(
+            () =>
             {
-                try
+                _isOverlayActive = isOverlayActive;
+                _smoothingFactor = isOverlayActive
+                    ? OVERLAY_SMOOTHING_FACTOR
+                    : DEFAULT_SMOOTHING_FACTOR;
+
+                if (_quality != quality && !_updatingQuality)
                 {
-                    _updatingQuality = true;
-                    _quality = quality;
-                    ApplyQualitySettings();
+                    try
+                    {
+                        _updatingQuality = true;
+                        _quality = quality;
+                        ApplyQualitySettings();
+                    }
+                    finally
+                    {
+                        _updatingQuality = false;
+                    }
                 }
-                finally
-                {
-                    _updatingQuality = false;
-                }
-            }
-        },
-        nameof(Configure),
-        "Failed to configure renderer");
+            },
+            nameof(Configure),
+            "Failed to configure renderer");
 
     public abstract void Render(
         SKCanvas? canvas,
@@ -111,23 +111,22 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         SKPaint? paint,
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo);
 
-    public virtual void Dispose() => ExecuteSafely(
-        () =>
-        {
-            if (!_disposed)
+    public virtual void Dispose() =>
+        ExecuteSafely(
+            () =>
             {
-                _spectrumSemaphore.Dispose();
-                _previousSpectrum = null;
-                _processedSpectrum = null;
-                Log(LogLevel.Debug,
-                    GetType().Name,
-                    "Disposed");
-                _disposed = true;
-                GC.SuppressFinalize(this);
-            }
-        },
-        nameof(Dispose),
-        "Error during base disposal");
+                if (!_disposed)
+                {
+                    _spectrumSemaphore.Dispose();
+                    _previousSpectrum = null;
+                    _processedSpectrum = null;
+                    Log(LogLevel.Debug, GetType().Name, "Disposed");
+                    _disposed = true;
+                    GC.SuppressFinalize(this);
+                }
+            },
+            nameof(Dispose),
+            "Error during base disposal");
 
     protected static void ExecuteSafely(
         Action action,
@@ -141,28 +140,29 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                 ErrorMessage = errorMessage
             });
 
-    protected virtual void ApplyQualitySettings() => ExecuteSafely(
-        () =>
-        {
-            if (_updatingQuality)
-                return;
+    protected virtual void ApplyQualitySettings() =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_updatingQuality)
+                    return;
 
-            try
-            {
-                _updatingQuality = true;
-                (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
-                _samplingOptions = QualityBasedSamplingOptions();
-            }
-            finally
-            {
-                _updatingQuality = false;
-            }
-        },
-        nameof(ApplyQualitySettings),
-        "Failed to apply quality settings");
+                try
+                {
+                    _updatingQuality = true;
+                    (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
+                    _samplingOptions = QualityBasedSamplingOptions();
+                }
+                finally
+                {
+                    _updatingQuality = false;
+                }
+            },
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings");
 
     protected virtual (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
-        Quality switch
+        _quality switch
         {
             RenderQuality.Low => (false, false),
             RenderQuality.Medium => (true, true),
@@ -171,20 +171,12 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         };
 
     protected virtual SKSamplingOptions QualityBasedSamplingOptions() =>
-        Quality switch
+        _quality switch
         {
-            RenderQuality.Low => new SKSamplingOptions(
-                SKFilterMode.Nearest,
-                SKMipmapMode.None),
-            RenderQuality.Medium => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear),
-            RenderQuality.High => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear),
-            _ => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear)
+            RenderQuality.Low => new(SKFilterMode.Nearest, SKMipmapMode.None),
+            RenderQuality.Medium => new(SKFilterMode.Linear, SKMipmapMode.Linear),
+            RenderQuality.High => new(SKFilterMode.Linear, SKMipmapMode.Linear),
+            _ => new(SKFilterMode.Linear, SKMipmapMode.Linear)
         };
 
     protected bool QuickValidate(
@@ -207,8 +199,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         float width,
         float height) =>
         canvas == null ||
-        !canvas.QuickReject(
-            new SKRect(x, y, x + width, y + height));
+        !canvas.QuickReject(new SKRect(x, y, x + width, y + height));
 
     protected (bool isValid, float[]? processedSpectrum) PrepareRender(
         SKCanvas? canvas,
@@ -217,32 +208,20 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         int barCount,
         SKPaint? paint)
     {
-        if (!QuickValidate(canvas,
-                spectrum,
-                info,
-                paint))
-        {
+        if (!QuickValidate(canvas, spectrum, info, paint))
             return (false, null);
-        }
 
         var cv = canvas!;
         var spec = spectrum!;
-        var rect = new SKRect(
-            0,
-            0,
-            info.Width,
-            info.Height);
+        var rect = new SKRect(0, 0, info.Width, info.Height);
+
         if (cv.QuickReject(rect))
-        {
             return (false, null);
-        }
 
         int length = spec.Length;
         int count = Min(length, barCount);
-        float[] processed = PrepareSpectrum(
-            spec,
-            count,
-            length);
+        float[] processed = PrepareSpectrum(spec, count, length);
+
         return (true, processed);
     }
 
@@ -255,23 +234,9 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         float blockSize = spectrumLength / (float)targetCount;
 
         if (targetCount >= PARALLEL_BATCH_SIZE && IsHardwareAccelerated)
-        {
-            ScaleSpectrumParallel(
-                spectrum,
-                result,
-                targetCount,
-                spectrumLength,
-                blockSize);
-        }
+            ScaleSpectrumParallel(spectrum, result, targetCount, spectrumLength, blockSize);
         else
-        {
-            ScaleSpectrumSequential(
-                spectrum,
-                result,
-                targetCount,
-                spectrumLength,
-                blockSize);
-        }
+            ScaleSpectrumSequential(spectrum, result, targetCount, spectrumLength, blockSize);
 
         return result;
     }
@@ -282,37 +247,18 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         float? customFactor = null)
     {
         float factor = customFactor ?? _smoothingFactor;
-        if (_previousSpectrum == null ||
-            _previousSpectrum.Length != targetCount)
+        if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
         {
             _previousSpectrum = new float[targetCount];
             if (spectrum.Length >= targetCount)
-            {
-                Array.Copy(
-                    spectrum,
-                    _previousSpectrum,
-                    targetCount);
-            }
+                Array.Copy(spectrum, _previousSpectrum, targetCount);
         }
 
         var smoothed = new float[targetCount];
-        if (IsHardwareAccelerated &&
-            targetCount >= Vector<float>.Count)
-        {
-            SmoothSpectrumVectorized(
-                spectrum,
-                smoothed,
-                targetCount,
-                factor);
-        }
+        if (IsHardwareAccelerated && targetCount >= Vector<float>.Count)
+            SmoothSpectrumVectorized(spectrum, smoothed, targetCount, factor);
         else
-        {
-            SmoothSpectrumSequential(
-                spectrum,
-                smoothed,
-                targetCount,
-                factor);
-        }
+            SmoothSpectrumSequential(spectrum, smoothed, targetCount, factor);
 
         return smoothed;
     }
@@ -327,27 +273,15 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         {
             locked = _spectrumSemaphore.Wait(0);
             if (locked)
-            {
-                PerformSpectrumProcessing(
-                    spectrum,
-                    targetCount,
-                    spectrumLength);
-            }
+                PerformSpectrumProcessing(spectrum, targetCount, spectrumLength);
 
             lock (_spectrumLock)
-            {
-                return GetProcessedSpectrum(
-                    spectrum,
-                    targetCount,
-                    spectrumLength);
-            }
+                return GetProcessedSpectrum(spectrum, targetCount, spectrumLength);
         }
         finally
         {
             if (locked)
-            {
                 _spectrumSemaphore.Release();
-            }
         }
     }
 
@@ -358,22 +292,14 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         int length,
         float blockSize)
     {
-        Parallel.For(
-            0,
-            count,
-            i =>
-            {
-                int start = (int)(i * blockSize);
-                int end = Min(
-                    (int)((i + 1) * blockSize),
-                    length);
-                target[i] = end > start
-                    ? CalculateBlockAverage(
-                        spectrum,
-                        start,
-                        end)
-                    : 0;
-            });
+        Parallel.For(0, count, i =>
+        {
+            int start = (int)(i * blockSize);
+            int end = Min((int)((i + 1) * blockSize), length);
+            target[i] = end > start
+                ? CalculateBlockAverage(spectrum, start, end)
+                : 0;
+        });
     }
 
     private static void ScaleSpectrumSequential(
@@ -386,14 +312,9 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         for (int i = 0; i < count; i++)
         {
             int start = (int)(i * blockSize);
-            int end = Min(
-                (int)((i + 1) * blockSize),
-                length);
+            int end = Min((int)((i + 1) * blockSize), length);
             target[i] = end > start
-                ? CalculateBlockAverage(
-                    spectrum,
-                    start,
-                    end)
+                ? CalculateBlockAverage(spectrum, start, end)
                 : 0;
         }
     }
@@ -406,6 +327,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     {
         var previous = _previousSpectrum ?? throw new InvalidOperationException(
             "Previous spectrum not initialized");
+
         int vecSize = Vector<float>.Count;
         int limit = count - count % vecSize;
 
@@ -418,12 +340,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
             blend.CopyTo(previous, i);
         }
 
-        SmoothSpectrumSequential(
-            spectrum,
-            smoothed,
-            count,
-            smoothing,
-            limit);
+        SmoothSpectrumSequential(spectrum, smoothed, count, smoothing, limit);
     }
 
     private void SmoothSpectrumSequential(
@@ -435,6 +352,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     {
         var previous = _previousSpectrum ?? throw new InvalidOperationException(
             "Previous spectrum not initialized");
+
         for (int i = startIndex; i < count; i++)
         {
             float current = spectrum[i];
@@ -450,13 +368,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         int count,
         int length)
     {
-        var scaled = ScaleSpectrum(
-            spectrum,
-            count,
-            length);
-        _processedSpectrum = SmoothSpectrum(
-            scaled,
-            count);
+        var scaled = ScaleSpectrum(spectrum, count, length);
+        _processedSpectrum = SmoothSpectrum(scaled, count);
     }
 
     private float[] GetProcessedSpectrum(
@@ -465,17 +378,10 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         int length)
     {
         if (_processedSpectrum != null && _processedSpectrum.Length == count)
-        {
             return _processedSpectrum;
-        }
 
-        var scaled = ScaleSpectrum(
-            spectrum,
-            count,
-            length);
-        _processedSpectrum = SmoothSpectrum(
-            scaled,
-            count);
+        var scaled = ScaleSpectrum(spectrum, count, length);
+        _processedSpectrum = SmoothSpectrum(scaled, count);
         return _processedSpectrum;
     }
 

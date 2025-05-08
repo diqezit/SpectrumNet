@@ -4,18 +4,18 @@ namespace SpectrumNet.Views.Abstract;
 
 public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 {
-    private const int DefaultPoolSize = 5;
+    private const int DEFAULT_POOL_SIZE = 5;
     private const string LOG_PREFIX = nameof(EffectSpectrumRenderer);
 
     protected readonly ObjectPool<SKPath> _pathPool = new(
         () => new SKPath(),
         path => path.Reset(),
-        DefaultPoolSize);
+        DEFAULT_POOL_SIZE);
 
     protected readonly ObjectPool<SKPaint> _paintPool = new(
         () => new SKPaint(),
         paint => paint.Reset(),
-        DefaultPoolSize);
+        DEFAULT_POOL_SIZE);
 
     private readonly object _renderLock = new();
     protected float _time;
@@ -43,7 +43,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
-    protected virtual void OnInitialize() 
+    protected virtual void OnInitialize()
     {
         if (_isInitialized) return;
         _isInitialized = true;
@@ -64,6 +64,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         base.Configure(isOverlayActive, quality);
         _isOverlayActive = isOverlayActive;
         Quality = quality;
+
         if (configChanged)
             OnConfigurationChanged();
     }
@@ -86,11 +87,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             info,
             barCount,
             paint);
+
         if (!isValid)
         {
-            drawPerformanceInfo?.Invoke(
-                canvas!,
-                info);
+            drawPerformanceInfo?.Invoke(canvas!, info);
             return;
         }
 
@@ -111,9 +111,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             nameof(Render),
             "Error during rendering");
 
-        drawPerformanceInfo?.Invoke(
-            cv,
-            info);
+        drawPerformanceInfo?.Invoke(cv, info);
     }
 
     private void RenderLocked(
@@ -136,6 +134,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
                 barSpacing,
                 processedSpectrum.Length,
                 paint);
+
             RenderEffect(
                 canvas,
                 processedSpectrum,
@@ -144,6 +143,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
                 barSpacing,
                 processedSpectrum.Length,
                 paint);
+
             AfterRender(
                 canvas,
                 processedSpectrum,
@@ -207,18 +207,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     protected override SKSamplingOptions QualityBasedSamplingOptions() =>
         Quality switch
         {
-            RenderQuality.Low => new SKSamplingOptions(
-                SKFilterMode.Nearest,
-                SKMipmapMode.None),
-            RenderQuality.Medium => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear),
-            RenderQuality.High => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear),
-            _ => new SKSamplingOptions(
-                SKFilterMode.Linear,
-                SKMipmapMode.Linear)
+            RenderQuality.Low => new(SKFilterMode.Nearest, SKMipmapMode.None),
+            RenderQuality.Medium => new(SKFilterMode.Linear, SKMipmapMode.Linear),
+            RenderQuality.High => new(SKFilterMode.Linear, SKMipmapMode.Linear),
+            _ => new(SKFilterMode.Linear, SKMipmapMode.Linear)
         };
 
     protected virtual void BeforeRender(
