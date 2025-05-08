@@ -179,15 +179,21 @@ public sealed class OverlayWindow : Window, IDisposable
     private void StartRenderTimer() =>
         _renderContext?.RenderTimer.Start();
 
-    private void OnKeyDown(object sender, KeyEventArgs e) =>
-        HandleEscapeKey(e);
-
-    private void HandleEscapeKey(KeyEventArgs e)
+    private void OnKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Escape)
         {
             e.Handled = true;
             Close();
+            return; 
+        }
+
+        if (_renderContext is not null)
+        {
+            if (_renderContext.Value.Controller.HandleKeyDown(e, this)) 
+            {
+                e.Handled = true;
+            }
         }
     }
 
