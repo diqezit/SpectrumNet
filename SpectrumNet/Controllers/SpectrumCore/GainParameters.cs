@@ -55,7 +55,7 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
             return;
 
         field = value;
-        SafeExecute(() =>
+        Safe(() =>
         {
             if (_context != null)
                 _context.Post(_ => PropertyChanged?.Invoke(
@@ -63,10 +63,8 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
             else
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         },
-        new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = $"Error notifying property change: {propertyName}"
-        });
+         LOG_SOURCE,
+         $"Error notifying property change: {propertyName}"
+        );
     }
 }

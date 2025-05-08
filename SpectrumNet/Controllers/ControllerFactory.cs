@@ -436,8 +436,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public bool HandleKeyDown(KeyEventArgs e, IInputElement? focusedElement) =>
         _inputController.HandleKeyDown(e, focusedElement);
 
-    public void OnPropertyChanged(params string[] propertyNames) =>
-        ExecuteSafely(() =>
+    public void OnPropertyChanged(params string[] propertyNames)
+    {
+        Safe(() =>
         {
             if (PropertyChanged == null) return;
 
@@ -445,8 +446,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
                 Dispatcher.Invoke(() =>
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name)));
         },
-        nameof(OnPropertyChanged),
+        $"{LOG_PREFIX}.{nameof(OnPropertyChanged)}",
         "Error notifying property change");
+    }
 
     public void DisposeResources() => Dispose();
 
@@ -509,11 +511,12 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         DisposeInputController();
     }
 
-    private void DisposeInputController() =>
-        ExecuteSafely(
-            () => (_inputController as IDisposable)?.Dispose(),
-            nameof(DisposeInputController),
+    private void DisposeInputController()
+    {
+        Safe(() => (_inputController as IDisposable)?.Dispose(),
+            $"{LOG_PREFIX}.{nameof(DisposeInputController)}",
             "Error disposing InputController");
+    }
 
     private void DisposeResourceObjects()
     {
@@ -560,12 +563,14 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         _cleanupCts?.Dispose();
     }
 
-    private async Task DetachEventHandlersAsync(CancellationToken token) =>
+    private async Task DetachEventHandlersAsync(CancellationToken token)
+    {
         await Dispatcher.InvokeAsync(() =>
         {
             if (_ownerWindow != null)
                 _ownerWindow.KeyDown -= OnWindowKeyDown;
         }).Task.WaitAsync(token);
+    }
 
     private async Task StopCaptureAsync(CancellationToken token)
     {
@@ -610,16 +615,19 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     private async Task DisposeInputControllerAsync(CancellationToken token)
     {
         if (_inputController is IAsyncDisposable asyncDisposable)
-            await ExecuteSafelyAsync(
+        {
+            await SafeAsync(
                 async () => await asyncDisposable.DisposeAsync().AsTask().WaitAsync(token),
-                nameof(DisposeInputControllerAsync),
+                $"{LOG_PREFIX}.{nameof(DisposeInputControllerAsync)}",
                 "Error async disposing InputController",
-                [typeof(OperationCanceledException)]);
+                ignoreExceptions: [typeof(OperationCanceledException)]);
+        }
         else if (_inputController is IDisposable disposable)
-            ExecuteSafely(
-                () => disposable.Dispose(),
-                nameof(DisposeInputControllerAsync),
+        {
+            Safe(() => disposable.Dispose(),
+                $"{LOG_PREFIX}.{nameof(DisposeInputControllerAsync)}",
                 "Error disposing InputController");
+        }
     }
 
     private static void DisposeControllerIfCreated<T>(
@@ -631,10 +639,11 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         var instance = controller.Value;
 
         if (instance is IDisposable disposable)
-            ExecuteSafely(
-                () => disposable.Dispose(),
-                nameof(DisposeControllerIfCreated),
+        {
+            Safe(() => disposable.Dispose(),
+                $"{LOG_PREFIX}.{nameof(DisposeControllerIfCreated)}",
                 $"Error disposing {controllerName}");
+        }
     }
 
     private static async Task DisposeControllerAsyncIfCreated<T>(
@@ -647,41 +656,18 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         var instance = controller.Value;
 
         if (instance is IAsyncDisposable asyncDisposable)
-            await ExecuteSafelyAsync(
+        {
+            await SafeAsync(
                 async () => await asyncDisposable.DisposeAsync().AsTask().WaitAsync(token),
-                nameof(DisposeControllerAsyncIfCreated),
+                $"{LOG_PREFIX}.{nameof(DisposeControllerAsyncIfCreated)}",
                 $"Error async disposing {controllerName}",
-                [typeof(OperationCanceledException)]);
+                ignoreExceptions: [typeof(OperationCanceledException)]);
+        }
         else if (instance is IDisposable disposable)
-            ExecuteSafely(
-                () => disposable.Dispose(),
-                nameof(DisposeControllerAsyncIfCreated),
+        {
+            Safe(() => disposable.Dispose(),
+                $"{LOG_PREFIX}.{nameof(DisposeControllerAsyncIfCreated)}",
                 $"Error disposing {controllerName}");
+        }
     }
-
-    private static void ExecuteSafely(
-        Action action,
-        string source,
-        string errorMessage) =>
-        Safe(
-            action,
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.{source}",
-                ErrorMessage = errorMessage
-            });
-
-    private static async Task ExecuteSafelyAsync(
-        Func<Task> asyncAction,
-        string source,
-        string errorMessage,
-        Type[]? ignoreExceptions = null) =>
-        await SafeAsync(
-            asyncAction,
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.{source}",
-                ErrorMessage = errorMessage,
-                IgnoreExceptions = ignoreExceptions
-            });
 }

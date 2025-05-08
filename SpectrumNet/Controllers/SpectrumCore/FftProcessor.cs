@@ -2,9 +2,7 @@
 
 namespace SpectrumNet.Controllers.SpectrumCore;
 
-public sealed class FftProcessor
-    : AsyncDisposableBase,
-    IFftProcessor
+public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
 {
     private const string LOG_SOURCE = nameof(FftProcessor);
 
@@ -153,12 +151,9 @@ public sealed class FftProcessor
             Parallel.For(0, size, setWindow);
             return w;
         },
-        defaultValue: new float[size],
-        options: new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = "Error generating window"
-        });
+        new float[size],
+        LOG_SOURCE,
+        "Error generating window");
 
     private Action<int> GetWindowGenerator(float[] w, int size, FftWindowType type)
     {
@@ -198,8 +193,9 @@ public sealed class FftProcessor
         return sum;
     }
 
-    private async Task ProcessAsync() =>
-        await SafeExecuteAsync(async () =>
+    private async Task ProcessAsync()
+    {
+        await SafeAsync(async () =>
         {
             await foreach (var (samples, rate, token) in _channel.Reader.ReadAllAsync(_cts.Token))
             {
@@ -210,18 +206,17 @@ public sealed class FftProcessor
                     await Task.Run(() => ProcessBatch(samples, rate, token), token);
             }
         },
-        new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = "Error in FFT processing loop",
-            IgnoreExceptions = [typeof(OperationCanceledException)]
-        });
+        LOG_SOURCE,
+        "Error in FFT processing loop",
+        ignoreExceptions: [typeof(OperationCanceledException)]);
+    }
 
     private void ProcessBatch(
         ReadOnlyMemory<float> samples,
         int rate,
-        CancellationToken cancellationToken) =>
-        SafeExecute(() =>
+        CancellationToken cancellationToken)
+    {
+        Safe(() =>
         {
             int pos = 0;
             while (pos < samples.Length && !cancellationToken.IsCancellationRequested)
@@ -241,27 +236,24 @@ public sealed class FftProcessor
                 }
             }
         },
-        new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = "Error processing batch"
-        });
+        LOG_SOURCE,
+        "Error processing batch");
+    }
 
     private void PerformFftAndNotify(
         int rate,
-        CancellationToken cancellationToken) =>
-        SafeExecute(() =>
+        CancellationToken cancellationToken)
+    {
+        Safe(() =>
         {
             Complex[] fftBuffer = _complexArrayPool.Rent(_fftSize);
             Array.Copy(_buffer, fftBuffer, _fftSize);
 
             ScheduleFftCalculation(fftBuffer, rate, cancellationToken);
         },
-        new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = "Error preparing FFT"
-        });
+        LOG_SOURCE,
+        "Error preparing FFT");
+    }
 
     private void ScheduleFftCalculation(
         Complex[] fftBuffer,
@@ -281,7 +273,7 @@ public sealed class FftProcessor
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error, LOG_SOURCE, $"FFT calculation failed: {ex}");
+                Error(LOG_SOURCE, $"FFT calculation failed: {ex}");
             }
             finally
             {
@@ -299,8 +291,9 @@ public sealed class FftProcessor
             FftCalculated(this, new FftEventArgs(fftBuffer, rate));
     }
 
-    private void ProcessChunk(ReadOnlyMemory<float> chunk) =>
-        SafeExecute(() =>
+    private void ProcessChunk(ReadOnlyMemory<float> chunk)
+    {
+        Safe(() =>
         {
             int offset = _sampleCount;
             int len = chunk.Length;
@@ -314,11 +307,9 @@ public sealed class FftProcessor
                 ApplyWindow(chunk, offset);
             }
         },
-        new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = "Error processing chunk"
-        });
+        LOG_SOURCE,
+        "Error processing chunk");
+    }
 
     private void ProcessLargeChunkInParallel(ReadOnlyMemory<float> chunk, int offset, int len)
     {

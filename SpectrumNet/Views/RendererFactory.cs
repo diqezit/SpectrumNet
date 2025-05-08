@@ -93,7 +93,7 @@ public class RendererFactory : IRendererFactory
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            return _rendererCache.GetOrAdd(style, _ => 
+            return _rendererCache.GetOrAdd(style, _ =>
             CreateAndInitializeRenderer(style));
         }
     }
@@ -154,11 +154,9 @@ public class RendererFactory : IRendererFactory
         RenderStyle style,
         ISpectrumRenderer renderer)
     {
-        ExecuteSafely(
-            () => renderer.Initialize(),
-            "EnsureInitialized",
-            $"Initialization error for style {style}"
-        );
+        Safe(() => renderer.Initialize(),
+            $"{LogPrefix}.EnsureInitialized",
+            $"Initialization error for style {style}");
 
         LogRendererInitialized(style);
     }
@@ -199,12 +197,9 @@ public class RendererFactory : IRendererFactory
         bool? isOverlayActive,
         RenderQuality? quality)
     {
-        ExecuteSafely(
-            () => ConfigureRenderer(renderer, isOverlayActive, quality),
-            "ConfigureRendererSafe",
-            "Error configuring renderer",
-            reThrowException: false
-        );
+        Safe(() => ConfigureRenderer(renderer, isOverlayActive, quality),
+            $"{LogPrefix}.ConfigureRendererSafe",
+            "Error configuring renderer");
     }
 
     private static void ConfigureRenderer(
@@ -246,27 +241,26 @@ public class RendererFactory : IRendererFactory
     {
         if (_isApplyingGlobalQuality) return;
 
-        ExecuteSafely(
-            () => {
-                _isApplyingGlobalQuality = true;
-                try
+        Safe(() =>
+        {
+            _isApplyingGlobalQuality = true;
+            try
+            {
+                lock (_lock)
                 {
-                    lock (_lock)
+                    foreach (var renderer in _rendererCache.Values)
                     {
-                        foreach (var renderer in _rendererCache.Values)
-                        {
-                            ConfigureRendererSafe(renderer, null, _globalQuality);
-                        }
+                        ConfigureRendererSafe(renderer, null, _globalQuality);
                     }
                 }
-                finally
-                {
-                    _isApplyingGlobalQuality = false;
-                }
-            },
-            "GlobalQualitySetter",
-            $"Failed to apply global quality {_globalQuality}"
-        );
+            }
+            finally
+            {
+                _isApplyingGlobalQuality = false;
+            }
+        },
+        $"{LogPrefix}.GlobalQualitySetter",
+        $"Failed to apply global quality {_globalQuality}");
     }
 
     private static void LogQualityChange(RenderQuality oldQuality, RenderQuality newQuality)
@@ -323,50 +317,5 @@ public class RendererFactory : IRendererFactory
             LogPrefix,
             $"{errorType} during creation/initialization of renderer for style {style}: {ex.Message}",
             forceLog: true);
-    }
-
-    private class ErrorHandlingOptions
-    {
-        public string Source { get; set; } = string.Empty;
-        public string ErrorMessage { get; set; } = string.Empty;
-        public bool ReThrowException { get; set; } = true;
-    }
-
-    private static void Safe(
-    Action action,
-    ErrorHandlingOptions options)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error,
-                options.Source,
-                $"{options.ErrorMessage}: {ex.Message}",
-                forceLog: true);
-
-            if (options.ReThrowException)
-            {
-                throw;
-            }
-        }
-    }
-
-    private static void ExecuteSafely(
-        Action action,
-        string source,
-        string errorMessage,
-        bool reThrowException = true)
-    {
-        Safe(
-            action,
-            new ErrorHandlingOptions
-            {
-                Source = $"{LogPrefix}.{source}",
-                ErrorMessage = errorMessage,
-                ReThrowException = reThrowException
-            });
     }
 }

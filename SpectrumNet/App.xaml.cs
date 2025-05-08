@@ -9,11 +9,22 @@ public partial class App : Application
         try
         {
             RenderOptions.ProcessRenderMode = RenderMode.Default;
-            SmartLogger.Initialize();
+            Initialize();
 
             AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-                SmartLogger.LoggerFactory.CreateLogger<App>()
-                           .LogCritical(args.ExceptionObject as Exception, "Unhandled exception in application");
+            {
+                if (args.ExceptionObject is Exception ex)
+                {
+                    Fatal(nameof(App),
+                          "Unhandled exception in application",
+                          ex);
+                }
+                else
+                {
+                    Fatal(nameof(App),
+                          $"Unhandled non-Exception object in application: {args.ExceptionObject}");
+                }
+            };
 
             base.OnStartup(e);
             CommonResources.InitialiseResources();
@@ -33,8 +44,8 @@ public partial class App : Application
             try
             {
                 Fatal(nameof(App),
-                        "Critical error during startup",
-                        ex);
+                      "Critical error during startup",
+                      ex);
             }
             catch { }
             Shutdown(-1);
@@ -49,7 +60,7 @@ public partial class App : Application
         {
             var shutdown = Task.Run(() =>
             {
-                try { SmartLogger.Shutdown(e.ApplicationExitCode); }
+                try { Shutdown(e.ApplicationExitCode); }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error during SmartLogger.Shutdown: {ex.Message}");
@@ -72,8 +83,8 @@ public partial class App : Application
             try
             {
                 Log(LogLevel.Error,
-                      nameof(App),
-                      $"Error during shutdown: {ex.Message}");
+                    nameof(App),
+                    $"Error during shutdown: {ex.Message}");
             }
             catch { }
         }
