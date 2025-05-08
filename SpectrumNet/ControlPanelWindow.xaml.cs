@@ -12,16 +12,13 @@ public partial class ControlPanelWindow : Window, IDisposable
     private readonly Dictionary<(string Name, Type ItemType), Action<object>> _comboBoxActions;
     private readonly Dictionary<string, Action<bool>> _checkBoxActions;
     private bool _isDisposed;
+    private readonly bool _isInitializingControls = true;
 
     public ControlPanelWindow(IMainController controller)
     {
         ArgumentNullException.ThrowIfNull(controller);
         _controller = controller;
         InitializeComponent();
-
-#if DEBUG
-        Log(LogLevel.Debug, LogPrefix, "Creating control panel window");
-#endif
 
         _buttonActions = CreateButtonActionsMap();
         _sliderActions = CreateSliderActionsMap();
@@ -33,6 +30,29 @@ public partial class ControlPanelWindow : Window, IDisposable
         MouseDoubleClick += OnWindowMouseDoubleClick;
         KeyDown += OnKeyDown;
         SetupGainControlsPopup();
+
+        SetInitialComboBoxSelections();
+        _isInitializingControls = false; 
+    }
+
+    private void SetInitialComboBoxSelections()
+    {
+        if (RenderQualityComboBox is not null)
+        {
+            RenderQualityComboBox.SelectedItem = _controller.RenderQuality;
+        }
+        if (RenderStyleComboBox is not null)
+        {
+            RenderStyleComboBox.SelectedItem = _controller.SelectedDrawingType;
+        }
+        if (FftWindowTypeComboBox is not null)
+        {
+            FftWindowTypeComboBox.SelectedItem = _controller.WindowType;
+        }
+        if (ScaleTypeComboBox is not null)
+        {
+            ScaleTypeComboBox.SelectedItem = _controller.ScaleType;
+        }
     }
 
     #region Event Setup
@@ -45,9 +65,6 @@ public partial class ControlPanelWindow : Window, IDisposable
             GainControlsPopup.Opened += OnGainControlsPopupOpened;
             GainControlsPopup.Closed += OnGainControlsPopupClosed;
             GainControlsPopup.MouseDown += OnGainControlsPopupMouseDown;
-#if DEBUG
-            Log(LogLevel.Debug, LogPrefix, "Gain controls popup setup complete");
-#endif
         }, GetLoggerOptions("Error setting up gain controls popup"));
 
     private void OnGainControlsPopupOpened(object? sender, EventArgs e) =>
@@ -83,9 +100,6 @@ public partial class ControlPanelWindow : Window, IDisposable
 
             WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
             e.Handled = true;
-#if DEBUG
-            Log(LogLevel.Debug, LogPrefix, string.Format("Window state changed to: {0}", WindowState));
-#endif
         }, GetLoggerOptions("Error handling double click"));
 
     private void OnButtonClick(object sender, RoutedEventArgs e) =>
@@ -93,9 +107,6 @@ public partial class ControlPanelWindow : Window, IDisposable
         {
             if (sender is Button { Name: var btnName } button && _buttonActions.TryGetValue(btnName, out var action))
             {
-#if DEBUG
-                Log(LogLevel.Debug, LogPrefix, string.Format("Button clicked: {0}", btnName));
-#endif
                 action();
             }
         }, GetLoggerOptions("Error handling button click"));
@@ -107,9 +118,6 @@ public partial class ControlPanelWindow : Window, IDisposable
 
             if (_sliderActions.TryGetValue(slider.Name, out var action))
             {
-#if DEBUG
-                Log(LogLevel.Debug, LogPrefix, string.Format("Slider changed: {0}, Value: {1}", slider.Name, slider.Value));
-#endif
                 action(slider.Value);
             }
         }, GetLoggerOptions("Error handling slider change"));
@@ -117,15 +125,15 @@ public partial class ControlPanelWindow : Window, IDisposable
     private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         Safe(() =>
         {
+            if (_isInitializingControls)
+                return;
+
             if (sender is not ComboBox { SelectedItem: var selectedItem } comboBox || selectedItem is null)
                 return;
 
             var key = (comboBox.Name, selectedItem.GetType());
             if (_comboBoxActions.TryGetValue(key, out var action))
             {
-#if DEBUG
-                Log(LogLevel.Debug, LogPrefix, string.Format("ComboBox selection changed: {0}, Selected: {1}", comboBox.Name, selectedItem));
-#endif
                 action(selectedItem);
             }
         }, GetLoggerOptions("Error handling selection change"));
@@ -143,9 +151,6 @@ public partial class ControlPanelWindow : Window, IDisposable
 
             if (e.Key == Key.Escape)
             {
-#if DEBUG
-                Log(LogLevel.Debug, LogPrefix, "Escape key pressed, closing window");
-#endif
                 Close();
                 e.Handled = true;
             }
@@ -174,11 +179,6 @@ public partial class ControlPanelWindow : Window, IDisposable
                 var favorites = Settings.Instance.FavoriteRenderers;
                 bool isFavorite = favorites.Contains(style);
 
-#if DEBUG
-                Log(LogLevel.Debug, LogPrefix, string.Format("{0} render style {1} from favorites",
-                    isFavorite ? "Removing" : "Adding", style));
-#endif
-
                 if (isFavorite)
                     favorites.Remove(style);
                 else
@@ -199,7 +199,7 @@ public partial class ControlPanelWindow : Window, IDisposable
 
     #region Helper Methods
 
-    private bool IsControlOfType<T>(DependencyObject element) where T : DependencyObject
+    private static bool IsControlOfType<T>(DependencyObject element) where T : DependencyObject
     {
         while (element is not null)
         {
@@ -212,10 +212,6 @@ public partial class ControlPanelWindow : Window, IDisposable
     private void ToggleOverlay() =>
         Safe(() =>
         {
-#if DEBUG
-            Log(LogLevel.Debug, LogPrefix, string.Format("Toggling overlay, current state: {0}",
-                _controller.IsOverlayActive ? "Active" : "Inactive"));
-#endif
             if (_controller.IsOverlayActive)
                 _controller.CloseOverlay();
             else
@@ -225,9 +221,6 @@ public partial class ControlPanelWindow : Window, IDisposable
     private void OpenSettings() =>
         Safe(() =>
         {
-#if DEBUG
-            Log(LogLevel.Debug, LogPrefix, "Opening settings window");
-#endif
             new SettingsWindow().ShowDialog();
         }, GetLoggerOptions("Error opening settings"));
 
@@ -287,9 +280,6 @@ public partial class ControlPanelWindow : Window, IDisposable
 
         if (disposing)
         {
-#if DEBUG
-            Log(LogLevel.Debug, LogPrefix, "Disposing control panel window");
-#endif
             MouseDoubleClick -= OnWindowMouseDoubleClick;
             KeyDown -= OnKeyDown;
 

@@ -25,11 +25,11 @@ public sealed class Renderer : AsyncDisposableBase
     private readonly SKElement? _skElement;
     private RenderState _currentState = default!;
 
-    private volatile bool 
+    private volatile bool
         _isAnalyzerDisposed,
         _shouldShowPlaceholder = true;
 
-    private bool 
+    private bool
         _updatingQuality,
         _isStyleUpdateInProgress;
 
@@ -75,7 +75,7 @@ public sealed class Renderer : AsyncDisposableBase
             ?? throw new InvalidOperationException($"{LOG_PREFIX} Failed to initialize {DEFAULT_STYLE} style"),
             _controller.SelectedDrawingType,
             DEFAULT_STYLE,
-            RenderQuality.Medium);
+            _controller.RenderQuality); 
     }
 
     public void RequestRender()

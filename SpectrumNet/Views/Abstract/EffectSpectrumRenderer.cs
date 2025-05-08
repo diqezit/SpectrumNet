@@ -43,11 +43,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
-    protected virtual void OnInitialize()
-    {
-        if (_isInitialized) return;
-        _isInitialized = true;
-    }
+    protected override void OnInitialize() { }
 
     public override void Configure(
         bool isOverlayActive,
@@ -60,16 +56,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality)
     {
-        var configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
         base.Configure(isOverlayActive, quality);
-        _isOverlayActive = isOverlayActive;
-        Quality = quality;
-
-        if (configChanged)
-            OnConfigurationChanged();
     }
 
-    protected virtual void OnConfigurationChanged() { }
+    protected override void OnConfigurationChanged() { }
 
     public override void Render(
         SKCanvas? canvas,
@@ -186,32 +176,31 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     protected override void ApplyQualitySettings() => ExecuteSafely(
         () =>
         {
-            (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
-            _samplingOptions = QualityBasedSamplingOptions();
-            OnQualitySettingsApplied();
+            if (_isApplyingQuality) return;
+
+            try
+            {
+                _isApplyingQuality = true;
+
+                base.ApplyQualitySettings();
+                OnQualitySettingsApplied();
+
+            }
+            finally
+            {
+                _isApplyingQuality = false;
+            }
         },
         nameof(ApplyQualitySettings),
         "Failed to apply quality settings");
 
     protected virtual void OnQualitySettingsApplied() { }
 
-    protected override (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
-        Quality switch
-        {
-            RenderQuality.Low => (false, false),
-            RenderQuality.Medium => (true, true),
-            RenderQuality.High => (true, true),
-            _ => (true, true)
-        };
+    protected override (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() => 
+        base.QualityBasedSettings();
 
-    protected override SKSamplingOptions QualityBasedSamplingOptions() =>
-        Quality switch
-        {
-            RenderQuality.Low => new(SKFilterMode.Nearest, SKMipmapMode.None),
-            RenderQuality.Medium => new(SKFilterMode.Linear, SKMipmapMode.Linear),
-            RenderQuality.High => new(SKFilterMode.Linear, SKMipmapMode.Linear),
-            _ => new(SKFilterMode.Linear, SKMipmapMode.Linear)
-        };
+    protected override SKSamplingOptions QualityBasedSamplingOptions() => 
+        base.QualityBasedSamplingOptions();
 
     protected virtual void BeforeRender(
         SKCanvas? canvas,

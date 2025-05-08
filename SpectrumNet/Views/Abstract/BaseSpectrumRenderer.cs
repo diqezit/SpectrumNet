@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using static System.MathF;
+
 namespace SpectrumNet.Views.Abstract;
 
 public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
@@ -16,42 +18,38 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 
     protected bool
         _isInitialized,
-        _disposed,
-        _isOverlayActive;
+        _disposed;
 
     protected float[]? _previousSpectrum;
     protected float[]? _processedSpectrum;
     protected float _smoothingFactor = DEFAULT_SMOOTHING_FACTOR;
 
     protected bool _useAntiAlias = true;
+    protected bool _useAdvancedEffects = true;
     protected SKSamplingOptions _samplingOptions = new(
         SKFilterMode.Linear,
         SKMipmapMode.Linear);
-    protected bool _useAdvancedEffects = true;
+
     protected RenderQuality _quality;
-    protected bool _updatingQuality;
+    protected volatile bool _isApplyingQuality;
+
+    protected bool _isOverlayActive;
 
     protected readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
     protected readonly object _spectrumLock = new();
+
+    private static readonly bool _isHardwareAcceleratedCached = IsHardwareAccelerated;
+    protected static bool IsHardwareAccelerated => _isHardwareAcceleratedCached;
 
     public RenderQuality Quality
     {
         get => _quality;
         set
         {
-            if (_quality == value || _updatingQuality)
+            if (_quality == value)
                 return;
 
-            try
-            {
-                _updatingQuality = true;
-                _quality = value;
-                ApplyQualitySettings();
-            }
-            finally
-            {
-                _updatingQuality = false;
-            }
+            _quality = value;
         }
     }
 
@@ -79,23 +77,23 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         ExecuteSafely(
             () =>
             {
+                bool overlayChanged = _isOverlayActive != isOverlayActive;
+                bool qualityChanged = _quality != quality;
+
                 _isOverlayActive = isOverlayActive;
+                Quality = quality;
+
                 _smoothingFactor = isOverlayActive
                     ? OVERLAY_SMOOTHING_FACTOR
                     : DEFAULT_SMOOTHING_FACTOR;
 
-                if (_quality != quality && !_updatingQuality)
+                if (overlayChanged || qualityChanged)
                 {
-                    try
-                    {
-                        _updatingQuality = true;
-                        _quality = quality;
-                        ApplyQualitySettings();
-                    }
-                    finally
-                    {
-                        _updatingQuality = false;
-                    }
+                    Log(LogLevel.Debug, GetType().Name, $"Configuration changed. New Quality: {Quality}");
+
+                    ApplyQualitySettings();
+
+                    OnConfigurationChanged();
                 }
             },
             nameof(Configure),
@@ -128,38 +126,27 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
             nameof(Dispose),
             "Error during base disposal");
 
-    protected static void ExecuteSafely(
-        Action action,
-        string source,
-        string errorMessage) =>
-        Safe(
-            action,
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.{source}",
-                ErrorMessage = errorMessage
-            });
+    protected virtual void ApplyQualitySettings() => ExecuteSafely(
+        () =>
+        {
+            if (_isApplyingQuality)
+                return;
 
-    protected virtual void ApplyQualitySettings() =>
-        ExecuteSafely(
-            () =>
+            try
             {
-                if (_updatingQuality)
-                    return;
+                _isApplyingQuality = true;
 
-                try
-                {
-                    _updatingQuality = true;
-                    (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
-                    _samplingOptions = QualityBasedSamplingOptions();
-                }
-                finally
-                {
-                    _updatingQuality = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings");
+                (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
+                _samplingOptions = QualityBasedSamplingOptions();
+
+            }
+            finally
+            {
+                _isApplyingQuality = false;
+            }
+        },
+        nameof(ApplyQualitySettings),
+        "Failed to apply base quality settings");
 
     protected virtual (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
         _quality switch
@@ -233,6 +220,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         var result = new float[targetCount];
         float blockSize = spectrumLength / (float)targetCount;
 
+        // Используем кэшированное значение IsHardwareAccelerated
         if (targetCount >= PARALLEL_BATCH_SIZE && IsHardwareAccelerated)
             ScaleSpectrumParallel(spectrum, result, targetCount, spectrumLength, blockSize);
         else
@@ -395,5 +383,22 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         for (int i = start; i < end; i++)
             sum += spectrum[i];
         return sum / (end - start);
+    }
+
+    protected virtual void OnConfigurationChanged() { }
+
+    protected virtual void OnInitialize() { }
+
+    protected static void Log(LogLevel level, string prefix, string message)
+    {
+        SmartLogger.Log(level, prefix, message);
+    }
+
+    protected static bool ExecuteSafely(
+        Action action,
+        string source,
+        string errorMessage)
+    {
+        return SmartLogger.Safe(action, source, errorMessage);
     }
 }

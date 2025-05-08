@@ -20,7 +20,7 @@ public sealed class RendererFactory : IRendererFactory
 
     private RenderQuality _globalQuality;
 
-    private bool 
+    private bool
         _isApplyingGlobalQuality,
         _suppressConfigEvents;
 
@@ -97,10 +97,7 @@ public sealed class RendererFactory : IRendererFactory
             {
                 foreach (var renderer in _rendererCache.Values)
                 {
-                    var actualQuality = quality ??
-                        (_rendererQualityState.TryGetValue(renderer, out var currentQuality) ?
-                            currentQuality : _globalQuality);
-
+                    var actualQuality = quality ?? _globalQuality;
                     var actualOverlay = isOverlayActive ?? renderer.IsOverlayActive;
 
                     if (ShouldConfigureRenderer(renderer, actualOverlay, actualQuality))
@@ -161,9 +158,8 @@ public sealed class RendererFactory : IRendererFactory
         if (_isApplyingGlobalQuality)
             return false;
 
-        if (_rendererQualityState.TryGetValue(renderer, out var currentQuality) &&
-            currentQuality == quality &&
-            renderer.IsOverlayActive == isOverlayActive)
+        if (renderer.IsOverlayActive == isOverlayActive &&
+            renderer.Quality == quality)
             return false;
 
         return true;
@@ -281,7 +277,7 @@ public sealed class RendererFactory : IRendererFactory
                 {
                     foreach (var renderer in _rendererCache.Values)
                     {
-                        ConfigureRendererSafe(renderer, null, _globalQuality);
+                        ConfigureRendererSafe(renderer, renderer.IsOverlayActive, _globalQuality);
                         _rendererQualityState[renderer] = _globalQuality;
                     }
                 }
@@ -345,5 +341,26 @@ public sealed class RendererFactory : IRendererFactory
             LOG_PREFIX,
             $"{errorType} during creation/initialization of renderer for style {style}: {ex.Message}",
             forceLog: true);
+    }
+
+    public void Dispose()
+    {
+        Safe(() =>
+        {
+            lock (_lock)
+            {
+                foreach (var renderer in _rendererCache.Values)
+                {
+                    Safe(() => renderer.Dispose(),
+                         renderer.GetType().Name,
+                         "Error disposing renderer");
+                }
+                _rendererCache.Clear();
+                _initializedRenderers.Clear();
+                _rendererQualityState.Clear();
+            }
+        }, 
+        nameof(Dispose),
+        "Error during RendererFactory disposal");
     }
 }
