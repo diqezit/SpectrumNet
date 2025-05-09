@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.GlitchRenderer.Constants;
+using static SpectrumNet.Views.Renderers.GlitchRenderer.Constants.Quality;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
@@ -110,7 +111,6 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
 
     // Resources for rendering
     private readonly SemaphoreSlim _glitchSemaphore = new(1, 1);
-    private readonly new ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), p => p.Reset(), 5);
     private readonly Random _random = new();
 
     // Rendering buffers and resources
@@ -122,119 +122,179 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
     private SKPaint? _noisePaint;
 
     // Quality settings
-    private new bool _useAntiAlias;
-    private new bool _useAdvancedEffects;
     private float _rgbSplitIntensity;
     private float _noiseIntensity;
 
     // State and buffers
     private float[]? _glitchProcessedSpectrum;
     private List<GlitchSegment>? _glitchSegments;
-    private new float _time;
     private int _scanlinePosition;
-    private new bool _isOverlayActive;
 
-    protected override void OnInitialize() =>
+    // Флаг для обеспечения атомарных операций
+    private volatile bool _isConfiguring;
+
+    protected override void OnInitialize()
+    {
         ExecuteSafely(
             () =>
             {
                 base.OnInitialize();
                 InitializeResources();
-                ApplyQualityBasedSettings();
+                InitializeQualityParams();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
             "Failed during renderer initialization"
         );
+    }
+
+    private void InitializeQualityParams()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                ApplyQualitySettingsInternal();
+            },
+            nameof(InitializeQualityParams),
+            "Failed to initialize quality parameters"
+        );
+    }
 
     private void InitializeResources()
     {
-        _bitmapPaint = new SKPaint { IsAntialias = _useAntiAlias };
+        _bitmapPaint = new SKPaint { IsAntialias = UseAntiAlias };
         _redPaint = CreateBlendPaint(SKColors.Red);
         _bluePaint = CreateBlendPaint(SKColors.Blue);
-        _scanlinePaint = new SKPaint { Color = SKColors.White.WithAlpha(SCANLINE_ALPHA), Style = Fill };
-        _noisePaint = new SKPaint { Style = Fill };
+
+        _scanlinePaint = new SKPaint
+        {
+            Color = SKColors.White.WithAlpha(SCANLINE_ALPHA),
+            Style = SKPaintStyle.Fill
+        };
+
+        _noisePaint = new SKPaint { Style = SKPaintStyle.Fill };
         _glitchSegments = [];
     }
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium) =>
+        RenderQuality quality = RenderQuality.Medium)
+    {
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                _isOverlayActive = isOverlayActive;
-
-                if (configChanged)
+                try
                 {
-                    Log(LogLevel.Debug,
-                        LOG_PREFIX,
-                        $"Configuration changed. New Quality: {Quality}");
+                    _isConfiguring = true;
+                    bool configChanged = Quality != quality
+                                         || _isOverlayActive != isOverlayActive;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
             nameof(Configure),
             "Failed to configure renderer"
         );
+    }
 
-    protected override void OnQualitySettingsApplied() =>
+    protected override void OnConfigurationChanged()
+    {
         ExecuteSafely(
             () =>
             {
-                base.OnQualitySettingsApplied();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug,
+                Log(LogLevel.Information,
                     LOG_PREFIX,
-                    $"Quality settings applied. New Quality: {Quality}");
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            nameof(OnQualitySettingsApplied),
-            "Failed to apply specific quality settings"
+            nameof(OnConfigurationChanged),
+            "Failed to apply configuration changes"
         );
+    }
 
-    private void ApplyQualityBasedSettings()
+    protected override void ApplyQualitySettings()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+            },
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
+        );
+    }
+
+    private void ApplyQualitySettingsInternal()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                ApplyLowQualitySettings();
+                LowQualitySettings();
                 break;
 
             case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
+                MediumQualitySettings();
                 break;
 
             case RenderQuality.High:
-                ApplyHighQualitySettings();
+                HighQualitySettings();
                 break;
         }
 
         UpdatePaintSettings();
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
+            $"RgbSplitIntensity: {_rgbSplitIntensity}, NoiseIntensity: {_noiseIntensity}");
     }
 
-    private void ApplyLowQualitySettings()
+    private void LowQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _rgbSplitIntensity = Constants.Quality.LOW_RGB_SPLIT_INTENSITY;
-        _noiseIntensity = Constants.Quality.LOW_NOISE_INTENSITY;
+        base._useAntiAlias = LOW_USE_ANTIALIASING;
+        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _rgbSplitIntensity = LOW_RGB_SPLIT_INTENSITY;
+        _noiseIntensity = LOW_NOISE_INTENSITY;
     }
 
-    private void ApplyMediumQualitySettings()
+    private void MediumQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _rgbSplitIntensity = Constants.Quality.MEDIUM_RGB_SPLIT_INTENSITY;
-        _noiseIntensity = Constants.Quality.MEDIUM_NOISE_INTENSITY;
+        base._useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _rgbSplitIntensity = MEDIUM_RGB_SPLIT_INTENSITY;
+        _noiseIntensity = MEDIUM_NOISE_INTENSITY;
     }
 
-    private void ApplyHighQualitySettings()
+    private void HighQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _rgbSplitIntensity = Constants.Quality.HIGH_RGB_SPLIT_INTENSITY;
-        _noiseIntensity = Constants.Quality.HIGH_NOISE_INTENSITY;
+        base._useAntiAlias = HIGH_USE_ANTIALIASING;
+        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _rgbSplitIntensity = HIGH_RGB_SPLIT_INTENSITY;
+        _noiseIntensity = HIGH_NOISE_INTENSITY;
     }
 
     private void UpdatePaintSettings()
@@ -249,7 +309,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
     private void UpdateAntialiasing(SKPaint? paint)
     {
         if (paint != null)
-            paint.IsAntialias = _useAntiAlias;
+            paint.IsAntialias = UseAntiAlias;
     }
 
     protected override void RenderEffect(
@@ -259,19 +319,21 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint) =>
+        SKPaint paint)
+    {
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+            return;
+
         ExecuteSafely(
             () =>
             {
-                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-                    return;
-
                 UpdateState(spectrum, info);
                 RenderFrame(canvas, info, paint);
             },
             nameof(RenderEffect),
             "Error during rendering"
         );
+    }
 
     private bool ValidateRenderParameters(
         SKCanvas? canvas,
@@ -322,7 +384,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         return true;
     }
 
-    private void UpdateState(float[] spectrum, SKImageInfo info) =>
+    private void UpdateState(float[] spectrum, SKImageInfo info)
+    {
         ExecuteSafely(
             () =>
             {
@@ -345,8 +408,10 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             nameof(UpdateState),
             "Error during state update"
         );
+    }
 
-    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint) =>
+    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint)
+    {
         ExecuteSafely(
             () =>
             {
@@ -359,6 +424,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             nameof(RenderFrame),
             "Error during frame rendering"
         );
+    }
 
     private void PrepareBuffer(SKImageInfo info)
     {
@@ -530,7 +596,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         });
     }
 
-    private void PopulateBuffer(SKImageInfo info, SKPaint paint) =>
+    private void PopulateBuffer(SKImageInfo info, SKPaint paint)
+    {
         ExecuteSafely(
             () =>
             {
@@ -541,7 +608,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
 
                 DrawBaseSpectrumToBuffer(bufCanvas, info, paint);
 
-                if (_useAdvancedEffects)
+                if (UseAdvancedEffects)
                 {
                     ApplyAdvancedEffects(bufCanvas, info, paint);
                 }
@@ -551,6 +618,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             nameof(PopulateBuffer),
             "Error during buffer population"
         );
+    }
 
     private void ApplyAdvancedEffects(
         SKCanvas bufCanvas,
@@ -571,7 +639,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         && _bufferBitmap.Width == info.Width
         && _bufferBitmap.Height == info.Height;
 
-    private void RenderBufferToCanvas(SKCanvas canvas, SKImageInfo info) =>
+    private void RenderBufferToCanvas(SKCanvas canvas, SKImageInfo info)
+    {
         ExecuteSafely(
             () =>
             {
@@ -581,16 +650,19 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             nameof(RenderBufferToCanvas),
             "Error during buffer rendering"
         );
+    }
 
-    private SKPaint CreateBlendPaint(SKColor baseColor) =>
-        new()
+    private SKPaint CreateBlendPaint(SKColor baseColor)
+    {
+        return new()
         {
             Color = baseColor.WithAlpha(SCANLINE_ALPHA),
             BlendMode = SKBlendMode.SrcOver,
-            IsAntialias = _useAntiAlias
+            IsAntialias = UseAntiAlias
         };
+    }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(AggressiveOptimization)]
     private void DrawBaseSpectrumToBuffer(
         SKCanvas bufCanvas,
         SKImageInfo info,
@@ -749,7 +821,8 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
-    protected override void OnDispose() =>
+    protected override void OnDispose()
+    {
         ExecuteSafely(
             () =>
             {
@@ -759,11 +832,12 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
             nameof(OnDispose),
             "Error during specific disposal"
         );
+    }
 
     private void DisposeManagedResources()
     {
         _glitchSemaphore?.Dispose();
-        _paintPool?.Dispose();
+        // _paintPool управляется базовым классом
 
         _bufferBitmap?.Dispose();
         _bitmapPaint?.Dispose();
