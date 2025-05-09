@@ -195,7 +195,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium) =>
+        RenderQuality quality) =>
         ExecuteSafely(
             () =>
             {

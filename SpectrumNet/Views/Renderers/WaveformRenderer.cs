@@ -1,15 +1,13 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.WaveformRenderer.Constants;
-using static System.MathF;
+using static SpectrumNet.Views.Renderers.WaveformRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
 public sealed class WaveformRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<WaveformRenderer> _instance = new(() => new WaveformRenderer());
-
-    private WaveformRenderer() { }
 
     public static WaveformRenderer GetInstance() => _instance.Value;
 
@@ -56,19 +54,19 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         }
     }
 
-    // Кэши и пути
     private readonly SKPath _topPath = new();
     private readonly SKPath _bottomPath = new();
     private readonly SKPath _fillPath = new();
 
-    // Настройки качества
     private float _glowRadius;
     private new bool _useAntiAlias;
     private new bool _useAdvancedEffects;
     private int _smoothingPasses;
+    private volatile bool _isConfiguring;
 
-    protected override void OnInitialize()
-    {
+    private WaveformRenderer() { }
+
+    protected override void OnInitialize() =>
         ExecuteSafely(
             () =>
             {
@@ -77,10 +75,9 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
                 ApplyQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed to initialize renderer"
         );
-    }
 
     private void InitializeResources()
     {
@@ -89,25 +86,34 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
-    {
+        RenderQuality quality) =>
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                UpdateConfiguration(isOverlayActive);
-
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+                    base.Configure(isOverlayActive, quality);
+
+                    UpdateConfiguration(isOverlayActive);
+
+                    if (configChanged)
+                    {
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
-    }
 
     private void UpdateConfiguration(bool isOverlayActive)
     {
@@ -116,31 +122,41 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             SMOOTHING_FACTOR_NORMAL;
     }
 
-    protected override void OnConfigurationChanged()
-    {
+    protected override void OnConfigurationChanged() =>
         ExecuteSafely(
             () =>
             {
-                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}");
             },
-            "OnConfigurationChanged",
+            nameof(OnConfigurationChanged),
             "Failed to handle configuration change"
         );
-    }
 
-    protected override void ApplyQualitySettings()
-    {
+    protected override void ApplyQualitySettings() =>
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualityBasedSettings();
+                    Log(LogLevel.Debug,
+                        LOG_PREFIX,
+                        $"Quality changed to {Quality}");
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
-            "ApplyQualitySettings",
+            nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
-    }
 
     private void ApplyQualityBasedSettings()
     {
@@ -162,26 +178,26 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private void ApplyLowQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTI_ALIAS;
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _glowRadius = Constants.Quality.LOW_GLOW_RADIUS;
-        _smoothingPasses = Constants.Quality.LOW_SMOOTHING_PASSES;
+        _useAntiAlias = LOW_USE_ANTI_ALIAS;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _glowRadius = LOW_GLOW_RADIUS;
+        _smoothingPasses = LOW_SMOOTHING_PASSES;
     }
 
     private void ApplyMediumQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTI_ALIAS;
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _glowRadius = Constants.Quality.MEDIUM_GLOW_RADIUS;
-        _smoothingPasses = Constants.Quality.MEDIUM_SMOOTHING_PASSES;
+        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _glowRadius = MEDIUM_GLOW_RADIUS;
+        _smoothingPasses = MEDIUM_SMOOTHING_PASSES;
     }
 
     private void ApplyHighQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTI_ALIAS;
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _glowRadius = Constants.Quality.HIGH_GLOW_RADIUS;
-        _smoothingPasses = Constants.Quality.HIGH_SMOOTHING_PASSES;
+        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _glowRadius = HIGH_GLOW_RADIUS;
+        _smoothingPasses = HIGH_SMOOTHING_PASSES;
     }
 
     protected override void RenderEffect(
@@ -191,23 +207,22 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
+        SKPaint paint) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                    return;
 
-        try
-        {
-            float midY = info.Height / 2;
-            float xStep = (float)info.Width / spectrum.Length;
+                float midY = info.Height / 2;
+                float xStep = info.Width / (float)spectrum.Length;
 
-            UpdateWavePaths(spectrum, midY, xStep);
-            RenderWaveform(canvas, spectrum, info, paint);
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Error in RenderEffect: {ex.Message}");
-        }
-    }
+                UpdateWavePaths(spectrum, midY, xStep);
+                RenderWaveform(canvas, spectrum, info, paint);
+            },
+            nameof(RenderEffect),
+            "Error during rendering"
+        );
 
     private bool ValidateRenderParameters(
         SKCanvas? canvas,
@@ -248,104 +263,114 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         return true;
     }
 
-    private void UpdateWavePaths(float[] spectrum, float midY, float xStep)
-    {
-        _topPath.Reset();
-        _bottomPath.Reset();
-        _fillPath.Reset();
-
-        float startX = 0;
-        float startTopY = midY - spectrum[0] * midY;
-        float startBottomY = midY + spectrum[0] * midY;
-
-        _topPath.MoveTo(startX, startTopY);
-        _bottomPath.MoveTo(startX, startBottomY);
-        _fillPath.MoveTo(startX, startTopY);
-
-        for (int i = 1; i < spectrum.Length; i++)
-        {
-            float prevX = (i - 1) * xStep;
-            float prevTopY = midY - spectrum[i - 1] * midY;
-            float prevBottomY = midY + spectrum[i - 1] * midY;
-
-            float x = i * xStep;
-            float topY = midY - spectrum[i] * midY;
-            float bottomY = midY + spectrum[i] * midY;
-
-            float controlX = (prevX + x) / 2;
-
-            if (Quality == RenderQuality.Low)
+    private void UpdateWavePaths(float[] spectrum, float midY, float xStep) =>
+        ExecuteSafely(
+            () =>
             {
-                _topPath.LineTo(x, topY);
-                _bottomPath.LineTo(x, bottomY);
-                _fillPath.LineTo(x, topY);
-            }
-            else
-            {
-                _topPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
-                _bottomPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
-                _fillPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
-            }
-        }
+                _topPath.Reset();
+                _bottomPath.Reset();
+                _fillPath.Reset();
 
-        float endX = (spectrum.Length - 1) * xStep;
-        float endBottomY = midY + spectrum[^1] * midY;
+                float startX = 0;
+                float startTopY = midY - spectrum[0] * midY;
+                float startBottomY = midY + spectrum[0] * midY;
 
-        _fillPath.LineTo(endX, endBottomY);
+                _topPath.MoveTo(startX, startTopY);
+                _bottomPath.MoveTo(startX, startBottomY);
+                _fillPath.MoveTo(startX, startTopY);
 
-        for (int i = spectrum.Length - 2; i >= 0; i--)
-        {
-            float prevX = (i + 1) * xStep;
-            float prevBottomY = midY + spectrum[i + 1] * midY;
+                for (int i = 1; i < spectrum.Length; i++)
+                {
+                    float prevX = (i - 1) * xStep;
+                    float prevTopY = midY - spectrum[i - 1] * midY;
+                    float prevBottomY = midY + spectrum[i - 1] * midY;
 
-            float x = i * xStep;
-            float bottomY = midY + spectrum[i] * midY;
+                    float x = i * xStep;
+                    float topY = midY - spectrum[i] * midY;
+                    float bottomY = midY + spectrum[i] * midY;
 
-            float controlX = (prevX + x) / 2;
+                    float controlX = (prevX + x) / 2;
 
-            if (Quality == RenderQuality.Low)
-            {
-                _fillPath.LineTo(x, bottomY);
-            }
-            else
-            {
-                _fillPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
-            }
-        }
+                    if (Quality == RenderQuality.Low)
+                    {
+                        _topPath.LineTo(x, topY);
+                        _bottomPath.LineTo(x, bottomY);
+                        _fillPath.LineTo(x, topY);
+                    }
+                    else
+                    {
+                        _topPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
+                        _bottomPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
+                        _fillPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
+                    }
+                }
 
-        _fillPath.Close();
-    }
+                float endX = (spectrum.Length - 1) * xStep;
+                float endBottomY = midY + spectrum[^1] * midY;
+
+                _fillPath.LineTo(endX, endBottomY);
+
+                for (int i = spectrum.Length - 2; i >= 0; i--)
+                {
+                    float prevX = (i + 1) * xStep;
+                    float prevBottomY = midY + spectrum[i + 1] * midY;
+
+                    float x = i * xStep;
+                    float bottomY = midY + spectrum[i] * midY;
+
+                    float controlX = (prevX + x) / 2;
+
+                    if (Quality == RenderQuality.Low)
+                    {
+                        _fillPath.LineTo(x, bottomY);
+                    }
+                    else
+                    {
+                        _fillPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
+                    }
+                }
+
+                _fillPath.Close();
+            },
+            nameof(UpdateWavePaths),
+            "Failed to update wave paths"
+        );
 
     private void RenderWaveform(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
-        SKPaint basePaint)
-    {
-        using var wavePaint = CreateWaveformPaint(basePaint, spectrum.Length);
-        using var fillPaint = CreateFillPaint(basePaint);
+        SKPaint basePaint) =>
+        ExecuteSafely(
+            () =>
+            {
+                using var wavePaint = CreateWaveformPaint(basePaint, spectrum.Length);
+                using var fillPaint = CreateFillPaint(basePaint);
 
-        canvas.DrawPath(_fillPath, fillPaint);
-        canvas.DrawPath(_topPath, wavePaint);
-        canvas.DrawPath(_bottomPath, wavePaint);
+                canvas.DrawPath(_fillPath, fillPaint);
+                canvas.DrawPath(_topPath, wavePaint);
+                canvas.DrawPath(_bottomPath, wavePaint);
 
-        if (_useAdvancedEffects && HasHighAmplitude(spectrum))
-        {
-            using var glowPaint = CreateGlowPaint(basePaint, spectrum.Length);
-            canvas.DrawPath(_topPath, glowPaint);
-            canvas.DrawPath(_bottomPath, glowPaint);
+                if (_useAdvancedEffects && HasHighAmplitude(spectrum))
+                {
+                    using var glowPaint = CreateGlowPaint(basePaint, spectrum.Length);
+                    canvas.DrawPath(_topPath, glowPaint);
+                    canvas.DrawPath(_bottomPath, glowPaint);
 
-            using var highlightPaint = CreateHighlightPaint(spectrum.Length);
-            RenderHighlights(canvas, spectrum, info.Height / 2, (float)info.Width / spectrum.Length, highlightPaint);
-        }
-    }
+                    using var highlightPaint = CreateHighlightPaint(spectrum.Length);
+                    RenderHighlights(canvas, spectrum, info.Height / 2, info.Width / (float)spectrum.Length, highlightPaint);
+                }
+            },
+            nameof(RenderWaveform),
+            "Failed to render waveform"
+        );
 
     private SKPaint CreateWaveformPaint(SKPaint basePaint, int spectrumLength)
     {
         var paint = _paintPool.Get();
         paint.Reset();
         paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = MathF.Max(MIN_STROKE_WIDTH, 50f / spectrumLength);
+        paint.StrokeWidth = Max(MIN_STROKE_WIDTH, 50f / spectrumLength);
         paint.IsAntialias = _useAntiAlias;
         paint.StrokeCap = SKStrokeCap.Round;
         paint.StrokeJoin = SKStrokeJoin.Round;
@@ -368,7 +393,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         var paint = _paintPool.Get();
         paint.Reset();
         paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = MathF.Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 1.5f;
+        paint.StrokeWidth = Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 1.5f;
         paint.Color = basePaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY));
         paint.IsAntialias = _useAntiAlias;
         paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _glowRadius);
@@ -380,7 +405,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         var paint = _paintPool.Get();
         paint.Reset();
         paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = MathF.Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 0.6f;
+        paint.StrokeWidth = Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 0.6f;
         paint.Color = SKColors.White.WithAlpha((byte)(255 * HIGHLIGHT_ALPHA));
         paint.IsAntialias = _useAntiAlias;
         return paint;
@@ -428,7 +453,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             {
                 OnDispose();
             },
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
 
@@ -437,18 +462,16 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
-    protected override void OnDispose()
-    {
+    protected override void OnDispose() =>
         ExecuteSafely(
             () =>
             {
                 DisposeManagedResources();
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
-    }
 
     private void DisposeManagedResources()
     {
