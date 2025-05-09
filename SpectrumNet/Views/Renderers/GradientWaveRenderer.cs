@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.GradientWaveRenderer.Constants;
+using static SpectrumNet.Views.Renderers.GradientWaveRenderer.Constants.Quality;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
@@ -70,9 +71,6 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         }
     }
 
-    private readonly new ObjectPool<SKPath> _pathPool = new(() => new SKPath(), path => path.Reset(), 2);
-    private readonly new ObjectPool<SKPaint> _paintPool = new(() => new SKPaint(), paint => paint.Reset(), 3);
-
     private List<SKPoint>? _cachedPoints;
     private readonly SKPath _wavePath = new();
     private readonly SKPath _fillPath = new();
@@ -84,6 +82,8 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
 
     private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
 
+    private volatile bool _isConfiguring;
+
     protected override void OnInitialize()
     {
         ExecuteSafely(
@@ -91,15 +91,28 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 InitializeResources();
-                ApplyQualitySettings();
+                InitializeQualityParams();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed to initialize renderer"
         );
     }
 
-    private void InitializeResources() => _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
+    private void InitializeResources() => 
+        _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
+
+    private void InitializeQualityParams()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                ApplyQualitySettingsInternal();
+            },
+            nameof(InitializeQualityParams),
+            "Failed to initialize quality parameters"
+        );
+    }
 
     public override void Configure(
         bool isOverlayActive,
@@ -108,17 +121,32 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                UpdateConfiguration(isOverlayActive);
-
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ?
+                        SMOOTHING_FACTOR_OVERLAY :
+                        SMOOTHING_FACTOR_NORMAL;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
     }
@@ -128,18 +156,13 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                // don't call any methods here that might trigger invalidation again
+                Log(LogLevel.Information,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            "OnConfigurationChanged",
+            nameof(OnConfigurationChanged),
             "Failed to handle configuration change"
         );
-    }
-
-    private void UpdateConfiguration(bool isOverlayActive)
-    {
-        _smoothingFactor = isOverlayActive ?
-            SMOOTHING_FACTOR_OVERLAY :
-            SMOOTHING_FACTOR_NORMAL;
     }
 
     protected override void ApplyQualitySettings()
@@ -147,59 +170,74 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
-            "ApplyQualitySettings",
+            nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualityBasedSettings()
+    private void ApplyQualitySettingsInternal()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                ApplyLowQualitySettings();
+                LowQualitySettings();
                 break;
 
             case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
+                MediumQualitySettings();
                 break;
 
             case RenderQuality.High:
-                ApplyHighQualitySettings();
+                HighQualitySettings();
                 break;
         }
-        base.InvalidateCachedResources();
+
+        InvalidateCachedResources();
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
+            $"SmoothingPasses: {_smoothingPasses}, PointCount: {_pointCount}");
     }
 
-    private void ApplyLowQualitySettings()
+    private void LowQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTI_ALIAS;
-        _samplingOptions = new(SKFilterMode.Nearest, SKMipmapMode.None);
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _smoothingPasses = Constants.Quality.LOW_SMOOTHING_PASSES;
-        _pointCount = Constants.Quality.LOW_POINT_COUNT;
+        base._useAntiAlias = LOW_USE_ANTI_ALIAS;
+        base._samplingOptions = new(SKFilterMode.Nearest, SKMipmapMode.None);
+        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _smoothingPasses = LOW_SMOOTHING_PASSES;
+        _pointCount = LOW_POINT_COUNT;
     }
 
-    private void ApplyMediumQualitySettings()
+    private void MediumQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTI_ALIAS;
-        _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _smoothingPasses = Constants.Quality.MEDIUM_SMOOTHING_PASSES;
-        _pointCount = Constants.Quality.MEDIUM_POINT_COUNT;
+        base._useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
+        base._samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _smoothingPasses = MEDIUM_SMOOTHING_PASSES;
+        _pointCount = MEDIUM_POINT_COUNT;
     }
 
-    private void ApplyHighQualitySettings()
+    private void HighQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTI_ALIAS;
-        _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _smoothingPasses = Constants.Quality.HIGH_SMOOTHING_PASSES;
-        _pointCount = Constants.Quality.HIGH_POINT_COUNT;
+        base._useAntiAlias = HIGH_USE_ANTI_ALIAS;
+        base._samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _smoothingPasses = HIGH_SMOOTHING_PASSES;
+        _pointCount = HIGH_POINT_COUNT;
     }
 
     protected override void RenderEffect(
@@ -221,7 +259,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
                 UpdateState(spectrum, barCount);
                 RenderFrame(canvas, spectrum, info, barCount, paint);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
     }
@@ -307,7 +345,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
     {
         lock (_spectrumLock)
         {
-            var renderSpectrum = _processedSpectrum ??
+            var renderSpectrum = base._processedSpectrum ??
                                 ProcessSpectrumSynchronously(spectrum, barCount);
 
             var renderPoints = _cachedPoints ??
@@ -330,14 +368,14 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
                 int actualBarCount = Min(spectrumLength, barCount);
 
                 float[] scaledSpectrum = ScaleSpectrum(spectrum, actualBarCount, spectrumLength);
-                _processedSpectrum = SmoothSpectrumData(scaledSpectrum, actualBarCount);
+                base._processedSpectrum = SmoothSpectrumData(scaledSpectrum, actualBarCount);
 
                 lock (_spectrumLock)
                 {
                     _cachedPoints = null;
                 }
             },
-            "ProcessSpectrumData",
+            nameof(ProcessSpectrumData),
             "Error processing spectrum data"
         );
     }
@@ -357,12 +395,12 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                if (_previousSpectrum == null || _previousSpectrum.Length != length)
+                if (base._previousSpectrum == null || base._previousSpectrum.Length != length)
                 {
-                    _previousSpectrum = new float[length];
+                    base._previousSpectrum = new float[length];
                 }
             },
-            "EnsureSpectrumBuffer",
+            nameof(EnsureSpectrumBuffer),
             "Error ensuring spectrum buffer"
         );
     }
@@ -382,13 +420,13 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
 
         for (int i = 0; i < targetCount; i++)
         {
-            if (_previousSpectrum == null) break;
+            if (base._previousSpectrum == null) break;
 
             float currentValue = spectrum[i];
-            float previousValue = _previousSpectrum[i];
+            float previousValue = base._previousSpectrum[i];
             float smoothedValue = previousValue + (currentValue - previousValue) * _smoothingFactor;
             smoothedSpectrum[i] = Clamp(smoothedValue, MIN_MAGNITUDE_THRESHOLD, MAX_SPECTRUM_VALUE);
-            _previousSpectrum[i] = smoothedSpectrum[i];
+            base._previousSpectrum[i] = smoothedSpectrum[i];
         }
 
         return smoothedSpectrum;
@@ -506,10 +544,16 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
 
         float maxMagnitude = CalculateMaxMagnitude(spectrum);
         float yBaseline = info.Height - EDGE_OFFSET + BASELINE_OFFSET;
-        bool shouldRenderGlow = maxMagnitude > HIGH_MAGNITUDE_THRESHOLD && _useAdvancedEffects;
+        bool shouldRenderGlow = maxMagnitude > HIGH_MAGNITUDE_THRESHOLD && UseAdvancedEffects;
 
-        using var wavePath = _pathPool.Get();
-        using var fillPath = _pathPool.Get();
+        var pathPool = _pathPool;
+        if (pathPool == null) return;
+
+        using var wavePath = pathPool.Get();
+        if (wavePath == null) return;
+
+        using var fillPath = pathPool.Get();
+        if (fillPath == null) return;
 
         CreateWavePaths(points, info, yBaseline, wavePath, fillPath);
 
@@ -639,7 +683,12 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         float yBaseline,
         SKPath fillPath)
     {
-        using var fillPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var fillPaint = paintPool.Get();
+        if (fillPaint == null) return;
+
         ConfigureFillPaint(fillPaint, basePaint, maxMagnitude, yBaseline);
         canvas.DrawPath(fillPath, fillPaint);
     }
@@ -651,7 +700,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         float yBaseline)
     {
         fillPaint.Style = SKPaintStyle.Fill;
-        fillPaint.IsAntialias = _useAntiAlias;
+        fillPaint.IsAntialias = UseAntiAlias;
         SetFillGradient(fillPaint, basePaint, maxMagnitude, yBaseline);
     }
 
@@ -685,9 +734,14 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         int barCount,
         SKPath wavePath)
     {
-        if (!_useAdvancedEffects) return;
+        if (!UseAdvancedEffects) return;
 
-        using var glowPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var glowPaint = paintPool.Get();
+        if (glowPaint == null) return;
+
         ConfigureGlowPaint(glowPaint, basePaint, maxMagnitude, barCount);
         canvas.DrawPath(wavePath, glowPaint);
     }
@@ -702,7 +756,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
 
         glowPaint.Style = SKPaintStyle.Stroke;
         glowPaint.StrokeWidth = DEFAULT_LINE_WIDTH * 2.0f;
-        glowPaint.IsAntialias = _useAntiAlias;
+        glowPaint.IsAntialias = UseAntiAlias;
         glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius);
         glowPaint.Color = basePaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY * maxMagnitude));
     }
@@ -714,7 +768,12 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         SKPath wavePath)
     {
-        using var gradientPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var gradientPaint = paintPool.Get();
+        if (gradientPaint == null) return;
+
         ConfigureGradientPaint(gradientPaint, points, info);
         canvas.DrawPath(wavePath, gradientPaint);
     }
@@ -726,7 +785,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
     {
         gradientPaint.Style = SKPaintStyle.Stroke;
         gradientPaint.StrokeWidth = DEFAULT_LINE_WIDTH;
-        gradientPaint.IsAntialias = _useAntiAlias;
+        gradientPaint.IsAntialias = UseAntiAlias;
         gradientPaint.StrokeCap = SKStrokeCap.Round;
         gradientPaint.StrokeJoin = SKStrokeJoin.Round;
         SetGradientShader(gradientPaint, points, info);
@@ -798,8 +857,10 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
                 _cachedBackground?.Dispose();
                 _cachedBackground = null;
                 _cachedPoints = null;
+
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
             },
-            "OnInvalidateCachedResources",
+            nameof(OnInvalidateCachedResources),
             "Failed to invalidate cached resources"
         );
     }
@@ -812,7 +873,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             {
                 OnDispose();
             },
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
         _disposed = true;
@@ -828,7 +889,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
                 DisposeManagedResources();
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
     }
@@ -841,13 +902,11 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         _wavePath?.Dispose();
         _fillPath?.Dispose();
 
-        _pathPool?.Dispose();
-        _paintPool?.Dispose();
-
+        // _pathPool и _paintPool управляются базовым классом
         _renderSemaphore?.Dispose();
 
-        _previousSpectrum = null;
-        _processedSpectrum = null;
+        base._previousSpectrum = null;
+        base._processedSpectrum = null;
         _cachedPoints = null;
     }
 }
