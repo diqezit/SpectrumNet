@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.AsciiDonutRenderer.Constants;
+using static SpectrumNet.Views.Renderers.AsciiDonutRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -40,7 +41,8 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         public const float
             DEFAULT_RADIUS = 1.0f,
             DEFAULT_TUBE_RADIUS = 0.5f,
-            DEFAULT_SCALE = 0.4f;
+            DEFAULT_SCALE = 0.4f,
+            CENTER_PROPORTION = 0.5f;
 
         public const float
             MIN_ALPHA_VALUE = 0.2f,
@@ -54,7 +56,11 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             DEFAULT_FONT_SIZE = 12.0f;
         public const string DEFAULT_ASCII_CHARS = " .,-~:;=!*#$@";
 
-        public const int BATCH_SIZE = 128;
+        public const int
+            BATCH_SIZE = 128,
+            MAX_VERTICES_CACHE_SIZE = 10000;
+
+        public const byte MAX_ALPHA_BYTE = 255;
 
         public static class Quality
         {
@@ -72,6 +78,30 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                 LOW_USE_ANTIALIASING = false,
                 MEDIUM_USE_ANTIALIASING = true,
                 HIGH_USE_ANTIALIASING = true;
+
+            public const bool
+                LOW_USE_PARALLEL_PROCESSING = false,
+                MEDIUM_USE_PARALLEL_PROCESSING = false,
+                HIGH_USE_PARALLEL_PROCESSING = true;
+
+            public const bool
+                LOW_USE_LIGHT_EFFECTS = false,
+                MEDIUM_USE_LIGHT_EFFECTS = true,
+                HIGH_USE_LIGHT_EFFECTS = true;
+
+            public const float
+                LOW_ROTATION_INTENSITY_FACTOR = 0.8f,
+                MEDIUM_ROTATION_INTENSITY_FACTOR = 1.0f,
+                HIGH_ROTATION_INTENSITY_FACTOR = 1.2f,
+
+                LOW_DETAIL_FACTOR = 0.6f,
+                MEDIUM_DETAIL_FACTOR = 1.0f,
+                HIGH_DETAIL_FACTOR = 1.5f;
+
+            public const int
+                LOW_PARALLEL_THRESHOLD = 5000,
+                MEDIUM_PARALLEL_THRESHOLD = 2000,
+                HIGH_PARALLEL_THRESHOLD = 1000;
         }
     }
 
@@ -108,6 +138,11 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         LIGHT_DIR_Z));
 
     private int _skipVertexCount;
+    private float _detailFactor;
+    private float _rotationIntensityFactor;
+    private int _parallelThreshold;
+    private bool _useParallelProcessing;
+    private bool _useLightEffects;
     private new bool _useAdvancedEffects;
     private new bool _useAntiAlias;
 
@@ -126,6 +161,9 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
     private SKFont? _font;
     private readonly Dictionary<int, List<ProjectedVertex>> _verticesByCharIndex = [];
     private readonly object _renderDataLock = new();
+
+    private volatile bool _isConfiguring;
+    private volatile bool _isRenderingDataDirty;
 
     static AsciiDonutRenderer()
     {
@@ -148,12 +186,17 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 InitializeResources();
-                ApplyQualitySettings();
+                InitializeQualityParams();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
             "Failed to initialize renderer"
         );
+    }
+
+    private void InitializeQualityParams()
+    {
+        ApplyQualitySettingsInternal();
     }
 
     private void InitializeResources()
@@ -175,6 +218,11 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
                 InitializeVertices();
                 InitializeAlphaCache();
+
+                _dataReady = false;
+                _isRenderingDataDirty = true;
+
+                Log(LogLevel.Debug, LOG_PREFIX, "Resources initialized");
             },
             nameof(InitializeResources),
             "Failed to initialize renderer resources"
@@ -188,12 +236,27 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
             nameof(Configure),
@@ -206,9 +269,11 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                Log(LogLevel.Debug,
+                Log(LogLevel.Information,
                     LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}");
+                    $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}");
+
+                _isRenderingDataDirty = true;
             },
             nameof(OnConfigurationChanged),
             "Failed to handle configuration change"
@@ -220,31 +285,43 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                    InvalidateCachedResources();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
             nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualityBasedSettings()
+    private void ApplyQualitySettingsInternal()
     {
         int oldSkipVertexCount = _skipVertexCount;
 
         switch (Quality)
         {
             case RenderQuality.Low:
-                ApplyLowQualitySettings();
+                LowQualitySettings();
                 break;
             case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
+                MediumQualitySettings();
                 break;
             case RenderQuality.High:
-                ApplyHighQualitySettings();
+                HighQualitySettings();
                 break;
         }
+
+        _samplingOptions = QualityBasedSamplingOptions();
 
         if (_skipVertexCount != oldSkipVertexCount)
         {
@@ -252,30 +329,49 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             {
                 _dataReady = false;
                 _currentRenderData = null;
+                _isRenderingDataDirty = true;
             }
             OnInvalidateCachedResources();
         }
+
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Quality settings applied: {Quality}, AntiAlias: {_useAntiAlias}");
     }
 
-    private void ApplyLowQualitySettings()
+    private void LowQualitySettings()
     {
-        _skipVertexCount = Constants.Quality.LOW_QUALITY_SKIP_FACTOR;
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+        _skipVertexCount = LOW_QUALITY_SKIP_FACTOR;
+        _useAntiAlias = LOW_USE_ANTIALIASING;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useParallelProcessing = LOW_USE_PARALLEL_PROCESSING;
+        _useLightEffects = LOW_USE_LIGHT_EFFECTS;
+        _detailFactor = LOW_DETAIL_FACTOR;
+        _rotationIntensityFactor = LOW_ROTATION_INTENSITY_FACTOR;
+        _parallelThreshold = LOW_PARALLEL_THRESHOLD;
     }
 
-    private void ApplyMediumQualitySettings()
+    private void MediumQualitySettings()
     {
-        _skipVertexCount = Constants.Quality.MEDIUM_QUALITY_SKIP_FACTOR;
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+        _skipVertexCount = MEDIUM_QUALITY_SKIP_FACTOR;
+        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useParallelProcessing = MEDIUM_USE_PARALLEL_PROCESSING;
+        _useLightEffects = MEDIUM_USE_LIGHT_EFFECTS;
+        _detailFactor = MEDIUM_DETAIL_FACTOR;
+        _rotationIntensityFactor = MEDIUM_ROTATION_INTENSITY_FACTOR;
+        _parallelThreshold = MEDIUM_PARALLEL_THRESHOLD;
     }
 
-    private void ApplyHighQualitySettings()
+    private void HighQualitySettings()
     {
-        _skipVertexCount = Constants.Quality.HIGH_QUALITY_SKIP_FACTOR;
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+        _skipVertexCount = HIGH_QUALITY_SKIP_FACTOR;
+        _useAntiAlias = HIGH_USE_ANTIALIASING;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useParallelProcessing = HIGH_USE_PARALLEL_PROCESSING;
+        _useLightEffects = HIGH_USE_LIGHT_EFFECTS;
+        _detailFactor = HIGH_DETAIL_FACTOR;
+        _rotationIntensityFactor = HIGH_ROTATION_INTENSITY_FACTOR;
+        _parallelThreshold = HIGH_PARALLEL_THRESHOLD;
     }
 
     protected override void RenderEffect(
@@ -287,12 +383,19 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint, barCount))
             return;
 
         ExecuteSafely(
             () =>
             {
+                if (HasInfoSizeChanged(info) || _isRenderingDataDirty)
+                {
+                    _lastImageInfo = info;
+                    _isRenderingDataDirty = false;
+                    ResetRenderState();
+                }
+
                 UpdateState(spectrum, barCount, info);
                 if (_dataReady)
                 {
@@ -304,11 +407,31 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         );
     }
 
+    private bool HasInfoSizeChanged(SKImageInfo info) => 
+        _lastImageInfo.Width != info.Width || _lastImageInfo.Height != info.Height;
+
+    private void ResetRenderState()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                lock (_renderDataLock)
+                {
+                    _dataReady = false;
+                    _currentRenderData = null;
+                }
+            },
+            nameof(ResetRenderState),
+            "Failed to reset render state"
+        );
+    }
+
     private bool ValidateRenderParameters(
         SKCanvas? canvas,
         float[]? spectrum,
         SKImageInfo info,
-        SKPaint? paint)
+        SKPaint? paint,
+        int barCount)
     {
         if (!_isInitialized)
         {
@@ -319,6 +442,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         if (!IsSpectrumValid(spectrum)) return false;
         if (!IsPaintValid(paint)) return false;
         if (!AreDimensionsValid(info)) return false;
+        if (!IsBarCountValid(barCount)) return false;
         if (IsDisposed()) return false;
 
         return true;
@@ -333,8 +457,8 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
     private static bool IsSpectrumValid(float[]? spectrum)
     {
-        if (spectrum != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null");
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
         return false;
     }
 
@@ -349,6 +473,13 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
     {
         if (info.Width > 0 && info.Height > 0) return true;
         Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private static bool IsBarCountValid(int barCount)
+    {
+        if (barCount > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Bar count must be greater than zero");
         return false;
     }
 
@@ -367,7 +498,6 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                _lastImageInfo = info;
                 float[] processedSpectrum = ProcessSpectrumForDonut(spectrum, barCount);
                 UpdateRotation(processedSpectrum);
 
@@ -419,9 +549,16 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
     private void UpdateRotation(float[] processedSpectrum)
     {
-        UpdateRotationIntensity(processedSpectrum);
-        UpdateRotationAngles();
-        _rotationMatrix = CreateRotationMatrix();
+        ExecuteSafely(
+            () =>
+            {
+                UpdateRotationIntensity(processedSpectrum);
+                UpdateRotationAngles();
+                _rotationMatrix = CreateRotationMatrix();
+            },
+            nameof(UpdateRotation),
+            "Error updating rotation"
+        );
     }
 
     private void UpdateRotationIntensity(float[] spectrum)
@@ -431,7 +568,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             {
                 if (spectrum == null || spectrum.Length == 0)
                 {
-                    _currentRotationIntensity = DEFAULT_ROTATION_INTENSITY;
+                    _currentRotationIntensity = DEFAULT_ROTATION_INTENSITY * _rotationIntensityFactor;
                     return;
                 }
 
@@ -440,7 +577,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                     sum += spectrum[i];
 
                 float average = sum / spectrum.Length;
-                float newIntensity = DEFAULT_ROTATION_INTENSITY + average;
+                float newIntensity = (DEFAULT_ROTATION_INTENSITY + average) * _rotationIntensityFactor;
 
                 _currentRotationIntensity = _currentRotationIntensity * (1f - ROTATION_INTENSITY_SMOOTHING) +
                                             newIntensity * ROTATION_INTENSITY_SMOOTHING;
@@ -518,9 +655,9 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         int barCount,
         float[] processedSpectrum)
     {
-        float centerX = info.Width * 0.5f;
-        float centerY = info.Height * 0.5f;
-        float scale = MathF.Min(centerX, centerY) * DEFAULT_SCALE;
+        float centerX = info.Width * CENTER_PROPORTION;
+        float centerY = info.Height * CENTER_PROPORTION;
+        float scale = MathF.Min(centerX, centerY) * DEFAULT_SCALE * _detailFactor;
 
         int step = _skipVertexCount + 1;
         int effectiveVertexCount = _vertices.Length / step;
@@ -541,7 +678,17 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
         float maxZ = effectiveVertexCount > 0 ? _projectedVertices[0].Depth : 0f;
         float minZ = effectiveVertexCount > 0 ? _projectedVertices[effectiveVertexCount - 1].Depth : 0f;
-        float maxSpectrum = effectiveVertexCount > 0 ? _projectedVertices.Max(v => v.LightIntensity) : 0f;
+        float maxSpectrum = 0f;
+
+        if (_useAdvancedEffects && effectiveVertexCount > 0)
+        {
+            maxSpectrum = _projectedVertices.Take(effectiveVertexCount).Max(v => v.LightIntensity);
+        }
+        else
+        {
+            maxSpectrum = processedSpectrum.Length > 0 ? processedSpectrum.Max() : 0f;
+        }
+
         float logBarCount = MathF.Log2(_projectedVertices.Length + 1);
 
         return (minZ, maxZ, maxSpectrum, logBarCount);
@@ -554,52 +701,67 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         float centerY,
         int step)
     {
-        float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
-        float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
-        float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
-
-        int effectiveVertexCount = _vertices.Length / step;
-
-        if (_projectedVertices.Length != effectiveVertexCount)
-        {
-            _projectedVertices = new ProjectedVertex[effectiveVertexCount];
-            _renderedVertices = new ProjectedVertex[effectiveVertexCount];
-        }
-
-        if (Quality == RenderQuality.High || effectiveVertexCount > 1000)
-        {
-            Parallel.For(0, effectiveVertexCount, i =>
+        ExecuteSafely(
+            () =>
             {
-                int vertexIndex = i * step;
-                var vertex = _vertices[vertexIndex];
-                ProjectSingleVertex(
-                    vertex,
-                    m11, m12, m13,
-                    m21, m22, m23,
-                    m31, m32, m33,
-                    scale,
-                    centerX,
-                    centerY,
-                    i);
-            });
-        }
-        else
-        {
-            for (int i = 0; i < effectiveVertexCount; i++)
-            {
-                int vertexIndex = i * step;
-                var vertex = _vertices[vertexIndex];
-                ProjectSingleVertex(
-                    vertex,
-                    m11, m12, m13,
-                    m21, m22, m23,
-                    m31, m32, m33,
-                    scale,
-                    centerX,
-                    centerY,
-                    i);
-            }
-        }
+                float m11 = _rotationMatrix.M11, m12 = _rotationMatrix.M12, m13 = _rotationMatrix.M13;
+                float m21 = _rotationMatrix.M21, m22 = _rotationMatrix.M22, m23 = _rotationMatrix.M23;
+                float m31 = _rotationMatrix.M31, m32 = _rotationMatrix.M32, m33 = _rotationMatrix.M33;
+
+                int effectiveVertexCount = _vertices.Length / step;
+
+                if (_projectedVertices.Length != effectiveVertexCount)
+                {
+                    _projectedVertices = new ProjectedVertex[effectiveVertexCount];
+                    _renderedVertices = new ProjectedVertex[effectiveVertexCount];
+                }
+
+                bool shouldUseParallel = _useParallelProcessing && effectiveVertexCount > _parallelThreshold;
+
+                if (shouldUseParallel)
+                {
+                    Parallel.For(0, effectiveVertexCount, i =>
+                    {
+                        int vertexIndex = i * step;
+                        if (vertexIndex < _vertices.Length)
+                        {
+                            var vertex = _vertices[vertexIndex];
+                            ProjectSingleVertex(
+                                vertex,
+                                m11, m12, m13,
+                                m21, m22, m23,
+                                m31, m32, m33,
+                                scale,
+                                centerX,
+                                centerY,
+                                i);
+                        }
+                    });
+                }
+                else
+                {
+                    for (int i = 0; i < effectiveVertexCount; i++)
+                    {
+                        int vertexIndex = i * step;
+                        if (vertexIndex < _vertices.Length)
+                        {
+                            var vertex = _vertices[vertexIndex];
+                            ProjectSingleVertex(
+                                vertex,
+                                m11, m12, m13,
+                                m21, m22, m23,
+                                m31, m32, m33,
+                                scale,
+                                centerX,
+                                centerY,
+                                i);
+                        }
+                    }
+                }
+            },
+            nameof(ProjectVerticesInternal),
+            "Error in internal vertex projection"
+        );
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -621,7 +783,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         float invDepth = 1f / (rzScaled + DEFAULT_DEPTH_OFFSET);
 
         float lightIntensity;
-        if (_useAdvancedEffects)
+        if (_useAdvancedEffects && _useLightEffects)
         {
             float length = MathF.Sqrt(rx * rx + ry * ry + rz * rz);
             float invLength = length > 0f ? 1f / length : 0f;
@@ -653,20 +815,28 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         float maxSpectrum,
         float logBarCount)
     {
-        lock (_renderDataLock)
-        {
-            Array.Copy(
-                _projectedVertices,
-                _renderedVertices,
-                _projectedVertices.Length);
-            _currentRenderData = new RenderData(
-                _renderedVertices,
-                minZ,
-                maxZ,
-                maxSpectrum,
-                logBarCount);
-            _dataReady = true;
-        }
+        ExecuteSafely(
+            () =>
+            {
+                lock (_renderDataLock)
+                {
+                    Array.Copy(
+                        _projectedVertices,
+                        _renderedVertices,
+                        (int)MathF.Min(_projectedVertices.Length, _renderedVertices.Length));
+
+                    _currentRenderData = new RenderData(
+                        _renderedVertices,
+                        minZ,
+                        maxZ,
+                        maxSpectrum,
+                        logBarCount);
+                    _dataReady = true;
+                }
+            },
+            nameof(PrepareRenderData),
+            "Error preparing render data"
+        );
     }
 
     private void RenderFrame(
@@ -719,29 +889,40 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         RenderData renderData)
     {
-        _verticesByCharIndex.Clear();
-
-        foreach (var vertex in vertices)
-        {
-            if (vertex.X < 0 || vertex.X >= info.Width || vertex.Y < 0 || vertex.Y >= info.Height)
-                continue;
-
-            float normalizedDepth = (vertex.Depth - renderData.MinZ) / renderData.DepthRange;
-            if (normalizedDepth is < 0f or > 1f)
-                continue;
-
-            int charIndex = (int)ClampF(
-                vertex.LightIntensity * (_asciiCharStrings.Length - 1),
-                0,
-                _asciiCharStrings.Length - 1);
-
-            if (!_verticesByCharIndex.TryGetValue(charIndex, out var groupedVertices))
+        ExecuteSafely(
+            () =>
             {
-                groupedVertices = [];
-                _verticesByCharIndex[charIndex] = groupedVertices;
-            }
-            groupedVertices.Add(vertex);
-        }
+                _verticesByCharIndex.Clear();
+
+                foreach (var vertex in vertices)
+                {
+                    if (vertex.X < 0 || vertex.X >= info.Width || vertex.Y < 0 || vertex.Y >= info.Height)
+                        continue;
+
+                    float normalizedDepth = (vertex.Depth - renderData.MinZ) / renderData.DepthRange;
+                    if (normalizedDepth < 0f || normalizedDepth > 1f)
+                        continue;
+
+                    int charIndex = (int)ClampF(
+                        vertex.LightIntensity * (_asciiCharStrings.Length - 1),
+                        0,
+                        _asciiCharStrings.Length - 1);
+
+                    if (!_verticesByCharIndex.TryGetValue(charIndex, out var groupedVertices))
+                    {
+                        groupedVertices = [];
+                        _verticesByCharIndex[charIndex] = groupedVertices;
+                    }
+
+                    if (groupedVertices.Count < MAX_VERTICES_CACHE_SIZE)
+                    {
+                        groupedVertices.Add(vertex);
+                    }
+                }
+            },
+            nameof(GroupVerticesByChar),
+            "Error grouping vertices by character"
+        );
     }
 
     private void DrawGroupedVertices(
@@ -750,28 +931,71 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         SKColor originalColor,
         RenderData renderData)
     {
-        foreach (var kvp in _verticesByCharIndex)
+        ExecuteSafely(
+            () =>
+            {
+                foreach (var kvp in _verticesByCharIndex)
+                {
+                    int charIndex = kvp.Key;
+                    var vertices = kvp.Value;
+
+                    byte baseAlpha = _alphaCache[charIndex];
+                    byte alpha = (byte)ClampF(
+                        baseAlpha * (BASE_ALPHA_INTENSITY + renderData.MaxSpectrum * MAX_SPECTRUM_ALPHA_SCALE) *
+                        renderData.AlphaMultiplier,
+                        0,
+                        MAX_ALPHA_BYTE);
+
+                    paint.Color = originalColor.WithAlpha(alpha);
+
+                    BatchDrawCharacters(canvas, vertices, _asciiCharStrings[charIndex], _font!, paint);
+                }
+            },
+            nameof(DrawGroupedVertices),
+            "Error drawing grouped vertices"
+        );
+    }
+
+    private static void BatchDrawCharacters(
+        SKCanvas canvas,
+        List<ProjectedVertex> vertices,
+        string charStr,
+        SKFont font,
+        SKPaint paint)
+    {
+        int batchSize = Constants.BATCH_SIZE;
+
+        if (vertices.Count <= batchSize)
         {
-            int charIndex = kvp.Key;
-            var vertices = kvp.Value;
-
-            byte baseAlpha = _alphaCache[charIndex];
-            byte alpha = (byte)ClampF(
-                baseAlpha * (BASE_ALPHA_INTENSITY + renderData.MaxSpectrum * MAX_SPECTRUM_ALPHA_SCALE) *
-                renderData.AlphaMultiplier,
-                0,
-                255);
-
-            paint.Color = originalColor.WithAlpha(alpha);
-
             foreach (var vertex in vertices)
             {
                 canvas.DrawText(
-                    _asciiCharStrings[charIndex],
+                    charStr,
                     vertex.X - CHAR_OFFSET_X,
                     vertex.Y + CHAR_OFFSET_Y,
-                    _font!,
+                    font,
                     paint);
+            }
+        }
+        else
+        {
+            int batches = (vertices.Count + batchSize - 1) / batchSize;
+
+            for (int i = 0; i < batches; i++)
+            {
+                int startIdx = i * batchSize;
+                int endIdx = Math.Min(startIdx + batchSize, vertices.Count);
+
+                for (int j = startIdx; j < endIdx; j++)
+                {
+                    var vertex = vertices[j];
+                    canvas.DrawText(
+                        charStr,
+                        vertex.X - CHAR_OFFSET_X,
+                        vertex.Y + CHAR_OFFSET_Y,
+                        font,
+                        paint);
+                }
             }
         }
     }
@@ -781,8 +1005,11 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
+                base.OnInvalidateCachedResources();
                 _dataReady = false;
                 _currentRenderData = null;
+                _isRenderingDataDirty = true;
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
             },
             nameof(OnInvalidateCachedResources),
             "Failed to invalidate cached resources"
@@ -808,6 +1035,10 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                             DEFAULT_TUBE_RADIUS * _sinTable[j]);
                     }
                 }
+
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Vertices initialized - count: {_vertices.Length}");
             },
             nameof(InitializeVertices),
             "Failed to initialize vertices"
@@ -822,8 +1053,10 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                 for (int i = 0; i < _asciiCharStrings.Length; i++)
                 {
                     float normalizedIndex = i / (float)(_asciiCharStrings.Length - 1);
-                    _alphaCache[i] = (byte)((MIN_ALPHA_VALUE + ALPHA_RANGE * normalizedIndex) * 255);
+                    _alphaCache[i] = (byte)((MIN_ALPHA_VALUE + ALPHA_RANGE * normalizedIndex) * MAX_ALPHA_BYTE);
                 }
+
+                Log(LogLevel.Debug, LOG_PREFIX, $"Alpha cache initialized - count: {_alphaCache.Length}");
             },
             nameof(InitializeAlphaCache),
             "Failed to initialize alpha cache"
@@ -842,16 +1075,15 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         if (_disposed) return;
 
         ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
+            () => OnDispose(),
             nameof(Dispose),
             "Error during renderer disposal"
         );
 
         _disposed = true;
+        base.Dispose();
         GC.SuppressFinalize(this);
+
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
@@ -879,5 +1111,8 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         _projectedVertices = [];
         _renderedVertices = [];
         _alphaCache = [];
+
+        _dataReady = false;
+        _currentRenderData = null;
     }
 }
