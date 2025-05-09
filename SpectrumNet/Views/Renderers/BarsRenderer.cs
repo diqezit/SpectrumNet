@@ -19,8 +19,8 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         public const string LOG_PREFIX = "BarsRenderer";
 
         public const float
-            MAX_CORNER_RADIUS = 10f,
-            DEFAULT_CORNER_RADIUS_FACTOR = 0.05f,
+            MAX_CORNER_RADIUS = 125f,
+            DEFAULT_CORNER_RADIUS_FACTOR = 0.5f,
             MIN_BAR_HEIGHT = 1f,
             HIGHLIGHT_WIDTH_PROPORTION = 0.6f,
             HIGHLIGHT_HEIGHT_PROPORTION = 0.1f,
@@ -40,28 +40,63 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
             public const bool
                 LOW_USE_ADVANCED_EFFECTS = false,
                 LOW_USE_ANTI_ALIAS = false,
-                LOW_USE_GLOW_EFFECT = false;
+                LOW_USE_GLOW_EFFECT = false,
+                LOW_USE_EDGE_EFFECT = false;
 
             public const bool
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
                 MEDIUM_USE_ANTI_ALIAS = true,
-                MEDIUM_USE_GLOW_EFFECT = true;
+                MEDIUM_USE_GLOW_EFFECT = true,
+                MEDIUM_USE_EDGE_EFFECT = true;
 
             public const bool
                 HIGH_USE_ADVANCED_EFFECTS = true,
                 HIGH_USE_ANTI_ALIAS = true,
-                HIGH_USE_GLOW_EFFECT = true;
+                HIGH_USE_GLOW_EFFECT = true,
+                HIGH_USE_EDGE_EFFECT = true;
 
             public const float
                 LOW_GLOW_RADIUS = GLOW_BLUR_RADIUS_LOW,
                 MEDIUM_GLOW_RADIUS = GLOW_BLUR_RADIUS_MEDIUM,
                 HIGH_GLOW_RADIUS = GLOW_BLUR_RADIUS_HIGH;
+
+            public const float
+                LOW_GLOW_ALPHA_QUALITY = GLOW_EFFECT_ALPHA * 0.5f,
+                MEDIUM_GLOW_ALPHA_QUALITY = GLOW_EFFECT_ALPHA * 0.8f,
+                HIGH_GLOW_ALPHA_QUALITY = GLOW_EFFECT_ALPHA;
+
+            public const float
+                LOW_INTENSITY_THRESHOLD_QUALITY = HIGH_INTENSITY_THRESHOLD * 1.2f,
+                MEDIUM_INTENSITY_THRESHOLD_QUALITY = HIGH_INTENSITY_THRESHOLD * 1.05f,
+                HIGH_INTENSITY_THRESHOLD_QUALITY = HIGH_INTENSITY_THRESHOLD;
+
+            public const float
+                LOW_ALPHA_MULTIPLIER = ALPHA_MULTIPLIER * 0.8f,
+                MEDIUM_ALPHA_MULTIPLIER = ALPHA_MULTIPLIER,
+                HIGH_ALPHA_MULTIPLIER = ALPHA_MULTIPLIER * 1.2f;
+
+            public const float
+               LOW_EDGE_STROKE_WIDTH = 0f,
+               MEDIUM_EDGE_STROKE_WIDTH = 1.5f,
+               HIGH_EDGE_STROKE_WIDTH = 2.5f;
+
+            public const float
+               LOW_EDGE_BLUR_RADIUS = 0f,
+               MEDIUM_EDGE_BLUR_RADIUS = 1f,
+               HIGH_EDGE_BLUR_RADIUS = 2f;
         }
     }
 
     private float _glowRadius;
     private bool _useGlowEffect;
     private volatile bool _isConfiguring;
+    private float _glowAlpha;
+    private float _intensityThreshold;
+    private float _alphaMultiplier;
+    private bool _useEdgeEffect;
+    private float _edgeStrokeWidth;
+    private float _edgeBlurRadius;
+
 
     private SKRect _lastRenderArea = SKRect.Empty;
     private SKMatrix _lastTransform = SKMatrix.Identity;
@@ -93,7 +128,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
                 {
                     _isConfiguring = true;
                     bool configChanged = _isOverlayActive != isOverlayActive
-                    || Quality != quality;
+                                         || Quality != quality;
 
                     _isOverlayActive = isOverlayActive;
                     Quality = quality;
@@ -172,6 +207,12 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
         _useGlowEffect = HIGH_USE_GLOW_EFFECT;
         _glowRadius = HIGH_GLOW_RADIUS;
+        _glowAlpha = HIGH_GLOW_ALPHA_QUALITY;
+        _intensityThreshold = HIGH_INTENSITY_THRESHOLD_QUALITY;
+        _alphaMultiplier = HIGH_ALPHA_MULTIPLIER;
+        _useEdgeEffect = HIGH_USE_EDGE_EFFECT;
+        _edgeStrokeWidth = HIGH_EDGE_STROKE_WIDTH;
+        _edgeBlurRadius = HIGH_EDGE_BLUR_RADIUS;
     }
 
     private void MediumQualitySettings()
@@ -180,6 +221,12 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
         _useGlowEffect = MEDIUM_USE_GLOW_EFFECT;
         _glowRadius = MEDIUM_GLOW_RADIUS;
+        _glowAlpha = MEDIUM_GLOW_ALPHA_QUALITY;
+        _intensityThreshold = MEDIUM_INTENSITY_THRESHOLD_QUALITY;
+        _alphaMultiplier = MEDIUM_ALPHA_MULTIPLIER;
+        _useEdgeEffect = MEDIUM_USE_EDGE_EFFECT;
+        _edgeStrokeWidth = MEDIUM_EDGE_STROKE_WIDTH;
+        _edgeBlurRadius = MEDIUM_EDGE_BLUR_RADIUS;
     }
 
     private void LowQualitySettings()
@@ -188,6 +235,12 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
         _useGlowEffect = LOW_USE_GLOW_EFFECT;
         _glowRadius = LOW_GLOW_RADIUS;
+        _glowAlpha = LOW_GLOW_ALPHA_QUALITY;
+        _intensityThreshold = LOW_INTENSITY_THRESHOLD_QUALITY;
+        _alphaMultiplier = LOW_ALPHA_MULTIPLIER;
+        _useEdgeEffect = LOW_USE_EDGE_EFFECT;
+        _edgeStrokeWidth = LOW_EDGE_STROKE_WIDTH;
+        _edgeBlurRadius = LOW_EDGE_BLUR_RADIUS;
     }
 
     protected override SKSamplingOptions QualityBasedSamplingOptions() =>
@@ -373,7 +426,9 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
         using var barPaint = ConfigureBarPaint(basePaint, alpha);
 
-        if (_useGlowEffect && _useAdvancedEffects && magnitude > HIGH_INTENSITY_THRESHOLD)
+        if (_useGlowEffect
+            && _useAdvancedEffects
+            && magnitude > _intensityThreshold)
         {
             using var glowPaint = ConfigureGlowPaint(magnitude);
             RenderGlowEffect(
@@ -395,16 +450,20 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
             cornerRadius,
             barPaint);
 
-        if (barHeight > cornerRadius * 2 && Quality != RenderQuality.Low)
+        if (_useEdgeEffect
+            && _useAdvancedEffects
+            && barHeight > 0
+            && _edgeStrokeWidth > 0)
         {
-            using var highlightPaint = ConfigureHighlightPaint(barPaint.Color.Alpha);
-            RenderBarHighlight(
+            using var edgePaint = ConfigureEdgePaint(alpha);
+            RenderBarEdgeEffect(
                 canvas,
                 x,
                 barWidth,
                 barHeight,
                 canvasHeight,
-                highlightPaint);
+                cornerRadius,
+                edgePaint);
         }
     }
 
@@ -419,18 +478,54 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     private SKPaint ConfigureGlowPaint(float magnitude)
     {
         var paint = _paintPool.Get();
-        paint.Color = SKColors.White.WithAlpha((byte)(magnitude * 255f * GLOW_EFFECT_ALPHA));
-        paint.ImageFilter = SKImageFilter.CreateBlur(_glowRadius, _glowRadius);
+        paint.Color = SKColors.White.WithAlpha((byte)(magnitude * 255f * _glowAlpha));
+        paint.ImageFilter = _edgeBlurRadius > 0
+            && _useAdvancedEffects ? SKImageFilter.CreateBlur(_glowRadius, _glowRadius) : null;
+
         paint.IsAntialias = _useAntiAlias;
         return paint;
     }
 
-    private SKPaint ConfigureHighlightPaint(byte baseAlpha)
+    private SKPaint ConfigureEdgePaint(byte barAlpha)
     {
         var paint = _paintPool.Get();
-        paint.Color = SKColors.White.WithAlpha((byte)(baseAlpha / HIGHLIGHT_ALPHA_DIVISOR));
+        paint.Color = SKColors.White.WithAlpha(barAlpha);
         paint.IsAntialias = _useAntiAlias;
+        paint.Style = SKPaintStyle.Stroke;
+        paint.StrokeWidth = _edgeStrokeWidth;
+        paint.StrokeCap = SKStrokeCap.Round;
+        paint.StrokeJoin = SKStrokeJoin.Round;
+
+        paint.MaskFilter = _edgeBlurRadius > 0 && _useAdvancedEffects
+            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _edgeBlurRadius)
+            : null;
+
         return paint;
+    }
+
+    private static float CalculateCornerRadius(float barWidth) =>
+        MathF.Min(barWidth * DEFAULT_CORNER_RADIUS_FACTOR, MAX_CORNER_RADIUS);
+
+    private byte CalculateBarAlpha(float magnitude) =>
+        (byte)MathF.Min(magnitude * _alphaMultiplier * 255f, 255f);
+
+    private static float CalculateBarHeight(float magnitude, float canvasHeight) =>
+        MathF.Max(magnitude * canvasHeight, MIN_BAR_HEIGHT);
+
+    private static void DrawRoundedRect(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        float cornerRadius,
+        SKPaint paint)
+    {
+        canvas.DrawRoundRect(
+            new SKRect(x, y, x + width, y + height),
+            cornerRadius,
+            cornerRadius,
+            paint);
     }
 
     private static void RenderGlowEffect(
@@ -471,50 +566,25 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
             barPaint);
     }
 
-    private static void RenderBarHighlight(
-        SKCanvas canvas,
-        float x,
-        float barWidth,
-        float barHeight,
-        float canvasHeight,
-        SKPaint highlightPaint)
+    private static void RenderBarEdgeEffect(
+       SKCanvas canvas,
+       float x,
+       float barWidth,
+       float barHeight,
+       float canvasHeight,
+       float cornerRadius,
+       SKPaint edgePaint)
     {
-        float highlightWidth = barWidth * HIGHLIGHT_WIDTH_PROPORTION;
-        float highlightHeight = MathF.Min(barHeight * HIGHLIGHT_HEIGHT_PROPORTION, MAX_HIGHLIGHT_HEIGHT);
-        float highlightX = x + (barWidth - highlightWidth) / 2;
-
-        canvas.DrawRect(
-            highlightX,
-            canvasHeight - barHeight,
-            highlightWidth,
-            highlightHeight,
-            highlightPaint);
+        DrawRoundedRect(
+           canvas,
+           x,
+           canvasHeight - barHeight,
+           barWidth,
+           barHeight,
+           cornerRadius,
+           edgePaint);
     }
 
-    private static float CalculateCornerRadius(float barWidth) =>
-        MathF.Min(barWidth * DEFAULT_CORNER_RADIUS_FACTOR, MAX_CORNER_RADIUS);
-
-    private static float CalculateBarHeight(float magnitude, float canvasHeight) =>
-        MathF.Max(magnitude * canvasHeight, MIN_BAR_HEIGHT);
-
-    private static byte CalculateBarAlpha(float magnitude) =>
-        (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * 255f, 255f);
-
-    private static void DrawRoundedRect(
-        SKCanvas canvas,
-        float x,
-        float y,
-        float width,
-        float height,
-        float cornerRadius,
-        SKPaint paint)
-    {
-        canvas.DrawRoundRect(
-            new SKRect(x, y, x + width, y + height),
-            cornerRadius,
-            cornerRadius,
-            paint);
-    }
 
     public override void Dispose()
     {

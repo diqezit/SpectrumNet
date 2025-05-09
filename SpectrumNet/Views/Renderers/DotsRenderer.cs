@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.DotsRenderer.Constants;
+using static SpectrumNet.Views.Renderers.DotsRenderer.Constants.Quality;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
@@ -39,6 +40,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             DEFAULT_DOT_COUNT = MEDIUM_QUALITY_DOT_COUNT,
             MIN_BAR_COUNT = 32;
 
+        public const byte MAX_ALPHA_BYTE = 255;
+
         public static class Quality
         {
             public const int
@@ -50,6 +53,31 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 LOW_USE_ADVANCED_EFFECTS = false,
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
                 HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
+            public const bool
+                LOW_USE_GLOW_EFFECTS = false,
+                MEDIUM_USE_GLOW_EFFECTS = true,
+                HIGH_USE_GLOW_EFFECTS = true;
+
+            public const float
+                LOW_GLOW_RADIUS_FACTOR = 0.2f,
+                MEDIUM_GLOW_RADIUS_FACTOR = 0.3f,
+                HIGH_GLOW_RADIUS_FACTOR = 0.5f;
+
+            public const float
+                LOW_GLOW_ALPHA = 0.4f,
+                MEDIUM_GLOW_ALPHA = 0.6f,
+                HIGH_GLOW_ALPHA = 0.8f;
+
+            public const float
+                LOW_DOT_SPEED_FACTOR = 0.7f,
+                MEDIUM_DOT_SPEED_FACTOR = 1.0f,
+                HIGH_DOT_SPEED_FACTOR = 1.3f;
         }
     }
 
@@ -65,7 +93,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         float MaxSpectrum,
         int BarCount)
     {
-        public readonly float AlphaFactor => MathF.Max(0.3f, MathF.Min(1.0f, MaxSpectrum + 0.3f));
+        public readonly float AlphaFactor => 
+            MathF.Max(0.3f, MathF.Min(1.0f, MaxSpectrum + 0.3f));
     }
 
     private static readonly Random _random = new();
@@ -77,6 +106,12 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     private int _dotCount = DEFAULT_DOT_COUNT;
     private float _globalRadiusMultiplier = 1.0f;
     private new bool _useAdvancedEffects;
+    private bool _useGlowEffects;
+    private new bool _useAntiAlias;
+    private float _glowRadiusFactor = GLOW_RADIUS_FACTOR;
+    private float _glowAlpha = BASE_GLOW_ALPHA;
+    private float _dotSpeedFactor = 1.0f;
+    private volatile bool _isConfiguring;
 
     private readonly object _renderDataLock = new();
     private bool _dataReady;
@@ -92,24 +127,35 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 InitializeResources();
-                ApplyQualitySettings();
+                InitializeQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed during renderer initialization"
         );
     }
 
+    private void InitializeQualitySettings() => 
+        ApplyQualitySettingsInternal();
+
     private void InitializeResources()
     {
-        _dotPaint.IsAntialias = true;
+        _dotPaint.IsAntialias = _useAntiAlias;
         _dotPaint.Style = SKPaintStyle.Fill;
 
-        _glowPaint.IsAntialias = true;
+        _glowPaint.IsAntialias = _useAntiAlias;
         _glowPaint.Style = SKPaintStyle.Fill;
-        _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR);
+
+        UpdateGlowMaskFilter();
 
         ResetDots(new SKImageInfo(800, 600));
+    }
+
+    private void UpdateGlowMaskFilter()
+    {
+        _glowPaint.MaskFilter = _useGlowEffects && _useAdvancedEffects
+            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * _glowRadiusFactor)
+            : null;
     }
 
     private void ResetDots(SKImageInfo info)
@@ -126,8 +172,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
 
             _dots[i] = new Dot(
                 x, y,
-                (_random.NextSingle() - 0.5f) * DOT_SPEED_BASE,
-                (_random.NextSingle() - 0.5f) * DOT_SPEED_BASE,
+                (_random.NextSingle() - 0.5f) * DOT_SPEED_BASE * _dotSpeedFactor,
+                (_random.NextSingle() - 0.5f) * DOT_SPEED_BASE * _dotSpeedFactor,
                 baseRadius,
                 baseRadius,
                 color
@@ -153,15 +199,30 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
     }
@@ -171,9 +232,11 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}");
             },
-            "OnConfigurationChanged",
+            nameof(OnConfigurationChanged),
             "Failed to handle configuration change"
         );
     }
@@ -183,56 +246,87 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
-            "ApplyQualitySettings",
+            nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualityBasedSettings()
+    private void ApplyQualitySettingsInternal()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                ApplyLowQualitySettings();
+                LowQualitySettings();
                 break;
             case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
+                MediumQualitySettings();
                 break;
             case RenderQuality.High:
-                ApplyHighQualitySettings();
+                HighQualitySettings();
                 break;
         }
 
         UpdateQualityDependentResources();
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"DotCount: {_dotCount}, AntiAlias: {_useAntiAlias}, " +
+            $"AdvancedEffects: {_useAdvancedEffects}, GlowEffects: {_useGlowEffects}, " +
+            $"GlowRadius: {_glowRadiusFactor}, SpeedFactor: {_dotSpeedFactor}");
     }
 
-    private void ApplyLowQualitySettings()
+    private void LowQualitySettings()
     {
-        _dotCount = Constants.Quality.LOW_DOT_COUNT;
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+        _dotCount = LOW_DOT_COUNT;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = LOW_USE_ANTIALIASING;
+        _useGlowEffects = LOW_USE_GLOW_EFFECTS;
+        _glowRadiusFactor = LOW_GLOW_RADIUS_FACTOR;
+        _glowAlpha = LOW_GLOW_ALPHA;
+        _dotSpeedFactor = LOW_DOT_SPEED_FACTOR;
     }
 
-    private void ApplyMediumQualitySettings()
+    private void MediumQualitySettings()
     {
-        _dotCount = Constants.Quality.MEDIUM_DOT_COUNT;
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+        _dotCount = MEDIUM_DOT_COUNT;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        _useGlowEffects = MEDIUM_USE_GLOW_EFFECTS;
+        _glowRadiusFactor = MEDIUM_GLOW_RADIUS_FACTOR;
+        _glowAlpha = MEDIUM_GLOW_ALPHA;
+        _dotSpeedFactor = MEDIUM_DOT_SPEED_FACTOR;
     }
 
-    private void ApplyHighQualitySettings()
+    private void HighQualitySettings()
     {
-        _dotCount = Constants.Quality.HIGH_DOT_COUNT;
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+        _dotCount = HIGH_DOT_COUNT;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = HIGH_USE_ANTIALIASING;
+        _useGlowEffects = HIGH_USE_GLOW_EFFECTS;
+        _glowRadiusFactor = HIGH_GLOW_RADIUS_FACTOR;
+        _glowAlpha = HIGH_GLOW_ALPHA;
+        _dotSpeedFactor = HIGH_DOT_SPEED_FACTOR;
     }
 
     private void UpdateQualityDependentResources()
     {
-        _glowPaint.MaskFilter = _useAdvancedEffects
-            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BASE_DOT_RADIUS * GLOW_RADIUS_FACTOR)
-            : null;
+        _dotPaint.IsAntialias = _useAntiAlias;
+        _glowPaint.IsAntialias = _useAntiAlias;
+
+        UpdateGlowMaskFilter();
 
         if (_lastImageInfo.Width > 0 && _lastImageInfo.Height > 0)
         {
@@ -262,7 +356,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 UpdateState(spectrum, barCount, info);
                 RenderFrame(canvas, info);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
     }
@@ -305,7 +399,9 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     private static bool AreDimensionsValid(SKImageInfo info)
     {
         if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        Log(LogLevel.Error,
+            LOG_PREFIX,
+            $"Invalid image dimensions: {info.Width}x{info.Height}");
         return false;
     }
 
@@ -411,7 +507,9 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         (newX, newVelocityX) = HandleBoundaryCollision(newX, newVelocityX, 0, info.Width);
         (newY, newVelocityY) = HandleBoundaryCollision(newY, newVelocityY, 0, info.Height);
 
-        float newRadius = dot.BaseRadius * (1.0f + spectrumValue * SPECTRUM_VELOCITY_FACTOR) * _globalRadiusMultiplier;
+        float newRadius = dot.BaseRadius
+                          * (1.0f + spectrumValue * SPECTRUM_VELOCITY_FACTOR)
+                          * _globalRadiusMultiplier;
 
         return dot with
         {
@@ -423,13 +521,23 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         };
     }
 
-    private static (float forceX, float forceY) CalculateForces(float normalizedX, float normalizedY, float spectrumValue)
+    private (float forceX, float forceY) CalculateForces(
+        float normalizedX,
+        float normalizedY,
+        float spectrumValue)
     {
-        float gravityX = (_gravityCenter.X - normalizedX) * DOT_SPEED_BASE;
-        float gravityY = (_gravityCenter.Y - normalizedY) * DOT_SPEED_BASE;
+        float gravityX = (_gravityCenter.X - normalizedX) * DOT_SPEED_BASE * _dotSpeedFactor;
+        float gravityY = (_gravityCenter.Y - normalizedY) * DOT_SPEED_BASE * _dotSpeedFactor;
 
-        float spectrumForceX = (normalizedX - 0.5f) * spectrumValue * SPECTRUM_INFLUENCE_FACTOR * DOT_SPEED_SCALE;
-        float spectrumForceY = (normalizedY - 0.5f) * spectrumValue * SPECTRUM_INFLUENCE_FACTOR * DOT_SPEED_SCALE;
+        float spectrumForceX = (normalizedX - 0.5f)
+                               * spectrumValue
+                               * SPECTRUM_INFLUENCE_FACTOR
+                               * DOT_SPEED_SCALE;
+
+        float spectrumForceY = (normalizedY - 0.5f)
+                               * spectrumValue
+                               * SPECTRUM_INFLUENCE_FACTOR
+                               * DOT_SPEED_SCALE;
 
         return (gravityX + spectrumForceX, gravityY + spectrumForceY);
     }
@@ -478,7 +586,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 Dot[] sortedDots = [.. renderData.Dots.OrderBy(d => d.Radius)];
                 DrawDots(canvas, sortedDots, renderData.AlphaFactor);
             },
-            "RenderFrame",
+            nameof(RenderFrame),
             "Error rendering dots frame"
         );
     }
@@ -493,17 +601,17 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             if (dot.Radius < 0.5f)
                 continue;
 
-            byte alpha = (byte)(ALPHA_BASE * 255 * alphaFactor);
+            byte alpha = (byte)(ALPHA_BASE * MAX_ALPHA_BYTE * alphaFactor);
             DrawDotWithGlow(canvas, dot, alpha);
         }
     }
 
     private void DrawDotWithGlow(SKCanvas canvas, Dot dot, byte alpha)
     {
-        if (_useAdvancedEffects)
+        if (_useAdvancedEffects && _useGlowEffects)
         {
-            _glowPaint.Color = dot.Color.WithAlpha((byte)(BASE_GLOW_ALPHA * alpha));
-            float glowRadius = dot.Radius * (1.0f + GLOW_RADIUS_FACTOR);
+            _glowPaint.Color = dot.Color.WithAlpha((byte)(_glowAlpha * alpha));
+            float glowRadius = dot.Radius * (1.0f + _glowRadiusFactor);
             canvas.DrawCircle(dot.X, dot.Y, glowRadius, _glowPaint);
         }
 
@@ -519,7 +627,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 _dataReady = false;
                 _currentRenderData = null;
             },
-            "OnInvalidateCachedResources",
+            nameof(OnInvalidateCachedResources),
             "Failed to invalidate cached resources"
         );
     }
@@ -532,7 +640,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             {
                 OnDispose();
             },
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
         _disposed = true;
@@ -548,7 +656,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 DisposeManagedResources();
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
     }

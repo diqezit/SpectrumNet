@@ -2,6 +2,7 @@
 
 using static SkiaSharp.SKBlendMode;
 using static SpectrumNet.Views.Renderers.ConstellationRenderer.Constants;
+using static SpectrumNet.Views.Renderers.ConstellationRenderer.Constants.Quality;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
@@ -9,9 +10,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class ConstellationRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<ConstellationRenderer> _instance = new(() => new ConstellationRenderer());
-
     private ConstellationRenderer() { }
-
     public static ConstellationRenderer GetInstance() => _instance.Value;
 
     public record Constants
@@ -45,7 +44,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         public const byte
             MIN_STAR_COLOR_VALUE = 130,
             MAX_STAR_COLOR_VARIATION = 50,
-            BASE_STAR_COLOR = 210;
+            BASE_STAR_COLOR = 210,
+            MAX_ALPHA_BYTE = 255;
 
         public const int UPDATE_INTERVAL = 16;
 
@@ -123,6 +123,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private readonly object _starsLock = new();
     private CancellationTokenSource _updateTokenSource = new();
     private Task? _updateTask;
+    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
@@ -147,7 +148,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 _starCount = _isOverlayActive
                     ? OVERLAY_STAR_COUNT
                     : DEFAULT_STAR_COUNT;
-
                 InitializeStars(_starCount);
                 InitializeShadersAndPaints();
                 StartUpdateLoop();
@@ -163,7 +163,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             () =>
             {
                 _starPaint = CreateBasicPaint(SKColors.White);
-
                 _glowShader = SKShader.CreateRadialGradient(
                     new SKPoint(0, 0),
                     UNIT_RADIUS,
@@ -171,13 +170,11 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     _starGlowPositions,
                     SKShaderTileMode.Clamp
                 );
-
                 _glowPaint = CreateGlowPaint(
                     SKColors.White,
                     GLOW_RADIUS,
                     128
                 );
-
                 if (_glowPaint != null && _glowShader != null)
                 {
                     _glowPaint.BlendMode = Plus;
@@ -195,7 +192,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         {
             Color = color,
             IsAntialias = true,
-            Style = Fill
+            Style = SKPaintStyle.Fill
         };
     }
 
@@ -206,12 +203,27 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        base.ApplyQualitySettings();
+                        ApplyQualityBasedSettings();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
             nameof(Configure),
@@ -227,7 +239,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 _starCount = _isOverlayActive
                     ? OVERLAY_STAR_COUNT
                     : DEFAULT_STAR_COUNT;
-
                 InitializeStars(_starCount);
                 Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
             },
@@ -241,9 +252,19 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualityBasedSettings();
+                    Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
             nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
@@ -264,26 +285,25 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 ApplyHighQualitySettings();
                 break;
         }
-
         UpdatePaintQualitySettings();
     }
 
     private void ApplyLowQualitySettings()
     {
-        _useGlowEffects = Constants.Quality.LOW_USE_GLOW_EFFECTS;
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+        _useGlowEffects = LOW_USE_GLOW_EFFECTS;
+        _useAntiAlias = LOW_USE_ANTIALIASING;
     }
 
     private void ApplyMediumQualitySettings()
     {
-        _useGlowEffects = Constants.Quality.MEDIUM_USE_GLOW_EFFECTS;
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+        _useGlowEffects = MEDIUM_USE_GLOW_EFFECTS;
+        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
     }
 
     private void ApplyHighQualitySettings()
     {
-        _useGlowEffects = Constants.Quality.HIGH_USE_GLOW_EFFECTS;
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+        _useGlowEffects = HIGH_USE_GLOW_EFFECTS;
+        _useAntiAlias = HIGH_USE_ANTIALIASING;
     }
 
     private void UpdatePaintQualitySettings()
@@ -292,7 +312,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         {
             _starPaint.IsAntialias = _useAntiAlias;
         }
-
         if (_glowPaint != null)
         {
             _glowPaint.IsAntialias = _useAntiAlias;
@@ -481,7 +500,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             () =>
             {
                 if (_stars == null) return;
-
                 lock (_starsLock)
                 {
                     for (int i = 0; i < _stars.Length; i++)
@@ -508,7 +526,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 {
                     return;
                 }
-
                 PrepareRenderSurface();
                 RenderStarsToSurface(info);
                 DrawFinalComposite(canvas);
@@ -518,7 +535,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         );
     }
 
-    private bool AreRenderResourcesValid() => 
+    private bool AreRenderResourcesValid() =>
         _stars != null
         && _starPaint != null
         && _glowPaint != null
@@ -529,7 +546,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private void RenderStarsToSurface(SKImageInfo info)
     {
         if (_renderSurface == null) return;
-
         lock (_starsLock)
         {
             RenderActiveStars(_renderSurface.Canvas, info);
@@ -539,7 +555,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private void DrawFinalComposite(SKCanvas canvas)
     {
         if (_renderSurface == null) return;
-
         using SKImage finalSnapshot = _renderSurface.Snapshot();
         canvas.DrawImage(finalSnapshot, 0, 0);
     }
@@ -550,23 +565,18 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         if (_stars == null || _starPaint == null || _glowPaint == null)
             return;
-
         foreach (var star in _stars)
         {
             if (!ShouldRenderStar(star, info))
             {
                 continue;
             }
-
             (float finalOpacity, byte alpha) = CalculateStarOpacity(star);
-
             if (finalOpacity < 0.01f)
             {
                 continue;
             }
-
             float dynamicSize = CalculateStarSize(star);
-
             if (ShouldRenderGlowEffect(star))
             {
                 RenderStarGlow(
@@ -576,7 +586,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                     alpha
                 );
             }
-
             RenderStarCore(
                 renderCanvas,
                 star,
@@ -592,7 +601,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         {
             return false;
         }
-
         return !IsStarOutsideVisibleArea(star, info);
     }
 
@@ -609,17 +617,15 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         float lifetimeRatio = star.Lifetime / star.MaxLifetime;
         float fadeEffect = CalculateFadeEffect(lifetimeRatio);
         float finalOpacity = star.Opacity * fadeEffect;
-
         byte alpha = (byte)ClampInt(
             (int)(255 * star.Brightness * finalOpacity),
             0,
             255
         );
-
         return (finalOpacity, alpha);
     }
 
-    private static float CalculateFadeEffect(float lifetimeRatio) => 
+    private static float CalculateFadeEffect(float lifetimeRatio) =>
         lifetimeRatio < 0.2f ? lifetimeRatio / 0.2f : 1.0f;
 
     private static float CalculateStarSize(Star star)
@@ -628,7 +634,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         return star.Size * (0.7f + lifetimeRatio * 0.3f);
     }
 
-    private bool ShouldRenderGlowEffect(Star star) => 
+    private bool ShouldRenderGlowEffect(Star star) =>
         _useGlowEffects
         && (star.Brightness > DEFAULT_BRIGHTNESS
         || _spectrumEnergy > 0.45f);
@@ -641,13 +647,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         if (_glowPaint == null)
             return;
-
         float finalOpacity = star.Opacity * (star.Lifetime / star.MaxLifetime);
         float glowSize = CalculateGlowSize(dynamicSize, finalOpacity);
         byte glowAlpha = (byte)(alpha * 0.6f);
-
         _glowPaint.Color = star.Color.WithAlpha(glowAlpha);
-
         canvas.Save();
         canvas.Translate(star.X, star.Y);
         canvas.Scale(glowSize, glowSize);
@@ -655,7 +658,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         canvas.Restore();
     }
 
-    private float CalculateGlowSize(float dynamicSize, float finalOpacity) => 
+    private float CalculateGlowSize(float dynamicSize, float finalOpacity) =>
         dynamicSize * (2.2f + _spectrumEnergy * 1.2f) * finalOpacity;
 
     private void RenderStarCore(
@@ -666,7 +669,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         if (_starPaint == null)
             return;
-
         _starPaint.Color = star.Color.WithAlpha(alpha);
         canvas.Save();
         canvas.Translate(star.X, star.Y);
@@ -695,7 +697,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         {
             _updateTokenSource.Cancel();
         }
-
         if (_updateTask != null)
         {
             try
@@ -718,7 +719,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void StartNewUpdateTask() => 
+    private void StartNewUpdateTask() =>
         _updateTask = Task.Run(
             UpdateLoopAsync,
             _updateTokenSource.Token
@@ -727,22 +728,18 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private async Task UpdateLoopAsync()
     {
         float accumulatedTime = 0;
-
         while (!_updateTokenSource.IsCancellationRequested)
         {
             if (_needsUpdate && _isInitialized)
             {
                 UpdateSimulationTime(ref accumulatedTime);
-
                 if (ShouldUpdateStars(accumulatedTime))
                 {
                     UpdateStarsBasedOnState();
                     accumulatedTime -= TIME_STEP;
                 }
-
                 _needsUpdate = false;
             }
-
             await Task.Delay(
                 UPDATE_INTERVAL,
                 _updateTokenSource.Token
@@ -756,7 +753,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         accumulatedTime += TIME_STEP;
     }
 
-    private bool ShouldUpdateStars(float accumulatedTime) => 
+    private bool ShouldUpdateStars(float accumulatedTime) =>
         accumulatedTime >= TIME_STEP
         && _stars != null
         && _lastRenderInfo.Width > 0;
@@ -779,13 +776,11 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             () =>
             {
                 if (_stars == null) return;
-
                 lock (_starsLock)
                 {
                     for (int i = 0; i < _stars.Length; i++)
                     {
                         if (!_stars[i].IsActive) continue;
-
                         float newOpacity = CalculateReducedOpacity(_stars[i]);
                         UpdateStarDuringFadeOut(i, newOpacity);
                     }
@@ -796,13 +791,12 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         );
     }
 
-    private static float CalculateReducedOpacity(Star star) => 
+    private static float CalculateReducedOpacity(Star star) =>
         MathF.Max(star.Opacity - TIME_STEP * FADE_OUT_SPEED, 0);
 
     private void UpdateStarDuringFadeOut(int starIndex, float newOpacity)
     {
         if (_stars == null) return;
-
         if (newOpacity <= 0.01f)
         {
             DeactivateStar(starIndex);
@@ -813,7 +807,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 _stars[starIndex].Lifetime - TIME_STEP * 2,
                 0
             );
-
             if (newLifetime <= 0)
             {
                 DeactivateStar(starIndex);
@@ -828,7 +821,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private void DeactivateStar(int starIndex)
     {
         if (_stars == null) return;
-
         _stars[starIndex] = _stars[starIndex] with
         {
             IsActive = false,
@@ -840,7 +832,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private void SlowDownStar(int starIndex, float newOpacity, float newLifetime)
     {
         if (_stars == null) return;
-
         _stars[starIndex] = _stars[starIndex] with
         {
             Opacity = newOpacity,
@@ -856,12 +847,9 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             () =>
             {
                 if (_stars == null) return;
-
                 float screenWidth = info.Width;
                 float screenHeight = info.Height;
-
                 HandleStarSpawning(screenWidth, screenHeight);
-
                 lock (_starsLock)
                 {
                     UpdateAllStars(screenWidth, screenHeight);
@@ -885,18 +873,15 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private void UpdateAllStars(float screenWidth, float screenHeight)
     {
         if (_stars == null) return;
-
         for (int i = 0; i < _stars.Length; i++)
         {
             if (!_stars[i].IsActive) continue;
-
             float newLifetime = _stars[i].Lifetime - TIME_STEP;
             if (newLifetime <= 0)
             {
                 DeactivateStar(i);
                 continue;
             }
-
             _stars[i] = CalculateUpdatedStar(
                 _stars[i],
                 newLifetime,
@@ -914,21 +899,18 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         float newOpacity = CalculateFadeInOpacity(star);
         float targetBrightness = CalculateTargetBrightness(star);
-
         (Vector2 newVelocity, float speed) = CalculateStarVelocity(
             star,
             newLifetime,
             screenWidth,
             screenHeight
         );
-
         (float newX, float newY) = CalculateNewPosition(
             star,
             newVelocity,
             screenWidth,
             screenHeight
         );
-
         return CreateUpdatedStar(
             star,
             newX,
@@ -941,7 +923,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         );
     }
 
-    private static float CalculateFadeInOpacity(Star star) => 
+    private static float CalculateFadeInOpacity(Star star) =>
         MathF.Min(star.Opacity + TIME_STEP * FADE_IN_SPEED, 1.0f);
 
     private float CalculateTargetBrightness(Star star)
@@ -949,7 +931,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         float twinkling = Sin(
             _time * TWINKLE_SPEED * star.TwinkleSpeed + star.TwinkleFactor
         );
-
         return ClampF(
             DEFAULT_BRIGHTNESS +
             twinkling * TWINKLE_INFLUENCE +
@@ -993,7 +974,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private void ApplyRandomDirectionChanges()
     {
         if (_stars == null || _stars.Length == 0) return;
-
         float directionChangeProbability = DIRECTION_CHANGE_CHANCE * (1f + _spectrumEnergy * 3f);
         if ((float)_random.NextDouble() < directionChangeProbability)
         {
@@ -1008,19 +988,15 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private void ChangeStarDirection(int starIndex)
     {
         if (_stars == null) return;
-
         float currentAngle = Atan2(
             _stars[starIndex].VelocityY,
             _stars[starIndex].VelocityX
         );
-
         float angleChange = (float)(_random.NextDouble() * 0.5f - 0.25f) * MathF.PI;
         float newAngle = currentAngle + angleChange;
         float magnitude = CalculateDirectionChangeMagnitude(starIndex);
-
         float newVelX = Cos(newAngle) * magnitude;
         float newVelY = Sin(newAngle) * magnitude;
-
         _stars[starIndex] = _stars[starIndex] with
         {
             VelocityX = newVelX,
@@ -1031,7 +1007,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private float CalculateDirectionChangeMagnitude(int starIndex)
     {
         if (_stars == null) return BASE_STAR_VELOCITY;
-
         return BASE_STAR_VELOCITY *
                (0.8f + _spectrumEnergy * 1.2f) *
                (0.8f + _stars[starIndex].Mass * 0.4f);
@@ -1051,18 +1026,14 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             ref forceX,
             ref forceY
         );
-
         Vector2 acceleration = CalculateAcceleration(star, forceX, forceY);
         Vector2 targetVelocity = CalculateTargetVelocity(star, acceleration, newLifetime);
-
         float velocityLerpFactor = VELOCITY_LERP * (1.0f + _spectrumEnergy * 0.5f);
         Vector2 currentVelocity = new(star.VelocityX, star.VelocityY);
         Vector2 newVelocity = currentVelocity +
                              (targetVelocity - currentVelocity) *
                              velocityLerpFactor;
-
         float speed = newVelocity.Length();
-
         return (newVelocity, speed);
     }
 
@@ -1071,15 +1042,12 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         float inertiaFactor = 1.0f / (0.8f + star.Mass * 0.5f);
         Vector2 baseForce = new(forceX, forceY);
         Vector2 baseAcceleration = baseForce * STAR_ACCELERATION * inertiaFactor;
-
         float spectrumAcceleration = 1.0f + _spectrumEnergy * 1.5f;
         baseAcceleration = Vector2.Multiply(baseAcceleration, spectrumAcceleration);
-
         Vector2 frequencyForce = new Vector2(
                    _highSpectrum - _lowSpectrum,
                    _midSpectrum
                ) * FREQUENCY_FORCE_FACTOR;
-
         return baseAcceleration + frequencyForce;
     }
 
@@ -1090,10 +1058,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         Vector2 currentVelocity = new(star.VelocityX, star.VelocityY);
         Vector2 targetVelocity = currentVelocity + acceleration;
-
         float dampingFactor = CalculateDampingFactor(star, newLifetime);
         targetVelocity = Vector2.Multiply(targetVelocity, dampingFactor);
-
         return LimitMaximumVelocity(targetVelocity);
     }
 
@@ -1101,12 +1067,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         float lifetimeRatio = newLifetime / star.MaxLifetime;
         float dampingFactor = STAR_DAMPING;
-
         if (lifetimeRatio < 0.3f)
         {
             dampingFactor *= 0.8f + lifetimeRatio * 0.2f;
         }
-
         return dampingFactor;
     }
 
@@ -1114,12 +1078,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         float maxSpeed = MAX_SPEED * (0.5f + _spectrumEnergy * 0.8f);
         float speedSq = Vector2.Dot(velocity, velocity);
-
         if (speedSq > maxSpeed * maxSpeed)
         {
             return Vector2.Normalize(velocity) * maxSpeed;
         }
-
         return velocity;
     }
 
@@ -1131,14 +1093,12 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         float newX = star.X + velocity.X;
         float newY = star.Y + velocity.Y;
-
         (newX, newY) = WrapPositionAroundScreen(
             newX,
             newY,
             screenWidth,
             screenHeight
         );
-
         return (newX, newY);
     }
 
@@ -1152,12 +1112,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             x = width + 10;
         else if (x > width + EDGE_REPULSION_DISTANCE)
             x = -10;
-
         if (y < -EDGE_REPULSION_DISTANCE)
             y = height + 10;
         else if (y > height + EDGE_REPULSION_DISTANCE)
             y = -10;
-
         return (x, y);
     }
 
@@ -1170,27 +1128,22 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         float edgeDistX = MathF.Min(star.X, screenWidth - star.X);
         float edgeDistY = MathF.Min(star.Y, screenHeight - star.Y);
-
         float normalizedEdgeDistX = ClampF(
             edgeDistX / EDGE_REPULSION_DISTANCE,
             0,
             1
         );
-
         float normalizedEdgeDistY = ClampF(
             edgeDistY / EDGE_REPULSION_DISTANCE,
             0,
             1
         );
-
         float edgeForceX = EDGE_REPULSION_FORCE *
                          (1f - Pow(normalizedEdgeDistX, REPULSION_CURVE_POWER)) *
                          MathF.Sign(screenWidth / 2f - star.X);
-
         float edgeForceY = EDGE_REPULSION_FORCE *
                          (1f - Pow(normalizedEdgeDistY, REPULSION_CURVE_POWER)) *
                          MathF.Sign(screenHeight / 2f - star.Y);
-
         forceX += edgeForceX;
         forceY += edgeForceY;
     }
@@ -1202,17 +1155,14 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             {
                 if (_stars == null || _midSpectrum < SPAWN_THRESHOLD)
                     return;
-
                 int starsToSpawn = (int)_spawnAccumulator;
                 _spawnAccumulator -= starsToSpawn;
-
                 lock (_starsLock)
                 {
                     for (int i = 0; i < starsToSpawn; i++)
                     {
                         int availableSlot = FindAvailableStarSlot();
                         if (availableSlot == -1) continue;
-
                         _stars[availableSlot] = CreateNewStar(
                             screenWidth,
                             screenHeight
@@ -1228,7 +1178,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private int FindAvailableStarSlot()
     {
         if (_stars == null) return -1;
-
         for (int j = 0; j < _stars.Length; j++)
         {
             if (!_stars[j].IsActive || _stars[j].Lifetime <= 0)
@@ -1243,25 +1192,19 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         float x = (float)_random.Next(0, (int)screenWidth);
         float y = (float)_random.Next(0, (int)screenHeight);
-
         float starSize = MIN_STAR_SIZE +
                         (MAX_STAR_SIZE - MIN_STAR_SIZE) *
                         (float)_random.NextDouble();
-
         float lifetime = MIN_STAR_LIFETIME +
                         (MAX_STAR_LIFETIME - MIN_STAR_LIFETIME) *
                         (float)_random.NextDouble();
-
         float brightness = DEFAULT_BRIGHTNESS +
                           (float)_random.NextDouble() * BRIGHTNESS_VARIATION;
-
         byte r = (byte)_random.Next(MIN_STAR_COLOR_VALUE, 255);
         byte g = (byte)_random.Next(MIN_STAR_COLOR_VALUE, 255);
         byte b = (byte)_random.Next(MIN_STAR_COLOR_VALUE, 255);
         var color = new SKColor(r, g, b);
-
         (float vx, float vy) = CalculateInitialVelocity();
-
         return new Star
         {
             X = x,
@@ -1289,10 +1232,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         float baseAngle = (float)_random.NextDouble() * MathF.PI * 2f;
         float angleOffset = (_highSpectrum - _lowSpectrum) * 0.5f;
         float angle = baseAngle + angleOffset;
-
         float vx = Cos(angle) * BASE_STAR_VELOCITY * initialSpeedMultiplier;
         float vy = Sin(angle) * BASE_STAR_VELOCITY * initialSpeedMultiplier;
-
         return (vx, vy);
     }
 
@@ -1303,7 +1244,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             () =>
             {
                 if (spectrum.Length < 3) return;
-
                 ProcessSpectrumBands(spectrum);
                 CalculateSpectrumEnergy();
             },
@@ -1318,7 +1258,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             _midSpectrum * SPECTRUM_AMPLIFICATION,
             MAX_BRIGHTNESS
         );
-
         _spectrumEnergy = _processedSpectrum;
     }
 
@@ -1326,13 +1265,11 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         int totalLength = spectrum.Length;
         int bandLength = totalLength / 3;
-
         (float avgLow, float avgMid, float avgHigh) = CalculateBandAverages(
             spectrum,
             bandLength,
             totalLength
         );
-
         _lowSpectrum += (avgLow - _lowSpectrum) * SMOOTHING_FACTOR;
         _midSpectrum += (avgMid - _midSpectrum) * SMOOTHING_FACTOR;
         _highSpectrum += (avgHigh - _highSpectrum) * SMOOTHING_FACTOR;
@@ -1348,11 +1285,9 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             bandLength,
             totalLength
         );
-
         float avgLow = lowSum / bandLength;
         float avgMid = midSum / bandLength;
         float avgHigh = highSum / (totalLength - 2 * bandLength);
-
         return (avgLow, avgMid, avgHigh);
     }
 
@@ -1362,16 +1297,12 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         int totalLength)
     {
         float lowSum = 0, midSum = 0, highSum = 0;
-
         for (int i = 0; i < bandLength; i++)
             lowSum += spectrum[i];
-
         for (int i = bandLength; i < 2 * bandLength; i++)
             midSum += spectrum[i];
-
         for (int i = 2 * bandLength; i < totalLength; i++)
             highSum += spectrum[i];
-
         return (lowSum, midSum, highSum);
     }
 
@@ -1381,11 +1312,9 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             () =>
             {
                 ObjectDisposedException.ThrowIf(_disposed, nameof(ConstellationRenderer));
-
                 lock (_starsLock)
                 {
                     _stars = new Star[count];
-
                     for (int i = 0; i < count; i++)
                     {
                         _stars[i] = CreateInitialStar();
@@ -1402,7 +1331,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         byte r = (byte)_random.Next(MIN_STAR_COLOR_VALUE, 255);
         byte g = (byte)_random.Next(MIN_STAR_COLOR_VALUE, 255);
         byte b = (byte)_random.Next(MIN_STAR_COLOR_VALUE, 255);
-
         return new Star
         {
             X = _random.Next(MIN_STAR_X, MAX_STAR_X),
@@ -1437,7 +1365,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     public override void Dispose()
     {
         if (_disposed) return;
-
         ExecuteSafely(
             () =>
             {
@@ -1446,7 +1373,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             nameof(Dispose),
             "Error during renderer disposal"
         );
-
         _disposed = true;
         GC.SuppressFinalize(this);
     }
@@ -1459,9 +1385,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
                 DisposeUpdateResources();
                 DisposeRenderResources();
                 ClearStateResources();
-
                 base.OnDispose();
-
                 Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
             nameof(OnDispose),
@@ -1485,6 +1409,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
             _updateTokenSource.Dispose();
         }
         _updateTask?.Dispose();
+        _spectrumSemaphore?.Dispose();
     }
 
     private void DisposeRenderResources()

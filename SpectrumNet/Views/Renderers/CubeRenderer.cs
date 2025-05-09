@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.CubeRenderer.Constants;
-using static System.MathF;
+using static SpectrumNet.Views.Renderers.CubeRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -56,13 +56,40 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
             HIGH_FREQ_SPEED_FACTOR = 0.8f,
             BASE_ROTATION_FACTOR = 1f;
 
-
         public const byte
             EDGE_STROKE_WIDTH = 1,
             EDGE_BLUR_RADIUS = 2,
             MIN_COLOR_BYTE = 0,
             MAX_COLOR_BYTE = 255,
             FACE_COLOR_COMPONENT_LOW = 100;
+
+        public static class Quality
+        {
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const bool
+                LOW_USE_GLOW_EFFECTS = false,
+                MEDIUM_USE_GLOW_EFFECTS = true,
+                HIGH_USE_GLOW_EFFECTS = true;
+
+            public const byte
+                LOW_EDGE_BLUR_RADIUS = 0,
+                MEDIUM_EDGE_BLUR_RADIUS = 2,
+                HIGH_EDGE_BLUR_RADIUS = 4;
+
+            public const byte
+                LOW_EDGE_STROKE_WIDTH = 1,
+                MEDIUM_EDGE_STROKE_WIDTH = 1,
+                HIGH_EDGE_STROKE_WIDTH = 2;
+        }
     }
 
     private static readonly Vector3 LIGHT_DIRECTION = Vector3.Normalize(new Vector3(
@@ -91,7 +118,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
     private readonly Vertex[] _vertices;
     private readonly Vector3[] _faceNormalVectors;
-
     private Face[] _faces;
     private readonly ProjectedVertex[] _projectedVertices;
     private float[] _faceDepths;
@@ -107,7 +133,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     private DateTime _lastRenderTime;
     private float _deltaTime;
     private SKImageInfo _lastImageInfo;
-
     private float _rotationSpeedX;
     private float _rotationSpeedY;
     private float _rotationSpeedZ;
@@ -119,28 +144,29 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     private AutoResetEvent? _processingComplete;
     private readonly object _renderDataLock = new();
     private volatile bool _processingRunning;
+    private volatile bool _isConfiguring;
     private bool _dataReady;
-
     private float[]? _spectrumToProcess;
     private int _barCountToProcess;
     private RenderData? _currentRenderData;
 
-    private readonly bool _useGlowEffects = true;
+    private bool _useGlowEffects;
+    private new bool _useAdvancedEffects;
+    private new bool _useAntiAlias;
+    private byte _edgeBlurRadius;
+    private byte _edgeStrokeWidth;
 
     private CubeRenderer()
     {
         _vertices = CreateCubeVertices();
         _faces = CreateCubeFaces();
         _faceNormalVectors = CalculateFaceNormals();
-
         _projectedVertices = new ProjectedVertex[_vertices.Length];
         _faceDepths = new float[_faces.Length];
         _faceNormals = new float[_faces.Length];
         _faceLightIntensities = new float[_faces.Length];
-
         _facePaints = CreateFacePaints();
         _edgePaint = CreateEdgePaint();
-
         InitializeRotationSpeeds();
     }
 
@@ -153,18 +179,18 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 InitializeResources();
+                InitializeQualitySettings();
                 InitializeThreading();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed during renderer initialization"
         );
     }
 
-    private static void InitializeResources()
-    {
+    private static void InitializeResources() { }
 
-    }
+    private void InitializeQualitySettings() => ApplyQualitySettingsInternal();
 
     public override void Configure(
         bool isOverlayActive,
@@ -173,17 +199,128 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
-                if (configChanged)
+                if (_isConfiguring) return;
+
+                try
                 {
-                    Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
+    }
+
+    protected override void OnConfigurationChanged()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}");
+            },
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
+        );
+    }
+
+    protected override void ApplyQualitySettings()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+            },
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
+        );
+    }
+
+    private void ApplyQualitySettingsInternal()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                LowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                MediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                HighQualitySettings();
+                break;
+        }
+
+        UpdatePaintsQualitySettings();
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
+            $"AdvancedEffects: {_useAdvancedEffects}, GlowEffects: {_useGlowEffects}, " +
+            $"BlurRadius: {_edgeBlurRadius}, StrokeWidth: {_edgeStrokeWidth}");
+    }
+
+    private void LowQualitySettings()
+    {
+        _useAntiAlias = LOW_USE_ANTIALIASING;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useGlowEffects = LOW_USE_GLOW_EFFECTS;
+        _edgeBlurRadius = LOW_EDGE_BLUR_RADIUS;
+        _edgeStrokeWidth = LOW_EDGE_STROKE_WIDTH;
+    }
+
+    private void MediumQualitySettings()
+    {
+        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useGlowEffects = MEDIUM_USE_GLOW_EFFECTS;
+        _edgeBlurRadius = MEDIUM_EDGE_BLUR_RADIUS;
+        _edgeStrokeWidth = MEDIUM_EDGE_STROKE_WIDTH;
+    }
+
+    private void HighQualitySettings()
+    {
+        _useAntiAlias = HIGH_USE_ANTIALIASING;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useGlowEffects = HIGH_USE_GLOW_EFFECTS;
+        _edgeBlurRadius = HIGH_EDGE_BLUR_RADIUS;
+        _edgeStrokeWidth = HIGH_EDGE_STROKE_WIDTH;
+    }
+
+    private void UpdatePaintsQualitySettings()
+    {
+        foreach (var paint in _facePaints)
+        {
+            paint.IsAntialias = _useAntiAlias;
+        }
+
+        _edgePaint.IsAntialias = _useAntiAlias;
+        _edgePaint.StrokeWidth = _edgeStrokeWidth;
     }
 
     protected override void OnQualitySettingsApplied()
@@ -192,9 +329,8 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
             () =>
             {
                 base.OnQualitySettingsApplied();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. New Quality: {Quality}");
             },
-            "OnQualitySettingsApplied",
+            nameof(OnQualitySettingsApplied),
             "Failed to apply quality settings"
         );
     }
@@ -241,7 +377,9 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     private static bool AreDimensionsValid(SKImageInfo info)
     {
         if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        Log(LogLevel.Error,
+            LOG_PREFIX,
+            $"Invalid image dimensions: {info.Width}x{info.Height}");
         return false;
     }
 
@@ -264,7 +402,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         UpdateDeltaTime();
         _lastImageInfo = info;
         SubmitSpectrumForProcessing(spectrum, barCount);
-
         base.BeforeRender(canvas, spectrum, info, barWidth, barSpacing, barCount, paint);
     }
 
@@ -287,12 +424,10 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         SKPaint paint)
     {
         if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
         ExecuteSafely(
             () =>
             {
                 RenderData? dataToUse = null;
-
                 lock (_renderDataLock)
                 {
                     if (_currentRenderData != null)
@@ -301,14 +436,13 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                         _dataReady = false;
                     }
                 }
-
                 if (dataToUse.HasValue)
                 {
                     PerformFrameCalculations(_lastImageInfo, dataToUse.Value);
                     DrawCubeFaces(canvas, dataToUse.Value);
                 }
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error rendering cube effect"
         );
     }
@@ -316,41 +450,42 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     private void InitializeThreading()
     {
         StopProcessingThread();
-
         _cts = new CancellationTokenSource();
         _spectrumDataAvailable = new AutoResetEvent(false);
         _processingComplete = new AutoResetEvent(false);
         _processingRunning = true;
         _dataReady = false;
         _currentRenderData = null;
-
         _processingThread = new Thread(ProcessSpectrumThreadEntry)
         {
             IsBackground = true,
             Name = "CubeProcessor"
         };
         _processingThread.Start();
-        Log(LogLevel.Debug, LOG_PREFIX, "Processing thread started.");
+
+        Log(LogLevel.Debug,
+            LOG_PREFIX,
+            "Processing thread started.");
     }
 
     private void StopProcessingThread()
     {
         if (_processingThread == null || !_processingRunning) return;
-
         _processingRunning = false;
         _cts?.Cancel();
         _spectrumDataAvailable?.Set();
         _processingThread?.Join(THREAD_JOIN_TIMEOUT_MS);
-
         _cts?.Dispose();
         _spectrumDataAvailable?.Dispose();
         _processingComplete?.Dispose();
-
         _cts = null;
         _spectrumDataAvailable = null;
         _processingComplete = null;
         _processingThread = null;
-        Log(LogLevel.Debug, LOG_PREFIX, "Processing thread stopped.");
+
+        Log(LogLevel.Debug,
+            LOG_PREFIX,
+            "Processing thread stopped.");
     }
 
     protected override void OnDispose()
@@ -362,9 +497,11 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                 DisposeResources();
                 base.OnDispose();
 
-                Log(LogLevel.Debug, LOG_PREFIX, "Renderer specific resources released.");
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    "Renderer specific resources released.");
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
     }
@@ -376,16 +513,15 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         _currentRenderData = null;
     }
 
-
     private static Vertex[] CreateCubeVertices() =>
     [
-        new Vertex(-CUBE_HALF_SIZE, -CUBE_HALF_SIZE, CUBE_HALF_SIZE), 
+        new Vertex(-CUBE_HALF_SIZE, -CUBE_HALF_SIZE, CUBE_HALF_SIZE),
         new Vertex(CUBE_HALF_SIZE, -CUBE_HALF_SIZE, CUBE_HALF_SIZE),
-        new Vertex(CUBE_HALF_SIZE, CUBE_HALF_SIZE, CUBE_HALF_SIZE), 
+        new Vertex(CUBE_HALF_SIZE, CUBE_HALF_SIZE, CUBE_HALF_SIZE),
         new Vertex(-CUBE_HALF_SIZE, CUBE_HALF_SIZE, CUBE_HALF_SIZE),
         new Vertex(-CUBE_HALF_SIZE, -CUBE_HALF_SIZE, -CUBE_HALF_SIZE),
         new Vertex(CUBE_HALF_SIZE, -CUBE_HALF_SIZE, -CUBE_HALF_SIZE),
-        new Vertex(CUBE_HALF_SIZE, CUBE_HALF_SIZE, -CUBE_HALF_SIZE), 
+        new Vertex(CUBE_HALF_SIZE, CUBE_HALF_SIZE, -CUBE_HALF_SIZE),
         new Vertex(-CUBE_HALF_SIZE, CUBE_HALF_SIZE, -CUBE_HALF_SIZE)
     ];
 
@@ -409,35 +545,18 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         [.. FACE_COLORS.Select(color => new SKPaint
         {
             Color = color,
-            IsAntialias = UseAntiAlias,
+            IsAntialias = _useAntiAlias,
             Style = SKPaintStyle.Fill
         })];
 
     private SKPaint CreateEdgePaint() => new()
     {
         Color = SKColors.White.WithAlpha(0),
-        IsAntialias = UseAntiAlias,
+        IsAntialias = _useAntiAlias,
         Style = SKPaintStyle.Stroke,
-        StrokeWidth = EDGE_STROKE_WIDTH,
+        StrokeWidth = _edgeStrokeWidth,
         MaskFilter = null
     };
-
-    private bool TryGetLatestRenderData(
-        [MaybeNullWhen(false)] out RenderData renderData)
-    {
-        lock (_renderDataLock)
-        {
-            if (!_dataReady || _currentRenderData == null)
-            {
-                renderData = default;
-                return false;
-            }
-            renderData = _currentRenderData.Value;
-            _dataReady = false;
-            _currentRenderData = null;
-            return true;
-        }
-    }
 
     private void PerformFrameCalculations(
         SKImageInfo info,
@@ -452,7 +571,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                 CalculateFaceDepthsAndNormals();
                 SortFacesByDepth();
             },
-            "PerformFrameCalculations",
+            nameof(PerformFrameCalculations),
             "Error during frame calculations"
         );
     }
@@ -482,7 +601,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                     out float centerX,
                     out float centerY,
                     out float scale);
-
                 for (int i = 0; i < _vertices.Length; i++)
                 {
                     _projectedVertices[i] = ProjectSingleVertex(
@@ -493,7 +611,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                         centerY);
                 }
             },
-            "ProjectVertices",
+            nameof(ProjectVertices),
             "Error projecting vertices"
         );
     }
@@ -510,7 +628,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         scale = CalculateProjectionScale(info, renderData);
     }
 
-
     private static ProjectedVertex ProjectSingleVertex(
         Vertex vertex,
         Matrix4x4 rotationMatrix,
@@ -521,7 +638,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         float rx = vertex.X * rotationMatrix.M11 + vertex.Y * rotationMatrix.M21 + vertex.Z * rotationMatrix.M31;
         float ry = vertex.X * rotationMatrix.M12 + vertex.Y * rotationMatrix.M22 + vertex.Z * rotationMatrix.M32;
         float rz = vertex.X * rotationMatrix.M13 + vertex.Y * rotationMatrix.M23 + vertex.Z * rotationMatrix.M33;
-
         return new ProjectedVertex
         {
             X = rx * scale + centerX,
@@ -530,13 +646,16 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         };
     }
 
-
     private static float CalculateProjectionScale(
         SKImageInfo info,
         RenderData renderData)
     {
-        float baseScale = MathF.Min(info.Width * CENTER_PROPORTION, info.Height * CENTER_PROPORTION);
-        float barCountFactor = BASE_ROTATION_FACTOR + Log10(MathF.Max(BASE_ROTATION_FACTOR, renderData.BarCount)) * SCALE_LOG_FACTOR;
+        float baseScale = Min(info.Width * CENTER_PROPORTION, info.Height * CENTER_PROPORTION);
+
+        float barCountFactor = BASE_ROTATION_FACTOR
+                               + MathF.Log10(MathF.Max(BASE_ROTATION_FACTOR, renderData.BarCount))
+                               * SCALE_LOG_FACTOR;
+
         barCountFactor = Clamp(barCountFactor, MIN_SCALE_FACTOR, MAX_SCALE_FACTOR);
         return baseScale * renderData.CubeSize * barCountFactor;
     }
@@ -551,7 +670,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                     CalculateFaceProperties(i);
                 }
             },
-            "CalculateFaceDepthsAndNormals",
+            nameof(CalculateFaceDepthsAndNormals),
             "Error calculating face depths and normals"
         );
     }
@@ -565,16 +684,16 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
         Vector3 worldNormal = _faceNormalVectors[face.FaceIndex];
         Vector3 rotatedNormal = Vector3.TransformNormal(worldNormal, _rotationMatrix);
+
         rotatedNormal = Vector3.Normalize(rotatedNormal);
 
         _faceNormals[faceIndex] = Vector3.Dot(rotatedNormal, Vector3.UnitZ);
         _faceLightIntensities[faceIndex] = CalculateLightIntensity(rotatedNormal);
     }
 
-
     private static float CalculateLightIntensity(Vector3 rotatedNormal)
     {
-        float diffuse = MathF.Max(MIN_DIFFUSE_LIGHT, Vector3.Dot(rotatedNormal, LIGHT_DIRECTION));
+        float diffuse = Max(MIN_DIFFUSE_LIGHT, Vector3.Dot(rotatedNormal, LIGHT_DIRECTION));
         return AMBIENT_LIGHT + DIFFUSE_LIGHT * diffuse;
     }
 
@@ -586,8 +705,8 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                 int[] indices = [.. Enumerable.Range(0, _faces.Length)];
 
                 Array.Sort(indices, (a, b) => _faceDepths[b].CompareTo(_faceDepths[a]));
-
                 Face[] sortedFaces = new Face[_faces.Length];
+
                 float[] sortedDepths = new float[_faceDepths.Length];
                 float[] sortedNormals = new float[_faceNormals.Length];
                 float[] sortedLightIntensities = new float[_faceLightIntensities.Length];
@@ -600,14 +719,12 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                     sortedNormals[i] = _faceNormals[originalIndex];
                     sortedLightIntensities[i] = _faceLightIntensities[originalIndex];
                 }
-
                 _faces = sortedFaces;
                 _faceDepths = sortedDepths;
                 _faceNormals = sortedNormals;
                 _faceLightIntensities = sortedLightIntensities;
-
             },
-            "SortFacesByDepth",
+            nameof(SortFacesByDepth),
             "Error sorting faces by depth"
         );
     }
@@ -642,7 +759,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         DrawSingleFace(canvas, path, face, renderData, sortedFaceIndex);
     }
 
-
     private static SKPath CreateFacePath(
         ProjectedVertex v1,
         ProjectedVertex v2,
@@ -670,12 +786,13 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
             renderData, face.FaceIndex, lightIntensity, normalZ);
 
         var facePaint = _facePaints[face.FaceIndex];
+
         facePaint.Color = litColor;
-        facePaint.IsAntialias = UseAntiAlias;
+        facePaint.IsAntialias = _useAntiAlias;
 
         canvas.DrawPath(path, facePaint);
 
-        if (_useGlowEffects && UseAdvancedEffects)
+        if (_useGlowEffects && _useAdvancedEffects)
         {
             ApplyGlowEffect(canvas, path, alphaByte);
         }
@@ -699,9 +816,9 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         SKColor baseColor,
         float lightIntensity)
     {
-        byte r = (byte)Clamp((int)(baseColor.Red * lightIntensity), (int)MIN_COLOR_BYTE, (int)MAX_COLOR_BYTE);
-        byte g = (byte)Clamp((int)(baseColor.Green * lightIntensity), (int)MIN_COLOR_BYTE, (int)MAX_COLOR_BYTE);
-        byte b = (byte)Clamp((int)(baseColor.Blue * lightIntensity), (int)MIN_COLOR_BYTE, (int)MAX_COLOR_BYTE);
+        byte r = (byte)Clamp((int)(baseColor.Red * lightIntensity), MIN_COLOR_BYTE, MAX_COLOR_BYTE);
+        byte g = (byte)Clamp((int)(baseColor.Green * lightIntensity), MIN_COLOR_BYTE, MAX_COLOR_BYTE);
+        byte b = (byte)Clamp((int)(baseColor.Blue * lightIntensity), MIN_COLOR_BYTE, MAX_COLOR_BYTE);
         return new SKColor(r, g, b);
     }
 
@@ -713,17 +830,19 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         return (byte)Clamp(alphaFactor * normalZ * MAX_COLOR_BYTE, MIN_COLOR_BYTE, MAX_COLOR_BYTE);
     }
 
-
     private void ApplyGlowEffect(
         SKCanvas canvas,
         SKPath path,
         byte alpha)
     {
         _edgePaint.Color = SKColors.White.WithAlpha((byte)(alpha * EDGE_ALPHA_MULTIPLIER));
-        _edgePaint.IsAntialias = UseAntiAlias;
-        _edgePaint.MaskFilter = UseAdvancedEffects
-            ? SKMaskFilter.CreateBlur(Normal, EDGE_BLUR_RADIUS)
+        _edgePaint.IsAntialias = _useAntiAlias;
+        _edgePaint.StrokeWidth = _edgeStrokeWidth;
+
+        _edgePaint.MaskFilter = _useAdvancedEffects && _edgeBlurRadius > 0
+            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _edgeBlurRadius)
             : null;
+
         canvas.DrawPath(path, _edgePaint);
     }
 
@@ -734,7 +853,9 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                if (spectrum == null || _spectrumDataAvailable == null || !_processingRunning)
+                if (spectrum == null
+                    || _spectrumDataAvailable == null
+                    || !_processingRunning)
                 {
                     return;
                 }
@@ -748,21 +869,29 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                     }
                 }
             },
-            "SubmitSpectrumForProcessing",
+            nameof(SubmitSpectrumForProcessing),
             "Failed to submit spectrum for processing"
         );
     }
 
     private void ProcessSpectrumThreadEntry()
     {
-        Log(LogLevel.Debug, LOG_PREFIX, "Processing thread loop started.");
+        Log(LogLevel.Debug,
+            LOG_PREFIX,
+            "Processing thread loop started.");
         try
         {
-            while (_processingRunning && _cts != null && !_cts.Token.IsCancellationRequested &&
-                   _spectrumDataAvailable != null && _processingComplete != null)
+            while (_processingRunning
+                && _cts != null
+                && !_cts.Token.IsCancellationRequested
+                && _spectrumDataAvailable != null
+                && _processingComplete != null)
             {
                 bool signaled = _spectrumDataAvailable.WaitOne();
-                if (!signaled || _cts.Token.IsCancellationRequested || !_processingRunning)
+
+                if (!signaled
+                    || _cts.Token.IsCancellationRequested
+                    || !_processingRunning)
                 {
                     break;
                 }
@@ -774,15 +903,21 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         }
         catch (OperationCanceledException)
         {
-            Log(LogLevel.Debug, LOG_PREFIX, "Processing thread cancelled.");
+            Log(LogLevel.Debug,
+                LOG_PREFIX,
+                "Processing thread cancelled.");
         }
         catch (ObjectDisposedException)
         {
-            Log(LogLevel.Debug, LOG_PREFIX, "Processing thread synchronization object disposed.");
+            Log(LogLevel.Debug,
+                LOG_PREFIX,
+                "Processing thread synchronization object disposed.");
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LOG_PREFIX, $"Unhandled error in cube processing thread: {ex.Message}\n{ex.StackTrace}");
+            Log(LogLevel.Error,
+                LOG_PREFIX,
+                $"Unhandled error in cube processing thread: {ex.Message}\n{ex.StackTrace}");
         }
         finally
         {
@@ -831,7 +966,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                 UpdateRotationSpeeds(spectrum);
 
                 float maxSpectrumValue = spectrum.Length > 0 ? spectrum.Max() : 0f;
-
                 RenderData computedData = new(
                     maxSpectrumValue,
                     _currentCubeSize,
@@ -843,7 +977,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                     _dataReady = true;
                 }
             },
-            "ComputeAndStoreRenderData",
+            nameof(ComputeAndStoreRenderData),
             "Error computing cube data"
         );
     }
@@ -859,9 +993,8 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                 float targetSize = BASE_CUBE_SIZE + avgIntensity * CUBE_SIZE_RESPONSE_FACTOR;
                 targetSize = Clamp(targetSize, MIN_CUBE_SIZE, MAX_CUBE_SIZE);
                 _currentCubeSize = SmoothValue(_currentCubeSize, targetSize, CUBE_SIZE_SMOOTHING);
-
             },
-            "UpdateCurrentCubeSize",
+            nameof(UpdateCurrentCubeSize),
             "Error updating cube size"
         );
     }
@@ -887,25 +1020,31 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                 int midIndex = spectrum.Length / 2;
                 int highIndex = spectrum.Length - 1;
 
-
                 float lowFreq = spectrum[0];
                 float midFreq = spectrum[midIndex];
                 float highFreq = spectrum[highIndex];
 
                 float targetSpeedX = BASE_ROTATION_SPEED + lowFreq * SPECTRUM_ROTATION_INFLUENCE;
-                float targetSpeedY = BASE_ROTATION_SPEED * MID_FREQ_SPEED_FACTOR + midFreq * SPECTRUM_ROTATION_INFLUENCE;
-                float targetSpeedZ = BASE_ROTATION_SPEED * HIGH_FREQ_SPEED_FACTOR + highFreq * SPECTRUM_ROTATION_INFLUENCE;
 
-                targetSpeedX = MathF.Min(targetSpeedX, MAX_ROTATION_SPEED);
-                targetSpeedY = MathF.Min(targetSpeedY, MAX_ROTATION_SPEED);
-                targetSpeedZ = MathF.Min(targetSpeedZ, MAX_ROTATION_SPEED);
+                float targetSpeedY = BASE_ROTATION_SPEED
+                                     * MID_FREQ_SPEED_FACTOR
+                                     + midFreq
+                                     * SPECTRUM_ROTATION_INFLUENCE;
+
+                float targetSpeedZ = BASE_ROTATION_SPEED
+                                     * HIGH_FREQ_SPEED_FACTOR
+                                     + highFreq
+                                     * SPECTRUM_ROTATION_INFLUENCE;
+
+                targetSpeedX = Min(targetSpeedX, MAX_ROTATION_SPEED);
+                targetSpeedY = Min(targetSpeedY, MAX_ROTATION_SPEED);
+                targetSpeedZ = Min(targetSpeedZ, MAX_ROTATION_SPEED);
 
                 _rotationSpeedX = SmoothValue(_rotationSpeedX, targetSpeedX, ROTATION_SPEED_SMOOTHING);
                 _rotationSpeedY = SmoothValue(_rotationSpeedY, targetSpeedY, ROTATION_SPEED_SMOOTHING);
                 _rotationSpeedZ = SmoothValue(_rotationSpeedZ, targetSpeedZ, ROTATION_SPEED_SMOOTHING);
-
             },
-            "UpdateRotationSpeeds",
+            nameof(UpdateRotationSpeeds),
             "Error updating rotation speeds"
         );
     }

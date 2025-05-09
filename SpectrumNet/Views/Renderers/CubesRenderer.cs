@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.CubesRenderer.Constants;
+using static SpectrumNet.Views.Renderers.CubesRenderer.Constants.Quality;
 using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
@@ -8,9 +9,6 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class CubesRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<CubesRenderer> _instance = new(() => new CubesRenderer());
-
-    private new bool _useAntiAlias = true;
-    private new bool _useAdvancedEffects = true;
 
     private CubesRenderer() { }
 
@@ -32,14 +30,61 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         public const int
             BATCH_SIZE = 32;
 
+        public const byte MAX_ALPHA_BYTE = 255;
+
         public static class Quality
         {
             public const bool
                 LOW_USE_ADVANCED_EFFECTS = false,
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
                 HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
+            public const bool
+                LOW_USE_TOP_FACE_EFFECT = false,
+                MEDIUM_USE_TOP_FACE_EFFECT = true,
+                HIGH_USE_TOP_FACE_EFFECT = true;
+
+            public const bool
+                LOW_USE_SIDE_FACE_EFFECT = false,
+                MEDIUM_USE_SIDE_FACE_EFFECT = true,
+                HIGH_USE_SIDE_FACE_EFFECT = true;
+
+            public const float
+                LOW_TOP_ALPHA_FACTOR = 0.7f,
+                MEDIUM_TOP_ALPHA_FACTOR = 0.8f,
+                HIGH_TOP_ALPHA_FACTOR = 0.9f;
+
+            public const float
+                LOW_SIDE_FACE_ALPHA_FACTOR = 0.5f,
+                MEDIUM_SIDE_FACE_ALPHA_FACTOR = 0.6f,
+                HIGH_SIDE_FACE_ALPHA_FACTOR = 0.7f;
+
+            public const float
+                LOW_TOP_WIDTH_PROPORTION = 0.7f,
+                MEDIUM_TOP_WIDTH_PROPORTION = 0.75f,
+                HIGH_TOP_WIDTH_PROPORTION = 0.8f;
+
+            public const float
+                LOW_TOP_HEIGHT_PROPORTION = 0.2f,
+                MEDIUM_TOP_HEIGHT_PROPORTION = 0.25f,
+                HIGH_TOP_HEIGHT_PROPORTION = 0.3f;
         }
     }
+
+    private new bool _useAntiAlias = true;
+    private new bool _useAdvancedEffects = true;
+    private bool _useTopFaceEffect = true;
+    private bool _useSideFaceEffect = true;
+    private float _topAlphaFactor = TOP_ALPHA_FACTOR;
+    private float _sideFaceAlphaFactor = SIDE_FACE_ALPHA_FACTOR;
+    private float _topWidthProportion = CUBE_TOP_WIDTH_PROPORTION;
+    private float _topHeightProportion = CUBE_TOP_HEIGHT_PROPORTION;
+    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
@@ -48,12 +93,16 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 if (_disposed) ResetRendererState();
+                InitializeQualitySettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed during renderer initialization"
         );
     }
+
+    private void InitializeQualitySettings() => 
+        ApplyQualitySettingsInternal();
 
     private void ResetRendererState() =>
         _disposed = false;
@@ -65,17 +114,126 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
-                if (configChanged)
+                if (_isConfiguring) return;
+
+                try
                 {
-                    Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
+    }
+
+    protected override void OnConfigurationChanged()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}");
+            },
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
+        );
+    }
+
+    protected override void ApplyQualitySettings()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+            },
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
+        );
+    }
+
+    private void ApplyQualitySettingsInternal()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                LowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                MediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                HighQualitySettings();
+                break;
+        }
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
+            $"AdvancedEffects: {_useAdvancedEffects}, TopFace: {_useTopFaceEffect}, " +
+            $"SideFace: {_useSideFaceEffect}");
+    }
+
+    private void LowQualitySettings()
+    {
+        _useAntiAlias = LOW_USE_ANTIALIASING;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useTopFaceEffect = LOW_USE_TOP_FACE_EFFECT;
+        _useSideFaceEffect = LOW_USE_SIDE_FACE_EFFECT;
+        _topAlphaFactor = LOW_TOP_ALPHA_FACTOR;
+        _sideFaceAlphaFactor = LOW_SIDE_FACE_ALPHA_FACTOR;
+        _topWidthProportion = LOW_TOP_WIDTH_PROPORTION;
+        _topHeightProportion = LOW_TOP_HEIGHT_PROPORTION;
+    }
+
+    private void MediumQualitySettings()
+    {
+        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useTopFaceEffect = MEDIUM_USE_TOP_FACE_EFFECT;
+        _useSideFaceEffect = MEDIUM_USE_SIDE_FACE_EFFECT;
+        _topAlphaFactor = MEDIUM_TOP_ALPHA_FACTOR;
+        _sideFaceAlphaFactor = MEDIUM_SIDE_FACE_ALPHA_FACTOR;
+        _topWidthProportion = MEDIUM_TOP_WIDTH_PROPORTION;
+        _topHeightProportion = MEDIUM_TOP_HEIGHT_PROPORTION;
+    }
+
+    private void HighQualitySettings()
+    {
+        _useAntiAlias = HIGH_USE_ANTIALIASING;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useTopFaceEffect = HIGH_USE_TOP_FACE_EFFECT;
+        _useSideFaceEffect = HIGH_USE_SIDE_FACE_EFFECT;
+        _topAlphaFactor = HIGH_TOP_ALPHA_FACTOR;
+        _sideFaceAlphaFactor = HIGH_SIDE_FACE_ALPHA_FACTOR;
+        _topWidthProportion = HIGH_TOP_WIDTH_PROPORTION;
+        _topHeightProportion = HIGH_TOP_HEIGHT_PROPORTION;
     }
 
     protected override void OnQualitySettingsApplied()
@@ -84,31 +242,10 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
             () =>
             {
                 base.OnQualitySettingsApplied();
-                ApplyQualitySpecificSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. New Quality: {Quality}");
             },
-            "OnQualitySettingsApplied",
+            nameof(OnQualitySettingsApplied),
             "Failed to apply specific quality settings"
         );
-    }
-
-    private void ApplyQualitySpecificSettings()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                _useAntiAlias = false;
-                _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-                break;
-            case RenderQuality.Medium:
-                _useAntiAlias = true;
-                _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-                break;
-            case RenderQuality.High:
-                _useAntiAlias = true;
-                _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-                break;
-        }
     }
 
     protected override void RenderEffect(
@@ -148,12 +285,12 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
                     RenderCube(canvas, x, y, barWidth, height, magnitude, cubePaint);
                 }
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
     }
 
-    private static bool IsCubeOutsideViewport(
+    private bool IsCubeOutsideViewport(
         SKCanvas canvas,
         float x,
         float y,
@@ -161,12 +298,12 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         float height) =>
         canvas.QuickReject(new SKRect(
             x,
-            y - barWidth * CUBE_TOP_HEIGHT_PROPORTION,
-            x + barWidth + barWidth * CUBE_TOP_WIDTH_PROPORTION,
+            y - barWidth * _topHeightProportion,
+            x + barWidth + barWidth * _topWidthProportion,
             y + height));
 
     private static byte CalculateCubeAlpha(float magnitude) =>
-        (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER, 255f);
+        (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER, MAX_ALPHA_BYTE);
 
     private void RenderCube(
         SKCanvas canvas,
@@ -181,8 +318,15 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
 
         if (_useAdvancedEffects)
         {
-            RenderCubeTopFace(canvas, x, y, barWidth, magnitude, paint);
-            RenderCubeSideFace(canvas, x, y, barWidth, height, magnitude, paint);
+            if (_useTopFaceEffect)
+            {
+                RenderCubeTopFace(canvas, x, y, barWidth, magnitude, paint);
+            }
+
+            if (_useSideFaceEffect)
+            {
+                RenderCubeSideFace(canvas, x, y, barWidth, height, magnitude, paint);
+            }
         }
     }
 
@@ -195,8 +339,8 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         SKPaint basePaint)
     {
         float topRightX = x + barWidth;
-        float topOffsetX = barWidth * CUBE_TOP_WIDTH_PROPORTION;
-        float topOffsetY = barWidth * CUBE_TOP_HEIGHT_PROPORTION;
+        float topOffsetX = barWidth * _topWidthProportion;
+        float topOffsetY = barWidth * _topHeightProportion;
         float topXLeft = x - (barWidth - topOffsetX);
 
         using var topPath = _pathPool.Get();
@@ -208,7 +352,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
 
         using var topPaint = _paintPool.Get();
         topPaint.Color = basePaint.Color.WithAlpha(
-            (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * TOP_ALPHA_FACTOR, 255f));
+            (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * _topAlphaFactor, MAX_ALPHA_BYTE));
         topPaint.IsAntialias = _useAntiAlias;
         topPaint.Style = basePaint.Style;
         canvas.DrawPath(topPath, topPaint);
@@ -224,8 +368,8 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         SKPaint basePaint)
     {
         float topRightX = x + barWidth;
-        float topOffsetX = barWidth * CUBE_TOP_WIDTH_PROPORTION;
-        float topOffsetY = barWidth * CUBE_TOP_HEIGHT_PROPORTION;
+        float topOffsetX = barWidth * _topWidthProportion;
+        float topOffsetY = barWidth * _topHeightProportion;
 
         using var sidePath = _pathPool.Get();
         sidePath.MoveTo(topRightX, y);
@@ -236,7 +380,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
 
         using var sidePaint = _paintPool.Get();
         sidePaint.Color = basePaint.Color.WithAlpha(
-            (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * SIDE_FACE_ALPHA_FACTOR, 255f));
+            (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * _sideFaceAlphaFactor, MAX_ALPHA_BYTE));
         sidePaint.IsAntialias = _useAntiAlias;
         sidePaint.Style = basePaint.Style;
         canvas.DrawPath(sidePath, sidePaint);
@@ -280,7 +424,9 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
     private static bool AreDimensionsValid(SKImageInfo info)
     {
         if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        Log(LogLevel.Error,
+            LOG_PREFIX,
+            $"Invalid image dimensions: {info.Width}x{info.Height}");
         return false;
     }
 
@@ -299,7 +445,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
             {
                 OnDispose();
             },
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
         _disposed = true;
@@ -314,7 +460,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
             {
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
     }
