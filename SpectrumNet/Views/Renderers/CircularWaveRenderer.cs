@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.CircularWaveRenderer.Constants;
+using static SpectrumNet.Views.Renderers.CircularWaveRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -30,9 +31,6 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             STROKE_WIDTH_FACTOR = 6.0f,
             ALPHA_MULTIPLIER = 255.0f,
             MIN_ALPHA_FACTOR = 0.3f,
-            GLOW_RADIUS_LOW = 1.5f,
-            GLOW_RADIUS_MEDIUM = 3.0f,
-            GLOW_RADIUS_HIGH = 5.0f,
             WAVE_RADIUS_INFLUENCE = 1.0f,
             MIN_MAGNITUDE_THRESHOLD_WAVE = 0.01f,
             CENTER_PROPORTION = 0.5f,
@@ -44,7 +42,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
         public const int
             MAX_RING_COUNT = 32,
-            POINTS_PER_CIRCLE_LOW = 32,
+            POINTS_PER_CIRCLE_LOW = 16,
             POINTS_PER_CIRCLE_MEDIUM = 64,
             POINTS_PER_CIRCLE_HIGH = 128;
 
@@ -58,9 +56,17 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
                 HIGH_POINTS_PER_CIRCLE = POINTS_PER_CIRCLE_HIGH;
 
             public const float
-                LOW_GLOW_RADIUS = GLOW_RADIUS_LOW,
-                MEDIUM_GLOW_RADIUS = GLOW_RADIUS_MEDIUM,
-                HIGH_GLOW_RADIUS = GLOW_RADIUS_HIGH;
+                LOW_GLOW_RADIUS = 0.5f,
+                MEDIUM_GLOW_RADIUS = 3.0f,
+                HIGH_GLOW_RADIUS = 8.0f;
+
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                LOW_USE_ANTI_ALIAS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                MEDIUM_USE_ANTI_ALIAS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ANTI_ALIAS = true;
         }
     }
 
@@ -71,6 +77,8 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     private SKPoint _center;
     private int _pointsPerCircle;
     private float _glowRadius;
+    private bool _useGlowEffect;
+    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
@@ -78,8 +86,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
             () =>
             {
                 base.OnInitialize();
-                InitializeResources();
-                ApplyQualitySettings();
+                InitializeQualityParams();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             "OnInitialize",
@@ -87,21 +94,41 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         );
     }
 
-    private static void InitializeResources() { }
+    private void InitializeQualityParams()
+    {
+        ApplyQualitySettingsInternal();
+        CreateCirclePointsCache();
+    }
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
+        RenderQuality quality)
     {
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                    || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        CreateCirclePointsCache();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
             "Configure",
@@ -114,9 +141,11 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                Log(LogLevel.Debug,
+                Log(LogLevel.Information,
                     LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}");
+                    $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
+                    $"AdvancedEffects: {_useAdvancedEffects}, PointsPerCircle: {_pointsPerCircle}, " +
+                    $"GlowRadius: {_glowRadius}");
             },
             "OnConfigurationChanged",
             "Failed to handle configuration change"
@@ -128,51 +157,76 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                    CreateCirclePointsCache();
+                    InvalidateCachedResources();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
             "ApplyQualitySettings",
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualityBasedSettings()
+    private void ApplyQualitySettingsInternal()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                ApplyLowQualitySettings();
+                LowQualitySettings();
                 break;
 
             case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
+                MediumQualitySettings();
                 break;
 
             case RenderQuality.High:
-                ApplyHighQualitySettings();
+                HighQualitySettings();
                 break;
         }
 
-        CreateCirclePointsCache();
+        _samplingOptions = QualityBasedSamplingOptions();
+
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Quality settings applied: {Quality}, AntiAlias: {_useAntiAlias}, " +
+            $"AdvancedEffects: {_useAdvancedEffects}, PointsPerCircle: {_pointsPerCircle}, " +
+            $"GlowRadius: {_glowRadius}");
     }
 
-    private void ApplyLowQualitySettings()
+    private void HighQualitySettings()
     {
-        _pointsPerCircle = Constants.Quality.LOW_POINTS_PER_CIRCLE;
-        _glowRadius = Constants.Quality.LOW_GLOW_RADIUS;
+        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _pointsPerCircle = HIGH_POINTS_PER_CIRCLE;
+        _glowRadius = HIGH_GLOW_RADIUS;
+        _useGlowEffect = true;
     }
 
-    private void ApplyMediumQualitySettings()
+    private void MediumQualitySettings()
     {
-        _pointsPerCircle = Constants.Quality.MEDIUM_POINTS_PER_CIRCLE;
-        _glowRadius = Constants.Quality.MEDIUM_GLOW_RADIUS;
+        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _pointsPerCircle = MEDIUM_POINTS_PER_CIRCLE;
+        _glowRadius = MEDIUM_GLOW_RADIUS;
+        _useGlowEffect = true;
     }
 
-    private void ApplyHighQualitySettings()
+    private void LowQualitySettings()
     {
-        _pointsPerCircle = Constants.Quality.HIGH_POINTS_PER_CIRCLE;
-        _glowRadius = Constants.Quality.HIGH_GLOW_RADIUS;
+        _useAntiAlias = LOW_USE_ANTI_ALIAS;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _pointsPerCircle = LOW_POINTS_PER_CIRCLE;
+        _glowRadius = LOW_GLOW_RADIUS;
+        _useGlowEffect = false;
     }
 
     protected override void RenderEffect(
@@ -282,7 +336,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
         using var mainPaint = _paintPool.Get();
         mainPaint.Color = basePaint.Color;
-        mainPaint.IsAntialias = UseAntiAlias;
+        mainPaint.IsAntialias = _useAntiAlias;
         mainPaint.Style = SKPaintStyle.Stroke;
 
         RenderRings(canvas, info, mainPaint, barWidth, barSpacing, maxPossibleRadius);
@@ -329,9 +383,9 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
         _rotationSpeed = ROTATION_SPEED * (BASE_ROTATION_FACTOR + avgIntensity * SPECTRUM_ROTATION_INFLUENCE);
         float deltaTime = Max(0, (float)(Now - _lastUpdateTime).TotalSeconds);
-        _angle = (float)((_angle + _rotationSpeed * deltaTime) % MathF.Tau);
+        _angle = (float)((_angle + _rotationSpeed * deltaTime) % Tau);
 
-        if (_angle < 0) _angle += MathF.Tau;
+        if (_angle < 0) _angle += MathF.    Tau;
     }
 
     private static float CalculateAverageIntensity(float[] spectrum)
@@ -392,6 +446,10 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
+                if (_circlePoints != null
+                    && _circlePoints.Length == _pointsPerCircle)
+                    return;
+
                 _circlePoints = new SKPoint[_pointsPerCircle];
                 float angleStep = MathF.Tau / _pointsPerCircle;
 
@@ -516,7 +574,9 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         float magnitude,
         SKPaint mainPaint)
     {
-        if (UseAdvancedEffects && magnitude > ADVANCED_EFFECTS_THRESHOLD)
+        if (_useAdvancedEffects
+            && _useGlowEffect
+            && magnitude > ADVANCED_EFFECTS_THRESHOLD)
         {
             RenderRingWithGlow(canvas, radius, magnitude, mainPaint);
         }
@@ -597,16 +657,17 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     public override void Dispose()
     {
         if (_disposed) return;
+
         ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
+            () => OnDispose(),
             "Dispose",
             "Error during disposal"
         );
+
         _disposed = true;
+        base.Dispose();
         GC.SuppressFinalize(this);
+
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
