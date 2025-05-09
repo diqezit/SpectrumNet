@@ -37,6 +37,8 @@ public partial class MainWindow : Window, IAsyncDisposable
         InitEventHandlers();
         ConfigureTheme();
         CompositionTarget.Rendering += OnRendering;
+
+        _controller.InputController.RegisterWindow(this);
     }
 
     public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)

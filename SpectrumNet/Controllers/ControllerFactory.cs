@@ -147,6 +147,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public void OpenOverlay() => UIController.OpenOverlay();
     public void CloseOverlay() => UIController.CloseOverlay();
 
+
+
     public bool LimitFpsTo60
     {
         get => Settings.Instance.LimitFpsTo60;
@@ -432,6 +434,12 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         else if (Renderer != null && e != null)
             Renderer.RenderFrame(sender, e);
     }
+
+    public void RegisterWindow(Window window) =>
+    _inputController.RegisterWindow(window);
+
+    public void UnregisterWindow(Window window) =>
+        _inputController.UnregisterWindow(window);
 
     public bool HandleKeyDown(KeyEventArgs e, IInputElement? focusedElement) =>
         _inputController.HandleKeyDown(e, focusedElement);

@@ -109,7 +109,8 @@ public class ViewController : IViewController, IDisposable
         set
         {
             if (_renderQuality == value
-                || _updatingQuality) return;
+                || _updatingQuality)
+                return;
 
             try
             {
@@ -118,6 +119,7 @@ public class ViewController : IViewController, IDisposable
                 Settings.Instance.SelectedRenderQuality = value;
                 _mainController.OnPropertyChanged(nameof(RenderQuality));
 
+                _rendererFactory.GlobalQuality = value;
                 _renderer?.UpdateRenderQuality(value);
 
                 Log(LogLevel.Information,

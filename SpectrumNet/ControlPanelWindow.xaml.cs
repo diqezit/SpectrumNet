@@ -32,9 +32,10 @@ public partial class ControlPanelWindow : Window, IDisposable
         SetupGainControlsPopup();
 
         SetInitialComboBoxSelections();
-        _isInitializingControls = false; 
-    }
+        _isInitializingControls = false;
 
+        _controller.InputController.RegisterWindow(this);
+    }
     private void SetInitialComboBoxSelections()
     {
         if (RenderQualityComboBox is not null)

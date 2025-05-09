@@ -35,6 +35,8 @@ public sealed class OverlayWindow : Window, IDisposable
             ConfigureRenderingOptions();
             InitializeOverlay(controller);
             _frameTimeWatch.Start();
+
+            controller.InputController.RegisterWindow(this);
         }
         catch (Exception ex)
         {
