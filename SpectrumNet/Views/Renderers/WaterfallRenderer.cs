@@ -8,8 +8,6 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<WaterfallRenderer> _instance = new(() => new WaterfallRenderer());
 
-    private WaterfallRenderer() { }
-
     public static WaterfallRenderer GetInstance() => _instance.Value;
 
     public record Constants
@@ -37,31 +35,29 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             YELLOW_THRESHOLD = 0.75f;
     }
 
-    // Статические данные
     private static readonly int[] _colorPalette = InitColorPalette();
 
-    // Ресурсы синхронизации
     private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
     private readonly ObjectPool<float[]> _spectrumPool = new(
         () => new float[DEFAULT_SPECTRUM_WIDTH],
         array => Array.Clear(array, 0, array.Length),
         initialCount: 2);
 
-    // Данные спектрограммы
     private float[]? _currentSpectrum;
     private float[][]? _spectrogramBuffer;
     private int _bufferHead;
     private bool _needsBufferResize;
     private SKBitmap? _waterfallBitmap;
+    private volatile bool _isConfiguring;
 
-    // Параметры рендеринга
     private float _lastBarWidth;
     private int _lastBarCount;
     private float _lastBarSpacing;
 
-    // Переопределение свойств базового класса
     private new bool _useAntiAlias;
     private new bool _useAdvancedEffects;
+
+    private WaterfallRenderer() { }
 
     protected override void OnInitialize() =>
         ExecuteSafely(
@@ -90,37 +86,42 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (Quality != quality)
+                try
                 {
-                    ApplyQualitySettings();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+                    base.Configure(isOverlayActive, quality);
+
+                    if (Quality != quality)
+                    {
+                        ApplyQualitySettings();
+                    }
+
+                    if (configChanged && _spectrogramBuffer != null)
+                    {
+                        ResizeBufferForOverlayMode(isOverlayActive);
+                    }
                 }
-
-                if (configChanged && _spectrogramBuffer != null)
+                finally
                 {
-                    ResizeBufferForOverlayMode(isOverlayActive);
+                    _isConfiguring = false;
                 }
             },
             nameof(Configure),
             "Failed to configure renderer"
         );
 
-    private void ResizeBufferForOverlayMode(bool isOverlayActive) =>
-        ExecuteSafely(
-            () =>
-            {
-                int bufferHeight = isOverlayActive ?
-                    OVERLAY_BUFFER_HEIGHT :
-                    DEFAULT_BUFFER_HEIGHT;
+    protected override void ApplyQualitySettings()
+    {
+        base.ApplyQualitySettings();
 
-                int currentWidth = _spectrogramBuffer![0].Length;
-                InitializeSpectrogramBuffer(bufferHeight, currentWidth);
-            },
-            nameof(ResizeBufferForOverlayMode),
-            "Failed to resize buffer for overlay mode"
-        );
+        _useAntiAlias = UseAntiAlias;
+        _useAdvancedEffects = UseAdvancedEffects;
+
+        Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+    }
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -165,35 +166,21 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void RenderFrame(
-        SKCanvas canvas,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount)
+    private bool CheckParametersChanged(float barWidth, float barSpacing, int barCount)
     {
-        if (_spectrogramBuffer == null)
+        bool changed = Abs(_lastBarWidth - barWidth) > 0.1f ||
+                       Abs(_lastBarSpacing - barSpacing) > 0.1f ||
+                       _lastBarCount != barCount;
+
+        if (changed)
         {
-            Log(LogLevel.Warning, LOG_PREFIX, "Spectrogram buffer is null");
-            return;
+            _lastBarWidth = barWidth;
+            _lastBarSpacing = barSpacing;
+            _lastBarCount = barCount;
+            _needsBufferResize = true;
         }
 
-        int bufferHeight = _spectrogramBuffer.Length;
-        int spectrumWidth = _spectrogramBuffer[0].Length;
-
-        UpdateWaterfallBitmap(spectrumWidth, bufferHeight);
-
-        RenderQuality renderQuality = CalculateRenderQuality(barCount);
-        UpdateBitmapPixels(_waterfallBitmap!, _spectrogramBuffer, _bufferHead,
-                         spectrumWidth, bufferHeight, renderQuality);
-
-        DrawBitmapToCanvas(canvas, info, barWidth, barSpacing, barCount);
-
-        if (barWidth > ZOOM_THRESHOLD && _useAdvancedEffects)
-        {
-            SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
-            ApplyZoomEnhancement(canvas, destRect, barWidth, barCount, barSpacing);
-        }
+        return changed;
     }
 
     private void ProcessSpectrumData(
@@ -223,313 +210,35 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             "Error processing spectrum data"
         );
 
-    private void UpdateWaterfallBitmap(int spectrumWidth, int bufferHeight) =>
-        ExecuteSafely(
-            () =>
-            {
-                if (_waterfallBitmap == null ||
-                    _waterfallBitmap.Width != spectrumWidth ||
-                    _waterfallBitmap.Height != bufferHeight)
-                {
-                    _waterfallBitmap?.Dispose();
-                    _waterfallBitmap = new SKBitmap(spectrumWidth, bufferHeight);
-                }
-            },
-            nameof(UpdateWaterfallBitmap),
-            "Failed to update waterfall bitmap"
-        );
-
-    private static SKRect CalculateDestRect(
+    private void RenderFrame(
+        SKCanvas canvas,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
         int barCount)
     {
-        float totalBarsWidth = barCount * barWidth + (barCount - 1) * barSpacing;
-        float startX = (info.Width - totalBarsWidth) / 2;
-
-        return new SKRect(
-            left: Max(startX, 0),
-            top: 0,
-            right: Min(startX + totalBarsWidth, info.Width),
-            bottom: info.Height);
-    }
-
-    private void DrawBitmapToCanvas(
-        SKCanvas canvas,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount) =>
-        ExecuteSafely(
-            () =>
-            {
-                SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
-
-                if (canvas.QuickReject(destRect))
-                    return;
-
-                using var renderPaint = new SKPaint
-                {
-                    IsAntialias = _useAntiAlias && barCount > HIGH_BAR_COUNT_THRESHOLD
-                };
-
-                canvas.Clear(SKColors.Black);
-                canvas.DrawBitmap(_waterfallBitmap!, destRect, renderPaint);
-            },
-            nameof(DrawBitmapToCanvas),
-            "Failed to draw bitmap to canvas"
-        );
-
-    private void ApplyZoomEnhancement(
-        SKCanvas canvas,
-        SKRect destRect,
-        float barWidth,
-        int barCount,
-        float barSpacing) =>
-        ExecuteSafely(
-            () =>
-            {
-                DrawGridLines(canvas, destRect, barWidth, barCount, barSpacing);
-
-                if (barWidth > ZOOM_THRESHOLD * 1.5f)
-                {
-                    DrawGridMarkers(canvas, destRect, barWidth, barCount, barSpacing);
-                }
-            },
-            nameof(ApplyZoomEnhancement),
-            "Failed to apply zoom enhancement"
-        );
-
-    private void DrawGridLines(
-        SKCanvas canvas,
-        SKRect destRect,
-        float barWidth,
-        int barCount,
-        float barSpacing) =>
-        ExecuteSafely(
-            () =>
-            {
-                using var paint = new SKPaint
-                {
-                    Color = new SKColor(255, 255, 255, 40),
-                    StrokeWidth = 1,
-                    IsAntialias = _useAntiAlias,
-                    Style = SKPaintStyle.Stroke
-                };
-
-                int gridStep = (int)Max(1, barCount / 10);
-                using var path = new SKPath();
-
-                DrawGridLineSegments(path, destRect, barWidth, barSpacing, barCount, gridStep);
-                canvas.DrawPath(path, paint);
-            },
-            nameof(DrawGridLines),
-            "Failed to draw grid lines"
-        );
-
-    private static void DrawGridLineSegments(
-        SKPath path,
-        SKRect destRect,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        int gridStep)
-    {
-        for (int i = 0; i < barCount; i += gridStep)
+        if (_spectrogramBuffer == null)
         {
-            float x = destRect.Left + i * (barWidth + barSpacing) + barWidth / 2;
-            path.MoveTo(x, destRect.Top);
-            path.LineTo(x, destRect.Bottom);
+            Log(LogLevel.Warning, LOG_PREFIX, "Spectrogram buffer is null");
+            return;
         }
-    }
 
-    private void DrawGridMarkers(
-        SKCanvas canvas,
-        SKRect destRect,
-        float barWidth,
-        int barCount,
-        float barSpacing) =>
-        ExecuteSafely(
-            () =>
-            {
-                using var font = new SKFont { Size = 10 };
-                using var textPaint = new SKPaint
-                {
-                    Color = SKColors.White,
-                    IsAntialias = _useAntiAlias
-                };
+        int bufferHeight = _spectrogramBuffer.Length;
+        int spectrumWidth = _spectrogramBuffer[0].Length;
 
-                int gridStep = (int)Max(1, barCount / 10);
-                DrawMarkerLabels(canvas, destRect, barWidth, barSpacing, barCount, gridStep, font, textPaint);
-            },
-            nameof(DrawGridMarkers),
-            "Failed to draw grid markers"
-        );
+        UpdateWaterfallBitmap(spectrumWidth, bufferHeight);
 
-    private static void DrawMarkerLabels(
-        SKCanvas canvas,
-        SKRect destRect,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        int gridStep,
-        SKFont font,
-        SKPaint textPaint)
-    {
-        for (int i = 0; i < barCount; i += gridStep * 2)
+        RenderQuality renderQuality = CalculateRenderQuality(barCount);
+        UpdateBitmapPixels(_waterfallBitmap!, _spectrogramBuffer, _bufferHead,
+                         spectrumWidth, bufferHeight, renderQuality);
+
+        DrawBitmapToCanvas(canvas, info, barWidth, barSpacing, barCount);
+
+        if (barWidth > ZOOM_THRESHOLD && _useAdvancedEffects)
         {
-            float x = destRect.Left + i * (barWidth + barSpacing) + barWidth / 2;
-            string marker = $"{i}";
-            float textWidth = font.MeasureText(marker, textPaint);
-            canvas.DrawText(marker, x - textWidth / 2, destRect.Bottom - 5, font, textPaint);
+            SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
+            ApplyZoomEnhancement(canvas, destRect, barWidth, barCount, barSpacing);
         }
-    }
-
-    private void UpdateBitmapPixels(
-        SKBitmap bitmap,
-        float[][] spectrogramBuffer,
-        int bufferHead,
-        int spectrumWidth,
-        int bufferHeight,
-        RenderQuality _) =>
-        ExecuteSafely(
-            () =>
-            {
-                nint pixelsPtr = bitmap.GetPixels();
-                if (pixelsPtr == IntPtr.Zero)
-                {
-                    Log(LogLevel.Error, LOG_PREFIX, "Invalid bitmap pixels pointer");
-                    return;
-                }
-
-                int[] pixels = ArrayPool<int>.Shared.Rent(spectrumWidth * bufferHeight);
-                try
-                {
-                    UpdatePixelArray(pixels, spectrogramBuffer, bufferHead, spectrumWidth, bufferHeight);
-                    Marshal.Copy(pixels, 0, pixelsPtr, spectrumWidth * bufferHeight);
-                }
-                finally
-                {
-                    ArrayPool<int>.Shared.Return(pixels);
-                }
-            },
-            nameof(UpdateBitmapPixels),
-            "Failed to update bitmap pixels"
-        );
-
-    private static void UpdatePixelArray(
-        int[] pixels,
-        float[][] spectrogramBuffer,
-        int bufferHead,
-        int spectrumWidth,
-        int bufferHeight)
-    {
-        float colorEnhancementFactor = 1.0f;
-
-        if (IsHardwareAccelerated && spectrumWidth >= Vector<float>.Count)
-        {
-            UpdatePixelsParallel(pixels, spectrogramBuffer, bufferHead,
-                               spectrumWidth, bufferHeight, colorEnhancementFactor);
-        }
-        else
-        {
-            UpdatePixelsSequential(pixels, spectrogramBuffer, bufferHead,
-                                 spectrumWidth, bufferHeight, colorEnhancementFactor);
-        }
-    }
-
-    private static void UpdatePixelsParallel(
-        int[] pixels,
-        float[][] spectrogramBuffer,
-        int bufferHead,
-        int spectrumWidth,
-        int bufferHeight,
-        float colorEnhancementFactor)
-    {
-        Parallel.For(0, bufferHeight, y =>
-        {
-            int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
-            int rowOffset = y * spectrumWidth;
-            int vectorizedWidth = spectrumWidth - spectrumWidth % Vector<float>.Count;
-
-            ProcessRowVectorized(
-                pixels, spectrogramBuffer[bufferIndex],
-                rowOffset, vectorizedWidth, colorEnhancementFactor);
-
-            ProcessRowRemainder(
-                pixels, spectrogramBuffer[bufferIndex],
-                rowOffset, vectorizedWidth, spectrumWidth, colorEnhancementFactor);
-        });
-    }
-
-    private static void ProcessRowVectorized(
-        int[] pixels,
-        float[] spectrumRow,
-        int rowOffset,
-        int vectorizedWidth,
-        float colorEnhancementFactor)
-    {
-        for (int x = 0; x < vectorizedWidth; x += Vector<float>.Count)
-        {
-            Vector<float> values = new(spectrumRow, x);
-
-            if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
-                values = Multiply(values, colorEnhancementFactor);
-
-            for (int i = 0; i < Vector<float>.Count; i++)
-            {
-                float normalized = Clamp(values[i], 0f, 1f);
-                int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
-                pixels[rowOffset + x + i] = _colorPalette[paletteIndex];
-            }
-        }
-    }
-
-    private static void ProcessRowRemainder(
-        int[] pixels,
-        float[] spectrumRow,
-        int rowOffset,
-        int vectorizedWidth,
-        int spectrumWidth,
-        float colorEnhancementFactor)
-    {
-        for (int x = vectorizedWidth; x < spectrumWidth; x++)
-        {
-            float value = spectrumRow[x];
-            if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
-                value *= colorEnhancementFactor;
-
-            float normalized = Clamp(value, 0f, 1f);
-            int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
-            pixels[rowOffset + x] = _colorPalette[paletteIndex];
-        }
-    }
-
-    private static void UpdatePixelsSequential(
-        int[] pixels,
-        float[][] spectrogramBuffer,
-        int bufferHead,
-        int spectrumWidth,
-        int bufferHeight,
-        float colorEnhancementFactor)
-    {
-        Parallel.For(0, bufferHeight, y =>
-        {
-            int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
-            int rowOffset = y * spectrumWidth;
-
-            for (int x = 0; x < spectrumWidth; x++)
-            {
-                float value = spectrogramBuffer[bufferIndex][x];
-                if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
-                    value *= colorEnhancementFactor;
-
-                float normalized = Clamp(value, 0f, 1f);
-                int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
-                pixels[rowOffset + x] = _colorPalette[paletteIndex];
-            }
-        });
     }
 
     private float[] AdjustSpectrumResolution(float[] spectrum, int barCount, float barWidth)
@@ -682,6 +391,19 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             "Failed to update spectrogram buffer"
         );
 
+    private void UpdateCurrentSpectrum(float[] spectrum) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_currentSpectrum == null || _currentSpectrum.Length != spectrum.Length)
+                    _currentSpectrum = new float[spectrum.Length];
+
+                Array.Copy(spectrum, _currentSpectrum, spectrum.Length);
+            },
+            nameof(UpdateCurrentSpectrum),
+            "Failed to update current spectrum"
+        );
+
     private void UpdateBufferFromSpectrum(float[] spectrum, int spectrumWidth)
     {
         if (spectrum.Length == spectrumWidth)
@@ -697,19 +419,6 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             ProcessSpectrumUpscaling(spectrum, spectrumWidth);
         }
     }
-
-    private void UpdateCurrentSpectrum(float[] spectrum) =>
-        ExecuteSafely(
-            () =>
-            {
-                if (_currentSpectrum == null || _currentSpectrum.Length != spectrum.Length)
-                    _currentSpectrum = new float[spectrum.Length];
-
-                Array.Copy(spectrum, _currentSpectrum, spectrum.Length);
-            },
-            nameof(UpdateCurrentSpectrum),
-            "Failed to update current spectrum"
-        );
 
     private void ProcessSpectrumDownscaling(float[] spectrum, int spectrumWidth) =>
         ExecuteSafely(
@@ -819,6 +528,39 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             "Failed to process spectrum upscaling"
         );
 
+    private void ResizeBufferForOverlayMode(bool isOverlayActive) =>
+        ExecuteSafely(
+            () =>
+            {
+                int bufferHeight = isOverlayActive ?
+                    OVERLAY_BUFFER_HEIGHT :
+                    DEFAULT_BUFFER_HEIGHT;
+
+                int currentWidth = _spectrogramBuffer![0].Length;
+                InitializeSpectrogramBuffer(bufferHeight, currentWidth);
+            },
+            nameof(ResizeBufferForOverlayMode),
+            "Failed to resize buffer for overlay mode"
+        );
+
+    private void ResizeBufferForBarParameters(int barCount) =>
+        ExecuteSafely(
+            () =>
+            {
+                if (_spectrogramBuffer == null) return;
+
+                int bufferHeight = _spectrogramBuffer.Length;
+                int newWidth = CalculateOptimalSpectrumWidth(barCount);
+
+                if (_spectrogramBuffer[0].Length != newWidth)
+                {
+                    InitializeSpectrogramBuffer(bufferHeight, newWidth);
+                }
+            },
+            nameof(ResizeBufferForBarParameters),
+            "Failed to resize buffer for bar parameters"
+        );
+
     private void InitializeSpectrogramBuffer(int bufferHeight, int spectrumWidth) =>
         ExecuteSafely(
             () =>
@@ -875,40 +617,314 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             "Failed to allocate new buffer"
         );
 
-    private bool CheckParametersChanged(float barWidth, float barSpacing, int barCount)
-    {
-        bool changed = Abs(_lastBarWidth - barWidth) > 0.1f ||
-                       Abs(_lastBarSpacing - barSpacing) > 0.1f ||
-                       _lastBarCount != barCount;
-
-        if (changed)
-        {
-            _lastBarWidth = barWidth;
-            _lastBarSpacing = barSpacing;
-            _lastBarCount = barCount;
-            _needsBufferResize = true;
-        }
-
-        return changed;
-    }
-
-    private void ResizeBufferForBarParameters(int barCount) =>
+    private void UpdateWaterfallBitmap(int spectrumWidth, int bufferHeight) =>
         ExecuteSafely(
             () =>
             {
-                if (_spectrogramBuffer == null) return;
-
-                int bufferHeight = _spectrogramBuffer.Length;
-                int newWidth = CalculateOptimalSpectrumWidth(barCount);
-
-                if (_spectrogramBuffer[0].Length != newWidth)
+                if (_waterfallBitmap == null ||
+                    _waterfallBitmap.Width != spectrumWidth ||
+                    _waterfallBitmap.Height != bufferHeight)
                 {
-                    InitializeSpectrogramBuffer(bufferHeight, newWidth);
+                    _waterfallBitmap?.Dispose();
+                    _waterfallBitmap = new SKBitmap(spectrumWidth, bufferHeight);
                 }
             },
-            nameof(ResizeBufferForBarParameters),
-            "Failed to resize buffer for bar parameters"
+            nameof(UpdateWaterfallBitmap),
+            "Failed to update waterfall bitmap"
         );
+
+    private void UpdateBitmapPixels(
+        SKBitmap bitmap,
+        float[][] spectrogramBuffer,
+        int bufferHead,
+        int spectrumWidth,
+        int bufferHeight,
+        RenderQuality _) =>
+        ExecuteSafely(
+            () =>
+            {
+                nint pixelsPtr = bitmap.GetPixels();
+                if (pixelsPtr == IntPtr.Zero)
+                {
+                    Log(LogLevel.Error, LOG_PREFIX, "Invalid bitmap pixels pointer");
+                    return;
+                }
+
+                int[] pixels = ArrayPool<int>.Shared.Rent(spectrumWidth * bufferHeight);
+                try
+                {
+                    UpdatePixelArray(pixels, spectrogramBuffer, bufferHead, spectrumWidth, bufferHeight);
+                    Marshal.Copy(pixels, 0, pixelsPtr, spectrumWidth * bufferHeight);
+                }
+                finally
+                {
+                    ArrayPool<int>.Shared.Return(pixels);
+                }
+            },
+            nameof(UpdateBitmapPixels),
+            "Failed to update bitmap pixels"
+        );
+
+    private static void UpdatePixelArray(
+        int[] pixels,
+        float[][] spectrogramBuffer,
+        int bufferHead,
+        int spectrumWidth,
+        int bufferHeight)
+    {
+        float colorEnhancementFactor = 1.0f;
+
+        if (IsHardwareAccelerated && spectrumWidth >= Vector<float>.Count)
+        {
+            UpdatePixelsParallel(pixels, spectrogramBuffer, bufferHead,
+                               spectrumWidth, bufferHeight, colorEnhancementFactor);
+        }
+        else
+        {
+            UpdatePixelsSequential(pixels, spectrogramBuffer, bufferHead,
+                                 spectrumWidth, bufferHeight, colorEnhancementFactor);
+        }
+    }
+
+    private static void UpdatePixelsParallel(
+        int[] pixels,
+        float[][] spectrogramBuffer,
+        int bufferHead,
+        int spectrumWidth,
+        int bufferHeight,
+        float colorEnhancementFactor)
+    {
+        Parallel.For(0, bufferHeight, y =>
+        {
+            int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
+            int rowOffset = y * spectrumWidth;
+            int vectorizedWidth = spectrumWidth - spectrumWidth % Vector<float>.Count;
+
+            ProcessRowVectorized(
+                pixels, spectrogramBuffer[bufferIndex],
+                rowOffset, vectorizedWidth, colorEnhancementFactor);
+
+            ProcessRowRemainder(
+                pixels, spectrogramBuffer[bufferIndex],
+                rowOffset, vectorizedWidth, spectrumWidth, colorEnhancementFactor);
+        });
+    }
+
+    private static void ProcessRowVectorized(
+        int[] pixels,
+        float[] spectrumRow,
+        int rowOffset,
+        int vectorizedWidth,
+        float colorEnhancementFactor)
+    {
+        for (int x = 0; x < vectorizedWidth; x += Vector<float>.Count)
+        {
+            Vector<float> values = new(spectrumRow, x);
+
+            if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
+                values = Multiply(values, colorEnhancementFactor);
+
+            for (int i = 0; i < Vector<float>.Count; i++)
+            {
+                float normalized = Clamp(values[i], 0f, 1f);
+                int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
+                pixels[rowOffset + x + i] = _colorPalette[paletteIndex];
+            }
+        }
+    }
+
+    private static void ProcessRowRemainder(
+        int[] pixels,
+        float[] spectrumRow,
+        int rowOffset,
+        int vectorizedWidth,
+        int spectrumWidth,
+        float colorEnhancementFactor)
+    {
+        for (int x = vectorizedWidth; x < spectrumWidth; x++)
+        {
+            float value = spectrumRow[x];
+            if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
+                value *= colorEnhancementFactor;
+
+            float normalized = Clamp(value, 0f, 1f);
+            int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
+            pixels[rowOffset + x] = _colorPalette[paletteIndex];
+        }
+    }
+
+    private static void UpdatePixelsSequential(
+        int[] pixels,
+        float[][] spectrogramBuffer,
+        int bufferHead,
+        int spectrumWidth,
+        int bufferHeight,
+        float colorEnhancementFactor)
+    {
+        Parallel.For(0, bufferHeight, y =>
+        {
+            int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
+            int rowOffset = y * spectrumWidth;
+
+            for (int x = 0; x < spectrumWidth; x++)
+            {
+                float value = spectrogramBuffer[bufferIndex][x];
+                if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
+                    value *= colorEnhancementFactor;
+
+                float normalized = Clamp(value, 0f, 1f);
+                int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
+                pixels[rowOffset + x] = _colorPalette[paletteIndex];
+            }
+        });
+    }
+
+    private void DrawBitmapToCanvas(
+        SKCanvas canvas,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount) =>
+        ExecuteSafely(
+            () =>
+            {
+                SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
+
+                if (canvas.QuickReject(destRect))
+                    return;
+
+                using var renderPaint = new SKPaint
+                {
+                    IsAntialias = _useAntiAlias && barCount > HIGH_BAR_COUNT_THRESHOLD
+                };
+
+                canvas.Clear(SKColors.Black);
+                canvas.DrawBitmap(_waterfallBitmap!, destRect, renderPaint);
+            },
+            nameof(DrawBitmapToCanvas),
+            "Failed to draw bitmap to canvas"
+        );
+
+    private static SKRect CalculateDestRect(
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount)
+    {
+        float totalBarsWidth = barCount * barWidth + (barCount - 1) * barSpacing;
+        float startX = (info.Width - totalBarsWidth) / 2;
+
+        return new SKRect(
+            left: Max(startX, 0),
+            top: 0,
+            right: Min(startX + totalBarsWidth, info.Width),
+            bottom: info.Height);
+    }
+
+    private void ApplyZoomEnhancement(
+        SKCanvas canvas,
+        SKRect destRect,
+        float barWidth,
+        int barCount,
+        float barSpacing) =>
+        ExecuteSafely(
+            () =>
+            {
+                DrawGridLines(canvas, destRect, barWidth, barCount, barSpacing);
+
+                if (barWidth > ZOOM_THRESHOLD * 1.5f)
+                {
+                    DrawGridMarkers(canvas, destRect, barWidth, barCount, barSpacing);
+                }
+            },
+            nameof(ApplyZoomEnhancement),
+            "Failed to apply zoom enhancement"
+        );
+
+    private void DrawGridLines(
+        SKCanvas canvas,
+        SKRect destRect,
+        float barWidth,
+        int barCount,
+        float barSpacing) =>
+        ExecuteSafely(
+            () =>
+            {
+                using var paint = new SKPaint
+                {
+                    Color = new SKColor(255, 255, 255, 40),
+                    StrokeWidth = 1,
+                    IsAntialias = _useAntiAlias,
+                    Style = SKPaintStyle.Stroke
+                };
+
+                int gridStep = (int)Max(1, barCount / 10);
+                using var path = new SKPath();
+
+                DrawGridLineSegments(path, destRect, barWidth, barSpacing, barCount, gridStep);
+                canvas.DrawPath(path, paint);
+            },
+            nameof(DrawGridLines),
+            "Failed to draw grid lines"
+        );
+
+    private static void DrawGridLineSegments(
+        SKPath path,
+        SKRect destRect,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        int gridStep)
+    {
+        for (int i = 0; i < barCount; i += gridStep)
+        {
+            float x = destRect.Left + i * (barWidth + barSpacing) + barWidth / 2;
+            path.MoveTo(x, destRect.Top);
+            path.LineTo(x, destRect.Bottom);
+        }
+    }
+
+    private void DrawGridMarkers(
+        SKCanvas canvas,
+        SKRect destRect,
+        float barWidth,
+        int barCount,
+        float barSpacing) =>
+        ExecuteSafely(
+            () =>
+            {
+                using var font = new SKFont { Size = 10 };
+                using var textPaint = new SKPaint
+                {
+                    Color = SKColors.White,
+                    IsAntialias = _useAntiAlias
+                };
+
+                int gridStep = (int)Max(1, barCount / 10);
+                DrawMarkerLabels(canvas, destRect, barWidth, barSpacing, barCount, gridStep, font, textPaint);
+            },
+            nameof(DrawGridMarkers),
+            "Failed to draw grid markers"
+        );
+
+    private static void DrawMarkerLabels(
+        SKCanvas canvas,
+        SKRect destRect,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        int gridStep,
+        SKFont font,
+        SKPaint textPaint)
+    {
+        for (int i = 0; i < barCount; i += gridStep * 2)
+        {
+            float x = destRect.Left + i * (barWidth + barSpacing) + barWidth / 2;
+            string marker = $"{i}";
+            float textWidth = font.MeasureText(marker, textPaint);
+            canvas.DrawText(marker, x - textWidth / 2, destRect.Bottom - 5, font, textPaint);
+        }
+    }
 
     private static int CalculateOptimalSpectrumWidth(int barCount)
     {
@@ -1043,15 +1059,5 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         _disposed = true;
         GC.SuppressFinalize(this);
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
-    protected override void ApplyQualitySettings()
-    {
-        base.ApplyQualitySettings();
-
-        _useAntiAlias = UseAntiAlias;
-        _useAdvancedEffects = UseAdvancedEffects;
-
-        Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
     }
 }
