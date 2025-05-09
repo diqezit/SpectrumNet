@@ -2,6 +2,7 @@
 
 using static System.MathF;
 using static SpectrumNet.Views.Renderers.WaterRenderer.Constants;
+using static SpectrumNet.Views.Renderers.WaterRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -25,6 +26,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     {
         public const string LOG_PREFIX = "WaterRenderer";
 
+        // Grid layout constants
         public const int
             DEFAULT_COLUMNS = 40,
             DEFAULT_ROWS = 25,
@@ -38,6 +40,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             POINT_RADIUS = 2.0f,
             LINE_WIDTH = 1.5f;
 
+        // Physics constants
         public const float
             NEIGHBOR_FORCE = 0.1f,
             SPRING_FORCE = 0.03f,
@@ -53,11 +56,13 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             SPECTRUM_IMPACT_MIN = 0.05f,
             SPECTRUM_IMPACT_MAX = 0.3f;
 
+        // Rendering thresholds
         public const int
             CONNECTIONS_THRESHOLD = 500,
             POINT_RENDERING_THRESHOLD = 800,
             ROW_RENDERING_THRESHOLD = 20;
 
+        // Appearance constants
         public const byte
             LINE_ALPHA = 100,
             WATER_ALPHA_BASE = 40,
@@ -108,9 +113,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         }
     }
 
-    // Данные моделирования
     private readonly List<WaterPoint> _points = [];
-    private readonly SKPath _fillPath = new();
     private Vector2[] _forces = [];
     private float[]? _lastSpectrum;
     private float[] _spectrumForPhysics = [];
@@ -119,7 +122,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     private float _lastLoudness;
     private readonly float _spectrumImpactFactor;
 
-    // Визуальные объекты
+    private readonly SKPath _fillPath = new();
     private SKPaint? _pointPaint;
     private SKPaint? _linePaint;
     private SKPaint? _fillPaint;
@@ -127,16 +130,12 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     private SKPaint? _reflectionPaint;
     private SKShader? _waterShader;
 
-    // Настройки качества
-    private new bool _useAntiAlias = true;
-    private new bool _useAdvancedEffects = true;
-    private new bool _isOverlayActive;
     private bool _showConnections;
     private float _timeFactor = 1.0f;
     private float _currentWaterAlpha = WATER_ALPHA_BASE;
     private float _currentBrightness = 0.5f;
+    private bool _isConfiguring;
 
-    // Система многопоточности
     private readonly Random _random = new();
     private readonly object _syncRoot = new();
     private readonly TaskFactory _physicsTaskFactory;
@@ -145,7 +144,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     private bool _physicsTaskRunning;
     private bool _pendingPhysicsUpdate;
 
-    // Параметры сетки и адаптивности
     private int _columns;
     private int _rows;
     private float _spacing;
@@ -158,25 +156,24 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     private int _currentFrame;
     private float _avgFrameTime = 0.016f;
 
-    // Состояние рендеринга
     private float _lastBarWidth;
     private float _lastBarSpacing;
     private int _lastBarCount;
     private SKImageInfo _lastImageInfo;
 
-    protected override void OnInitialize() =>
+    protected override void OnInitialize()
+    {
         ExecuteSafely(
-            PerformInitialization,
+            () =>
+            {
+                base.OnInitialize();
+                InitializeResources();
+                StartPhysicsTask();
+                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+            },
             nameof(OnInitialize),
             "Failed during renderer initialization"
         );
-
-    private void PerformInitialization()
-    {
-        base.OnInitialize();
-        InitializeResources();
-        StartPhysicsTask();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     private void InitializeResources()
@@ -246,28 +243,259 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             BlendMode = SKBlendMode.SrcOver
         };
 
-    private static SKShader CreateWaterShader(float _, float height, float alpha)
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality)
     {
-        var colors = new[]
-        {
-            BASE_WATER_COLOR.WithAlpha((byte)alpha),
-            DEEP_WATER_COLOR.WithAlpha((byte)(alpha * 0.7f))
-        };
+        ExecuteSafely(
+            () =>
+            {
+                if (_isConfiguring) return;
 
-        return SKShader.CreateLinearGradient(
-            new SKPoint(0, 0),
-            new SKPoint(0, height),
-            colors,
-            [0, 1],
-            SKShaderTileMode.Clamp);
+                try
+                {
+                    _isConfiguring = true;
+                    bool configChanged = base.IsOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    base.Configure(isOverlayActive, quality);
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+            },
+            nameof(Configure),
+            "Failed to configure renderer"
+        );
+    }
+
+    protected override void OnConfigurationChanged()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                _needsGridRebuild = true;
+                Log(LogLevel.Information,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}, " +
+                    $"AntiAlias: {base.UseAntiAlias}, AdvancedEffects: {base.UseAdvancedEffects}, " +
+                    $"ShowConnections: {_showConnections}, TimeFactor: {_timeFactor}");
+            },
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
+        );
+    }
+
+    protected override void ApplyQualitySettings()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+            },
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
+        );
+    }
+
+    private void ApplyQualitySettingsInternal()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                LowQualitySettings();
+                break;
+
+            case RenderQuality.Medium:
+                MediumQualitySettings();
+                break;
+
+            case RenderQuality.High:
+                HighQualitySettings();
+                break;
+        }
+
+        UpdatePaintProperties();
+        _needsGridRebuild = true;
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"AntiAlias: {base.UseAntiAlias}, AdvancedEffects: {base.UseAdvancedEffects}, " +
+            $"ShowConnections: {_showConnections}, TimeFactor: {_timeFactor}");
+    }
+
+    private void LowQualitySettings()
+    {
+        _showConnections = LOW_SHOW_CONNECTIONS;
+        _timeFactor = LOW_TIME_FACTOR;
+    }
+
+    private void MediumQualitySettings()
+    {
+        _showConnections = MEDIUM_SHOW_CONNECTIONS;
+        _timeFactor = MEDIUM_TIME_FACTOR;
+    }
+
+    private void HighQualitySettings()
+    {
+        _showConnections = HIGH_SHOW_CONNECTIONS;
+        _timeFactor = HIGH_TIME_FACTOR;
+    }
+
+    private void UpdatePaintProperties()
+    {
+        if (_pointPaint != null)
+            _pointPaint.IsAntialias = base.UseAntiAlias;
+
+        if (_linePaint != null)
+            _linePaint.IsAntialias = base.UseAntiAlias;
+
+        if (_fillPaint != null)
+            _fillPaint.IsAntialias = base.UseAntiAlias;
+
+        if (_highlightPaint != null)
+            _highlightPaint.IsAntialias = base.UseAntiAlias;
+
+        if (_reflectionPaint != null)
+            _reflectionPaint.IsAntialias = base.UseAntiAlias;
+    }
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint paint)
+    {
+        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
+
+        ExecuteSafely(
+            () =>
+            {
+                UpdateState(spectrum, info, barWidth, barSpacing, barCount);
+                RenderFrame(canvas, spectrum, info, paint);
+            },
+            nameof(RenderEffect),
+            "Error during rendering"
+        );
+    }
+
+    private static bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        SKPaint? paint)
+    {
+        if (!IsCanvasValid(canvas)) return false;
+        if (!IsSpectrumValid(spectrum)) return false;
+        if (!IsPaintValid(paint)) return false;
+        if (!AreDimensionsValid(info)) return false;
+        return true;
+    }
+
+    private static bool IsCanvasValid(SKCanvas? canvas)
+    {
+        if (canvas != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
+        return false;
+    }
+
+    private static bool IsSpectrumValid(float[]? spectrum)
+    {
+        if (spectrum != null && spectrum.Length > 0) return true;
+        Log(LogLevel.Warning, LOG_PREFIX, "Spectrum is null or empty");
+        return false;
+    }
+
+    private static bool IsPaintValid(SKPaint? paint)
+    {
+        if (paint != null) return true;
+        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
+        return false;
+    }
+
+    private static bool AreDimensionsValid(SKImageInfo info)
+    {
+        if (info.Width > 0 && info.Height > 0) return true;
+        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
+        return false;
+    }
+
+    private void UpdateState(
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                BuildWaterGrid(
+                    info.Width,
+                    info.Height,
+                    barWidth,
+                    barSpacing,
+                    barCount);
+
+                UpdatePhysicsIfNeeded(spectrum);
+                UpdateVisualParameters(spectrum, info);
+                UpdateFrameTimeMeasurement();
+            },
+            nameof(UpdateState),
+            "Error updating renderer state"
+        );
+    }
+
+    private void RenderFrame(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        SKPaint paint)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                RenderWaterGrid(canvas, paint);
+            },
+            nameof(RenderFrame),
+            "Error rendering frame"
+        );
     }
 
     private void StartPhysicsTask()
     {
-        if (_physicsTask != null) return;
+        ExecuteSafely(
+            () =>
+            {
+                if (_physicsTask != null) return;
 
-        _physicsTaskRunning = true;
-        _physicsTask = _physicsTaskFactory.StartNew(RunPhysicsLoop);
+                _physicsTaskRunning = true;
+                _physicsTask = _physicsTaskFactory.StartNew(RunPhysicsLoop);
+            },
+            nameof(StartPhysicsTask),
+            "Failed to start physics task"
+        );
     }
 
     private void RunPhysicsLoop()
@@ -307,196 +535,45 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void SchedulePhysicsUpdate(float[] spectrum)
     {
-        int length = spectrum.Length;
-        if (_spectrumForPhysics.Length != length)
-        {
-            float[] newArray = new float[length];
-            Array.Copy(spectrum, newArray, length);
-            _spectrumForPhysics = newArray;
-        }
-        else
-        {
-            Array.Copy(spectrum, _spectrumForPhysics, length);
-        }
+        ExecuteSafely(
+            () =>
+            {
+                int length = spectrum.Length;
+                if (_spectrumForPhysics.Length != length)
+                {
+                    float[] newArray = new float[length];
+                    Array.Copy(spectrum, newArray, length);
+                    _spectrumForPhysics = newArray;
+                }
+                else
+                {
+                    Array.Copy(spectrum, _spectrumForPhysics, length);
+                }
 
-        _pendingPhysicsUpdate = true;
+                _pendingPhysicsUpdate = true;
+            },
+            nameof(SchedulePhysicsUpdate),
+            "Error scheduling physics update"
+        );
     }
 
     private void StopPhysicsTask()
     {
-        _physicsTaskRunning = false;
-        try
-        {
-            _physicsTask?.Wait(500);
-        }
-        catch { }
-
-        _physicsTask = null;
-    }
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium) =>
-        ExecuteSafely(
-            () => PerformConfiguration(isOverlayActive, quality),
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-
-    private void PerformConfiguration(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-        base.Configure(isOverlayActive, quality);
-        _isOverlayActive = isOverlayActive;
-
-        if (configChanged)
-        {
-            ApplyQualitySpecificSettings();
-            _needsGridRebuild = true;
-        }
-    }
-
-    protected override void OnQualitySettingsApplied() =>
-        ExecuteSafely(
-            PerformQualitySettingsApplication,
-            nameof(OnQualitySettingsApplied),
-            "Failed to apply specific quality settings"
-        );
-
-    private void PerformQualitySettingsApplication()
-    {
-        base.OnQualitySettingsApplied();
-        ApplyQualitySpecificSettings();
-    }
-
-    private void ApplyQualitySpecificSettings()
-    {
-        ApplyQualityBasedParameters();
-        UpdatePaintProperties();
-        _needsGridRebuild = true;
-    }
-
-    private void ApplyQualityBasedParameters()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                ApplyLowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                ApplyHighQualitySettings();
-                break;
-        }
-    }
-
-    private void ApplyLowQualitySettings()
-    {
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
-        _showConnections = Constants.Quality.LOW_SHOW_CONNECTIONS;
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _timeFactor = Constants.Quality.LOW_TIME_FACTOR;
-    }
-
-    private void ApplyMediumQualitySettings()
-    {
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
-        _showConnections = Constants.Quality.MEDIUM_SHOW_CONNECTIONS;
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _timeFactor = Constants.Quality.MEDIUM_TIME_FACTOR;
-    }
-
-    private void ApplyHighQualitySettings()
-    {
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
-        _showConnections = Constants.Quality.HIGH_SHOW_CONNECTIONS;
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _timeFactor = Constants.Quality.HIGH_TIME_FACTOR;
-    }
-
-    private void UpdatePaintProperties()
-    {
-        if (_pointPaint != null && _linePaint != null && _fillPaint != null)
-        {
-            _pointPaint.IsAntialias = _useAntiAlias;
-            _linePaint.IsAntialias = _useAntiAlias;
-            _fillPaint.IsAntialias = _useAntiAlias;
-
-            if (_highlightPaint != null)
-                _highlightPaint.IsAntialias = _useAntiAlias;
-
-            if (_reflectionPaint != null)
-                _reflectionPaint.IsAntialias = _useAntiAlias;
-        }
-    }
-
-    protected override void RenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint paint) =>
         ExecuteSafely(
             () =>
             {
-                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
+                _physicsTaskRunning = false;
+                try
                 {
-                    return;
+                    _physicsTask?.Wait(500);
                 }
+                catch { }
 
-                UpdateState(spectrum, info, barWidth, barSpacing, barCount);
-                RenderFrame(canvas, spectrum, info, paint);
+                _physicsTask = null;
             },
-            nameof(RenderEffect),
-            "Error during rendering"
+            nameof(StopPhysicsTask),
+            "Error stopping physics task"
         );
-
-    private static bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint) =>
-        canvas != null &&
-        spectrum != null &&
-        spectrum.Length > 0 &&
-        paint != null &&
-        info.Width > 0 &&
-        info.Height > 0;
-
-    private void UpdateState(
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount)
-    {
-        BuildWaterGrid(
-            info.Width,
-            info.Height,
-            barWidth,
-            barSpacing,
-            barCount);
-
-        UpdatePhysicsIfNeeded(spectrum);
-        UpdateVisualParameters(spectrum, info);
-        UpdateFrameTimeMeasurement();
-    }
-
-    private void RenderFrame(
-        SKCanvas canvas,
-        float[] _,
-        SKImageInfo __,
-        SKPaint paint)
-    {
-        RenderWaterGrid(canvas, paint);
     }
 
     private void UpdatePhysicsIfNeeded(float[] spectrum)
@@ -531,21 +608,49 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void UpdateVisualParameters(float[] spectrum, SKImageInfo info)
     {
-        float loudness = CalculateLoudness(spectrum);
-        _lastLoudness = _lastLoudness * (1 - LOUDNESS_SMOOTHING) + loudness * LOUDNESS_SMOOTHING;
+        ExecuteSafely(
+            () =>
+            {
+                float loudness = CalculateLoudness(spectrum);
+                _lastLoudness = _lastLoudness * (1 - LOUDNESS_SMOOTHING) + loudness * LOUDNESS_SMOOTHING;
 
-        float targetAlpha = WATER_ALPHA_BASE + _lastLoudness * (WATER_ALPHA_MAX - WATER_ALPHA_BASE);
-        _currentWaterAlpha = MathF.Min(WATER_ALPHA_MAX, targetAlpha);
+                float targetAlpha = WATER_ALPHA_BASE + _lastLoudness * (WATER_ALPHA_MAX - WATER_ALPHA_BASE);
+                _currentWaterAlpha = MathF.Min(WATER_ALPHA_MAX, targetAlpha);
 
-        float targetBrightness = 0.5f + _lastLoudness * 0.5f;
-        _currentBrightness = _currentBrightness * (1 - BRIGHTNESS_SMOOTHING) +
-                            targetBrightness * BRIGHTNESS_SMOOTHING;
+                float targetBrightness = 0.5f + _lastLoudness * 0.5f;
+                _currentBrightness = _currentBrightness * (1 - BRIGHTNESS_SMOOTHING) +
+                                    targetBrightness * BRIGHTNESS_SMOOTHING;
 
-        if (_useAdvancedEffects && _currentFrame == 0)
+                if (base.UseAdvancedEffects && _currentFrame == 0)
+                {
+                    UpdateWaterShader(info);
+                }
+            },
+            nameof(UpdateVisualParameters),
+            "Error updating visual parameters"
+        );
+    }
+
+    private void UpdateWaterShader(SKImageInfo info)
+    {
+        _waterShader?.Dispose();
+        _waterShader = CreateWaterShader(info.Width, info.Height, _currentWaterAlpha);
+    }
+
+    private static SKShader CreateWaterShader(float width, float height, float alpha)
+    {
+        var colors = new[]
         {
-            _waterShader?.Dispose();
-            _waterShader = CreateWaterShader(info.Width, info.Height, _currentWaterAlpha);
-        }
+            BASE_WATER_COLOR.WithAlpha((byte)alpha),
+            DEEP_WATER_COLOR.WithAlpha((byte)(alpha * 0.7f))
+        };
+
+        return SKShader.CreateLinearGradient(
+            new SKPoint(0, 0),
+            new SKPoint(0, height),
+            colors,
+            [0, 1],
+            SKShaderTileMode.Clamp);
     }
 
     private static float CalculateLoudness(float[] spectrum)
@@ -572,13 +677,17 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void RenderWaterGrid(SKCanvas canvas, SKPaint externalPaint)
     {
-        if (!AreRenderResourcesValid())
-        {
-            return;
-        }
+        if (!AreRenderResourcesValid()) return;
 
-        ConfigureRenderingPaints(externalPaint);
-        RenderWaterGridElements(canvas);
+        ExecuteSafely(
+            () =>
+            {
+                ConfigureRenderingPaints(externalPaint);
+                RenderWaterGridElements(canvas);
+            },
+            nameof(RenderWaterGrid),
+            "Error rendering water grid"
+        );
     }
 
     private bool AreRenderResourcesValid() =>
@@ -591,7 +700,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     {
         SKColor baseColor = externalPaint.Color;
 
-        if (_useAdvancedEffects)
+        if (base.UseAdvancedEffects)
         {
             float hueShift = Sin(_animationTime * COLOR_SHIFT_SPEED) * 10;
             baseColor = ShiftHue(baseColor, hueShift);
@@ -622,21 +731,21 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void UpdateFillPaint(SKColor baseColor)
     {
-        if (_fillPaint != null)
+        if (_fillPaint == null) return;
+
+        if (base.UseAdvancedEffects && _waterShader != null)
         {
-            if (_useAdvancedEffects && _waterShader != null)
-            {
-                float phase = _animationTime * WAVE_SPEED;
-                SKMatrix matrix = SKMatrix.CreateRotationDegrees(Sin(phase) * 2);
-                matrix = matrix.PostConcat(SKMatrix.CreateScale(1 + Sin(phase) * WAVE_AMPLITUDE * _lastLoudness,
-                                                               1 + Cos(phase) * WAVE_AMPLITUDE * _lastLoudness));
-                _fillPaint.Shader = _waterShader.WithLocalMatrix(matrix);
-            }
-            else
-            {
-                _fillPaint.Shader = null;
-                _fillPaint.Color = baseColor.WithAlpha((byte)_currentWaterAlpha);
-            }
+            float phase = _animationTime * WAVE_SPEED;
+            SKMatrix matrix = SKMatrix.CreateRotationDegrees(Sin(phase) * 2);
+            matrix = matrix.PostConcat(SKMatrix.CreateScale(
+                1 + Sin(phase) * WAVE_AMPLITUDE * _lastLoudness,
+                1 + Cos(phase) * WAVE_AMPLITUDE * _lastLoudness));
+            _fillPaint.Shader = _waterShader.WithLocalMatrix(matrix);
+        }
+        else
+        {
+            _fillPaint.Shader = null;
+            _fillPaint.Color = baseColor.WithAlpha((byte)_currentWaterAlpha);
         }
     }
 
@@ -658,22 +767,29 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void RenderWaterGridElements(SKCanvas canvas)
     {
-        if (_useAdvancedEffects && _fillPaint != null)
-        {
-            DrawWaterSurface(canvas);
-        }
+        ExecuteSafely(
+            () =>
+            {
+                if (base.UseAdvancedEffects && _fillPaint != null)
+                {
+                    DrawWaterSurface(canvas);
+                }
 
-        if (_showConnections)
-        {
-            RenderConnections(canvas);
-        }
+                if (_showConnections)
+                {
+                    RenderConnections(canvas);
+                }
 
-        RenderPoints(canvas);
+                RenderPoints(canvas);
 
-        if (_useAdvancedEffects)
-        {
-            RenderHighlightsAndReflections(canvas);
-        }
+                if (base.UseAdvancedEffects)
+                {
+                    RenderHighlightsAndReflections(canvas);
+                }
+            },
+            nameof(RenderWaterGridElements),
+            "Error rendering water grid elements"
+        );
     }
 
     private void RenderConnections(SKCanvas canvas)
@@ -813,19 +929,18 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             return;
         }
 
-        UpdateGridParameters(width, height, barWidth, barSpacing, barCount);
-        CalculateAdaptiveGridDimensions(width, height);
-
         ExecuteSafely(
             () =>
             {
+                UpdateGridParameters(width, height, barWidth, barSpacing, barCount);
+                CalculateAdaptiveGridDimensions(width, height);
                 ClearCurrentGrid();
                 CreateGridPoints();
                 ConnectGridPoints();
                 InitializeForces();
                 _needsGridRebuild = false;
             },
-            "BuildWaterGrid",
+            nameof(BuildWaterGrid),
             "Error building water grid"
         );
     }
@@ -928,26 +1043,33 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void ConnectGridPoints()
     {
-        if (_points.Count > 400 && _rows > 2 && _columns > 2)
-        {
-            Parallel.For(0, _rows, y =>
+        ExecuteSafely(
+            () =>
             {
-                for (int x = 0; x < _columns; x++)
+                if (_points.Count > 400 && _rows > 2 && _columns > 2)
                 {
-                    ConnectPointAtPosition(x, y);
+                    Parallel.For(0, _rows, y =>
+                    {
+                        for (int x = 0; x < _columns; x++)
+                        {
+                            ConnectPointAtPosition(x, y);
+                        }
+                    });
                 }
-            });
-        }
-        else
-        {
-            for (int y = 0; y < _rows; y++)
-            {
-                for (int x = 0; x < _columns; x++)
+                else
                 {
-                    ConnectPointAtPosition(x, y);
+                    for (int y = 0; y < _rows; y++)
+                    {
+                        for (int x = 0; x < _columns; x++)
+                        {
+                            ConnectPointAtPosition(x, y);
+                        }
+                    }
                 }
-            }
-        }
+            },
+            nameof(ConnectGridPoints),
+            "Error connecting grid points"
+        );
     }
 
     private void ConnectPointAtPosition(int x, int y)
@@ -959,7 +1081,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         ConnectToCardinalNeighbors(x, y, point);
 
-        if (_useAdvancedEffects)
+        if (base.UseAdvancedEffects)
         {
             ConnectToDiagonalNeighbors(x, y, point);
         }
@@ -1079,20 +1201,27 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void CalculateForces(float[] spectrum)
     {
-        if (_points.Count > 500)
-        {
-            Parallel.For(0, _points.Count, i =>
+        ExecuteSafely(
+            () =>
             {
-                CalculateForceForPoint(i, spectrum);
-            });
-        }
-        else
-        {
-            for (int i = 0; i < _points.Count; i++)
-            {
-                CalculateForceForPoint(i, spectrum);
-            }
-        }
+                if (_points.Count > 500)
+                {
+                    Parallel.For(0, _points.Count, i =>
+                    {
+                        CalculateForceForPoint(i, spectrum);
+                    });
+                }
+                else
+                {
+                    for (int i = 0; i < _points.Count; i++)
+                    {
+                        CalculateForceForPoint(i, spectrum);
+                    }
+                }
+            },
+            nameof(CalculateForces),
+            "Error calculating forces"
+        );
     }
 
     private void CalculateForceForPoint(int pointIndex, float[] spectrum)
@@ -1108,7 +1237,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             CalculateSpectrumForces(pointIndex, point, spectrum);
         }
 
-        if (_useAdvancedEffects)
+        if (base.UseAdvancedEffects)
         {
             CalculateWaveForces(pointIndex);
         }
@@ -1208,7 +1337,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         CalculateVerticalSpectrumForce(pointIndex, amplitude);
 
-        if (_useAdvancedEffects)
+        if (base.UseAdvancedEffects)
         {
             CalculateHorizontalSpectrumForce(pointIndex, amplitude);
         }
@@ -1238,10 +1367,17 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private void ApplyForcesToPoints()
     {
-        for (int i = 0; i < _points.Count; i++)
-        {
-            ApplyForceToPoint(i);
-        }
+        ExecuteSafely(
+            () =>
+            {
+                for (int i = 0; i < _points.Count; i++)
+                {
+                    ApplyForceToPoint(i);
+                }
+            },
+            nameof(ApplyForcesToPoints),
+            "Error applying forces to points"
+        );
     }
 
     private void ApplyForceToPoint(int pointIndex)
@@ -1264,27 +1400,37 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         );
     }
 
-    protected override void OnDispose() =>
+    protected override void OnInvalidateCachedResources()
+    {
         ExecuteSafely(
-            PerformDispose,
+            () =>
+            {
+                base.OnInvalidateCachedResources();
+                _waterShader?.Dispose();
+                _waterShader = null;
+                _needsGridRebuild = true;
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+            },
+            nameof(OnInvalidateCachedResources),
+            "Error invalidating cached resources"
+        );
+    }
+
+    protected override void OnDispose()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                StopPhysicsTask();
+                DisposeManagedResources();
+                base.OnDispose();
+            },
             nameof(OnDispose),
             "Error during specific disposal"
         );
-
-    private void PerformDispose()
-    {
-        StopPhysicsTask();
-        DisposeManagedResources();
-        base.OnDispose();
     }
 
     private void DisposeManagedResources()
-    {
-        DisposeGraphicsResources();
-        ClearData();
-    }
-
-    private void DisposeGraphicsResources()
     {
         _fillPath?.Dispose();
         _pointPaint?.Dispose();
@@ -1293,10 +1439,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         _highlightPaint?.Dispose();
         _reflectionPaint?.Dispose();
         _waterShader?.Dispose();
-    }
 
-    private void ClearData()
-    {
         _pointPaint = null;
         _linePaint = null;
         _fillPaint = null;
@@ -1313,7 +1456,10 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         if (_disposed) return;
 
         ExecuteSafely(
-            OnDispose,
+            () =>
+            {
+                OnDispose();
+            },
             nameof(Dispose),
             "Error during disposal"
         );

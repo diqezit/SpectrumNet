@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.KenwoodRenderer.Constants;
+using static SpectrumNet.Views.Renderers.KenwoodRenderer.Constants.Quality;
+using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -67,6 +69,16 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                 HIGH_SEGMENT_ROUNDNESS = 4f,
                 HIGH_SMOOTHING_FACTOR = 1.5f,
                 HIGH_TRANSITION_SMOOTHNESS = 1f;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
         }
 
         public const RenderQuality DEFAULT_QUALITY = RenderQuality.Medium;
@@ -76,7 +88,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     private bool _enableReflections;
     private bool _useSegmentedBars;
     private float _segmentRoundness;
-    private new float _smoothingFactor;
+    private float _rendererSmoothingFactor; 
     private float _transitionSmoothness;
 
     private readonly float
@@ -92,7 +104,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     private int _pendingBarCount;
     private float _pendingCanvasHeight;
 
-    private new float[]? _previousSpectrum;
+    private float[]? _previousSpectrumBuffer;
     private float[]? _peaks, _renderBarValues, _renderPeaks;
     private float[]? _processingBarValues, _processingPeaks, _pendingSpectrum, _velocities;
     private DateTime[]? _peakHoldTimes;
@@ -157,6 +169,8 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     private readonly Dictionary<int, SKPaint> _segmentPaints = [];
     private volatile bool _buffersInitialized;
 
+    private volatile bool _isConfiguring;
+
     protected override void OnInitialize()
     {
         ExecuteSafely(
@@ -166,12 +180,65 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                 InitializeBufferPools();
                 InitializePaths();
                 InitializeBuffers(INITIAL_BUFFER_SIZE);
+                InitializeQualityParams();
                 StartCalculationThread();
 
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed to initialize renderer resources"
+        );
+    }
+
+    private void InitializeQualityParams()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                ApplyQualitySettingsInternal();
+            },
+            nameof(InitializeQualityParams),
+            "Failed to initialize quality parameters"
+        );
+    }
+
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality)
+    {
+        ExecuteSafely(
+            () =>
+            {
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    base._smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    _rendererSmoothingFactor = isOverlayActive ? 0.6f 
+                    : (_isOverlayActive ? 0.6f 
+                    : MEDIUM_SMOOTHING_FACTOR * 0.2f);
+
+                    _transitionSmoothness = _isOverlayActive ? 0.7f : 0.5f;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+            },
+            nameof(Configure),
+            "Failed to configure renderer"
         );
     }
 
@@ -180,30 +247,101 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                _smoothingFactor = _isOverlayActive ? 0.6f : Constants.Quality.MEDIUM_SMOOTHING_FACTOR * 0.2f;
-                _transitionSmoothness = _isOverlayActive ? 0.7f : 0.5f;
                 _pathsNeedRebuild = true;
+
+                Log(LogLevel.Information,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            "OnConfigurationChanged",
+            nameof(OnConfigurationChanged),
             "Failed to apply configuration changes"
         );
     }
 
-    protected override void OnQualitySettingsApplied()
+    protected override void ApplyQualitySettings()
     {
         ExecuteSafely(
             () =>
             {
-                base.OnQualitySettingsApplied();
-                ApplyQualityBasedSettings();
-                UpdatePaintProperties();
-                _pathsNeedRebuild = true;
+                if (_isConfiguring) return;
 
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
-            "OnQualitySettingsApplied",
+            nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
+    }
+
+    private void ApplyQualitySettingsInternal()
+    {
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                LowQualitySettings();
+                break;
+
+            case RenderQuality.Medium:
+                MediumQualitySettings();
+                break;
+
+            case RenderQuality.High:
+                HighQualitySettings();
+                break;
+        }
+
+        UpdatePaintProperties();
+        _pathsNeedRebuild = true;
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
+            $"Shadows: {_enableShadows}, Reflections: {_enableReflections}, " +
+            $"SegmentedBars: {_useSegmentedBars}");
+    }
+
+    private void LowQualitySettings()
+    {
+        base._useAntiAlias = LOW_USE_ANTIALIASING;
+        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _enableShadows = LOW_ENABLE_SHADOWS;
+        _enableReflections = LOW_ENABLE_REFLECTIONS;
+        _segmentRoundness = LOW_SEGMENT_ROUNDNESS;
+        _useSegmentedBars = LOW_USE_SEGMENTED_BARS;
+        _rendererSmoothingFactor = LOW_SMOOTHING_FACTOR;
+        _transitionSmoothness = LOW_TRANSITION_SMOOTHNESS;
+    }
+
+    private void MediumQualitySettings()
+    {
+        base._useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _enableShadows = MEDIUM_ENABLE_SHADOWS;
+        _enableReflections = MEDIUM_ENABLE_REFLECTIONS;
+        _segmentRoundness = MEDIUM_SEGMENT_ROUNDNESS;
+        _useSegmentedBars = MEDIUM_USE_SEGMENTED_BARS;
+        _rendererSmoothingFactor = MEDIUM_SMOOTHING_FACTOR;
+        _transitionSmoothness = MEDIUM_TRANSITION_SMOOTHNESS;
+    }
+
+    private void HighQualitySettings()
+    {
+        base._useAntiAlias = HIGH_USE_ANTIALIASING;
+        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _enableShadows = HIGH_ENABLE_SHADOWS;
+        _enableReflections = HIGH_ENABLE_REFLECTIONS;
+        _segmentRoundness = HIGH_SEGMENT_ROUNDNESS;
+        _useSegmentedBars = HIGH_USE_SEGMENTED_BARS;
+        _rendererSmoothingFactor = HIGH_SMOOTHING_FACTOR;
+        _transitionSmoothness = HIGH_TRANSITION_SMOOTHNESS;
     }
 
     protected override void RenderEffect(
@@ -229,7 +367,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                 UpdateState(canvas, spectrum, info, barCount);
                 RenderFrame(canvas, info, barWidth, barSpacing, totalBarWidth, barCount);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
     }
@@ -240,8 +378,10 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             () =>
             {
                 _pathsNeedRebuild = true;
+
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
             },
-            "OnInvalidateCachedResources",
+            nameof(OnInvalidateCachedResources),
             "Failed to invalidate cached resources"
         );
     }
@@ -261,7 +401,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                 base.OnDispose();
                 Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during disposal"
         );
     }
@@ -277,7 +417,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     private void InitializeBuffers(int size)
     {
-        _previousSpectrum = new float[size];
+        _previousSpectrumBuffer = new float[size];
         _peaks = new float[size];
         _peakHoldTimes = new DateTime[size];
         _velocities = new float[size];
@@ -311,54 +451,6 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             _calculationCts.Token,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
-    }
-
-    private void ApplyQualityBasedSettings()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                ApplyLowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                ApplyHighQualitySettings();
-                break;
-        }
-    }
-
-    private void ApplyLowQualitySettings()
-    {
-        _enableShadows = Constants.Quality.LOW_ENABLE_SHADOWS;
-        _enableReflections = Constants.Quality.LOW_ENABLE_REFLECTIONS;
-        _segmentRoundness = Constants.Quality.LOW_SEGMENT_ROUNDNESS;
-        _useSegmentedBars = Constants.Quality.LOW_USE_SEGMENTED_BARS;
-        _smoothingFactor = Constants.Quality.LOW_SMOOTHING_FACTOR;
-        _transitionSmoothness = Constants.Quality.LOW_TRANSITION_SMOOTHNESS;
-    }
-
-    private void ApplyMediumQualitySettings()
-    {
-        _enableShadows = Constants.Quality.MEDIUM_ENABLE_SHADOWS;
-        _enableReflections = Constants.Quality.MEDIUM_ENABLE_REFLECTIONS;
-        _segmentRoundness = Constants.Quality.MEDIUM_SEGMENT_ROUNDNESS;
-        _useSegmentedBars = Constants.Quality.MEDIUM_USE_SEGMENTED_BARS;
-        _smoothingFactor = Constants.Quality.MEDIUM_SMOOTHING_FACTOR;
-        _transitionSmoothness = Constants.Quality.MEDIUM_TRANSITION_SMOOTHNESS;
-    }
-
-    private void ApplyHighQualitySettings()
-    {
-        _enableShadows = Constants.Quality.HIGH_ENABLE_SHADOWS;
-        _enableReflections = Constants.Quality.HIGH_ENABLE_REFLECTIONS;
-        _segmentRoundness = Constants.Quality.HIGH_SEGMENT_ROUNDNESS;
-        _useSegmentedBars = Constants.Quality.HIGH_USE_SEGMENTED_BARS;
-        _smoothingFactor = Constants.Quality.HIGH_SMOOTHING_FACTOR;
-        _transitionSmoothness = Constants.Quality.HIGH_TRANSITION_SMOOTHNESS;
     }
 
     private void UpdatePaintProperties()
@@ -647,7 +739,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                         minVisibleValue);
                 }
             },
-            "RebuildPaths",
+            nameof(RebuildPaths),
             "Failed to rebuild rendering paths"
         );
     }
@@ -1122,7 +1214,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                 CreateSegmentGradients(height);
                 CreateCombinedGradients(height);
             },
-            "CreateGradients",
+            nameof(CreateGradients),
             "Failed to create gradients"
         );
     }
@@ -1210,20 +1302,24 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     private void InitializeBuffersIfNeeded(int actualBarCount)
     {
-        if (!_buffersInitialized || _previousSpectrum == null || _velocities == null ||
-            _peaks == null || _peakHoldTimes == null || _previousSpectrum.Length < actualBarCount)
+        if (!_buffersInitialized
+            || _previousSpectrumBuffer == null
+            || _velocities == null
+            || _peaks == null
+            || _peakHoldTimes == null
+            || _previousSpectrumBuffer.Length < actualBarCount)
         {
             Log(LogLevel.Debug, LOG_PREFIX, $"Reinitializing buffers for {actualBarCount} bars");
 
             _dataSemaphore.Wait();
             try
             {
-                ReturnBufferToPool(_previousSpectrum);
+                ReturnBufferToPool(_previousSpectrumBuffer);
                 ReturnBufferToPool(_peaks);
                 ReturnBufferToPool(_peakHoldTimes);
                 ReturnBufferToPool(_velocities);
 
-                _previousSpectrum = GetFloatBuffer(actualBarCount);
+                _previousSpectrumBuffer = GetFloatBuffer(actualBarCount);
                 _peaks = GetFloatBuffer(actualBarCount);
                 _peakHoldTimes = GetDateTimeBuffer(actualBarCount);
                 _velocities = GetFloatBuffer(actualBarCount);
@@ -1247,15 +1343,18 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         float canvasHeight,
         int actualBarCount)
     {
-        if (!_buffersInitialized || _velocities == null || _previousSpectrum == null ||
-            _peaks == null || _peakHoldTimes == null)
+        if (!_buffersInitialized
+            || _velocities == null
+            || _previousSpectrumBuffer == null
+            || _peaks == null
+            || _peakHoldTimes == null)
         {
             InitializeBuffersIfNeeded(actualBarCount);
             if (!_buffersInitialized)
                 return;
         }
 
-        float smoothFactor = _smoothingFactor * _animationSpeed;
+        float smoothFactor = _rendererSmoothingFactor * _animationSpeed;
         float peakFallRate = _peakFallSpeed * canvasHeight * _animationSpeed;
         double peakHoldTimeMs = PEAK_HOLD_TIME_MS;
 
@@ -1299,19 +1398,21 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         float velocityDamping,
         float springStiffness)
     {
-        if (_velocities == null || _previousSpectrum == null ||
-            _peaks == null || _peakHoldTimes == null)
+        if (_velocities == null
+            || _previousSpectrumBuffer == null
+            || _peaks == null
+            || _peakHoldTimes == null)
             return;
 
         for (int i = batchStart; i < batchEnd; i++)
         {
-            if (i >= _velocities.Length || i >= _previousSpectrum.Length)
+            if (i >= _velocities.Length || i >= _previousSpectrumBuffer.Length)
                 continue;
 
             ProcessSingleSpectrumValue(
                 i,
                 scaledSpectrum[i],
-                _previousSpectrum[i],
+                _previousSpectrumBuffer[i],
                 canvasHeight,
                 smoothFactor,
                 maxChangeThreshold,
@@ -1342,8 +1443,10 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         float springStiffness,
         float[] computedBarValues)
     {
-        if (_velocities == null || _previousSpectrum == null ||
-            index >= _velocities.Length || index >= _previousSpectrum.Length)
+        if (_velocities == null
+            || _previousSpectrumBuffer == null
+            || index >= _velocities.Length
+            || index >= _previousSpectrumBuffer.Length)
             return;
 
         float delta = targetValue - currentValue;
@@ -1362,7 +1465,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         float newValue = currentValue + _velocities[index] + delta * adaptiveSmoothFactor;
         newValue = MathF.Max(0f, MathF.Min(1f, newValue));
 
-        _previousSpectrum[index] = newValue;
+        _previousSpectrumBuffer[index] = newValue;
         computedBarValues[index] = newValue * canvasHeight;
     }
 
@@ -1643,7 +1746,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     private void ReturnAllBuffers()
     {
-        ReturnBufferToPool(_previousSpectrum);
+        ReturnBufferToPool(_previousSpectrumBuffer);
         ReturnBufferToPool(_peaks);
         ReturnBufferToPool(_peakHoldTimes);
         ReturnBufferToPool(_renderBarValues);

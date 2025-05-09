@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.LedMeterRenderer.Constants;
+using static SpectrumNet.Views.Renderers.LedMeterRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -68,11 +69,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         }
     }
 
-    private new bool 
-        _useAdvancedEffects,
-        _useAntiAlias;
-
-    private float 
+    private float
         _animationPhase,
         _vibrationOffset,
         _previousLoudness,
@@ -82,7 +79,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private float[] _ledAnimationPhases = [];
 
-    private int 
+    private int
         _currentWidth,
         _currentHeight,
         _ledCount = DEFAULT_LED_COUNT;
@@ -98,6 +95,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
     private readonly List<SKColor> _ledColorVariations = new(30);
 
     private readonly object _loudnessLock = new();
+    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
@@ -106,7 +104,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 InitializeResources();
-                ApplyQualitySettings();
+                InitializeQualityParams();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
@@ -125,6 +123,18 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             },
             nameof(InitializeResources),
             "Failed to initialize renderer resources"
+        );
+    }
+
+    private void InitializeQualityParams()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                ApplyQualitySettingsInternal();
+            },
+            nameof(InitializeQualityParams),
+            "Failed to initialize quality parameters"
         );
     }
 
@@ -276,7 +286,12 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
     private void DrawBrushedMetalLines(SKCanvas canvas)
     {
         Random texRandom = new(42);
-        using var linePaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var linePaint = paintPool.Get();
+        if (linePaint == null) return;
+
         linePaint.IsAntialias = false;
         linePaint.StrokeWidth = 1;
 
@@ -319,17 +334,36 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         canvas.DrawRect(0, 0, BRUSHED_METAL_TEXTURE_SIZE, BRUSHED_METAL_TEXTURE_SIZE, gradientPaint);
     }
 
-    public override void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium)
+    public override void Configure(
+        bool isOverlayActive,
+        RenderQuality quality)
     {
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ?
+                        SMOOTHING_FACTOR_OVERLAY :
+                        SMOOTHING_FACTOR_NORMAL;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
             nameof(Configure),
@@ -342,9 +376,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.OnConfigurationChanged();
-                UpdateSmoothingFactor();
-                Log(LogLevel.Debug,
+                Log(LogLevel.Information,
                     LOG_PREFIX,
                     $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
@@ -353,69 +385,76 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         );
     }
 
-    private void UpdateSmoothingFactor()
-    {
-        _smoothingFactor = _isOverlayActive ?
-            SMOOTHING_FACTOR_OVERLAY :
-            SMOOTHING_FACTOR_NORMAL;
-    }
-
     protected override void ApplyQualitySettings()
     {
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                OnQualitySettingsApplied();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
             nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualityBasedSettings()
+    private void ApplyQualitySettingsInternal()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                ApplyLowQualitySettings();
+                LowQualitySettings();
                 break;
+
             case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
+                MediumQualitySettings();
                 break;
+
             case RenderQuality.High:
-                ApplyHighQualitySettings();
+                HighQualitySettings();
                 break;
         }
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}");
     }
 
-    private void ApplyLowQualitySettings()
+    private void LowQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
-        _samplingOptions = new SKSamplingOptions(
-            Constants.Quality.LOW_FILTER_MODE,
-            Constants.Quality.LOW_MIPMAP_MODE);
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
+        base._useAntiAlias = LOW_USE_ANTIALIASING;
+        base._samplingOptions = new SKSamplingOptions(
+            LOW_FILTER_MODE,
+            LOW_MIPMAP_MODE);
+        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
     }
 
-    private void ApplyMediumQualitySettings()
+    private void MediumQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
-        _samplingOptions = new SKSamplingOptions(
-            Constants.Quality.MEDIUM_FILTER_MODE,
-            Constants.Quality.MEDIUM_MIPMAP_MODE);
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
+        base._useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        base._samplingOptions = new SKSamplingOptions(
+            MEDIUM_FILTER_MODE,
+            MEDIUM_MIPMAP_MODE);
+        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
     }
 
-    private void ApplyHighQualitySettings()
+    private void HighQualitySettings()
     {
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
-        _samplingOptions = new SKSamplingOptions(
-            Constants.Quality.HIGH_FILTER_MODE,
-            Constants.Quality.HIGH_MIPMAP_MODE);
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
+        base._useAntiAlias = HIGH_USE_ANTIALIASING;
+        base._samplingOptions = new SKSamplingOptions(
+            HIGH_FILTER_MODE,
+            HIGH_MIPMAP_MODE);
+        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
     }
 
     protected override void RenderEffect(
@@ -522,12 +561,6 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         SKPaint? paint)
     {
-        if (!_isInitialized)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
-            return false;
-        }
-
         if (!IsCanvasValid(canvas)) return false;
         if (!IsSpectrumValid(spectrum)) return false;
         if (!IsPaintValid(paint)) return false;
@@ -749,7 +782,11 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void RenderOuterCase(SKCanvas canvas, SKRect rect)
     {
-        using var outerCasePaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var outerCasePaint = paintPool.Get();
+        if (outerCasePaint == null) return;
 
         SKColor[] colors = [
             new SKColor(70, 70, 70),
@@ -766,7 +803,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             positions,
             SKShaderTileMode.Clamp
         );
-        outerCasePaint.IsAntialias = _useAntiAlias;
+        outerCasePaint.IsAntialias = UseAntiAlias;
 
         canvas.DrawRoundRect(rect, CORNER_RADIUS, CORNER_RADIUS, outerCasePaint);
 
@@ -775,8 +812,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void RenderCaseHighlight(SKCanvas canvas, SKRect rect)
     {
-        using var highlightPaint = _paintPool.Get();
-        highlightPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var highlightPaint = paintPool.Get();
+        if (highlightPaint == null) return;
+
+        highlightPaint.IsAntialias = UseAntiAlias;
         highlightPaint.Style = SKPaintStyle.Stroke;
         highlightPaint.StrokeWidth = 1.2f;
         highlightPaint.Color = new SKColor(255, 255, 255, 40);
@@ -795,7 +837,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         RenderPanelBackground(canvas, roundRect);
         RenderPanelBevel(canvas, roundRect);
 
-        if (_useAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             RenderPanelVignette(canvas, roundRect, rect);
         }
@@ -806,21 +848,31 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         if (_brushedMetalBitmap == null)
             return;
 
-        using var panelPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var panelPaint = paintPool.Get();
+        if (panelPaint == null) return;
+
         panelPaint.Shader = SKShader.CreateBitmap(
             _brushedMetalBitmap,
             SKShaderTileMode.Repeat,
             SKShaderTileMode.Repeat,
             SKMatrix.CreateScale(1.5f, 1.5f)
         );
-        panelPaint.IsAntialias = _useAntiAlias;
+        panelPaint.IsAntialias = UseAntiAlias;
         canvas.DrawRoundRect(roundRect, panelPaint);
     }
 
     private void RenderPanelVignette(SKCanvas canvas, SKRoundRect roundRect, SKRect rect)
     {
-        using var vignettePaint = _paintPool.Get();
-        vignettePaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var vignettePaint = paintPool.Get();
+        if (vignettePaint == null) return;
+
+        vignettePaint.IsAntialias = UseAntiAlias;
 
         SKColor[] colors = [new SKColor(0, 0, 0, 0), new SKColor(0, 0, 0, 30)];
         float[] positions = null!;
@@ -843,8 +895,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void RenderBevelHighlight(SKCanvas canvas, SKRoundRect roundRect)
     {
-        using var outerHighlightPaint = _paintPool.Get();
-        outerHighlightPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var outerHighlightPaint = paintPool.Get();
+        if (outerHighlightPaint == null) return;
+
+        outerHighlightPaint.IsAntialias = UseAntiAlias;
         outerHighlightPaint.Style = SKPaintStyle.Stroke;
         outerHighlightPaint.StrokeWidth = BEVEL_SIZE;
         outerHighlightPaint.Color = new SKColor(255, 255, 255, 120);
@@ -871,8 +928,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void RenderBevelShadow(SKCanvas canvas, SKRoundRect roundRect)
     {
-        using var outerShadowPaint = _paintPool.Get();
-        outerShadowPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var outerShadowPaint = paintPool.Get();
+        if (outerShadowPaint == null) return;
+
+        outerShadowPaint.IsAntialias = UseAntiAlias;
         outerShadowPaint.Style = SKPaintStyle.Stroke;
         outerShadowPaint.StrokeWidth = BEVEL_SIZE;
         outerShadowPaint.Color = new SKColor(0, 0, 0, 90);
@@ -902,18 +964,25 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         float recessRadius = 6f;
         using var recessRoundRect = new SKRoundRect(rect, recessRadius, recessRadius);
 
-        using var backgroundPaint = _paintPool.Get();
-        backgroundPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var backgroundPaint = paintPool.Get();
+        if (backgroundPaint == null) return;
+
+        backgroundPaint.IsAntialias = UseAntiAlias;
         backgroundPaint.Color = new SKColor(12, 12, 12);
         canvas.DrawRoundRect(recessRoundRect, backgroundPaint);
 
-        if (_useAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             RenderLedPanelShadow(canvas, recessRoundRect, rect);
         }
 
-        using var borderPaint = _paintPool.Get();
-        borderPaint.IsAntialias = _useAntiAlias;
+        using var borderPaint = paintPool.Get();
+        if (borderPaint == null) return;
+
+        borderPaint.IsAntialias = UseAntiAlias;
         borderPaint.Style = SKPaintStyle.Stroke;
         borderPaint.StrokeWidth = 1;
         borderPaint.Color = new SKColor(0, 0, 0, 180);
@@ -925,8 +994,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         SKRoundRect recessRoundRect,
         SKRect rect)
     {
-        using var innerShadowPaint = _paintPool.Get();
-        innerShadowPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var innerShadowPaint = paintPool.Get();
+        if (innerShadowPaint == null) return;
+
+        innerShadowPaint.IsAntialias = UseAntiAlias;
 
         SKColor[] colors = [new SKColor(0, 0, 0, 120), new SKColor(0, 0, 0, 0)];
         float[] positions = null!;
@@ -961,8 +1035,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         float labelX = panelRect.Right - 65;
         float labelY = panelRect.Bottom - 8;
 
-        using var labelPaint = _paintPool.Get();
-        labelPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var labelPaint = paintPool.Get();
+        if (labelPaint == null) return;
+
+        labelPaint.IsAntialias = UseAntiAlias;
         labelPaint.Color = new SKColor(230, 230, 230, 120);
 
         using var font = new SKFont(
@@ -1004,8 +1083,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void RenderLabels(SKCanvas canvas, SKRect panelRect)
     {
-        using var labelPaint = _paintPool.Get();
-        labelPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var labelPaint = paintPool.Get();
+        if (labelPaint == null) return;
+
+        labelPaint.IsAntialias = UseAntiAlias;
 
         using var boldTypeface = SKTypeface.FromFamilyName(
             "Arial",
@@ -1085,7 +1169,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         DrawTickBackground(canvas, panelRect, meterRect);
         DrawTickLabels(canvas, meterRect);
 
-        if (_useAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             DrawMinorTicks(canvas, meterRect);
         }
@@ -1093,8 +1177,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void DrawTickBackground(SKCanvas canvas, SKRect panelRect, SKRect meterRect)
     {
-        using var tickAreaPaint = _paintPool.Get();
-        tickAreaPaint.IsAntialias = _useAntiAlias;
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var tickAreaPaint = paintPool.Get();
+        if (tickAreaPaint == null) return;
+
+        tickAreaPaint.IsAntialias = UseAntiAlias;
         tickAreaPaint.Color = new SKColor(30, 30, 30, 70);
 
         SKRect tickAreaRect = new(
@@ -1109,15 +1198,22 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void DrawTickLabels(SKCanvas canvas, SKRect meterRect)
     {
-        using var tickPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var tickPaint = paintPool.Get();
+        if (tickPaint == null) return;
+
         tickPaint.Style = SKPaintStyle.Stroke;
         tickPaint.StrokeWidth = 1;
         tickPaint.Color = SKColors.LightGray.WithAlpha(150);
-        tickPaint.IsAntialias = _useAntiAlias;
+        tickPaint.IsAntialias = UseAntiAlias;
 
-        using var textPaint = _paintPool.Get();
+        using var textPaint = paintPool.Get();
+        if (textPaint == null) return;
+
         textPaint.Color = SKColors.LightGray.WithAlpha(180);
-        textPaint.IsAntialias = _useAntiAlias;
+        textPaint.IsAntialias = UseAntiAlias;
 
         using var font = new SKFont(
             SKTypeface.FromFamilyName(
@@ -1141,12 +1237,15 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             float yPos = y + height - dbPositions[i] * height;
             canvas.DrawLine(x, yPos, x + width - 5, yPos, tickPaint);
 
-            if (_useAdvancedEffects)
+            if (UseAdvancedEffects)
             {
-                using var shadowPaint = _paintPool.Get();
-                shadowPaint.Color = SKColors.Black.WithAlpha(80);
-                shadowPaint.IsAntialias = _useAntiAlias;
-                canvas.DrawText(dbValues[i], x + width - 7, yPos + 3.5f, SKTextAlign.Right, font, shadowPaint);
+                using var shadowPaint = paintPool.Get();
+                if (shadowPaint != null)
+                {
+                    shadowPaint.Color = SKColors.Black.WithAlpha(80);
+                    shadowPaint.IsAntialias = UseAntiAlias;
+                    canvas.DrawText(dbValues[i], x + width - 7, yPos + 3.5f, SKTextAlign.Right, font, shadowPaint);
+                }
             }
 
             canvas.DrawText(dbValues[i], x + width - 8, yPos + 3, SKTextAlign.Right, font, textPaint);
@@ -1155,11 +1254,16 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void DrawMinorTicks(SKCanvas canvas, SKRect meterRect)
     {
-        using var tickPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var tickPaint = paintPool.Get();
+        if (tickPaint == null) return;
+
         tickPaint.Style = SKPaintStyle.Stroke;
         tickPaint.StrokeWidth = 1;
         tickPaint.Color = SKColors.LightGray.WithAlpha(80);
-        tickPaint.IsAntialias = _useAntiAlias;
+        tickPaint.IsAntialias = UseAntiAlias;
 
         float x = meterRect.Left - TICK_MARK_WIDTH;
         float width = TICK_MARK_WIDTH;
@@ -1257,10 +1361,15 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         );
         _ledPath.AddRoundRect(ledRect);
 
-        using var ledBasePaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var ledBasePaint = paintPool.Get();
+        if (ledBasePaint == null) return;
+
         ledBasePaint.Style = SKPaintStyle.Fill;
         ledBasePaint.Color = new SKColor(8, 8, 8);
-        ledBasePaint.IsAntialias = _useAntiAlias;
+        ledBasePaint.IsAntialias = UseAntiAlias;
         canvas.DrawPath(_ledPath, ledBasePaint);
 
         float inset = 1f;
@@ -1270,10 +1379,12 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             Max(1, LED_ROUNDING_RADIUS - inset * 0.5f)
         );
 
-        using var inactiveLedPaint = _paintPool.Get();
+        using var inactiveLedPaint = paintPool.Get();
+        if (inactiveLedPaint == null) return;
+
         inactiveLedPaint.Style = SKPaintStyle.Fill;
         inactiveLedPaint.Color = MultiplyColor(color, 0.10f);
-        inactiveLedPaint.IsAntialias = _useAntiAlias;
+        inactiveLedPaint.IsAntialias = UseAntiAlias;
         canvas.DrawRoundRect(ledSurfaceRect, inactiveLedPaint);
     }
 
@@ -1299,10 +1410,15 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         );
         _ledPath.AddRoundRect(ledRect);
 
-        using var ledBasePaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var ledBasePaint = paintPool.Get();
+        if (ledBasePaint == null) return;
+
         ledBasePaint.Style = SKPaintStyle.Fill;
         ledBasePaint.Color = new SKColor(8, 8, 8);
-        ledBasePaint.IsAntialias = _useAntiAlias;
+        ledBasePaint.IsAntialias = UseAntiAlias;
         canvas.DrawPath(_ledPath, ledBasePaint);
 
         float inset = 1f;
@@ -1334,16 +1450,21 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         float animPhase,
         float brightnessVariation)
     {
-        if (!_useAdvancedEffects || index <= ledSurfaceRect.Rect.Height * 0.7f)
+        if (!UseAdvancedEffects || index <= ledSurfaceRect.Rect.Height * 0.7f)
             return;
+
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
 
         float glowIntensity = GLOW_INTENSITY
             * (0.8f + MathF.Sin(animPhase * MathF.PI * 2) * 0.2f * brightnessVariation);
 
-        using var glowPaint = _paintPool.Get();
+        using var glowPaint = paintPool.Get();
+        if (glowPaint == null) return;
+
         glowPaint.Style = SKPaintStyle.Fill;
         glowPaint.Color = ledOnColor.WithAlpha((byte)(glowIntensity * 160 * brightnessVariation));
-        glowPaint.IsAntialias = _useAntiAlias;
+        glowPaint.IsAntialias = UseAntiAlias;
         glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 2);
         canvas.DrawRoundRect(ledSurfaceRect, glowPaint);
     }
@@ -1357,9 +1478,14 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         SKColor ledOnColor,
         SKColor ledOffColor)
     {
-        using var ledPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var ledPaint = paintPool.Get();
+        if (ledPaint == null) return;
+
         ledPaint.Style = SKPaintStyle.Fill;
-        ledPaint.IsAntialias = _useAntiAlias;
+        ledPaint.IsAntialias = UseAntiAlias;
 
         SKColor[] colors = [ledOnColor, MultiplyColor(ledOnColor, 0.9f), ledOffColor];
         float[] positions = [0.0f, 0.7f, 1.0f];
@@ -1377,7 +1503,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     private void RenderLedHighlight(SKCanvas canvas, float x, float y, float width, float height)
     {
-        if (!_useAdvancedEffects)
+        if (!UseAdvancedEffects)
             return;
 
         _highlightPath.Reset();
@@ -1392,17 +1518,24 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             LED_ROUNDING_RADIUS
         ));
 
-        using var highlightFillPaint = _paintPool.Get();
+        var paintPool = _paintPool;
+        if (paintPool == null) return;
+
+        using var highlightFillPaint = paintPool.Get();
+        if (highlightFillPaint == null) return;
+
         highlightFillPaint.Color = new SKColor(255, 255, 255, 50);
-        highlightFillPaint.IsAntialias = _useAntiAlias;
+        highlightFillPaint.IsAntialias = UseAntiAlias;
         highlightFillPaint.Style = SKPaintStyle.Fill;
         canvas.DrawPath(_highlightPath, highlightFillPaint);
 
-        using var highlightPaint = _paintPool.Get();
+        using var highlightPaint = paintPool.Get();
+        if (highlightPaint == null) return;
+
         highlightPaint.Style = SKPaintStyle.Stroke;
         highlightPaint.StrokeWidth = 0.7f;
         highlightPaint.Color = new SKColor(255, 255, 255, 180);
-        highlightPaint.IsAntialias = _useAntiAlias;
+        highlightPaint.IsAntialias = UseAntiAlias;
         canvas.DrawPath(_highlightPath, highlightPaint);
     }
 
@@ -1448,6 +1581,8 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             {
                 base.OnInvalidateCachedResources();
                 _cachedLoudness = null;
+
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
             },
             nameof(OnInvalidateCachedResources),
             "Failed to invalidate cached resources"
@@ -1491,7 +1626,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         _highlightPath?.Dispose();
         _screwBitmap?.Dispose();
         _brushedMetalBitmap?.Dispose();
-        _paintPool?.Dispose();
+        // _paintPool управляется базовым классом
         _ledColorVariations.Clear();
         _ledVariations.Clear();
     }

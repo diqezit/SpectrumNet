@@ -2,6 +2,7 @@
 
 using static System.MathF;
 using static SpectrumNet.Views.Renderers.ParticlesRenderer.Constants;
+using static SpectrumNet.Views.Renderers.ParticlesRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -37,7 +38,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         private int _head, _tail, _count;
         private readonly int _capacity = capacity;
 
-        private readonly float 
+        private readonly float
             _particleLife = particleLife,
             _particleLifeDecay = particleLifeDecay,
             _velocityMultiplier = velocityMultiplier,
@@ -221,7 +222,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     private CancellationTokenSource? _cts;
     private AutoResetEvent? _spectrumDataAvailable;
     private AutoResetEvent? _processingComplete;
-    private readonly new object _spectrumLock = new();
+    private readonly object _particleSpectrumLock = new();
     private float[]? _spectrumToProcess;
     private int _spectrumLength;
     private bool _processingRunning;
@@ -230,9 +231,10 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     private float _barWidth;
 
     private int _sampleCount = 2;
-    private new bool _isOverlayActive;
 
     private SKPicture? _cachedPicture;
+
+    private volatile bool _isConfiguring;
 
     private ParticlesRenderer() { }
 
@@ -264,6 +266,11 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
                 HIGH_USE_ADVANCED_EFFECTS = true;
 
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
             public const int
                 LOW_SAMPLE_COUNT = 1,
                 MEDIUM_SAMPLE_COUNT = 2,
@@ -278,10 +285,11 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
             {
                 base.OnInitialize();
                 InitializeResources();
+                InitializeQualityParams();
                 StartProcessingThread();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed during renderer initialization"
         );
     }
@@ -292,6 +300,18 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         InitializeVelocityLookup(Settings.ParticleVelocityMin);
         InitializeParticleBuffer();
         InitializeSynchronizationObjects();
+    }
+
+    private void InitializeQualityParams()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                ApplyQualitySettingsInternal();
+            },
+            nameof(InitializeQualityParams),
+            "Failed to initialize quality parameters"
+        );
     }
 
     private void InitializeParticleBuffer()
@@ -323,80 +343,128 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
+        RenderQuality quality)
     {
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                _isOverlayActive = isOverlayActive;
-                _smoothingFactor = isOverlayActive ? SMOOTHING_FACTOR_OVERLAY : SMOOTHING_FACTOR_NORMAL;
-
-                if (configChanged)
+                try
                 {
-                    Log(LogLevel.Debug,
-                        LOG_PREFIX,
-                        $"Configuration changed. New Quality: {Quality}");
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ?
+                        SMOOTHING_FACTOR_OVERLAY :
+                        SMOOTHING_FACTOR_NORMAL;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
     }
 
-    protected override void OnQualitySettingsApplied()
+    protected override void OnConfigurationChanged()
     {
         ExecuteSafely(
             () =>
             {
-                base.OnQualitySettingsApplied();
-                ApplyQualitySpecificSettings();
-                Log(LogLevel.Debug,
+                Log(LogLevel.Information,
                     LOG_PREFIX,
-                    $"Quality settings applied. New Quality: {Quality}");
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            "OnQualitySettingsApplied",
-            "Failed to apply specific quality settings"
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
         );
     }
 
-    private void ApplyQualitySpecificSettings()
+    protected override void ApplyQualitySettings()
     {
-        SetQualityBasedParameters();
-        InvalidateCachedResources();
+        ExecuteSafely(
+            () =>
+            {
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+            },
+            nameof(ApplyQualitySettings),
+            "Failed to apply quality settings"
+        );
     }
 
-    private void SetQualityBasedParameters()
+    private void ApplyQualitySettingsInternal()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                _useAntiAlias = false;
-                _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-                _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-                _sampleCount = Constants.Quality.LOW_SAMPLE_COUNT;
+                LowQualitySettings();
                 break;
 
             case RenderQuality.Medium:
-                _useAntiAlias = true;
-                _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-                _sampleCount = Constants.Quality.MEDIUM_SAMPLE_COUNT;
+                MediumQualitySettings();
                 break;
 
             case RenderQuality.High:
-                _useAntiAlias = true;
-                _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-                _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-                _sampleCount = Constants.Quality.HIGH_SAMPLE_COUNT;
+                HighQualitySettings();
                 break;
         }
+
+        InvalidateCachedPicture();
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
+            $"SampleCount: {_sampleCount}");
     }
 
-    private new void InvalidateCachedResources()
+    private void LowQualitySettings()
+    {
+        base._useAntiAlias = LOW_USE_ANTIALIASING;
+        base._samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _sampleCount = LOW_SAMPLE_COUNT;
+    }
+
+    private void MediumQualitySettings()
+    {
+        base._useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        base._samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _sampleCount = MEDIUM_SAMPLE_COUNT;
+    }
+
+    private void HighQualitySettings()
+    {
+        base._useAntiAlias = HIGH_USE_ANTIALIASING;
+        base._samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _sampleCount = HIGH_SAMPLE_COUNT;
+    }
+
+    private void InvalidateCachedPicture()
     {
         _cachedPicture?.Dispose();
         _cachedPicture = null;
@@ -421,7 +489,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
                 UpdateParticles(_renderCache.UpperBound);
                 RenderParticles(canvas, paint, _renderCache.UpperBound, _renderCache.LowerBound);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
     }
@@ -484,7 +552,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         return true;
     }
 
-    private void ProcessSpectrumData(float[] spectrum) => 
+    private void ProcessSpectrumData(float[] spectrum) =>
         SubmitSpectrumForProcessing(spectrum, _renderCache.LowerBound, (int)_renderCache.Width, _barWidth);
 
     private void SubmitSpectrumForProcessing(
@@ -493,7 +561,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         int canvasWidth,
         float barWidth)
     {
-        lock (_spectrumLock)
+        lock (_particleSpectrumLock)
         {
             _spectrumToProcess = spectrum;
             _spectrumLength = spectrum.Length;
@@ -544,7 +612,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
     private bool TryGetProcessingParameters(out ProcessingParameters parameters)
     {
-        lock (_spectrumLock)
+        lock (_particleSpectrumLock)
         {
             if (_spectrumToProcess == null)
             {
@@ -788,7 +856,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
             {
                 OnDispose();
             },
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
         _disposed = true;
@@ -805,7 +873,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
                 DisposeResources();
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
     }

@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.LoudnessMeterRenderer.Constants;
+using static SpectrumNet.Views.Renderers.LoudnessMeterRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -48,18 +49,14 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         }
     }
 
-    private new bool 
-        _useAdvancedEffects,
-        _useAntiAlias;
-
-    private float 
+    private float
         _previousLoudness,
         _peakLoudness;
 
-    private float? 
+    private float?
         _cachedLoudness;
 
-    private int 
+    private int
         _currentWidth,
         _currentHeight;
 
@@ -73,6 +70,8 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
     private readonly SemaphoreSlim _loudnessSemaphore = new(1, 1);
     private readonly object _loudnessLock = new();
 
+    private volatile bool _isConfiguring;
+
     protected override void OnInitialize()
     {
         ExecuteSafely(
@@ -81,7 +80,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
                 base.OnInitialize();
                 InitializeStateValues();
                 CreatePaints();
-                ApplyQualitySettings();
+                InitializeQualityParams();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
@@ -107,6 +106,18 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         CreatePeakPaint();
     }
 
+    private void InitializeQualityParams()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                ApplyQualitySettingsInternal();
+            },
+            nameof(InitializeQualityParams),
+            "Failed to initialize quality parameters"
+        );
+    }
+
     private void CreateBackgroundPaint()
     {
         _backgroundPaint = new SKPaint
@@ -114,7 +125,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             Style = SKPaintStyle.Stroke,
             StrokeWidth = BORDER_WIDTH,
             Color = SKColors.White.WithAlpha(100),
-            IsAntialias = _useAntiAlias
+            IsAntialias = UseAntiAlias
         };
     }
 
@@ -125,7 +136,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
             Color = SKColors.White.WithAlpha(150),
-            IsAntialias = _useAntiAlias
+            IsAntialias = UseAntiAlias
         };
     }
 
@@ -134,7 +145,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         _fillPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = _useAntiAlias
+            IsAntialias = UseAntiAlias
         };
     }
 
@@ -143,7 +154,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         _glowPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = _useAntiAlias,
+            IsAntialias = UseAntiAlias,
             MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, BLUR_SIGMA)
         };
     }
@@ -153,23 +164,40 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         _peakPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = _useAntiAlias
+            IsAntialias = UseAntiAlias
         };
     }
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
+        RenderQuality quality)
     {
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = _isOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+                    _smoothingFactor = isOverlayActive ?
+                        SMOOTHING_FACTOR_OVERLAY :
+                        SMOOTHING_FACTOR_NORMAL;
+
+                    if (configChanged)
+                    {
+                        ApplyQualitySettingsInternal();
+                        OnConfigurationChanged();
+                    }
+                }
+                finally
+                {
+                    _isConfiguring = false;
                 }
             },
             nameof(Configure),
@@ -182,9 +210,8 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.OnConfigurationChanged();
                 UpdateSmoothingFactor();
-                Log(LogLevel.Debug,
+                Log(LogLevel.Information,
                     LOG_PREFIX,
                     $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
@@ -205,61 +232,76 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualitySettingsInternal();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
             },
             nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualityBasedSettings()
+    private void ApplyQualitySettingsInternal()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
-                ApplyLowQualitySettings();
+                LowQualitySettings();
                 break;
+
             case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
+                MediumQualitySettings();
                 break;
+
             case RenderQuality.High:
-                ApplyHighQualitySettings();
+                HighQualitySettings();
                 break;
         }
 
         UpdatePaintProperties();
         ResetStaticCache();
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}");
     }
 
-    private void ApplyLowQualitySettings()
+    private void LowQualitySettings()
     {
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _useAntiAlias = Constants.Quality.LOW_USE_ANTIALIASING;
+        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        base._useAntiAlias = LOW_USE_ANTIALIASING;
     }
 
-    private void ApplyMediumQualitySettings()
+    private void MediumQualitySettings()
     {
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _useAntiAlias = Constants.Quality.MEDIUM_USE_ANTIALIASING;
+        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        base._useAntiAlias = MEDIUM_USE_ANTIALIASING;
     }
 
-    private void ApplyHighQualitySettings()
+    private void HighQualitySettings()
     {
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _useAntiAlias = Constants.Quality.HIGH_USE_ANTIALIASING;
+        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        base._useAntiAlias = HIGH_USE_ANTIALIASING;
     }
 
     private void UpdatePaintProperties() => UpdatePaintAntialiasing();
 
     private void UpdatePaintAntialiasing()
     {
-        if (_backgroundPaint != null) _backgroundPaint.IsAntialias = _useAntiAlias;
-        if (_markerPaint != null) _markerPaint.IsAntialias = _useAntiAlias;
-        if (_fillPaint != null) _fillPaint.IsAntialias = _useAntiAlias;
-        if (_glowPaint != null) _glowPaint.IsAntialias = _useAntiAlias;
-        if (_peakPaint != null) _peakPaint.IsAntialias = _useAntiAlias;
+        if (_backgroundPaint != null) _backgroundPaint.IsAntialias = UseAntiAlias;
+        if (_markerPaint != null) _markerPaint.IsAntialias = UseAntiAlias;
+        if (_fillPaint != null) _fillPaint.IsAntialias = UseAntiAlias;
+        if (_glowPaint != null) _glowPaint.IsAntialias = UseAntiAlias;
+        if (_peakPaint != null) _peakPaint.IsAntialias = UseAntiAlias;
     }
 
     private void ResetStaticCache()
@@ -673,7 +715,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         float loudness,
         float meterHeight)
     {
-        if (!_useAdvancedEffects ||
+        if (!UseAdvancedEffects ||
             loudness <= HIGH_LOUDNESS_THRESHOLD ||
             _glowPaint == null)
             return;
@@ -757,7 +799,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         if (spectrum.IsEmpty)
             return 0f;
 
-        float sum = _useAdvancedEffects && spectrum.Length >= Vector<float>.Count
+        float sum = UseAdvancedEffects && spectrum.Length >= Vector<float>.Count
             ? CalculateLoudnessVectorized(spectrum)
             : CalculateLoudnessSequential(spectrum);
 

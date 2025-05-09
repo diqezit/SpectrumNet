@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.RaindropsRenderer.Constants;
+using static SpectrumNet.Views.Renderers.RaindropsRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -69,12 +70,9 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         }
     }
 
-    // Quality settings (changed when quality changes)
-    private int _effectsThreshold = Constants.Quality.MEDIUM_EFFECTS_THRESHOLD;
-    private new bool _useAntiAlias = true;
-    private new SKSamplingOptions _samplingOptions = new(SKFilterMode.Linear, SKMipmapMode.Linear);
-    private new bool _useAdvancedEffects = true;
-    private new bool _isOverlayActive;
+    // Quality settings
+    private int _effectsThreshold = MEDIUM_EFFECTS_THRESHOLD;
+    private bool _isConfiguring;
 
     // Caches and states
     private RenderCache _renderCache;
@@ -337,7 +335,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 _firstRender = true;
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
-            "OnInitialize",
+            nameof(OnInitialize),
             "Failed to initialize renderer"
         );
     }
@@ -353,7 +351,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 _renderCache = new RenderCache(1, 1, false);
                 _frameTimer.Start();
             },
-            "InitializeFields",
+            nameof(InitializeFields),
             "Failed to initialize fields"
         );
     }
@@ -365,7 +363,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _disposed = false;
     }
 
-    private void SubscribeToSettingsChanges() => 
+    private void SubscribeToSettingsChanges() =>
         Settings.Instance.PropertyChanged += OnSettingsChanged;
 
     public override void Configure(bool isOverlayActive,
@@ -374,20 +372,33 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                base.Configure(isOverlayActive, quality);
+                if (_isConfiguring) return;
 
-                if (configChanged)
+                try
                 {
-                    OnConfigurationChanged();
+                    _isConfiguring = true;
+                    bool configChanged = base.IsOverlayActive != isOverlayActive
+                                         || Quality != quality;
+
+                    base.Configure(isOverlayActive, quality);
+
+                    if (configChanged)
+                    {
+                        ApplyQualityBasedSettings();
+                        OnConfigurationChanged();
+                    }
+
+                    if (base.IsOverlayActive != isOverlayActive)
+                    {
+                        UpdateOverlayState(isOverlayActive);
+                    }
                 }
-
-                if (_isOverlayActive != isOverlayActive)
+                finally
                 {
-                    UpdateOverlayState(isOverlayActive);
+                    _isConfiguring = false;
                 }
             },
-            "Configure",
+            nameof(Configure),
             "Failed to configure renderer"
         );
     }
@@ -397,18 +408,18 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
+                base.OnConfigurationChanged();
                 Log(LogLevel.Debug,
                     LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}");
+                    $"Configuration changed. New Quality: {Quality}, Effects Threshold: {_effectsThreshold}");
             },
-            "OnConfigurationChanged",
+            nameof(OnConfigurationChanged),
             "Failed to handle configuration change"
         );
     }
 
     private void UpdateOverlayState(bool isOverlayActive)
     {
-        _isOverlayActive = isOverlayActive;
         _cacheNeedsUpdate = true;
         _firstRender = true;
         _raindropCount = 0;
@@ -420,11 +431,24 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.ApplyQualitySettings();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+                if (_isConfiguring) return;
+
+                try
+                {
+                    _isConfiguring = true;
+                    base.ApplyQualitySettings();
+                    ApplyQualityBasedSettings();
+                }
+                finally
+                {
+                    _isConfiguring = false;
+                }
+
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Quality changed to {Quality}, Effects Threshold: {_effectsThreshold}");
             },
-            "ApplyQualitySettings",
+            nameof(ApplyQualitySettings),
             "Failed to apply quality settings"
         );
     }
@@ -445,30 +469,15 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void ApplyLowQualitySettings()
-    {
-        _useAntiAlias = false;
-        _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-        _useAdvancedEffects = Constants.Quality.LOW_USE_ADVANCED_EFFECTS;
-        _effectsThreshold = Constants.Quality.LOW_EFFECTS_THRESHOLD;
-    }
+    private void ApplyLowQualitySettings() =>
+        _effectsThreshold = LOW_EFFECTS_THRESHOLD;
 
-    private void ApplyMediumQualitySettings()
-    {
-        _useAntiAlias = true;
-        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-        _useAdvancedEffects = Constants.Quality.MEDIUM_USE_ADVANCED_EFFECTS;
-        _effectsThreshold = Constants.Quality.MEDIUM_EFFECTS_THRESHOLD;
-    }
-
-    private void ApplyHighQualitySettings()
-    {
-        _useAntiAlias = true;
-        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-        _useAdvancedEffects = Constants.Quality.HIGH_USE_ADVANCED_EFFECTS;
-        _effectsThreshold = Constants.Quality.HIGH_EFFECTS_THRESHOLD;
-    }
-
+    private void ApplyMediumQualitySettings() => 
+        _effectsThreshold = MEDIUM_EFFECTS_THRESHOLD;
+    
+    private void ApplyHighQualitySettings() => 
+        _effectsThreshold = HIGH_EFFECTS_THRESHOLD;
+    
     protected override void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
@@ -486,7 +495,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 UpdateState(spectrum, info, barCount);
                 RenderFrame(canvas, spectrum, paint);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
     }
@@ -568,7 +577,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 ProcessAndRender(canvas!, spectrum!, info, barCount, paint!, drawPerformanceInfo);
                 drawPerformanceInfo?.Invoke(canvas!, info);
             },
-            "Render",
+            nameof(Render),
             "Error during rendering"
         );
     }
@@ -612,7 +621,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private float[] GetProcessedSpectrum(float[] spectrum, int barCount)
     {
         lock (_spectrumLock)
-            return _processedSpectrum ?? ProcessSpectrumSynchronously(spectrum, barCount);
+            return base._processedSpectrum ?? ProcessSpectrumSynchronously(spectrum, barCount);
     }
 
     private void UpdateFrameCounter() =>
@@ -635,7 +644,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 RenderParticles(canvas, basePaint);
                 RenderScene(canvas, spectrum, basePaint);
             },
-            "UpdateAndRenderScene",
+            nameof(UpdateAndRenderScene),
             "Error during scene update and rendering"
         );
     }
@@ -666,12 +675,12 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     private void UpdateRenderCache(SKImageInfo info)
     {
-        _renderCache = new RenderCache(info.Width, info.Height, _isOverlayActive);
+        _renderCache = new RenderCache(info.Width, info.Height, base.IsOverlayActive);
         _particleBuffer.UpdateLowerBound(_renderCache.LowerBound);
         _cacheNeedsUpdate = false;
     }
 
-    private void UpdateDeltaTime() => 
+    private void UpdateDeltaTime() =>
         _actualDeltaTime = CalculateDeltaTime();
 
     private float CalculateDeltaTime()
@@ -721,9 +730,9 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 if (barCount <= 0) return;
                 ProcessSpectrumData(spectrum.AsSpan(0, Min(spectrum.Length, barCount)),
                                   _smoothedSpectrumCache.AsSpan(0, barCount));
-                _processedSpectrum = _smoothedSpectrumCache;
+                base._processedSpectrum = _smoothedSpectrumCache;
             },
-            "ProcessSpectrum",
+            nameof(ProcessSpectrum),
             "Error processing spectrum data"
         );
     }
@@ -857,7 +866,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 for (int i = 0; i < initialCount; i++)
                     AddInitialDrop(barCount, _renderCache.Width, _renderCache.Height);
             },
-            "InitializeInitialDrops",
+            nameof(InitializeInitialDrops),
             "Error during initializing initial drops"
         );
     }
@@ -1018,7 +1027,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _renderCache.Width / barCount;
 
     private float GetSpawnThreshold() =>
-        _isOverlayActive ? Settings.Instance.SpawnThresholdOverlay : Settings.Instance.SpawnThresholdNormal;
+        base.IsOverlayActive ? Settings.Instance.SpawnThresholdOverlay : Settings.Instance.SpawnThresholdNormal;
 
     private float CalculateSpawnBoost() =>
         1.0f + _averageLoudness * 2.0f;
@@ -1071,18 +1080,19 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         Settings.Instance.RaindropSize * (0.8f + intensity * 0.4f) *
         (0.9f + (float)_random.NextDouble() * 0.2f);
 
-    // RENDERING METHODS
-
-    private void RenderRaindropTrails(SKCanvas canvas, float[] spectrum, SKPaint basePaint)
+    private void RenderRaindropTrails(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKPaint basePaint)
     {
         ExecuteSafely(
             () =>
             {
                 using var trailPaint = ConfigureTrailPaint(basePaint);
-                if (_useAdvancedEffects) ApplyAdvancedTrailEffects(trailPaint, basePaint);
+                if (base.UseAdvancedEffects) ApplyAdvancedTrailEffects(trailPaint, basePaint);
                 RenderAllTrails(canvas, trailPaint, spectrum, basePaint.Color);
             },
-            "RenderRaindropTrails",
+            nameof(RenderRaindropTrails),
             "Error rendering raindrop trails"
         );
     }
@@ -1092,7 +1102,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         var paint = _paintPool.Get();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeCap = SKStrokeCap.Round;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = base.UseAntiAlias;
         paint.Color = basePaint.Color;
         return paint;
     }
@@ -1190,7 +1200,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 using var highlightPaint = ConfigureHighlightPaintBase();
                 RenderAllRaindrops(canvas, dropPaint, highlightPaint, spectrum, basePaint.Color);
             },
-            "RenderRaindrops",
+            nameof(RenderRaindrops),
             "Error rendering raindrops"
         );
     }
@@ -1199,7 +1209,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     {
         var paint = _paintPool.Get();
         paint.Style = SKPaintStyle.Fill;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = base.UseAntiAlias;
         paint.Color = basePaint.Color;
         return paint;
     }
@@ -1208,7 +1218,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     {
         var paint = _paintPool.Get();
         paint.Style = SKPaintStyle.Fill;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = base.UseAntiAlias;
         return paint;
     }
 
@@ -1300,7 +1310,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     {
         ExecuteSafely(
             () => HandleSettingsChange(e.PropertyName),
-            "OnSettingsChanged",
+            nameof(OnSettingsChanged),
             "Failed to process settings change"
         );
     }
@@ -1326,6 +1336,20 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _cacheNeedsUpdate = true;
     }
 
+    protected override void OnInvalidateCachedResources()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                base.OnInvalidateCachedResources();
+                _cacheNeedsUpdate = true;
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+            },
+            nameof(OnInvalidateCachedResources),
+            "Error invalidating cached resources"
+        );
+    }
+
     public override void Dispose()
     {
         if (_disposed) return;
@@ -1335,7 +1359,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             {
                 OnDispose();
             },
-            "Dispose",
+            nameof(Dispose),
             "Error during disposal"
         );
 
@@ -1352,7 +1376,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 CleanupResources();
                 base.OnDispose();
             },
-            "OnDispose",
+            nameof(OnDispose),
             "Error during specific disposal"
         );
     }
@@ -1363,15 +1387,8 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         DisposeRenderingResources();
     }
 
-    private void UnsubscribeFromSettingsChanges()
-    {
+    private void UnsubscribeFromSettingsChanges() => 
         Settings.Instance.PropertyChanged -= OnSettingsChanged;
-    }
 
-    private void DisposeRenderingResources()
-    {
-        _spectrumSemaphore?.Dispose();
-        _trailPath?.Dispose();
-        _processedSpectrum = null;
-    }
+    private void DisposeRenderingResources() => _trailPath?.Dispose();
 }

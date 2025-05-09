@@ -194,7 +194,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
+        RenderQuality quality)
     {
         ExecuteSafely(
             () =>
