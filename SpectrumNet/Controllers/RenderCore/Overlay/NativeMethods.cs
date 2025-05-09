@@ -2,11 +2,14 @@
 
 namespace SpectrumNet.Controllers.RenderCore.Overlay;
 
-internal static class NativeMethods
+internal static partial class NativeMethods
 {
     public const int GWL_EXSTYLE = -20;
     public const int WS_EX_TRANSPARENT = 0x00000020;
     public const int WS_EX_LAYERED = 0x00080000;
+
+    public const int DWMWA_NCRENDERING_POLICY = 2;
+    public const int DWMNCRP_DISABLED = 1;
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern int GetWindowLong(nint hwnd, int index);
@@ -16,6 +19,13 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern int SetWindowCompositionAttribute(nint hwnd, ref WINDOWCOMPOSITIONATTRIBDATA data);
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(
+        nint hwnd,
+        int attr,
+        ref int attrValue,
+        int attrSize);
 
     public enum WINDOWCOMPOSITIONATTRIB { WCA_ACCENT_POLICY = 19 }
 

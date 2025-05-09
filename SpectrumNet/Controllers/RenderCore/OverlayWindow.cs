@@ -5,6 +5,7 @@ namespace SpectrumNet.Controllers.RenderCore;
 public sealed class OverlayWindow : Window, IDisposable
 {
     private const string LogSource = "OverlayWindow";
+    private const int MaxConsecutiveRenderSkips = 3;
 
     private readonly record struct RenderContext(
         IMainController Controller,
@@ -16,10 +17,13 @@ public sealed class OverlayWindow : Window, IDisposable
     private readonly CancellationTokenSource _disposalTokenSource = new();
     private RenderContext? _renderContext;
     private bool _isDisposed;
-    private SKBitmap? _cacheBitmap;
-    private readonly SemaphoreSlim _renderLock = new(1, 1);
-    private readonly Stopwatch _frameTimeWatch = new();
+
     private readonly FpsLimiter _fpsLimiter = FpsLimiter.Instance;
+    private readonly Stopwatch _frameTimeWatch = new();
+    private readonly object _renderLock = new();
+
+    private int _consecutiveSkips;
+    private nint _windowHandle;
 
     public new bool IsInitialized => _renderContext != null && !_isDisposed;
 
@@ -47,20 +51,28 @@ public sealed class OverlayWindow : Window, IDisposable
 
     public void ForceRedraw()
     {
-        if (!_isDisposed && _renderContext != null)
-        {
-            _renderContext.Value.SkElement.InvalidateVisual();
-        }
+        if (_isDisposed || _renderContext is null) return;
+        _renderContext.Value.SkElement.InvalidateVisual();
     }
 
     private void ConfigureRenderingOptions()
     {
-        if (_configuration.EnableHardwareAcceleration)
-        {
-            RenderOptions.ProcessRenderMode = RenderMode.Default;
-            SetValue(RenderOptions.BitmapScalingModeProperty,
-                     BitmapScalingMode.NearestNeighbor);
-        }
+        SetHardwareAccelerationOptions();
+        SetRenderQualityOptions();
+    }
+
+    private void SetHardwareAccelerationOptions()
+    {
+        RenderOptions.ProcessRenderMode = RenderMode.Default;
+        SetValue(RenderOptions.BitmapScalingModeProperty, BitmapScalingMode.HighQuality);
+    }
+
+    private void SetRenderQualityOptions()
+    {
+        SetValue(TextOptions.TextRenderingModeProperty, TextRenderingMode.Auto);
+        SetValue(TextOptions.TextFormattingModeProperty, TextFormattingMode.Ideal);
+        SetValue(RenderOptions.EdgeModeProperty, EdgeMode.Aliased);
+        SetValue(RenderOptions.ClearTypeHintProperty, ClearTypeHint.Enabled);
     }
 
     private void InitializeOverlay(IMainController controller)
@@ -72,17 +84,30 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private void ConfigureWindowProperties()
     {
+        ConfigureWindowStyle();
+        ConfigureWindowVisibility();
+        ConfigureWindowInteraction();
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            SystemBackdrop.SetTransparentBackground(this);
+    }
+
+    private void ConfigureWindowStyle()
+    {
         WindowStyle = _configuration.Style;
+        WindowState = _configuration.State;
+        ResizeMode = ResizeMode.NoResize;
+    }
+
+    private void ConfigureWindowVisibility()
+    {
         AllowsTransparency = true;
         Background = null;
         Topmost = _configuration.IsTopmost;
-        WindowState = _configuration.State;
         ShowInTaskbar = _configuration.ShowInTaskbar;
-        ResizeMode = ResizeMode.NoResize;
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            new SystemBackdrop().SetTransparentBackground(this);
     }
+
+    private void ConfigureWindowInteraction() => IsHitTestVisible = false;
 
     private void CreateRenderContext(IMainController controller)
     {
@@ -96,8 +121,9 @@ public sealed class OverlayWindow : Window, IDisposable
         controller.PropertyChanged += OnControllerPropertyChanged;
     }
 
-    private static SKElement CreateSkElement() =>
-        new()
+    private static SKElement CreateSkElement()
+    {
+        var element = new SKElement
         {
             VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
             HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
@@ -105,11 +131,29 @@ public sealed class OverlayWindow : Window, IDisposable
             UseLayoutRounding = true
         };
 
-    private static DispatcherTimer CreateRenderTimer() =>
-        new(DispatcherPriority.Render)
+        OptimizeElementForRender(element);
+
+        return element;
+    }
+
+    private static void OptimizeElementForRender(FrameworkElement element)
+    {
+        RenderOptions.SetCachingHint(element, CachingHint.Cache);
+        element.CacheMode = new BitmapCache
         {
-            Interval = FromMilliseconds(1000.0 / 60.0)
+            EnableClearType = false,
+            SnapsToDevicePixels = true,
+            RenderAtScale = 1.0
         };
+    }
+
+    private DispatcherTimer CreateRenderTimer()
+    {
+        return new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = FromMilliseconds(_configuration.RenderInterval)
+        };
+    }
 
     private void SubscribeToEvents()
     {
@@ -136,30 +180,50 @@ public sealed class OverlayWindow : Window, IDisposable
 
         DpiChanged += OnDpiChanged;
         IsVisibleChanged += OnIsVisibleChanged;
-        SizeChanged += OnSizeChanged;
     }
 
-    private void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
-        HandleFpsLimitingPropertyChange(e);
-
-    private void HandleFpsLimitingPropertyChange(PropertyChangedEventArgs e)
+    private void OnControllerPropertyChanged(
+        object? sender,
+        PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(IMainController.LimitFpsTo60))
+        if (string.Equals(
+            e.PropertyName,
+            nameof(IMainController.LimitFpsTo60)))
         {
-            _fpsLimiter.IsEnabled = _renderContext?.Controller.LimitFpsTo60 ?? false;
-            _fpsLimiter.Reset();
-            ForceRedraw();
+            UpdateFpsLimit();
         }
+    }
+
+    private void UpdateFpsLimit()
+    {
+        _fpsLimiter.IsEnabled = _renderContext?.Controller.LimitFpsTo60 ?? false;
+        _fpsLimiter.Reset();
+        _consecutiveSkips = 0;
+        ForceRedraw();
     }
 
     private void RenderTimerTick(object? sender, EventArgs e)
     {
-        if (ShouldSkipRendering()) return;
+        if (_isDisposed) return;
 
-        if (_fpsLimiter.ShouldRenderFrame())
+        if (ShouldRender())
         {
+            _consecutiveSkips = 0;
             ForceRedraw();
         }
+        else
+        {
+            _consecutiveSkips++;
+        }
+    }
+
+    private bool ShouldRender()
+    {
+        //if (_consecutiveSkips >= MaxConsecutiveRenderSkips)
+
+            return true; // Всегда отрисовывать для оверлея, игнорируя глобальную настройку FPS лимитера.
+
+        //return !_fpsLimiter.IsEnabled || _fpsLimiter.ShouldRenderFrame();
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)
@@ -168,44 +232,81 @@ public sealed class OverlayWindow : Window, IDisposable
         Dispose();
     }
 
-    private void StopRenderTimer() =>
-        _renderContext?.RenderTimer.Stop();
+    private void StopRenderTimer()
+    {
+        if (_renderContext?.RenderTimer is { IsEnabled: true } timer)
+            timer.Stop();
+    }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        ConfigureWindowStyleEx();
+        InitializeWindowHandle();
+        ApplyWindowOptimizations();
         StartRenderTimer();
         ForceRedraw();
     }
 
-    private void StartRenderTimer() =>
-        _renderContext?.RenderTimer.Start();
+    private void InitializeWindowHandle() => 
+        _windowHandle = new WindowInteropHelper(this).Handle;
+
+    private void ApplyWindowOptimizations()
+    {
+        if (_windowHandle == nint.Zero) return;
+
+        ConfigureWindowStyleEx();
+
+        if (_configuration.DisableWindowAnimations)
+            SystemBackdrop.DisableWindowAnimations(_windowHandle);
+    }
+
+    private void ConfigureWindowStyleEx()
+    {
+        var extendedStyle = NativeMethods.GetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE);
+        _ = NativeMethods.SetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE,
+            extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED);
+    }
+
+    private void StartRenderTimer()
+    {
+        if (_renderContext?.RenderTimer is { IsEnabled: false } timer)
+            timer.Start();
+    }
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Escape)
+        if (e.Key == Key.Escape)
         {
             e.Handled = true;
             Close();
-            return; 
+            return;
         }
 
         if (_renderContext is not null)
-        {
-            if (_renderContext.Value.Controller.HandleKeyDown(e, this)) 
-            {
-                e.Handled = true;
-            }
-        }
+            e.Handled = _renderContext.Value.Controller.HandleKeyDown(e, this);
     }
 
     private void OnDpiChanged(object? sender, DpiChangedEventArgs e)
     {
-        InvalidateRenderCache();
+        RefreshElementCacheForDpi();
         ForceRedraw();
     }
 
-    private void OnIsVisibleChanged(object? sender, DependencyPropertyChangedEventArgs e)
+    private void RefreshElementCacheForDpi()
+    {
+        if (_renderContext?.SkElement is not { } element) return;
+
+        element.CacheMode = null;
+        element.CacheMode = new BitmapCache
+        {
+            EnableClearType = false,
+            SnapsToDevicePixels = true,
+            RenderAtScale = 1.0
+        };
+    }
+
+    private void OnIsVisibleChanged(
+        object? sender,
+        DependencyPropertyChangedEventArgs e)
     {
         if (IsVisible)
         {
@@ -218,147 +319,50 @@ public sealed class OverlayWindow : Window, IDisposable
         }
     }
 
-    private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        InvalidateRenderCache();
-        ForceRedraw();
-    }
-
-    private void InvalidateRenderCache()
-    {
-        _cacheBitmap?.Dispose();
-        _cacheBitmap = null;
-    }
-
     private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args)
     {
-        if (ShouldSkipRendering()) return;
-
-        if (!TryAcquireRenderLock()) return;
+        if (_isDisposed || _renderContext is null) return;
 
         try
         {
-            _frameTimeWatch.Restart();
-
-            var info = args.Info;
-            var canvas = args.Surface.Canvas;
-
-            ClearCanvas(canvas);
-
-            if (IsRenderingTakingTooLong())
-            {
-                RenderDirectly(sender, args);
-            }
-            else
-            {
-                RenderWithOrWithoutCaching(sender, args, info, canvas);
-            }
-
-            PerformanceMetricsManager.RecordFrameTime();
+            PerformRender(sender, args);
         }
         catch (Exception ex)
         {
-            HandleRenderingException(ex);
-        }
-        finally
-        {
-            ReleaseRenderLock();
+            Error(LogSource,
+                  "Error during paint surface handling",
+                  ex);
         }
     }
 
-    private bool ShouldSkipRendering() => _isDisposed || _renderContext is null;
+    private void PerformRender(object? sender, SKPaintSurfaceEventArgs args)
+    {
+        _frameTimeWatch.Restart();
 
-    private bool TryAcquireRenderLock() => _renderLock.Wait(0);
+        ClearCanvas(args.Surface.Canvas);
+        RenderSpectrum(sender, args);
 
-    private void ReleaseRenderLock() => _renderLock.Release();
+        _frameTimeWatch.Stop();
+        RecordPerformanceMetrics();
+    }
 
-    private static void ClearCanvas(SKCanvas canvas) =>
+    private static void ClearCanvas(SKCanvas canvas) => 
         canvas.Clear(SKColors.Transparent);
 
-    private bool IsRenderingTakingTooLong() =>
-        _frameTimeWatch.ElapsedMilliseconds > _configuration.RenderInterval * 2;
-
-    private void RenderDirectly(object? sender, SKPaintSurfaceEventArgs args)
+    private void RenderSpectrum(object? sender, SKPaintSurfaceEventArgs args)
     {
-        if (_renderContext is null) return;
+        if (_renderContext is null || args is null) return;
         _renderContext.Value.Controller.OnPaintSurface(sender, args);
     }
 
-    private void RenderWithOrWithoutCaching(
-        object? sender,
-        SKPaintSurfaceEventArgs args,
-        SKImageInfo info,
-        SKCanvas canvas)
-    {
-        if (_renderContext is null) return;
-
-        if (_configuration.EnableHardwareAcceleration)
-        {
-            RenderWithHardwareAcceleration(sender, args);
-        }
-        else
-        {
-            RenderWithSoftwareCaching(sender, args, info, canvas);
-        }
-    }
-
-    private void RenderWithHardwareAcceleration(object? sender, SKPaintSurfaceEventArgs args)
-    {
-        if (_renderContext is null) return;
-        _renderContext.Value.Controller.OnPaintSurface(sender, args);
-    }
-
-    private void RenderWithSoftwareCaching(
-        object? sender,
-        SKPaintSurfaceEventArgs args,
-        SKImageInfo info,
-        SKCanvas canvas)
-    {
-        if (_renderContext is null) return;
-
-        EnsureCacheBitmapCreated(info);
-
-        using var tempSurface = SKSurface.Create(info, _cacheBitmap!.GetPixels(), _cacheBitmap.RowBytes);
-        tempSurface.Canvas.Clear(SKColors.Transparent);
-        _renderContext.Value.Controller.OnPaintSurface(sender, args);
-
-
-        canvas.DrawBitmap(_cacheBitmap!, 0, 0);
-    }
-
-    private void EnsureCacheBitmapCreated(SKImageInfo info)
-    {
-        if (_cacheBitmap == null || _cacheBitmap.Width != info.Width || _cacheBitmap.Height != info.Height)
-        {
-            _cacheBitmap?.Dispose();
-            _cacheBitmap = new SKBitmap(info.Width, info.Height, info.ColorType, info.AlphaType);
-        }
-    }
-
-    private static void HandleRenderingException(Exception ex) =>
-        Error(LogSource, "Error during paint surface handling", ex);
-
-    private void ConfigureWindowStyleEx()
-    {
-        var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd == nint.Zero) return;
-
-        ApplyExtendedWindowStyle(hwnd);
-    }
-
-    private static void ApplyExtendedWindowStyle(nint hwnd)
-    {
-        var extendedStyle = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
-        _ = NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE,
-            extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED);
-    }
+    private static void RecordPerformanceMetrics() => 
+        PerformanceMetricsManager.RecordFrameTime();
 
     public void Dispose()
     {
         if (_isDisposed) return;
 
         _isDisposed = true;
-
         UnsubscribeFromEvents();
         DisposeResources();
     }
@@ -372,12 +376,11 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private void UnregisterElementEvents()
     {
-        if (_renderContext != null)
-        {
-            _renderContext.Value.SkElement.PaintSurface -= HandlePaintSurface;
-            _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
-            _renderContext.Value.RenderTimer.Stop();
-        }
+        if (_renderContext is null) return;
+
+        _renderContext.Value.SkElement.PaintSurface -= HandlePaintSurface;
+        _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
+        _renderContext.Value.RenderTimer.Stop();
     }
 
     private void UnregisterWindowEvents()
@@ -390,7 +393,6 @@ public sealed class OverlayWindow : Window, IDisposable
 
         DpiChanged -= OnDpiChanged;
         IsVisibleChanged -= OnIsVisibleChanged;
-        SizeChanged -= OnSizeChanged;
     }
 
     private void UnregisterControllerEvents()
@@ -403,8 +405,6 @@ public sealed class OverlayWindow : Window, IDisposable
     {
         _disposalTokenSource.Cancel();
         _disposalTokenSource.Dispose();
-        _cacheBitmap?.Dispose();
-        _renderLock.Dispose();
         _renderContext = null;
     }
 }

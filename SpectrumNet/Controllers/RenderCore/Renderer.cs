@@ -176,10 +176,27 @@ public sealed class Renderer : AsyncDisposableBase
             return;
         }
 
-        if (ShouldRenderNewFrame())
+        bool forceNewFrameForOverlay = false;
+
+        if (sender is SKElement sendingElement
+            && _skElement != null
+            && sendingElement != _skElement)
+        {
+            forceNewFrameForOverlay = true;
+        }
+
+        if (forceNewFrameForOverlay || ShouldRenderNewFrame())
+        {
+            if (forceNewFrameForOverlay)
+            {
+                _frameCache.MarkDirty();
+            }
             RenderNewFrame(sender, e);
+        }
         else
+        {
             RenderCachedFrame(e);
+        }
     }
 
     private bool ShouldSkipRenderingFrame(object? sender) =>

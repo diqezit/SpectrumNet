@@ -4,7 +4,7 @@ namespace SpectrumNet.Controllers.RenderCore.Overlay;
 
 internal sealed class SystemBackdrop
 {
-    public void SetTransparentBackground(Window window)
+    public static void SetTransparentBackground(Window window)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
 
@@ -27,5 +27,18 @@ internal sealed class SystemBackdrop
             _ = NativeMethods.SetWindowCompositionAttribute(hwnd, ref nativeData);
         }
         finally { Marshal.FreeHGlobal(accentPtr); }
+    }
+
+    public static void DisableWindowAnimations(nint hwnd)
+    {
+        if (hwnd == nint.Zero || !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return;
+
+        int policy = NativeMethods.DWMNCRP_DISABLED;
+        _ = NativeMethods.DwmSetWindowAttribute(
+            hwnd,
+            NativeMethods.DWMWA_NCRENDERING_POLICY,
+            ref policy,
+            sizeof(int));
     }
 }
