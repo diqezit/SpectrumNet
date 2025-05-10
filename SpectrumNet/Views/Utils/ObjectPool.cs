@@ -4,25 +4,42 @@ namespace SpectrumNet.Views.Utils;
 
 public class ObjectPool<T> : IDisposable where T : class
 {
+    private static readonly bool _isDisposable;
+
     private readonly ConcurrentBag<T> _objects;
     private readonly Func<T> _objectGenerator;
-    private readonly Action<T> _objectReset;
+    private readonly Action<T>? _objectReset;
+    private readonly int _maxSize;
+    private int _currentCount;
+
+    static ObjectPool() => _isDisposable = typeof(IDisposable).IsAssignableFrom(typeof(T));
 
     public ObjectPool(
-      Func<T> objectGenerator,
-      Action<T> objectReset,
-      int initialCount = 0)
+        Func<T> objectGenerator,
+        Action<T>? objectReset = null,
+        int initialCount = 0,
+        int maxSize = 100)
     {
+        _objectGenerator = objectGenerator ??
+            throw new ArgumentNullException(nameof(objectGenerator));
+        _objectReset = objectReset;
+        _maxSize = maxSize;
         _objects = [];
 
-        _objectGenerator = objectGenerator ??
-                throw new ArgumentNullException(nameof(objectGenerator));
+        PreAllocateObjects(initialCount);
+    }
 
-        _objectReset = objectReset;
-
-        for (int i = 0; i < initialCount; i++)
+    private void PreAllocateObjects(int count)
+    {
+        int countToAllocate = Math.Min(count, _maxSize);
+        for (int i = 0; i < countToAllocate; i++)
         {
-            _objects.Add(_objectGenerator());
+            var obj = _objectGenerator();
+            if (obj != null)
+            {
+                _objects.Add(obj);
+                Interlocked.Increment(ref _currentCount);
+            }
         }
     }
 
@@ -30,6 +47,7 @@ public class ObjectPool<T> : IDisposable where T : class
     {
         if (_objects.TryTake(out T? item))
         {
+            Interlocked.Decrement(ref _currentCount);
             _objectReset?.Invoke(item);
             return item;
         }
@@ -37,20 +55,36 @@ public class ObjectPool<T> : IDisposable where T : class
         return _objectGenerator();
     }
 
+    public void Return(T item)
+    {
+        if (item == null) return;
 
-    public void Return(T item) => _objects.Add(item);
-
+        if (_currentCount < _maxSize)
+        {
+            _objectReset?.Invoke(item);
+            _objects.Add(item);
+            Interlocked.Increment(ref _currentCount);
+        }
+        else
+        {
+            if (_isDisposable)
+            {
+                (item as IDisposable)?.Dispose();
+            }
+        }
+    }
 
     public void Dispose()
     {
-        if (typeof(IDisposable).IsAssignableFrom(typeof(T)))
+        if (_isDisposable)
         {
-            foreach (var obj in _objects)
+            while (_objects.TryTake(out T? obj))
             {
-                (obj as IDisposable)?.Dispose();
+                if (obj != null)
+                {
+                    (obj as IDisposable)?.Dispose();
+                }
             }
-
-            _objects.Clear();
         }
 
         SuppressFinalize(this);

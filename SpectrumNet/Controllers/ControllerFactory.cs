@@ -20,9 +20,15 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     private bool _isTransitioning;
     private bool _isRecording;
 
+    private readonly ConcurrentQueue<Action> _pendingUIOperations = new();
+    private DispatcherTimer _batchUpdateTimer;
+    private const int BATCH_UPDATE_INTERVAL_MS = 8;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
     public ControllerFactory(Window ownerWindow, SKElement renderElement)
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
     {
         _ownerWindow = ownerWindow ?? throw new ArgumentNullException(nameof(ownerWindow));
         _renderElement = renderElement ?? throw new ArgumentNullException(nameof(renderElement));
@@ -43,7 +49,18 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         ownerWindow.Closed += (_, _) => DisposeResources();
         ownerWindow.KeyDown += OnWindowKeyDown;
 
+        BatchUpdate();
         InitializeRenderingState();
+    }
+
+    private void BatchUpdate()
+    {
+        _batchUpdateTimer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = FromMilliseconds(BATCH_UPDATE_INTERVAL_MS)
+        };
+        _batchUpdateTimer.Tick += ProcessBatchedUIOperations;
+        _batchUpdateTimer.Start();
     }
 
     private void OnWindowKeyDown(object sender, KeyEventArgs e)
@@ -488,16 +505,24 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     public void OnPropertyChanged(params string[] propertyNames)
     {
-        Safe(() =>
+        _pendingUIOperations.Enqueue(() =>
         {
-            if (PropertyChanged == null) return;
-
             foreach (var name in propertyNames)
-                Dispatcher.Invoke(() =>
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name)));
-        },
-        $"{LOG_PREFIX}.{nameof(OnPropertyChanged)}",
-        "Error notifying property change");
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        });
+    }
+
+    private void ProcessBatchedUIOperations(object? sender, EventArgs e)
+    {
+        int processedCount = 0;
+        const int MAX_OPERATIONS_PER_FRAME = 10;
+
+        while (processedCount < MAX_OPERATIONS_PER_FRAME &&
+               _pendingUIOperations.TryDequeue(out var operation))
+        {
+            operation();
+            processedCount++;
+        }
     }
 
     public void DisposeResources() => Dispose();
@@ -532,6 +557,12 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             _ownerWindow.KeyDown -= OnWindowKeyDown;
 
         _cleanupCts.Cancel();
+        _batchUpdateTimer?.Stop();
+
+        while (_pendingUIOperations.TryDequeue(out var operation))
+        {
+            operation();
+        }
     }
 
     private void StopCaptureIfNeeded()
@@ -604,6 +635,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     {
         await DetachEventHandlersAsync(token);
         _cleanupCts.Cancel();
+        _batchUpdateTimer?.Stop();
 
         await StopCaptureAsync(token);
         await CloseUIElementsAsync(token);
