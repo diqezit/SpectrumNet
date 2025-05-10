@@ -1,10 +1,10 @@
-﻿#nullable enable 
+﻿#nullable enable
 
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace SpectrumNet.Controllers.Interfaces;
 
-public interface IInputController
+public interface IInputHandler
 {
     bool HandleKeyDown(KeyEventArgs e, IInputElement? focusedElement);
     bool HandleMouseDown(object? sender, MouseButtonEventArgs e);
@@ -15,6 +15,4 @@ public interface IInputController
     void HandleMouseEnter(object? sender, MouseEventArgs e);
     void HandleMouseLeave(object? sender, MouseEventArgs e);
     bool HandleButtonClick(object? sender, RoutedEventArgs e);
-    void RegisterWindow(Window window);
-    void UnregisterWindow(Window window);
 }

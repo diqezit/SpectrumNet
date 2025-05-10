@@ -147,8 +147,6 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public void OpenOverlay() => UIController.OpenOverlay();
     public void CloseOverlay() => UIController.CloseOverlay();
 
-
-
     public bool LimitFpsTo60
     {
         get => Settings.Instance.LimitFpsTo60;
@@ -214,6 +212,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
     }
 
+    #region Audio Properties
+
     public FftWindowType WindowType
     {
         get => _audioController.IsValueCreated ?
@@ -264,6 +264,10 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
     }
 
+    #endregion
+
+    #region Audio Methods
+
     public async Task StartCaptureAsync() =>
         await AudioController.StartCaptureAsync();
 
@@ -289,6 +293,10 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         _audioController.IsValueCreated ?
             AudioController.GetCurrentAnalyzer() :
             null;
+
+    #endregion
+
+    #region View Properties
 
     public SKElement SpectrumCanvas => _renderElement;
 
@@ -418,6 +426,10 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             ViewController.OrderedDrawingTypes :
             Enum.GetValues<RenderStyle>();
 
+    #endregion
+
+    #region View Methods
+
     public void RequestRender() =>
         Renderer?.RequestRender();
 
@@ -435,14 +447,44 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             Renderer.RenderFrame(sender, e);
     }
 
+    #endregion
+
+    #region IInputController Implementation
+
     public void RegisterWindow(Window window) =>
-    _inputController.RegisterWindow(window);
+        _inputController.RegisterWindow(window);
 
     public void UnregisterWindow(Window window) =>
         _inputController.UnregisterWindow(window);
 
     public bool HandleKeyDown(KeyEventArgs e, IInputElement? focusedElement) =>
         _inputController.HandleKeyDown(e, focusedElement);
+
+    public bool HandleMouseDown(object? sender, MouseButtonEventArgs e) =>
+        _inputController.HandleMouseDown(sender, e);
+
+    public bool HandleMouseMove(object? sender, System.Windows.Input.MouseEventArgs e) =>
+        _inputController.HandleMouseMove(sender, e);
+
+    public bool HandleMouseUp(object? sender, MouseButtonEventArgs e) =>
+        _inputController.HandleMouseUp(sender, e);
+
+    public bool HandleMouseDoubleClick(object? sender, MouseButtonEventArgs e) =>
+        _inputController.HandleMouseDoubleClick(sender, e);
+
+    public bool HandleWindowDrag(object? sender, MouseButtonEventArgs e) =>
+        _inputController.HandleWindowDrag(sender, e);
+
+    public void HandleMouseEnter(object? sender, System.Windows.Input.MouseEventArgs e) =>
+        _inputController.HandleMouseEnter(sender, e);
+
+    public void HandleMouseLeave(object? sender, System.Windows.Input.MouseEventArgs e) =>
+        _inputController.HandleMouseLeave(sender, e);
+
+    public bool HandleButtonClick(object? sender, RoutedEventArgs e) =>
+        _inputController.HandleButtonClick(sender, e);
+
+    #endregion
 
     public void OnPropertyChanged(params string[] propertyNames)
     {

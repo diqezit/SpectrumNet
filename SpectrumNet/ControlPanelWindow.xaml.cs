@@ -27,15 +27,16 @@ public partial class ControlPanelWindow : Window, IDisposable
 
         DataContext = _controller;
 
-        MouseDoubleClick += OnWindowMouseDoubleClick;
-        KeyDown += OnKeyDown;
-        SetupGainControlsPopup();
+        MouseDoubleClick += (s, e) => _controller.InputController.HandleMouseDoubleClick(s, e);
+        KeyDown += (s, e) => _controller.InputController.HandleKeyDown(e, Keyboard.FocusedElement);
 
+        SetupGainControlsPopup();
         SetInitialComboBoxSelections();
         _isInitializingControls = false;
 
         _controller.InputController.RegisterWindow(this);
     }
+
     private void SetInitialComboBoxSelections()
     {
         if (RenderQualityComboBox is not null)
@@ -56,8 +57,6 @@ public partial class ControlPanelWindow : Window, IDisposable
         }
     }
 
-    #region Event Setup
-
     private void SetupGainControlsPopup() =>
         Safe(() =>
         {
@@ -74,10 +73,6 @@ public partial class ControlPanelWindow : Window, IDisposable
     private void OnGainControlsPopupClosed(object? sender, EventArgs e) =>
         Mouse.Capture(null);
 
-    #endregion
-
-    #region Event Handlers
-
     private void OnGainControlsPopupMouseDown(object sender, MouseButtonEventArgs e) =>
         Safe(() =>
         {
@@ -87,21 +82,6 @@ public partial class ControlPanelWindow : Window, IDisposable
                 e.Handled = true;
             }
         }, GetLoggerOptions("Error handling gain controls popup mouse down"));
-
-    private void OnWindowMouseDoubleClick(object sender, MouseButtonEventArgs e) =>
-        Safe(() =>
-        {
-            if (e.ChangedButton != MouseButton.Left) return;
-            if (e.OriginalSource is DependencyObject element &&
-                (IsControlOfType<Slider>(element) ||
-                 IsControlOfType<ComboBox>(element) ||
-                 IsControlOfType<CheckBox>(element) ||
-                 IsControlOfType<Button>(element)))
-                return;
-
-            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-            e.Handled = true;
-        }, GetLoggerOptions("Error handling double click"));
 
     private void OnButtonClick(object sender, RoutedEventArgs e) =>
         Safe(() =>
@@ -139,24 +119,6 @@ public partial class ControlPanelWindow : Window, IDisposable
             }
         }, GetLoggerOptions("Error handling selection change"));
 
-    private void OnKeyDown(object sender, KeyEventArgs e) =>
-        Safe(() =>
-        {
-            if (!IsActive) return;
-
-            if (_controller.HandleKeyDown(e, Keyboard.FocusedElement))
-            {
-                e.Handled = true;
-                return;
-            }
-
-            if (e.Key == Key.Escape)
-            {
-                Close();
-                e.Handled = true;
-            }
-        }, GetLoggerOptions("Error handling key down"));
-
     private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
         Safe(() =>
         {
@@ -169,7 +131,6 @@ public partial class ControlPanelWindow : Window, IDisposable
             if (!closeButtonBounds.Contains(mousePos))
                 DragMove();
         }, GetLoggerOptions("Error handling window drag"));
-
 
     private void OnFavoriteButtonClick(object sender, RoutedEventArgs e)
     {
@@ -196,50 +157,28 @@ public partial class ControlPanelWindow : Window, IDisposable
             }
         }, GetLoggerOptions("Error handling favorite button click"));
     }
-    #endregion
 
-    #region Helper Methods
+    private ErrorHandlingOptions GetLoggerOptions(string errorMessage) =>
+        new() { Source = LogPrefix, ErrorMessage = errorMessage };
 
-    private static bool IsControlOfType<T>(DependencyObject element) where T : DependencyObject
+    private Dictionary<string, Action> CreateButtonActionsMap() => new()
     {
-        while (element is not null)
+        ["CloseButton"] = () =>
         {
-            if (element is T) return true;
-            element = VisualTreeHelper.GetParent(element);
-        }
-        return false;
-    }
-
-    private void ToggleOverlay() =>
-        Safe(() =>
+            _controller.InputController.UnregisterWindow(this);
+            Close();
+        },
+        ["StartCaptureButton"] = () => _ = _controller.StartCaptureAsync(),
+        ["StopCaptureButton"] = () => _ = _controller.StopCaptureAsync(),
+        ["OverlayButton"] = () =>
         {
             if (_controller.IsOverlayActive)
                 _controller.CloseOverlay();
             else
                 _controller.OpenOverlay();
-        }, GetLoggerOptions("Error toggling overlay"));
-
-    private void OpenSettings() =>
-        Safe(() =>
-        {
-            new SettingsWindow().ShowDialog();
-        }, GetLoggerOptions("Error opening settings"));
-
-    private ErrorHandlingOptions GetLoggerOptions(string errorMessage) =>
-        new() { Source = LogPrefix, ErrorMessage = errorMessage };
-
-    #endregion
-
-    #region Action Maps
-
-    private Dictionary<string, Action> CreateButtonActionsMap() => new()
-    {
-        ["CloseButton"] = Close,
-        ["StartCaptureButton"] = () => _ = _controller.StartCaptureAsync(),
-        ["StopCaptureButton"] = () => _ = _controller.StopCaptureAsync(),
-        ["OverlayButton"] = ToggleOverlay,
-        ["OpenPopupButton"] = () => _controller.IsPopupOpen = true,
-        ["OpenSettingsButton"] = OpenSettings
+        },
+        ["OpenSettingsButton"] = () => new SettingsWindow().ShowDialog(),
+        ["OpenPopupButton"] = () => _controller.IsPopupOpen = true
     };
 
     private Dictionary<string, Action<double>> CreateSliderActionsMap() => new()
@@ -265,24 +204,13 @@ public partial class ControlPanelWindow : Window, IDisposable
         ["OverlayTopmostCheckBox"] = value => _controller.IsOverlayTopmost = value
     };
 
-    #endregion
-
-    #region IDisposable Implementation
-
     public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
     {
         if (_isDisposed) return;
 
-        if (disposing)
+        Safe(() =>
         {
-            MouseDoubleClick -= OnWindowMouseDoubleClick;
-            KeyDown -= OnKeyDown;
+            _controller.InputController.UnregisterWindow(this);
 
             if (GainControlsPopup is not null)
             {
@@ -290,12 +218,18 @@ public partial class ControlPanelWindow : Window, IDisposable
                 GainControlsPopup.Closed -= OnGainControlsPopupClosed;
                 GainControlsPopup.MouseDown -= OnGainControlsPopupMouseDown;
             }
-        }
 
-        _isDisposed = true;
+            _isDisposed = true;
+        }, GetLoggerOptions("Error during dispose"));
+
+        GC.SuppressFinalize(this);
     }
 
-    ~ControlPanelWindow() => Dispose(false);
+    protected override void OnClosed(EventArgs e)
+    {
+        base.OnClosed(e);
+        Dispose();
+    }
 
-    #endregion
+    ~ControlPanelWindow() => Dispose();
 }

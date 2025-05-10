@@ -15,11 +15,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
-    private bool
-        _isDisposed,
-        _isClosing,
-        _isTrackingMouse;
-
+    private bool _isDisposed, _isClosing;
     private CancellationTokenSource? _closingCts;
 
     public MainWindow()
@@ -43,11 +39,11 @@ public partial class MainWindow : Window, IAsyncDisposable
 
         _controller.InputController.RegisterWindow(this);
 
-        spectrumCanvas.MouseDown += OnCanvasMouseDown;
-        spectrumCanvas.MouseMove += OnCanvasMouseMove;
-        spectrumCanvas.MouseUp += OnCanvasMouseUp;
-        spectrumCanvas.MouseEnter += OnCanvasMouseEnter;
-        spectrumCanvas.MouseLeave += OnCanvasMouseLeave;
+        spectrumCanvas.MouseDown += (s, e) => _controller.InputController.HandleMouseDown(s, e);
+        spectrumCanvas.MouseMove += (s, e) => _controller.InputController.HandleMouseMove(s, e);
+        spectrumCanvas.MouseUp += (s, e) => _controller.InputController.HandleMouseUp(s, e);
+        spectrumCanvas.MouseEnter += (s, e) => _controller.InputController.HandleMouseEnter(s, e);
+        spectrumCanvas.MouseLeave += (s, e) => _controller.InputController.HandleMouseLeave(s, e);
     }
 
     public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
@@ -68,8 +64,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        Safe(
-            () => HandleClosing(e),
+        Safe(() => HandleClosing(e),
             new ErrorHandlingOptions
             {
                 Source = LogPrefix,
@@ -100,18 +95,11 @@ public partial class MainWindow : Window, IAsyncDisposable
             try
             {
                 await CleanupResourcesAsync();
-                Dispatcher.Invoke(() =>
-                {
-                    Close();
-                });
+                Dispatcher.Invoke(() => Close());
             }
             catch (Exception ex)
             {
-                Log(
-                    LogLevel.Error,
-                    LogPrefix,
-                    $"Error during resource cleanup: {ex.Message}"
-                );
+                Log(LogLevel.Error, LogPrefix, $"Error during resource cleanup: {ex.Message}");
             }
         });
 
@@ -123,8 +111,9 @@ public partial class MainWindow : Window, IAsyncDisposable
         SizeChanged += OnWindowSizeChanged;
         StateChanged += OnStateChanged;
         MouseDoubleClick += OnWindowMouseDoubleClick;
+        MouseLeftButtonDown += OnWindowDrag;
         Closed += OnWindowClosed;
-        KeyDown += OnKeyDown;
+        KeyDown += (s, e) => _controller.InputController.HandleKeyDown(e, Keyboard.FocusedElement);
         LocationChanged += OnWindowLocationChanged;
     }
 
@@ -139,208 +128,54 @@ public partial class MainWindow : Window, IAsyncDisposable
         if (shouldRender)
         {
             _controller.RequestRender();
-
             PerformanceMetricsManager.RecordFrameTime();
         }
     }
 
-    private void OnStateChanged(
-        object? sender,
-        EventArgs e)
+    private void OnButtonClick(object sender, RoutedEventArgs e)
     {
-        Safe(
-            () => HandleStateChanged(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error changing icon"
-            }
-        );
-    }
-
-    private void HandleStateChanged(
-        object? sender,
-        EventArgs e)
-    {
-        if (MaximizeButton is null || MaximizeIcon is null) return;
-
-        MaximizeIcon.Data = Geometry.Parse(
-            WindowState == WindowState.Maximized
-                ? "M0,0 L20,0 L20,20 L0,20 Z"
-                : "M2,2 H18 V18 H2 Z");
-
-        Settings.Instance.WindowState = WindowState;
-    }
-
-    private void UnsubscribeFromEvents()
-    {
-        CompositionTarget.Rendering -= OnRendering;
-        SizeChanged -= OnWindowSizeChanged;
-        StateChanged -= OnStateChanged;
-        MouseDoubleClick -= OnWindowMouseDoubleClick;
-        Closed -= OnWindowClosed;
-        KeyDown -= OnKeyDown;
-        LocationChanged -= OnWindowLocationChanged;
-
-        spectrumCanvas.MouseDown -= OnCanvasMouseDown;
-        spectrumCanvas.MouseMove -= OnCanvasMouseMove;
-        spectrumCanvas.MouseUp -= OnCanvasMouseUp;
-        spectrumCanvas.MouseEnter -= OnCanvasMouseEnter;
-        spectrumCanvas.MouseLeave -= OnCanvasMouseLeave;
-
-        if (ThemeManager.Instance != null && _themePropertyChangedHandler != null)
-        {
-            ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
-            _themePropertyChangedHandler = null;
-        }
-    }
-
-    private void OnCanvasMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.LeftButton == MouseButtonState.Pressed)
-        {
-            var point = e.GetPosition(spectrumCanvas);
-            var skPoint = new SKPoint((float)point.X, (float)point.Y);
-
-            if (_controller.Renderer?.ShouldShowPlaceholder == true)
-            {
-                var placeholder = _controller.Renderer.GetPlaceholder();
-                if (placeholder?.HitTest(skPoint) == true)
-                {
-                    _controller.Renderer.HandlePlaceholderMouseDown(skPoint);
-                    spectrumCanvas.CaptureMouse();
-                    _isTrackingMouse = true;
-                    e.Handled = true;
-                    spectrumCanvas.InvalidateVisual();
-                }
-            }
-        }
-    }
-
-    private void OnCanvasMouseMove(object sender, MouseEventArgs e)
-    {
-        var point = e.GetPosition(spectrumCanvas);
-        var skPoint = new SKPoint((float)point.X, (float)point.Y);
-
-        if (_controller.Renderer?.ShouldShowPlaceholder == true)
-        {
-            _controller.Renderer.HandlePlaceholderMouseMove(skPoint);
-            if (_isTrackingMouse)
-            {
-                spectrumCanvas.InvalidateVisual();
-            }
-        }
-    }
-
-    private void OnCanvasMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        if (e.LeftButton == MouseButtonState.Released && _isTrackingMouse)
-        {
-            var point = e.GetPosition(spectrumCanvas);
-            var skPoint = new SKPoint((float)point.X, (float)point.Y);
-
-            if (_controller.Renderer?.ShouldShowPlaceholder == true)
-            {
-                _controller.Renderer.HandlePlaceholderMouseUp(skPoint);
-            }
-
-            spectrumCanvas.ReleaseMouseCapture();
-            _isTrackingMouse = false;
-            spectrumCanvas.InvalidateVisual();
-            e.Handled = true;
-        }
-    }
-
-    private void OnCanvasMouseEnter(object sender, MouseEventArgs e)
-    {
-        if (_controller.Renderer?.ShouldShowPlaceholder == true)
-        {
-            _controller.Renderer.HandlePlaceholderMouseEnter();
-        }
-    }
-
-    private void OnCanvasMouseLeave(object sender, MouseEventArgs e)
-    {
-        if (_controller.Renderer?.ShouldShowPlaceholder == true)
-        {
-            _controller.Renderer.HandlePlaceholderMouseLeave();
-        }
-
-        if (_isTrackingMouse)
-        {
-            var point = e.GetPosition(spectrumCanvas);
-            var skPoint = new SKPoint((float)point.X, (float)point.Y);
-            _controller.Renderer?.HandlePlaceholderMouseUp(skPoint);
-
-            spectrumCanvas.ReleaseMouseCapture();
-            _isTrackingMouse = false;
-        }
-    }
-
-    private void OnWindowSizeChanged(
-        object? sender,
-        SizeChangedEventArgs e)
-    {
-        Safe(
-            () => HandleWindowSizeChanged(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating dimensions"
-            }
-        );
-    }
-
-    private void HandleWindowSizeChanged(
-        object? sender,
-        SizeChangedEventArgs e)
-    {
-        if (_isClosing || _isDisposed) return;
-
-        _controller.UpdateRenderDimensions(
-            (int)e.NewSize.Width,
-            (int)e.NewSize.Height);
-
-        if (WindowState == WindowState.Normal)
-        {
-            var settings = Settings.Instance;
-            settings.WindowWidth = Width;
-            settings.WindowHeight = Height;
-        }
-    }
-
-    private void OnButtonClick(
-        object sender,
-        RoutedEventArgs e)
-    {
-        Safe(
-            () => HandleButtonClick(sender, e),
+        Safe(() => HandleButtonClick(sender, e),
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling button click" }
         );
     }
 
-    private void HandleButtonClick(
-        object sender,
-        RoutedEventArgs e)
+    private void HandleButtonClick(object sender, RoutedEventArgs e)
     {
         if (_isDisposed) return;
         if (sender is Button btn && _windowButtonActions.TryGetValue(btn.Name, out var action))
             action();
     }
 
-    private void OnWindowMouseDoubleClick(
-        object? sender,
-        MouseButtonEventArgs e)
+    private void OnWindowDrag(object? sender, MouseButtonEventArgs e)
     {
-        Safe(
-            () => HandleWindowMouseDoubleClick(sender, e),
+        Safe(() => HandleWindowDrag(sender, e),
+            new ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error moving window"
+            }
+        );
+    }
+
+    private void HandleWindowDrag(object? sender, MouseButtonEventArgs e)
+    {
+        if (_isDisposed || _isClosing || e.ChangedButton != MouseButton.Left)
+            return;
+
+        DragMove();
+
+        if (WindowState == WindowState.Normal)
+            SaveWindowPosition();
+    }
+
+    private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
+    {
+        Safe(() => HandleWindowMouseDoubleClick(sender, e),
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling double click" }
         );
     }
 
-    private void HandleWindowMouseDoubleClick(
-        object? sender,
-        MouseButtonEventArgs e)
+    private void HandleWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
     {
         if (_isDisposed || IsCheckBoxOrChild(e.OriginalSource as DependencyObject))
         {
@@ -368,41 +203,65 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private void OnKeyDown(
-        object? sender,
-        KeyEventArgs e)
+    private void ToggleWindowState()
     {
-        Safe(
-            () => HandleKeyDown(sender, e),
-            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling key down" }
+        if (WindowState == WindowState.Maximized)
+            WindowState = WindowState.Normal;
+        else
+            WindowState = WindowState.Maximized;
+    }
+
+    private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        Safe(() => HandleWindowSizeChanged(sender, e),
+            new ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error updating dimensions"
+            }
         );
     }
 
-    private void HandleKeyDown(
-        object? sender,
-        KeyEventArgs e)
+    private void HandleWindowSizeChanged(object? sender, SizeChangedEventArgs e)
     {
-        if (_isDisposed || _isClosing || !IsActive) return;
+        if (_isClosing || _isDisposed) return;
 
-        if (_controller.HandleKeyDown(e, Keyboard.FocusedElement))
-        {
-            e.Handled = true;
-            return;
-        }
+        _controller.UpdateRenderDimensions((int)e.NewSize.Width, (int)e.NewSize.Height);
 
-        if (e.Key == Key.Escape && WindowState == WindowState.Maximized)
+        if (WindowState == WindowState.Normal)
         {
-            WindowState = WindowState.Normal;
-            e.Handled = true;
+            var settings = Settings.Instance;
+            settings.WindowWidth = Width;
+            settings.WindowHeight = Height;
         }
     }
 
-    private void OnWindowLocationChanged(
-        object? sender,
-        EventArgs e)
+    private void OnStateChanged(object? sender, EventArgs e)
     {
-        Safe(
-            () => HandleWindowLocationChanged(sender, e),
+        Safe(() => HandleStateChanged(sender, e),
+            new ErrorHandlingOptions
+            {
+                Source = LogPrefix,
+                ErrorMessage = "Error changing icon"
+            }
+        );
+    }
+
+    private void HandleStateChanged(object? sender, EventArgs e)
+    {
+        if (MaximizeButton is null || MaximizeIcon is null) return;
+
+        MaximizeIcon.Data = Geometry.Parse(
+            WindowState == WindowState.Maximized
+                ? "M0,0 L20,0 L20,20 L0,20 Z"
+                : "M2,2 H18 V18 H2 Z");
+
+        Settings.Instance.WindowState = WindowState;
+    }
+
+    private void OnWindowLocationChanged(object? sender, EventArgs e)
+    {
+        Safe(() => HandleWindowLocationChanged(sender, e),
             new ErrorHandlingOptions
             {
                 Source = LogPrefix,
@@ -411,12 +270,17 @@ public partial class MainWindow : Window, IAsyncDisposable
         );
     }
 
-    private void HandleWindowLocationChanged(
-        object? sender,
-        EventArgs e)
+    private void HandleWindowLocationChanged(object? sender, EventArgs e)
     {
         if (_isDisposed || _isClosing || WindowState != WindowState.Normal) return;
         SaveWindowPosition();
+    }
+
+    private void SaveWindowPosition()
+    {
+        var settings = Settings.Instance;
+        settings.WindowLeft = Left;
+        settings.WindowTop = Top;
     }
 
     private static bool IsCheckBoxOrChild(DependencyObject? element)
@@ -429,19 +293,9 @@ public partial class MainWindow : Window, IAsyncDisposable
         return false;
     }
 
-    private void SaveWindowPosition()
+    private void OnWindowClosed(object? sender, EventArgs e)
     {
-        var settings = Settings.Instance;
-        settings.WindowLeft = Left;
-        settings.WindowTop = Top;
-    }
-
-    private void OnWindowClosed(
-        object? sender,
-        EventArgs e)
-    {
-        Safe(
-            () => HandleWindowClosed(sender, e),
+        Safe(() => HandleWindowClosed(sender, e),
             new ErrorHandlingOptions
             {
                 Source = LogPrefix,
@@ -450,9 +304,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         );
     }
 
-    private void HandleWindowClosed(
-        object? sender,
-        EventArgs e)
+    private void HandleWindowClosed(object? sender, EventArgs e)
     {
         UnsubscribeFromEvents();
 
@@ -464,17 +316,36 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
+    private void UnsubscribeFromEvents()
+    {
+        CompositionTarget.Rendering -= OnRendering;
+        SizeChanged -= OnWindowSizeChanged;
+        StateChanged -= OnStateChanged;
+        MouseDoubleClick -= OnWindowMouseDoubleClick;
+        MouseLeftButtonDown -= OnWindowDrag;
+        Closed -= OnWindowClosed;
+        LocationChanged -= OnWindowLocationChanged;
+
+        spectrumCanvas.MouseDown -= (s, e) => _controller.InputController.HandleMouseDown(s, e);
+        spectrumCanvas.MouseMove -= (s, e) => _controller.InputController.HandleMouseMove(s, e);
+        spectrumCanvas.MouseUp -= (s, e) => _controller.InputController.HandleMouseUp(s, e);
+        spectrumCanvas.MouseEnter -= (s, e) => _controller.InputController.HandleMouseEnter(s, e);
+        spectrumCanvas.MouseLeave -= (s, e) => _controller.InputController.HandleMouseLeave(s, e);
+
+        if (ThemeManager.Instance != null && _themePropertyChangedHandler != null)
+        {
+            ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
+            _themePropertyChangedHandler = null;
+        }
+    }
+
     private async Task CleanupResourcesAsync()
     {
         if (_isDisposed) return;
 
         if (!await _disposeLock.WaitAsync(FromSeconds(5)))
         {
-            Log(
-                LogLevel.Warning,
-                LogPrefix,
-                "Failed to acquire dispose lock within timeout"
-            );
+            Log(LogLevel.Warning, LogPrefix, "Failed to acquire dispose lock within timeout");
             return;
         }
 
@@ -489,16 +360,11 @@ public partial class MainWindow : Window, IAsyncDisposable
             await DisposeControllerDuringCleanupAsync();
 
             UnsubscribePostCleanupEvents();
-
             _disposeCompleted.Set();
         }
         catch (Exception ex)
         {
-            Log(
-                LogLevel.Error,
-                LogPrefix,
-                $"Error during cleanup: {ex.Message}"
-            );
+            Log(LogLevel.Error, LogPrefix, $"Error during cleanup: {ex.Message}");
         }
         finally
         {
@@ -511,11 +377,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         bool settingsSaved = await SaveSettingsWithTimeoutAsync(FromSeconds(3));
         if (!settingsSaved)
         {
-            Log(
-                LogLevel.Warning,
-                LogPrefix,
-                "Failed to save settings within timeout, continuing with cleanup"
-            );
+            Log(LogLevel.Warning, LogPrefix, "Failed to save settings within timeout, continuing with cleanup");
         }
     }
 
@@ -526,11 +388,7 @@ public partial class MainWindow : Window, IAsyncDisposable
             bool captureStoppedSuccessfully = await StopCaptureWithTimeoutAsync(FromSeconds(5));
             if (!captureStoppedSuccessfully)
             {
-                Log(
-                    LogLevel.Warning,
-                    LogPrefix,
-                    "Failed to stop audio capture within timeout, continuing with cleanup"
-                );
+                Log(LogLevel.Warning, LogPrefix, "Failed to stop audio capture within timeout, continuing with cleanup");
             }
         }
     }
@@ -540,14 +398,10 @@ public partial class MainWindow : Window, IAsyncDisposable
         await Dispatcher.InvokeAsync(() =>
         {
             if (_controller.IsOverlayActive)
-            {
                 _controller.CloseOverlay();
-            }
 
             if (_controller.IsControlPanelOpen)
-            {
                 _controller.CloseControlPanel();
-            }
         });
     }
 
@@ -556,11 +410,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         bool controllerDisposed = await DisposeControllerWithTimeoutAsync(FromSeconds(10));
         if (!controllerDisposed)
         {
-            Log(
-                LogLevel.Warning,
-                LogPrefix,
-                "Failed to dispose controller within timeout"
-            );
+            Log(LogLevel.Warning, LogPrefix, "Failed to dispose controller within timeout");
         }
     }
 
@@ -585,8 +435,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         {
             await Task.Run(() =>
             {
-                Safe(
-                    () => SettingsWindow.Instance.SaveSettings(),
+                Safe(() => SettingsWindow.Instance.SaveSettings(),
                     new ErrorHandlingOptions
                     {
                         Source = LogPrefix,
@@ -636,41 +485,6 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private void ToggleWindowState()
-    {
-        if (WindowState == WindowState.Maximized)
-            WindowState = WindowState.Normal;
-        else
-            WindowState = WindowState.Maximized;
-    }
-
-    private void OnWindowDrag(
-        object? sender,
-        MouseButtonEventArgs e)
-    {
-        Safe(
-            () => HandleWindowDrag(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error moving window"
-            }
-        );
-    }
-
-    private void HandleWindowDrag(
-        object? sender,
-        MouseButtonEventArgs e)
-    {
-        if (_isDisposed || _isClosing || e.ChangedButton != MouseButton.Left)
-            return;
-
-        DragMove();
-
-        if (WindowState == WindowState.Normal)
-            SaveWindowPosition();
-    }
-
     private void ConfigureTheme()
     {
         var tm = ThemeManager.Instance;
@@ -682,19 +496,14 @@ public partial class MainWindow : Window, IAsyncDisposable
         UpdateThemeToggleButtonState();
     }
 
-    private void OnThemePropertyChanged(
-        object? sender,
-        PropertyChangedEventArgs e)
+    private void OnThemePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        Safe(
-            () => HandleThemePropertyChanged(sender, e),
+        Safe(() => HandleThemePropertyChanged(sender, e),
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling theme change" }
         );
     }
 
-    private void HandleThemePropertyChanged(
-        object? sender,
-        PropertyChangedEventArgs e)
+    private void HandleThemePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (_isDisposed || _isClosing || e.PropertyName != nameof(ThemeManager.IsDarkTheme) ||
             sender is not ThemeManager tm)
@@ -728,11 +537,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log(
-                LogLevel.Error,
-                options.Source!,
-                options.ErrorMessage + ": " + ex.Message
-            );
+            Log(LogLevel.Error, options.Source!, options.ErrorMessage + ": " + ex.Message);
         }
     }
 }
