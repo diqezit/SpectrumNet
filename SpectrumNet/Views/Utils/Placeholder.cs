@@ -4,21 +4,6 @@ using static SpectrumNet.Views.Utils.RendererPlaceholder.Constants;
 
 namespace SpectrumNet.Views.Utils;
 
-public interface IPlaceholder : IDisposable
-{
-    void Render(SKCanvas canvas, SKImageInfo info);
-    SKSize CanvasSize { get; set; }
-    void Reset();
-    void OnMouseDown(SKPoint point);
-    void OnMouseMove(SKPoint point);
-    void OnMouseUp(SKPoint point);
-    void OnMouseEnter();
-    void OnMouseLeave();
-    bool HitTest(SKPoint point);
-    bool IsInteractive { get; set; }
-    float Transparency { get; set; }
-}
-
 public sealed class RendererPlaceholder : IPlaceholder
 {
     public record Constants
@@ -120,7 +105,7 @@ public sealed class RendererPlaceholder : IPlaceholder
     private SKColor _lastColor2 = SKColors.Transparent;
 
     public required SKSize CanvasSize { get; set; }
-    public bool IsInteractive { get; set; }
+    public bool IsInteractive { get; set; } = true;
     public float Transparency { get; set; } = 1f;
 
     public RendererPlaceholder(string? message = null)
@@ -223,11 +208,12 @@ public sealed class RendererPlaceholder : IPlaceholder
     public void OnMouseDown(SKPoint point)
     {
         if (!IsInteractive || _isDisposed) return;
+
         if (HitTest(point))
         {
             _isMouseDown = true;
             _lastMousePosition = point;
-            _mouseOffset = new(point.X - _position.X, point.Y - _position.Y);
+            _mouseOffset = new SKPoint(point.X - _position.X, point.Y - _position.Y);
             GenerateEnergyParticles(point);
         }
     }
@@ -236,9 +222,10 @@ public sealed class RendererPlaceholder : IPlaceholder
     {
         if (!IsInteractive || _isDisposed) return;
         _lastMousePosition = point;
+
         if (_isMouseDown)
         {
-            _position = new(point.X - _mouseOffset.X, point.Y - _mouseOffset.Y);
+            _position = new SKPoint(point.X - _mouseOffset.X, point.Y - _mouseOffset.Y);
             _velocity = SKPoint.Empty;
             GenerateEnergyParticles(point);
         }
@@ -247,12 +234,17 @@ public sealed class RendererPlaceholder : IPlaceholder
     public void OnMouseUp(SKPoint point)
     {
         if (!IsInteractive || _isDisposed) return;
-        _isMouseDown = false;
-        if (_lastMousePosition != SKPoint.Empty)
+
+        if (_isMouseDown)
         {
-            var delta = new SKPoint(point.X - _lastMousePosition.X, point.Y - _lastMousePosition.Y);
-            _velocity = new(delta.X * 10, delta.Y * 10);
-            LimitVelocityMagnitude(ref _velocity, MIN_SPEED, MAX_SPEED);
+            _isMouseDown = false;
+
+            if (_lastMousePosition != SKPoint.Empty)
+            {
+                var delta = new SKPoint(point.X - _lastMousePosition.X, point.Y - _lastMousePosition.Y);
+                _velocity = new SKPoint(delta.X * 10, delta.Y * 10);
+                LimitVelocityMagnitude(ref _velocity, MIN_SPEED, MAX_SPEED);
+            }
         }
     }
 
@@ -343,7 +335,16 @@ public sealed class RendererPlaceholder : IPlaceholder
             ApplyWaveMotion(deltaTime);
             ProcessCollisions();
         }
+
         UpdateGradientOffset(deltaTime);
+
+        if (_isMouseDown)
+        {
+            _cachedShader?.Dispose();
+            _cachedShader = null;
+        }
+
+        UpdateSquashEffect(deltaTime);
         ApplyPeriodicRandomNudge();
         SpawnEnergyParticles(deltaTime);
     }
@@ -666,7 +667,7 @@ public sealed class RendererPlaceholder : IPlaceholder
         using var shader = GetOrCreateShader();
         var paint = _paint.Clone();
         paint.Shader = shader;
-        paint.Color = paint.Color.WithAlpha((byte)(255 * Transparency));
+        paint.Color = SKColors.White.WithAlpha((byte)(255 * Transparency));
         canvas.DrawText(_message, _position.X, _position.Y, _font, paint);
         paint.Dispose();
     }
@@ -676,7 +677,8 @@ public sealed class RendererPlaceholder : IPlaceholder
         if (_cachedShader != null &&
             _lastGradientOffset == _gradientOffset &&
             _lastColor1 == _gradientColor1 &&
-            _lastColor2 == _gradientColor2)
+            _lastColor2 == _gradientColor2 &&
+            !_isMouseDown)
         {
             return _cachedShader;
         }
@@ -689,14 +691,21 @@ public sealed class RendererPlaceholder : IPlaceholder
         return _cachedShader;
     }
 
-    private SKShader CreateTextShader() =>
-        SKShader.CreateLinearGradient(
-            new(_position.X, _position.Y - _textHeight / 2),
-            new(_position.X + _textWidth, _position.Y - _textHeight / 2),
-            _shaderColors,
-            _shaderPositions,
+    private SKShader CreateTextShader()
+    {
+        GenerateShaderColors();
+
+        var startPoint = new SKPoint(_position.X, _position.Y - _textHeight / 2);
+        var endPoint = new SKPoint(_position.X + _textWidth, _position.Y - _textHeight / 2);
+
+        return SKShader.CreateLinearGradient(
+            startPoint,
+            endPoint,
+            [.. _shaderColors],
+            [.. _shaderPositions],
             SKShaderTileMode.Clamp,
             SKMatrix.CreateTranslation(_gradientOffset * _textWidth, 0));
+    }
 
     private void DrawSplashParticles(SKCanvas canvas)
     {

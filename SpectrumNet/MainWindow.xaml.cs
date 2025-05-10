@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+
 namespace SpectrumNet;
 
 public partial class MainWindow : Window, IAsyncDisposable
@@ -15,7 +17,8 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private bool
         _isDisposed,
-        _isClosing;
+        _isClosing,
+        _isTrackingMouse;
 
     private CancellationTokenSource? _closingCts;
 
@@ -39,6 +42,12 @@ public partial class MainWindow : Window, IAsyncDisposable
         CompositionTarget.Rendering += OnRendering;
 
         _controller.InputController.RegisterWindow(this);
+
+        spectrumCanvas.MouseDown += OnCanvasMouseDown;
+        spectrumCanvas.MouseMove += OnCanvasMouseMove;
+        spectrumCanvas.MouseUp += OnCanvasMouseUp;
+        spectrumCanvas.MouseEnter += OnCanvasMouseEnter;
+        spectrumCanvas.MouseLeave += OnCanvasMouseLeave;
     }
 
     public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
@@ -173,10 +182,98 @@ public partial class MainWindow : Window, IAsyncDisposable
         KeyDown -= OnKeyDown;
         LocationChanged -= OnWindowLocationChanged;
 
+        spectrumCanvas.MouseDown -= OnCanvasMouseDown;
+        spectrumCanvas.MouseMove -= OnCanvasMouseMove;
+        spectrumCanvas.MouseUp -= OnCanvasMouseUp;
+        spectrumCanvas.MouseEnter -= OnCanvasMouseEnter;
+        spectrumCanvas.MouseLeave -= OnCanvasMouseLeave;
+
         if (ThemeManager.Instance != null && _themePropertyChangedHandler != null)
         {
             ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
             _themePropertyChangedHandler = null;
+        }
+    }
+
+    private void OnCanvasMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            var point = e.GetPosition(spectrumCanvas);
+            var skPoint = new SKPoint((float)point.X, (float)point.Y);
+
+            if (_controller.Renderer?.ShouldShowPlaceholder == true)
+            {
+                var placeholder = _controller.Renderer.GetPlaceholder();
+                if (placeholder?.HitTest(skPoint) == true)
+                {
+                    _controller.Renderer.HandlePlaceholderMouseDown(skPoint);
+                    spectrumCanvas.CaptureMouse();
+                    _isTrackingMouse = true;
+                    e.Handled = true;
+                    spectrumCanvas.InvalidateVisual();
+                }
+            }
+        }
+    }
+
+    private void OnCanvasMouseMove(object sender, MouseEventArgs e)
+    {
+        var point = e.GetPosition(spectrumCanvas);
+        var skPoint = new SKPoint((float)point.X, (float)point.Y);
+
+        if (_controller.Renderer?.ShouldShowPlaceholder == true)
+        {
+            _controller.Renderer.HandlePlaceholderMouseMove(skPoint);
+            if (_isTrackingMouse)
+            {
+                spectrumCanvas.InvalidateVisual();
+            }
+        }
+    }
+
+    private void OnCanvasMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Released && _isTrackingMouse)
+        {
+            var point = e.GetPosition(spectrumCanvas);
+            var skPoint = new SKPoint((float)point.X, (float)point.Y);
+
+            if (_controller.Renderer?.ShouldShowPlaceholder == true)
+            {
+                _controller.Renderer.HandlePlaceholderMouseUp(skPoint);
+            }
+
+            spectrumCanvas.ReleaseMouseCapture();
+            _isTrackingMouse = false;
+            spectrumCanvas.InvalidateVisual();
+            e.Handled = true;
+        }
+    }
+
+    private void OnCanvasMouseEnter(object sender, MouseEventArgs e)
+    {
+        if (_controller.Renderer?.ShouldShowPlaceholder == true)
+        {
+            _controller.Renderer.HandlePlaceholderMouseEnter();
+        }
+    }
+
+    private void OnCanvasMouseLeave(object sender, MouseEventArgs e)
+    {
+        if (_controller.Renderer?.ShouldShowPlaceholder == true)
+        {
+            _controller.Renderer.HandlePlaceholderMouseLeave();
+        }
+
+        if (_isTrackingMouse)
+        {
+            var point = e.GetPosition(spectrumCanvas);
+            var skPoint = new SKPoint((float)point.X, (float)point.Y);
+            _controller.Renderer?.HandlePlaceholderMouseUp(skPoint);
+
+            spectrumCanvas.ReleaseMouseCapture();
+            _isTrackingMouse = false;
         }
     }
 
@@ -253,6 +350,19 @@ public partial class MainWindow : Window, IAsyncDisposable
 
         if (e.ChangedButton == MouseButton.Left)
         {
+            if (_controller.Renderer?.ShouldShowPlaceholder == true)
+            {
+                var position = e.GetPosition(spectrumCanvas);
+                var skPoint = new SKPoint((float)position.X, (float)position.Y);
+                var placeholder = _controller.Renderer.GetPlaceholder();
+
+                if (placeholder?.HitTest(skPoint) == true)
+                {
+                    e.Handled = true;
+                    return;
+                }
+            }
+
             e.Handled = true;
             ToggleWindowState();
         }

@@ -75,7 +75,7 @@ public sealed class Renderer : AsyncDisposableBase
             ?? throw new InvalidOperationException($"{LOG_PREFIX} Failed to initialize {DEFAULT_STYLE} style"),
             _controller.SelectedDrawingType,
             DEFAULT_STYLE,
-            _controller.RenderQuality); 
+            _controller.RenderQuality);
     }
 
     public void RequestRender()
@@ -198,6 +198,60 @@ public sealed class Renderer : AsyncDisposableBase
             RenderCachedFrame(e);
         }
     }
+
+    public void HandlePlaceholderMouseDown(SKPoint point)
+    {
+        if (ShouldShowPlaceholder && _placeholder != null)
+        {
+            _placeholder.IsInteractive = true;
+            _placeholder.OnMouseDown(point);
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+    }
+
+    public void HandlePlaceholderMouseMove(SKPoint point)
+    {
+        if (ShouldShowPlaceholder && _placeholder != null)
+        {
+            _placeholder.OnMouseMove(point);
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+    }
+
+    public void HandlePlaceholderMouseUp(SKPoint point)
+    {
+        if (ShouldShowPlaceholder && _placeholder != null)
+        {
+            _placeholder.OnMouseUp(point);
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+    }
+
+    public void HandlePlaceholderMouseEnter()
+    {
+        if (ShouldShowPlaceholder && _placeholder != null)
+        {
+            _placeholder.OnMouseEnter();
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+    }
+
+    public void HandlePlaceholderMouseLeave()
+    {
+        if (ShouldShowPlaceholder && _placeholder != null)
+        {
+            _placeholder.OnMouseLeave();
+            _frameCache.MarkDirty();
+            RequestRender();
+        }
+    }
+
+    public IPlaceholder? GetPlaceholder() => 
+        ShouldShowPlaceholder ? _placeholder : null;
 
     private bool ShouldSkipRenderingFrame(object? sender) =>
         _isDisposed || IsSkipRendering(sender);
