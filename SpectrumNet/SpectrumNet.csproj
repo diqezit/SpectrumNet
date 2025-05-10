@@ -1,40 +1,76 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <UseWPF>true</UseWPF>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <OutputType>WinExe</OutputType>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <StartupObject>SpectrumNet.App</StartupObject>
-    <ApplicationIcon>spectrum.ico</ApplicationIcon>
-    <UseWindowsForms>True</UseWindowsForms>
-    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
-  </PropertyGroup>
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+		<Nullable>enable</Nullable>
+		<UseWPF>true</UseWPF>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<StartupObject>SpectrumNet.App</StartupObject>
+		<ApplicationIcon>spectrum.ico</ApplicationIcon>
+		<RuntimeIdentifiers>win-x64;win-x86</RuntimeIdentifiers>
+		<PublishSingleFile>true</PublishSingleFile>
+		<PublishTrimmed>false</PublishTrimmed>
+		<SelfContained>false</SelfContained>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <Content Include="spectrum.ico" />
-  </ItemGroup>
+	<!-- Exclude unnecessary macOS and browser runtime assets -->
+	<ItemGroup>
+		<RuntimePackAssetExclude Include="runtimes/osx/**" />
+		<RuntimePackAssetExclude Include="runtimes/browser/**" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.4" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.4" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.4" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.4" Condition="'$(Configuration)' != 'Release'" />
-    <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.4" />
-    <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="Serilog" Version="4.2.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="SkiaSharp" Version="3.119.0" />
-    <PackageReference Include="SkiaSharp.Views" Version="3.119.0" />
-    <PackageReference Include="SkiaSharp.Views.WPF" Version="3.119.0" />
-    <PackageReference Include="System.Reactive" Version="6.0.1" />
-  </ItemGroup>
+	<!-- Application icon -->
+	<ItemGroup>
+		<None Include="spectrum.ico" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <Page Include="App.xaml" />
-  </ItemGroup>
+	<!-- Package dependencies -->
+	<ItemGroup>
+		<!-- Configuration and logging -->
+		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.4" />
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.4" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.4" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.4" Condition="'$(Configuration)' != 'Release'" />
+		<PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.4" />
+		<PackageReference Include="Serilog" Version="4.2.0" />
+		<PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+
+		<!-- JSON processing -->
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+
+		<!-- Audio -->
+		<PackageReference Include="NAudio" Version="2.2.1" />
+
+		<!-- SkiaSharp visualization -->
+		<PackageReference Include="SkiaSharp" Version="3.119.0" />
+		<PackageReference Include="SkiaSharp.Views" Version="3.119.0" />
+		<PackageReference Include="SkiaSharp.Views.WPF" Version="3.119.0" />
+
+		<!-- Reactive programming -->
+		<PackageReference Include="System.Reactive" Version="6.0.1" />
+
+		<!-- Explicitly exclude OpenTK -->
+		<PackageReference Include="OpenTK">
+			<ExcludeAssets>all</ExcludeAssets>
+		</PackageReference>
+	</ItemGroup>
+
+	<!-- XAML markup -->
+	<ItemGroup>
+		<Page Include="App.xaml" />
+	</ItemGroup>
+
+	<!-- Remove unnecessary runtime folders after build -->
+	<Target Name="RemoveUnnecessaryRuntimes" AfterTargets="Build">
+		<ItemGroup>
+			<UnwantedRuntimeDirs Include="$(OutputPath)runtimes\osx\" />
+			<UnwantedRuntimeDirs Include="$(OutputPath)runtimes\browser\" />
+		</ItemGroup>
+		<RemoveDir Directories="@(UnwantedRuntimeDirs)" />
+	</Target>
 
 </Project>
