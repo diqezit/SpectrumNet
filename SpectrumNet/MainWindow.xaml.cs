@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using SpectrumNet.Themes;
+using System.Windows.Navigation;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace SpectrumNet;
@@ -158,16 +159,30 @@ public partial class MainWindow : Window, IAsyncDisposable
         );
     }
 
-    private void HandleWindowDrag(object? sender, MouseButtonEventArgs e)
+    private void HandleWindowDrag(object? sender, MouseButtonEventArgs e) => Safe(() =>
     {
-        if (_isDisposed || _isClosing || e.ChangedButton != MouseButton.Left)
+        if (_isDisposed
+            || _isClosing
+            || e.ChangedButton != MouseButton.Left
+            || Mouse.LeftButton != MouseButtonState.Pressed)
             return;
 
-        DragMove();
-
-        if (WindowState == WindowState.Normal)
+        try
+        {
+            DragMove();
             SaveWindowPosition();
-    }
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log(LogLevel.Error, LogPrefix, $"Window drag error: {ex.Message}");
+        }
+    },
+    new ErrorHandlingOptions
+    {
+        Source = LogPrefix,
+        ErrorMessage = "Error moving window",
+        IgnoreExceptions = [typeof(InvalidOperationException)]
+    });
 
     private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
     {
@@ -540,5 +555,11 @@ public partial class MainWindow : Window, IAsyncDisposable
         {
             Log(LogLevel.Error, options.Source!, options.ErrorMessage + ": " + ex.Message);
         }
+    }
+
+    private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        e.Handled = true;
     }
 }
