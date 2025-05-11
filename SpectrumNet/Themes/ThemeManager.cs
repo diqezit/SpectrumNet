@@ -1,19 +1,12 @@
 ﻿#nullable enable
 
-namespace SpectrumNet;
+namespace SpectrumNet.Themes;
 
 public partial class CommonResources
 {
     public static void InitialiseResources() => Safe(
         () =>
         {
-            Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
-            {
-                Source = new Uri(
-                    "pack://application:,,,/SpectrumNet;component/Themes/CommonResources.xaml",
-                    UriKind.Absolute)
-            });
-
             ThemeManager.Instance.ApplyThemeToWindow(Application.Current.MainWindow);
         },
         nameof(InitialiseResources),
@@ -25,7 +18,7 @@ public partial class CommonResources
             if (sender is Slider slider)
             {
                 var change = slider.SmallChange > 0 ? slider.SmallChange : 1;
-                slider.Value = Math.Clamp(
+                slider.Value = Clamp(
                     slider.Value + (e.Delta > 0 ? change : -change),
                     slider.Minimum,
                     slider.Maximum);
@@ -121,7 +114,7 @@ public class ThemeManager : INotifyPropertyChanged
         if (window == null || !window.IsActive)
             return false;
 
-        if (checkInputElements && (e.Key == Key.Space || e.Key == Key.Enter))
+        if (checkInputElements && (e.Key == Space || e.Key == Enter))
         {
             if (Keyboard.FocusedElement is TextBox ||
                 Keyboard.FocusedElement is PasswordBox ||
@@ -201,7 +194,7 @@ public class ThemeManager : INotifyPropertyChanged
                             Application.Current.Resources[key] = themeDict[key];
                         }
                     },
-                    System.Windows.Threading.DispatcherPriority.Normal,
+                    DispatcherPriority.Normal,
                     cancellationToken);
             },
             nameof(ApplyThemeToWindowAsync),

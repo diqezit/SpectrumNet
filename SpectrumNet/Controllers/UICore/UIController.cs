@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Themes;
+
 namespace SpectrumNet.Controllers.UICore;
 
 public class UIController(IMainController mainController) 

@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Themes;
+
 namespace SpectrumNet;
 
 public partial class SettingsWindow : Window

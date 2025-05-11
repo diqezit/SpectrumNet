@@ -22,12 +22,6 @@
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
-        <!-- Ресурс преобразователя для placeholder -->
-        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
-
-        <!-- Стиль для ScrollBar -->
-        <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
-
         <!-- Стиль для вложенных GroupBox -->
         <Style x:Key="SettingsGroupBoxStyle" TargetType="GroupBox">
             <Setter Property="Margin" Value="0,8"/>
@@ -78,43 +72,10 @@
             <Setter Property="Margin" Value="8,4"/>
         </Style>
 
-        <!-- Новый стиль для TextBox -->
-        <Style x:Key="ModernTextBoxStyle" TargetType="TextBox">
-            <Setter Property="Background" Value="{DynamicResource TextBoxBackgroundBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextBoxForegroundBrush}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource TextBoxBorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1.5"/>
-            <Setter Property="Padding" Value="8,4"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="FontWeight" Value="Regular"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TextBox">
-                        <Border x:Name="TextBoxBorder"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6">
-                            <ScrollViewer x:Name="PART_ContentHost"
-                                          SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
-                                          Margin="{TemplateBinding Padding}"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="TextBoxBorder" Property="BorderBrush" Value="{DynamicResource TextBoxHoverBorderBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsFocused" Value="True">
-                                <Setter TargetName="TextBoxBorder" Property="BorderBrush" Value="{DynamicResource TextBoxFocusBorderBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Background" Value="{DynamicResource TextBoxDisabledBackgroundBrush}"/>
-                                <Setter Property="Foreground" Value="{DynamicResource TextBoxDisabledForegroundBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+        <!-- Стиль для TextBox с плейсхолдером -->
+        <Style x:Key="PlaceholderTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource PlaceholderTextBoxStyle}">
+            <Setter Property="Margin" Value="8,4"/>
+            <Setter Property="Height" Value="28"/>
         </Style>
     </Window.Resources>
 
@@ -578,17 +539,8 @@
                                             <Grid Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2">
                                                 <TextBox x:Name="AsciiCharsTextBox"
                                                          Text="{Binding DonutAsciiChars, Mode=TwoWay}"
-                                                         Margin="8,4"
-                                                         VerticalAlignment="Center"
-                                                         Height="28"
-                                                         Style="{StaticResource ModernTextBoxStyle}"/>
-                                                <TextBlock Text="Enter ASCII characters"
-                                                           Foreground="{DynamicResource TextSecondaryBrush}"
-                                                           Margin="12,4"
-                                                           VerticalAlignment="Center"
-                                                           HorizontalAlignment="Left"
-                                                           IsHitTestVisible="False"
-                                                           Visibility="{Binding ElementName=AsciiCharsTextBox, Path=Text.IsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                         Style="{StaticResource PlaceholderTextBoxStyle}"
+                                                         Tag="Enter ASCII characters"/>
                                             </Grid>
                                         </Grid>
                                     </GroupBox>
@@ -811,13 +763,13 @@
                         <Button Content="Reset"
                                 Click="OnResetButton_Click"
                                 Margin="8,0"
-                                Style="{StaticResource ModernButtonStyle}"
+                                Style="{DynamicResource ModernButtonStyle}"
                                 Height="40"
                                 Width="120"/>
                         <Button Content="Apply"
                                 Click="OnApplyButton_Click"
                                 Margin="8,0"
-                                Style="{StaticResource ModernButtonStyle}"
+                                Style="{DynamicResource ModernButtonStyle}"
                                 Height="40"
                                 Width="120"/>
                     </StackPanel>

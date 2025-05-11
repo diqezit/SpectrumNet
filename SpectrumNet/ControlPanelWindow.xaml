@@ -5,7 +5,7 @@
     xmlns:local="clr-namespace:SpectrumNet"
     xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     Title="Control Panel"
-    Height="420" Width="730"
+    Height="450" Width="730"
     WindowStartupLocation="CenterOwner"
     Background="Transparent"
     AllowsTransparency="True"
@@ -20,11 +20,6 @@
             GlassFrameThickness="0"
             ResizeBorderThickness="6"/>
     </shell:WindowChrome.WindowChrome>
-
-    <Window.Resources>
-        <Duration x:Key="StandardAnimationDuration">0:0:0.3</Duration>
-        <CubicEase x:Key="StandardEaseOut" EasingMode="EaseOut"/>
-    </Window.Resources>
 
     <Border
         Background="{DynamicResource WindowBackgroundBrush}"
@@ -270,7 +265,7 @@
                                                     <Button
                                                         x:Name="favoriteButton"
                                                         Tag="{Binding}"
-                                                        Style="{StaticResource FavoriteButtonStyle}"
+                                                        Style="{DynamicResource FavoriteButtonStyle}"
                                                         Click="OnFavoriteButtonClick"/>
                                                     <TextBlock
                                                         Text="{Binding}"
@@ -368,7 +363,7 @@
                                     <ComboBox
                                         x:Name="RenderQualityComboBox"
                                         Grid.Row="1"
-                                        Style="{StaticResource ModernComboBoxStyle}"
+                                        Style="{DynamicResource ModernComboBoxStyle}"
                                         Height="24"
                                         HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                         ItemsSource="{Binding AvailableRenderQualities}"

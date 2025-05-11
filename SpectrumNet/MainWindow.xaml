@@ -15,11 +15,6 @@
         StateChanged="OnStateChanged"
         MouseDoubleClick="OnWindowMouseDoubleClick">
 
-    <Window.Resources>
-        <Duration x:Key="StandardAnimationDuration">0:0:0.3</Duration>
-        <CubicEase x:Key="StandardEaseOut" EasingMode="EaseOut"/>
-    </Window.Resources>
-
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0"
                             CornerRadius="0"
@@ -57,8 +52,8 @@
                                   Unchecked="OnThemeToggleButtonChanged"/>
 
                     <ContentControl Grid.Column="1"
-Content="Spectrum Analyser"
-                                    Style="{StaticResource SpectrumAnalyserTitleStyle}"
+                                    Content="Spectrum Analyser"
+                                    Style="{DynamicResource SpectrumAnalyserTitleStyle}"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"/>
 

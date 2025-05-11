@@ -4,29 +4,44 @@
              xmlns:local="clr-namespace:SpectrumNet"
              xmlns:service="clr-namespace:SpectrumNet.Service"
              xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/CommonResources.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/CommonConstants.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/BaseStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/Animations.xaml"/>
+
+                <ResourceDictionary Source="Themes/Converters.xaml"/>
+
                 <ResourceDictionary Source="Themes/DarkTheme.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/ButtonStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/TextStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/ComboboxStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/SliderStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/CheckBoxStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/ScrollBarStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/WindowStyles.xaml"/>
+                <ResourceDictionary Source="Themes/Resource/SpecialStyles.xaml"/>
+
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- Global styles -->
             <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
             <Style TargetType="Thumb" BasedOn="{StaticResource ScrollBarThumbStyle}"/>
-
-            <!-- Style for SKGLElement -->
+            <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}"/>
+            <Style TargetType="TextBox" BasedOn="{StaticResource ModernTextBoxStyle}"/>
+            <Style TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}"/>
+            <Style TargetType="ComboBox" BasedOn="{StaticResource ModernComboBoxStyle}"/>
+            <Style TargetType="Slider" BasedOn="{StaticResource ModernSliderStyle}"/>
+            <Style TargetType="CheckBox" BasedOn="{StaticResource ModernCheckBoxStyle}"/>
+            <Style TargetType="ToolTip" BasedOn="{StaticResource ToolTipStyle}"/>
+            <Style TargetType="ProgressBar" BasedOn="{StaticResource ModernProgressBarStyle}"/>
             <Style TargetType="skia:SKGLElement">
                 <Setter Property="SnapsToDevicePixels" Value="True"/>
                 <Setter Property="UseLayoutRounding" Value="True"/>
             </Style>
 
-            <!-- converter definition -->
-            <service:IsFavoriteConverter x:Key="IsFavoriteConverter"/>
-
-            <!-- Other converter -->
-            <service:PaletteNameToBrushConverter x:Key="PaletteNameToBrushConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

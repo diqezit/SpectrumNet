@@ -1,5 +1,6 @@
 ﻿#nullable enable
 
+using SpectrumNet.Themes;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace SpectrumNet;
