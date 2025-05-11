@@ -29,7 +29,11 @@ public partial class SettingsWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Log(LogLevel.Warning, LogPrefix, "Window position reset to center");
         }
-    }, new() { Source = LogPrefix, ErrorMessage = "Error ensuring window visibility" });
+    }, new()
+    {
+        Source = LogPrefix,
+        ErrorMessage = "Error ensuring window visibility"
+    });
 
     private void CopyPropertiesFrom(object source) => Safe(() =>
     {
@@ -67,24 +71,28 @@ public partial class SettingsWindow : Window
             var loadedSettings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(settingsPath));
             if (loadedSettings == null)
             {
-                Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings");
+                Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings. Using defaults.");
                 return;
             }
 
             CopyPropertiesFrom(loadedSettings);
             SaveOriginalSettings();
+
+            ThemeManager.Instance.SetTheme(_settings.IsDarkTheme);
+
             UpdateAllRenderers();
             Log(LogLevel.Information, LogPrefix, $"Settings loaded from {settingsPath}");
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}");
+            Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}. Using defaults.");
         }
-    }, new() { Source = LogPrefix, ErrorMessage = "Error loading settings" });
+    }, new() { Source = nameof(LoadSettings), ErrorMessage = "Error loading settings" });
 
     public void SaveSettings() => Safe(() =>
     {
         UpdateRenderers();
+
         string appDataPath = GetFolderPath(SpecialFolder.ApplicationData);
         string appFolder = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER);
 
@@ -92,6 +100,7 @@ public partial class SettingsWindow : Window
             Directory.CreateDirectory(appFolder);
 
         string settingsPath = Path.Combine(appFolder, DefaultSettings.SETTINGS_FILE);
+
         string json = JsonConvert.SerializeObject(_settings, new JsonSerializerSettings
         {
             Formatting = Formatting.Indented,
@@ -106,7 +115,7 @@ public partial class SettingsWindow : Window
             LogPrefix,
             $"Settings saved to {settingsPath}");
 
-    }, new() { Source = LogPrefix, ErrorMessage = "Error saving settings" });
+    }, new() { Source = nameof(SaveSettings), ErrorMessage = "Error saving settings" });
 
     public void ResetToDefaults() => Safe(() =>
     {
@@ -131,7 +140,7 @@ public partial class SettingsWindow : Window
 
     }, new()
     {
-        Source = LogPrefix,
+        Source = nameof(ResetToDefaults),
         ErrorMessage = "Error resetting settings",
 
         ExceptionHandler = ex => MessageBox.Show(
@@ -153,6 +162,9 @@ public partial class SettingsWindow : Window
 
         foreach (var (key, value) in _originalValues)
             _settings.GetType().GetProperty(key)?.SetValue(_settings, value);
+
+        ThemeManager.Instance.SetTheme(_settings.IsDarkTheme);
+        UpdateAllRenderers();
     }
 
     private void UpdateRenderers() => Safe(() =>
@@ -163,7 +175,7 @@ public partial class SettingsWindow : Window
             bool isOverlayActive = renderer.IsOverlayActive;
             renderer.Configure(isOverlayActive);
         }
-    }, new() { Source = LogPrefix, ErrorMessage = "Error updating renderer" });
+    }, new() { Source = nameof(UpdateRenderers), ErrorMessage = "Error updating renderer" });
 
     private void UpdateAllRenderers() => Safe(() =>
     {
@@ -173,7 +185,7 @@ public partial class SettingsWindow : Window
             bool isOverlayActive = renderer.IsOverlayActive;
             renderer.Configure(isOverlayActive, _settings.SelectedRenderQuality);
         }
-    }, new() { Source = LogPrefix, ErrorMessage = "Error updating renderers" });
+    }, new() { Source = nameof(UpdateAllRenderers), ErrorMessage = "Error updating renderers" });
 
     private void OnWindowDrag(object sender, MouseButtonEventArgs e)
     {
@@ -182,8 +194,13 @@ public partial class SettingsWindow : Window
     }
 
     private void Window_Closing(object sender, CancelEventArgs e) =>
-        Safe(() => { SaveSettings(); ThemeManager.Instance.UnregisterWindow(this); },
-            new() { Source = LogPrefix, ErrorMessage = "Error closing window" });
+        Safe(() =>
+        {
+            SaveSettings();
+            ThemeManager.Instance.UnregisterWindow(this);
+        },
+        nameof(Window_Closing),
+        "Error closing window");
 
     private void OnCloseButton_Click(object sender, RoutedEventArgs e)
     {
@@ -205,7 +222,7 @@ public partial class SettingsWindow : Window
 
     }, new()
     {
-        Source = LogPrefix,
+        Source = nameof(OnApplyButton_Click),
         ErrorMessage = "Error applying settings",
         ExceptionHandler = ex => MessageBox.Show(
             $"Error applying settings: {ex.Message}",

@@ -6,7 +6,6 @@ public class Settings : ISettings, INotifyPropertyChanged
 {
     private const string LogPrefix = "Settings";
 
-    // Поля для рендереров
     private int _maxParticles;
     private float _spawnThresholdOverlay, _spawnThresholdNormal,
                   _particleVelocityMin, _particleVelocityMax,
@@ -17,7 +16,6 @@ public class Settings : ISettings, INotifyPropertyChanged
                   _overlayOffsetMultiplier, _overlayHeightMultiplier,
                   _maxZDepth, _minZDepth;
 
-    // Поля для AsciiDonutRenderer
     private int _donutSegments, _donutLowQualitySkipFactor, _donutMediumQualitySkipFactor, _donutHighQualitySkipFactor;
     private float _donutRadius, _donutTubeRadius, _donutScale, _donutDepthOffset, _donutDepthScaleFactor,
                   _donutCharOffsetX, _donutCharOffsetY, _donutFontSize, _donutBaseRotationIntensity,
@@ -28,12 +26,10 @@ public class Settings : ISettings, INotifyPropertyChanged
                   _donutRotationIntensityMin, _donutRotationIntensityMax, _donutRotationIntensitySmoothingFactor;
     private string _donutAsciiChars = string.Empty;
 
-    // Поля для RaindropsRenderer
     private int _maxRaindrops;
     private float _baseFallSpeed, _raindropSize, _splashParticleSize, _splashUpwardForce, _speedVariation,
                   _intensitySpeedMultiplier, _timeScaleFactor, _maxTimeStep, _minTimeStep;
 
-    // Поля для UI настроек
     private double _windowLeft, _windowTop, _windowWidth, _windowHeight, _uiBarSpacing;
     private WindowState _windowState;
     private bool _isControlPanelVisible, _isOverlayTopmost, _isDarkTheme, _showPerformanceInfo, _limitFpsTo60;
@@ -48,11 +44,10 @@ public class Settings : ISettings, INotifyPropertyChanged
     [JsonIgnore]
     private PropertyChangedEventHandler? _propertyChanged;
 
-    // Синглтон
-    private static readonly Lazy<Settings> _instance = new(() => new Settings());
+    private static readonly Lazy<Settings> _instance = new(() => new());
     public static Settings Instance => _instance.Value;
 
-    public Settings() => ResetToDefaults();
+    public Settings() { }
 
     public event PropertyChangedEventHandler? PropertyChanged
     {
@@ -71,14 +66,10 @@ public class Settings : ISettings, INotifyPropertyChanged
     protected virtual void OnPropertyChanged(string propertyName) =>
         _propertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-    // свойство для хранения списка избранных рендеров
-
-    private ObservableCollection<RenderStyle> _favoriteRenderers = new ObservableCollection<RenderStyle>();
+    private ObservableCollection<RenderStyle> _favoriteRenderers = [];
 
     public ObservableCollection<RenderStyle> FavoriteRenderers { get => _favoriteRenderers; set => SetProperty(ref _favoriteRenderers, value); }
 
-
-    // Свойства для рендереров (с использованием выражений-методов)
     public float VelocityMultiplier { get => _velocityMultiplier; set => SetProperty(ref _velocityMultiplier, value); }
     public float AlphaDecayExponent { get => _alphaDecayExponent; set => SetProperty(ref _alphaDecayExponent, value); }
     public float SpawnProbability { get => _spawnProbability; set => SetProperty(ref _spawnProbability, value); }
@@ -96,7 +87,6 @@ public class Settings : ISettings, INotifyPropertyChanged
     public float MaxZDepth { get => _maxZDepth; set => SetProperty(ref _maxZDepth, value); }
     public float MinZDepth { get => _minZDepth; set => SetProperty(ref _minZDepth, value); }
 
-    // Свойства для RaindropsRenderer
     public int MaxRaindrops { get => _maxRaindrops; set => SetProperty(ref _maxRaindrops, value); }
     public float BaseFallSpeed { get => _baseFallSpeed; set => SetProperty(ref _baseFallSpeed, value); }
     public float RaindropSize { get => _raindropSize; set => SetProperty(ref _raindropSize, value); }
@@ -108,7 +98,6 @@ public class Settings : ISettings, INotifyPropertyChanged
     public float MaxTimeStep { get => _maxTimeStep; set => SetProperty(ref _maxTimeStep, value); }
     public float MinTimeStep { get => _minTimeStep; set => SetProperty(ref _minTimeStep, value); }
 
-    // Свойства для AsciiDonutRenderer
     public int DonutSegments { get => _donutSegments; set => SetProperty(ref _donutSegments, value); }
     public float DonutRadius { get => _donutRadius; set => SetProperty(ref _donutRadius, value); }
     public float DonutTubeRadius { get => _donutTubeRadius; set => SetProperty(ref _donutTubeRadius, value); }
@@ -140,7 +129,6 @@ public class Settings : ISettings, INotifyPropertyChanged
     public int DonutHighQualitySkipFactor { get => _donutHighQualitySkipFactor; set => SetProperty(ref _donutHighQualitySkipFactor, value); }
     public string DonutAsciiChars { get => _donutAsciiChars; set => SetProperty(ref _donutAsciiChars, value); }
 
-    // Свойства для UI настроек
     public double WindowLeft { get => _windowLeft; set => SetProperty(ref _windowLeft, value); }
     public double WindowTop { get => _windowTop; set => SetProperty(ref _windowTop, value); }
     public double WindowWidth { get => _windowWidth; set => SetProperty(ref _windowWidth, value); }
@@ -162,98 +150,94 @@ public class Settings : ISettings, INotifyPropertyChanged
     public bool IsDarkTheme { get => _isDarkTheme; set => SetProperty(ref _isDarkTheme, value); }
     public bool LimitFpsTo60 { get => _limitFpsTo60; set => SetProperty(ref _limitFpsTo60, value); }
 
-    // Сброс настроек к значениям по умолчанию с использованием SmartLogger.Safe для обработки ошибок
-    public void ResetToDefaults() => Safe(() =>
-    {
-        // Particle renderer settings
-        MaxParticles = DefaultSettings.MaxParticles;
-        SpawnThresholdOverlay = DefaultSettings.SpawnThresholdOverlay;
-        SpawnThresholdNormal = DefaultSettings.SpawnThresholdNormal;
-        ParticleVelocityMin = DefaultSettings.ParticleVelocityMin;
-        ParticleVelocityMax = DefaultSettings.ParticleVelocityMax;
-        ParticleSizeOverlay = DefaultSettings.ParticleSizeOverlay;
-        ParticleSizeNormal = DefaultSettings.ParticleSizeNormal;
-        ParticleLife = DefaultSettings.ParticleLife;
-        ParticleLifeDecay = DefaultSettings.ParticleLifeDecay;
-        VelocityMultiplier = DefaultSettings.VelocityMultiplier;
-        AlphaDecayExponent = DefaultSettings.AlphaDecayExponent;
-        SpawnProbability = DefaultSettings.SpawnProbability;
-        OverlayOffsetMultiplier = DefaultSettings.OverlayOffsetMultiplier;
-        OverlayHeightMultiplier = DefaultSettings.OverlayHeightMultiplier;
-        MaxZDepth = DefaultSettings.MaxZDepth;
-        MinZDepth = DefaultSettings.MinZDepth;
+    public void ResetToDefaults() => Safe(
+        () =>
+        {
+            MaxParticles = DefaultSettings.MaxParticles;
+            SpawnThresholdOverlay = DefaultSettings.SpawnThresholdOverlay;
+            SpawnThresholdNormal = DefaultSettings.SpawnThresholdNormal;
+            ParticleVelocityMin = DefaultSettings.ParticleVelocityMin;
+            ParticleVelocityMax = DefaultSettings.ParticleVelocityMax;
+            ParticleSizeOverlay = DefaultSettings.ParticleSizeOverlay;
+            ParticleSizeNormal = DefaultSettings.ParticleSizeNormal;
+            ParticleLife = DefaultSettings.ParticleLife;
+            ParticleLifeDecay = DefaultSettings.ParticleLifeDecay;
+            VelocityMultiplier = DefaultSettings.VelocityMultiplier;
+            AlphaDecayExponent = DefaultSettings.AlphaDecayExponent;
+            SpawnProbability = DefaultSettings.SpawnProbability;
+            OverlayOffsetMultiplier = DefaultSettings.OverlayOffsetMultiplier;
+            OverlayHeightMultiplier = DefaultSettings.OverlayHeightMultiplier;
+            MaxZDepth = DefaultSettings.MaxZDepth;
+            MinZDepth = DefaultSettings.MinZDepth;
 
-        // Raindrops renderer settings
-        MaxRaindrops = DefaultSettings.MaxRaindrops;
-        BaseFallSpeed = DefaultSettings.BaseFallSpeed;
-        RaindropSize = DefaultSettings.RaindropSize;
-        SplashParticleSize = DefaultSettings.SplashParticleSize;
-        SplashUpwardForce = DefaultSettings.SplashUpwardForce;
-        SpeedVariation = DefaultSettings.SpeedVariation;
-        IntensitySpeedMultiplier = DefaultSettings.IntensitySpeedMultiplier;
-        TimeScaleFactor = DefaultSettings.TimeScaleFactor;
-        MaxTimeStep = DefaultSettings.MaxTimeStep;
-        MinTimeStep = DefaultSettings.MinTimeStep;
+            MaxRaindrops = DefaultSettings.MaxRaindrops;
+            BaseFallSpeed = DefaultSettings.BaseFallSpeed;
+            RaindropSize = DefaultSettings.RaindropSize;
+            SplashParticleSize = DefaultSettings.SplashParticleSize;
+            SplashUpwardForce = DefaultSettings.SplashUpwardForce;
+            SpeedVariation = DefaultSettings.SpeedVariation;
+            IntensitySpeedMultiplier = DefaultSettings.IntensitySpeedMultiplier;
+            TimeScaleFactor = DefaultSettings.TimeScaleFactor;
+            MaxTimeStep = DefaultSettings.MaxTimeStep;
+            MinTimeStep = DefaultSettings.MinTimeStep;
 
-        // ASCII Donut renderer settings
-        DonutSegments = DefaultSettings.DonutRenderer.Segments;
-        DonutRadius = DefaultSettings.DonutRenderer.DonutRadius;
-        DonutTubeRadius = DefaultSettings.DonutRenderer.TubeRadius;
-        DonutScale = DefaultSettings.DonutRenderer.DonutScale;
-        DonutDepthOffset = DefaultSettings.DonutRenderer.DepthOffset;
-        DonutDepthScaleFactor = DefaultSettings.DonutRenderer.DepthScaleFactor;
-        DonutCharOffsetX = DefaultSettings.DonutRenderer.CharOffsetX;
-        DonutCharOffsetY = DefaultSettings.DonutRenderer.CharOffsetY;
-        DonutFontSize = DefaultSettings.DonutRenderer.FontSize;
-        DonutBaseRotationIntensity = DefaultSettings.DonutRenderer.BaseRotationIntensity;
-        DonutSpectrumIntensityScale = DefaultSettings.DonutRenderer.SpectrumIntensityScale;
-        DonutSmoothingFactorSpectrum = DefaultSettings.DonutRenderer.SmoothingFactorSpectrum;
-        DonutSmoothingFactorRotation = DefaultSettings.DonutRenderer.SmoothingFactorRotation;
-        DonutMaxRotationAngleChange = DefaultSettings.DonutRenderer.MaxRotationAngleChange;
-        DonutRotationSpeedX = DefaultSettings.DonutRenderer.RotationSpeedX;
-        DonutRotationSpeedY = DefaultSettings.DonutRenderer.RotationSpeedY;
-        DonutRotationSpeedZ = DefaultSettings.DonutRenderer.RotationSpeedZ;
-        DonutBarCountScaleFactorDonutScale = DefaultSettings.DonutRenderer.BarCountScaleFactorDonutScale;
-        DonutBarCountScaleFactorAlpha = DefaultSettings.DonutRenderer.BarCountScaleFactorAlpha;
-        DonutBaseAlphaIntensity = DefaultSettings.DonutRenderer.BaseAlphaIntensity;
-        DonutMaxSpectrumAlphaScale = DefaultSettings.DonutRenderer.MaxSpectrumAlphaScale;
-        DonutMinAlphaValue = DefaultSettings.DonutRenderer.MinAlphaValue;
-        DonutAlphaRange = DefaultSettings.DonutRenderer.AlphaRange;
-        DonutRotationIntensityMin = DefaultSettings.DonutRenderer.RotationIntensityMin;
-        DonutRotationIntensityMax = DefaultSettings.DonutRenderer.RotationIntensityMax;
-        DonutRotationIntensitySmoothingFactor = DefaultSettings.DonutRenderer.RotationIntensitySmoothingFactor;
-        DonutLowQualitySkipFactor = DefaultSettings.DonutRenderer.LowQualitySkipFactor;
-        DonutMediumQualitySkipFactor = DefaultSettings.DonutRenderer.MediumQualitySkipFactor;
-        DonutHighQualitySkipFactor = DefaultSettings.DonutRenderer.HighQualitySkipFactor;
-        DonutAsciiChars = DefaultSettings.DonutRenderer.AsciiChars;
+            DonutSegments = DefaultSettings.DonutRenderer.Segments;
+            DonutRadius = DefaultSettings.DonutRenderer.DonutRadius;
+            DonutTubeRadius = DefaultSettings.DonutRenderer.TubeRadius;
+            DonutScale = DefaultSettings.DonutRenderer.DonutScale;
+            DonutDepthOffset = DefaultSettings.DonutRenderer.DepthOffset;
+            DonutDepthScaleFactor = DefaultSettings.DonutRenderer.DepthScaleFactor;
+            DonutCharOffsetX = DefaultSettings.DonutRenderer.CharOffsetX;
+            DonutCharOffsetY = DefaultSettings.DonutRenderer.CharOffsetY;
+            DonutFontSize = DefaultSettings.DonutRenderer.FontSize;
+            DonutBaseRotationIntensity = DefaultSettings.DonutRenderer.BaseRotationIntensity;
+            DonutSpectrumIntensityScale = DefaultSettings.DonutRenderer.SpectrumIntensityScale;
+            DonutSmoothingFactorSpectrum = DefaultSettings.DonutRenderer.SmoothingFactorSpectrum;
+            DonutSmoothingFactorRotation = DefaultSettings.DonutRenderer.SmoothingFactorRotation;
+            DonutMaxRotationAngleChange = DefaultSettings.DonutRenderer.MaxRotationAngleChange;
+            DonutRotationSpeedX = DefaultSettings.DonutRenderer.RotationSpeedX;
+            DonutRotationSpeedY = DefaultSettings.DonutRenderer.RotationSpeedY;
+            DonutRotationSpeedZ = DefaultSettings.DonutRenderer.RotationSpeedZ;
+            DonutBarCountScaleFactorDonutScale = DefaultSettings.DonutRenderer.BarCountScaleFactorDonutScale;
+            DonutBarCountScaleFactorAlpha = DefaultSettings.DonutRenderer.BarCountScaleFactorAlpha;
+            DonutBaseAlphaIntensity = DefaultSettings.DonutRenderer.BaseAlphaIntensity;
+            DonutMaxSpectrumAlphaScale = DefaultSettings.DonutRenderer.MaxSpectrumAlphaScale;
+            DonutMinAlphaValue = DefaultSettings.DonutRenderer.MinAlphaValue;
+            DonutAlphaRange = DefaultSettings.DonutRenderer.AlphaRange;
+            DonutRotationIntensityMin = DefaultSettings.DonutRenderer.RotationIntensityMin;
+            DonutRotationIntensityMax = DefaultSettings.DonutRenderer.RotationIntensityMax;
+            DonutRotationIntensitySmoothingFactor = DefaultSettings.DonutRenderer.RotationIntensitySmoothingFactor;
+            DonutLowQualitySkipFactor = DefaultSettings.DonutRenderer.LowQualitySkipFactor;
+            DonutMediumQualitySkipFactor = DefaultSettings.DonutRenderer.MediumQualitySkipFactor;
+            DonutHighQualitySkipFactor = DefaultSettings.DonutRenderer.HighQualitySkipFactor;
+            DonutAsciiChars = DefaultSettings.DonutRenderer.AsciiChars;
 
-        // UI настройки
-        WindowLeft = DefaultSettings.WindowLeft;
-        WindowTop = DefaultSettings.WindowTop;
-        WindowWidth = DefaultSettings.WindowWidth;
-        WindowHeight = DefaultSettings.WindowHeight;
-        WindowState = DefaultSettings.WindowState;
-        IsControlPanelVisible = DefaultSettings.IsControlPanelVisible;
-        SelectedRenderStyle = DefaultSettings.SelectedRenderStyle;
-        SelectedFftWindowType = DefaultSettings.SelectedFftWindowType;
-        SelectedScaleType = DefaultSettings.SelectedScaleType;
-        SelectedRenderQuality = DefaultSettings.SelectedRenderQuality;
-        UIBarCount = DefaultSettings.UIBarCount;
-        UIBarSpacing = DefaultSettings.UIBarSpacing;
-        SelectedPalette = DefaultSettings.SelectedPalette;
-        IsOverlayTopmost = DefaultSettings.IsOverlayTopmost;
-        ShowPerformanceInfo = DefaultSettings.ShowPerformanceInfo;
-        UIMinDbLevel = DefaultSettings.UIMinDbLevel;
-        UIMaxDbLevel = DefaultSettings.UIMaxDbLevel;
-        UIAmplificationFactor = DefaultSettings.UIAmplificationFactor;
-        IsDarkTheme = DefaultSettings.IsDarkTheme;
-        LimitFpsTo60 = DefaultSettings.LimitFpsTo60;
+            WindowLeft = DefaultSettings.WindowLeft;
+            WindowTop = DefaultSettings.WindowTop;
+            WindowWidth = DefaultSettings.WindowWidth;
+            WindowHeight = DefaultSettings.WindowHeight;
+            WindowState = DefaultSettings.WindowState;
+            IsControlPanelVisible = DefaultSettings.IsControlPanelVisible;
+            SelectedRenderStyle = DefaultSettings.SelectedRenderStyle;
+            SelectedFftWindowType = DefaultSettings.SelectedFftWindowType;
+            SelectedScaleType = DefaultSettings.SelectedScaleType;
+            SelectedRenderQuality = DefaultSettings.SelectedRenderQuality;
+            UIBarCount = DefaultSettings.UIBarCount;
+            UIBarSpacing = DefaultSettings.UIBarSpacing;
+            SelectedPalette = DefaultSettings.SelectedPalette;
+            IsOverlayTopmost = DefaultSettings.IsOverlayTopmost;
+            ShowPerformanceInfo = DefaultSettings.ShowPerformanceInfo;
+            UIMinDbLevel = DefaultSettings.UIMinDbLevel;
+            UIMaxDbLevel = DefaultSettings.UIMaxDbLevel;
+            UIAmplificationFactor = DefaultSettings.UIAmplificationFactor;
+            IsDarkTheme = DefaultSettings.IsDarkTheme;
+            LimitFpsTo60 = DefaultSettings.LimitFpsTo60;
 
-        Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
-    },
-    new ErrorHandlingOptions
-    {
-        Source = nameof(ResetToDefaults),
-        ErrorMessage = "Ошибка сброса настроек к значениям по умолчанию"
-    });
+            Log(
+                LogLevel.Information,
+                LogPrefix,
+                "Settings have been reset to defaults");
+        },
+        nameof(ResetToDefaults),
+        "Ошибка сброса настроек к значениям по умолчанию");
 }
