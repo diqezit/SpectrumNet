@@ -2,57 +2,34 @@
 
 namespace SpectrumNet.Controllers.Input;
 
-public class MouseInputHandler : IInputHandler
+public class MouseInputHandler(IMainController controller) : IInputHandler
 {
-    private readonly IMainController _controller;
+    private readonly IMainController _controller = controller;
     private bool _isTrackingMouse;
-
-    public MouseInputHandler(IMainController controller)
-    {
-        _controller = controller ?? throw new ArgumentNullException(nameof(controller));
-    }
 
     public bool HandleMouseDown(object? sender, MouseButtonEventArgs e)
     {
-        if (sender is not UIElement element || e.LeftButton != MouseButtonState.Pressed)
+        if (!TryGetUiElementAndSkPoint(sender, e, out var element, out var skPoint)
+            || e.LeftButton != MouseButtonState.Pressed)
             return false;
 
-        var point = e.GetPosition(element);
-        var skPoint = new SKPoint((float)point.X, (float)point.Y);
-
-        if (_controller.Renderer?.ShouldShowPlaceholder == true)
-        {
-            var placeholder = _controller.Renderer.GetPlaceholder();
-            if (placeholder?.HitTest(skPoint) == true)
-            {
-                _controller.Renderer.HandlePlaceholderMouseDown(skPoint);
-                element.CaptureMouse();
-                _isTrackingMouse = true;
-                e.Handled = true;
-                _controller.SpectrumCanvas.InvalidateVisual();
-                return true;
-            }
-        }
+        if (TryHandlePlaceholderMouseDown(element, skPoint, e))
+            return true;
 
         return false;
     }
 
     public bool HandleMouseMove(object? sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (sender is not UIElement element)
+        if (!TryGetUiElementAndSkPoint(sender, e, out _, out var skPoint))
             return false;
 
-        var point = e.GetPosition(element);
-        var skPoint = new SKPoint((float)point.X, (float)point.Y);
+        HandlePlaceholderMouseMoveIfRelevant(skPoint);
 
-        if (_controller.Renderer?.ShouldShowPlaceholder == true)
+        if (_isTrackingMouse)
         {
-            _controller.Renderer.HandlePlaceholderMouseMove(skPoint);
-            if (_isTrackingMouse)
-            {
-                _controller.SpectrumCanvas.InvalidateVisual();
-                return true;
-            }
+            _controller.SpectrumCanvas?.InvalidateVisual();
+            return true;
         }
 
         return false;
@@ -60,46 +37,35 @@ public class MouseInputHandler : IInputHandler
 
     public bool HandleMouseUp(object? sender, MouseButtonEventArgs e)
     {
-        if (sender is not UIElement element || e.LeftButton != MouseButtonState.Released || !_isTrackingMouse)
+        if (!TryGetUiElementAndSkPoint(sender, e, out var element, out var skPoint)
+            || e.LeftButton != MouseButtonState.Released
+            || !_isTrackingMouse)
             return false;
 
-        var point = e.GetPosition(element);
-        var skPoint = new SKPoint((float)point.X, (float)point.Y);
+        HandlePlaceholderMouseUpIfRelevant(skPoint);
 
-        if (_controller.Renderer?.ShouldShowPlaceholder == true)
-        {
-            _controller.Renderer.HandlePlaceholderMouseUp(skPoint);
-        }
+        ReleaseMouseCaptureAndTracking(element);
 
-        element.ReleaseMouseCapture();
-        _isTrackingMouse = false;
-        _controller.SpectrumCanvas.InvalidateVisual();
+        _controller.SpectrumCanvas?.InvalidateVisual();
+
         e.Handled = true;
         return true;
     }
 
     public bool HandleMouseDoubleClick(object? sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left || sender is not FrameworkElement)
+        if (e.ChangedButton != MouseButton.Left
+            || sender is not FrameworkElement)
             return false;
 
-        if (IsControlOfType<CheckBox>(e.OriginalSource as DependencyObject))
+        if (TryHandleCheckBoxDoubleClick(e.OriginalSource as DependencyObject, e))
         {
-            e.Handled = true;
             return true;
         }
 
-        if (_controller.Renderer?.ShouldShowPlaceholder == true)
+        if (TryHandlePlaceholderDoubleClick(e))
         {
-            var position = e.GetPosition(_controller.SpectrumCanvas);
-            var skPoint = new SKPoint((float)position.X, (float)position.Y);
-            var placeholder = _controller.Renderer.GetPlaceholder();
-
-            if (placeholder?.HitTest(skPoint) == true)
-            {
-                e.Handled = true;
-                return true;
-            }
+            return true;
         }
 
         e.Handled = true;
@@ -108,6 +74,76 @@ public class MouseInputHandler : IInputHandler
     }
 
     public void HandleMouseEnter(object? sender, System.Windows.Input.MouseEventArgs e)
+        => HandlePlaceholderMouseEnterIfRelevant();
+
+    public void HandleMouseLeave(object? sender, System.Windows.Input.MouseEventArgs e)
+    {
+        HandlePlaceholderMouseLeaveIfRelevant();
+
+        if (_isTrackingMouse && sender is UIElement element)
+        {
+            var point = e.GetPosition(element);
+            var skPoint = new SKPoint((float)point.X, (float)point.Y);
+
+            _controller.Renderer?.HandlePlaceholderMouseUp(skPoint);
+
+            ReleaseMouseCaptureAndTracking(element);
+        }
+    }
+
+    private static bool TryGetUiElementAndSkPoint(
+        object? sender,
+        System.Windows.Input.MouseEventArgs e,
+        [NotNullWhen(true)] out UIElement? element,
+        out SKPoint skPoint)
+    {
+        element = sender as UIElement;
+        if (element is null)
+        {
+            skPoint = default;
+            return false;
+        }
+
+        var point = e.GetPosition(element);
+        skPoint = new SKPoint((float)point.X, (float)point.Y);
+        return true;
+    }
+
+    private bool TryHandlePlaceholderMouseDown(UIElement element, SKPoint skPoint, MouseButtonEventArgs e)
+    {
+        if (_controller.Renderer?.ShouldShowPlaceholder != true)
+            return false;
+
+        var placeholder = _controller.Renderer.GetPlaceholder();
+        if (placeholder?.HitTest(skPoint) == true)
+        {
+            _controller.Renderer.HandlePlaceholderMouseDown(skPoint);
+            element.CaptureMouse();
+            _isTrackingMouse = true;
+            e.Handled = true;
+            _controller.SpectrumCanvas?.InvalidateVisual();
+            return true;
+        }
+        return false;
+    }
+
+    private void HandlePlaceholderMouseMoveIfRelevant(SKPoint skPoint)
+    {
+        if (_controller.Renderer?.ShouldShowPlaceholder == true)
+        {
+            _controller.Renderer.HandlePlaceholderMouseMove(skPoint);
+        }
+    }
+
+    private void HandlePlaceholderMouseUpIfRelevant(SKPoint skPoint)
+    {
+        if (_controller.Renderer?.ShouldShowPlaceholder == true)
+        {
+            _controller.Renderer.HandlePlaceholderMouseUp(skPoint);
+        }
+    }
+
+    private void HandlePlaceholderMouseEnterIfRelevant()
     {
         if (_controller.Renderer?.ShouldShowPlaceholder == true)
         {
@@ -115,22 +151,48 @@ public class MouseInputHandler : IInputHandler
         }
     }
 
-    public void HandleMouseLeave(object? sender, System.Windows.Input.MouseEventArgs e)
+    private void HandlePlaceholderMouseLeaveIfRelevant()
     {
         if (_controller.Renderer?.ShouldShowPlaceholder == true)
         {
             _controller.Renderer.HandlePlaceholderMouseLeave();
         }
+    }
 
-        if (_isTrackingMouse && sender is UIElement element)
+    private static bool TryHandleCheckBoxDoubleClick(DependencyObject? originalSource, MouseButtonEventArgs e)
+    {
+        if (IsControlOfType<CheckBox>(originalSource))
         {
-            var point = e.GetPosition(element);
-            var skPoint = new SKPoint((float)point.X, (float)point.Y);
-            _controller.Renderer?.HandlePlaceholderMouseUp(skPoint);
-
-            element.ReleaseMouseCapture();
-            _isTrackingMouse = false;
+            e.Handled = true;
+            return true;
         }
+        return false;
+    }
+
+    private bool TryHandlePlaceholderDoubleClick(MouseButtonEventArgs e)
+    {
+        if (_controller.Renderer?.ShouldShowPlaceholder != true || _controller.SpectrumCanvas is null)
+            return false;
+
+        var position = e.GetPosition(_controller.SpectrumCanvas);
+        var skPoint = new SKPoint((float)position.X, (float)position.Y);
+        var placeholder = _controller.Renderer.GetPlaceholder();
+
+        if (placeholder?.HitTest(skPoint) == true)
+        {
+            e.Handled = true;
+            return true;
+        }
+        return false;
+    }
+
+    private void ReleaseMouseCaptureAndTracking(UIElement element)
+    {
+        if (Mouse.Captured == element)
+        {
+            element.ReleaseMouseCapture();
+        }
+        _isTrackingMouse = false;
     }
 
     private static bool IsControlOfType<T>(DependencyObject? element) where T : DependencyObject
@@ -138,12 +200,12 @@ public class MouseInputHandler : IInputHandler
         while (element is not null)
         {
             if (element is T) return true;
-            element = GetParent(element);
+            element = VisualTreeHelper.GetParent(element);
         }
         return false;
     }
 
-    private void ToggleWindowState()
+    private static void ToggleWindowState()
     {
         if (Application.Current?.MainWindow is Window window)
         {
