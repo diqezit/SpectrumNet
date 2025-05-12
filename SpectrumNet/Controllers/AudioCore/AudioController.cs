@@ -174,6 +174,8 @@ public class AudioController : AsyncDisposableBase, IAudioController
             return;
         }
 
+        _lastOperationTime = DateTime.Now;
+
         try
         {
             if (!IsRecording)
@@ -192,28 +194,14 @@ public class AudioController : AsyncDisposableBase, IAudioController
                 return;
             }
 
-            _operationLock.Release();
+            await captureManager.StopCaptureAsync();
+            await Task.Delay(OPERATION_COOLDOWN_MS);
 
-            try
-            {
-                await captureManager.StopCaptureAsync();
-                await Task.Delay(OPERATION_COOLDOWN_MS);
-
-                _lastOperationTime = DateTime.Now;
-                _mainController.OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
-            }
-            finally
-            {
-                // Не пытаемся повторно захватить блокировку здесь
-            }
+            _mainController.OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
         }
-        catch
+        finally
         {
-            if (await TryAcquireOperationLock(0))
-            {
-                _operationLock.Release();
-            }
-            throw;
+            _operationLock.Release();
         }
     }
 
