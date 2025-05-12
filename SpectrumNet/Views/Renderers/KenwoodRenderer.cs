@@ -22,14 +22,57 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         public const float
             ANIMATION_SPEED = 0.85f,
             PEAK_FALL_SPEED = 0.007f,
-            PEAK_HOLD_TIME_MS = 500,
+            PEAK_HOLD_TIME_MS = 500f,
             SPECTRUM_WEIGHT = 0.3f,
             BOOST_FACTOR = 0.3f,
-            PEAK_HEIGHT = 3f;
+            PEAK_HEIGHT = 3f,
+            OVERLAY_ALPHA_FACTOR = 0.8f,
+            OVERLAY_SMOOTHING_FACTOR = 0.5f,
+            NORMAL_SMOOTHING_FACTOR = 0.3f,
+            OVERLAY_TRANSITION_SMOOTHNESS = 0.7f,
+            NORMAL_TRANSITION_SMOOTHNESS = 0.5f,
+            OVERLAY_RENDERER_SMOOTHING_FACTOR = 0.6f,
+            NORMAL_RENDERER_SMOOTHING_FACTOR_MULTIPLIER = 0.2f;
 
         public const int
-            MAX_BUFFER_POOL_SIZE = 16,
-            INITIAL_BUFFER_SIZE = 1024;
+            MAX_BUFFER_POOL_SIZE = 12,
+            INITIAL_BUFFER_SIZE = 1024,
+            BATCH_SIZE = 64,
+            MAX_PARALLEL_THREADS = 2,
+            HIGH_RENDER_STEP_THRESHOLD = 120,
+            BATCH_SIZE_LARGE = 128,
+            SIMD_THRESHOLD = 8,
+            SMALL_BAR_COUNT_THRESHOLD = 32,
+            SPECTRUM_HALF_DIVIDER = 2,
+            DISPOSE_WAIT_TIMEOUT = 500,
+            PARALLEL_THRESHOLD = 128,
+            SMALL_BUFFER_COUNT = 4;
+
+        public const float
+            MIN_VISIBLE_VALUE = 1.0f,
+            VELOCITY_DAMPING = 0.8f,
+            SPRING_STIFFNESS = 0.2f,
+            MAX_CHANGE_THRESHOLD = 0.3f,
+            CHANGE_RATIO_DIVISOR = 0.7f,
+            SMOOTH_FACTOR_MIN_MULTIPLIER = 0.3f,
+            SMOOTH_FACTOR_DELTA_MULTIPLIER = 0.5f,
+            SIMPLIFIED_BAR_PEAK_FALL_RATE = 2.0f,
+            SHADOW_OFFSET_HIGH = 2.0f,
+            SHADOW_OFFSET_MEDIUM = 1.5f,
+            MIN_DELTA_THRESHOLD = 0.001f,
+            MIN_CANVAS_HEIGHT = 5f,
+            CANVAS_SIZE_CHANGE_THRESHOLD = 0.5f,
+            MIN_BAR_COUNT = 2,
+            PEAK_ANIMATION_THRESHOLD = 0.5f,
+            SMALL_BAR_VALUE_MIN = 0f,
+            SMALL_BAR_VALUE_MAX = 1f,
+            CALCULATION_SLEEP_MS = 100f,
+            CALCULATION_WAIT_TIME_MS = 50;
+
+        public const int
+            MAX_BAR_COUNT_MEDIUM_HIGH = 150,
+            MAX_BAR_COUNT_HIGH_OVERLAY = 125,
+            MAX_BAR_COUNT_MEDIUM_OVERLAY = 150;
 
         public static class Quality
         {
@@ -45,26 +88,26 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
             public const float
                 LOW_SMOOTHING_FACTOR = 0.3f,
-                MEDIUM_SMOOTHING_FACTOR = 1.5f,
-                HIGH_SMOOTHING_FACTOR = 1.5f;
+                MEDIUM_SMOOTHING_FACTOR = 0.8f,
+                HIGH_SMOOTHING_FACTOR = 1.0f;
 
             public const float
                 LOW_TRANSITION_SMOOTHNESS = 0.5f,
-                MEDIUM_TRANSITION_SMOOTHNESS = 1f,
-                HIGH_TRANSITION_SMOOTHNESS = 1f;
+                MEDIUM_TRANSITION_SMOOTHNESS = 0.7f,
+                HIGH_TRANSITION_SMOOTHNESS = 0.8f;
 
             public const float
-                MEDIUM_GLOW_RADIUS = 3.0f,
-                MEDIUM_GLOW_INTENSITY = 0.4f,
-                MEDIUM_SHADOW_BLUR = 4.0f,
-                MEDIUM_SHADOW_OPACITY = 0.5f;
+                MEDIUM_GLOW_RADIUS = 2.0f,
+                MEDIUM_GLOW_INTENSITY = 0.3f,
+                MEDIUM_SHADOW_BLUR = 2.0f,
+                MEDIUM_SHADOW_OPACITY = 0.4f;
 
             public const float
-                HIGH_GLOW_RADIUS = 6.0f,
-                HIGH_GLOW_INTENSITY = 0.6f,
-                HIGH_SHADOW_BLUR = 8.0f,
-                HIGH_SHADOW_OPACITY = 0.7f,
-                HIGH_BAR_BLUR = 1.0f;
+                HIGH_GLOW_RADIUS = 3.0f,
+                HIGH_GLOW_INTENSITY = 0.4f,
+                HIGH_SHADOW_BLUR = 3.0f,
+                HIGH_SHADOW_OPACITY = 0.5f,
+                HIGH_BAR_BLUR = 0.5f;
 
             public const bool
                 LOW_USE_SHADOWS = false,
@@ -85,21 +128,22 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         public const RenderQuality DEFAULT_QUALITY = RenderQuality.Medium;
     }
 
-    private bool 
+    private bool
         _useShadows,
         _useGlow,
         _useBarBlur;
 
-    private float 
+    private float
         _glowRadius,
         _glowIntensity,
         _shadowBlur,
         _shadowOpacity,
         _barBlur,
         _rendererSmoothingFactor,
-        _transitionSmoothness;
+        _transitionSmoothness,
+        _overlayAlphaFactor = 1.0f;
 
-    private float 
+    private float
         _lastCanvasHeight,
         _pendingCanvasHeight;
 
@@ -109,19 +153,19 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         _peakHoldTime = PEAK_HOLD_TIME_MS,
         _peakHeight = PEAK_HEIGHT;
 
-    private int 
-        _currentBarCount, 
+    private int
+        _currentBarCount,
         _lastRenderCount,
         _pendingBarCount;
 
-    private float[]? 
+    private float[]?
         _previousSpectrumBuffer,
-        _peaks, 
-        _renderBarValues, 
+        _peaks,
+        _renderBarValues,
         _renderPeaks,
-        _processingBarValues, 
-        _processingPeaks, 
-        _pendingSpectrum, 
+        _processingBarValues,
+        _processingPeaks,
+        _pendingSpectrum,
         _velocities;
 
     private DateTime[]? _peakHoldTimes;
@@ -161,15 +205,20 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         new(255, 230, 0, 255), new(255, 180, 0, 255),
         new(255, 80, 0, 255), new(255, 30, 0, 255)
     ];
+
     private static readonly float[] _barColorPositions =
         [0f, 0.6f, 0.6f, 0.85f, 0.85f, 1f];
 
     private Task? _calculationTask;
     private CancellationTokenSource? _calculationCts;
 
-    private volatile bool _buffersInitialized;
-    private volatile bool _isConfiguring;
-    private volatile bool _pathsNeedRebuild = true;
+    private volatile bool
+        _buffersInitialized,
+        _isConfiguring,
+        _pathsNeedRebuild = true,
+        _overlayStateChanged,
+        _overlayStateChangeRequested;
+
     protected override void OnInitialize()
     {
         ExecuteSafely(
@@ -220,7 +269,18 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         {
             _isConfiguring = true;
             bool configChanged = CheckConfigurationChange(isOverlayActive, quality);
+            bool overlayChanged = _isOverlayActive != isOverlayActive;
+
             ApplyConfiguration(isOverlayActive, quality);
+
+            if (overlayChanged)
+            {
+                _overlayStateChangeRequested = true;
+                _overlayStateChanged = true;
+                _overlayAlphaFactor = isOverlayActive ? OVERLAY_ALPHA_FACTOR : 1.0f;
+                Log(LogLevel.Information, LOG_PREFIX,
+                    $"Overlay state changed from {!isOverlayActive} to {isOverlayActive}");
+            }
 
             if (configChanged)
             {
@@ -236,10 +296,8 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     private bool CheckConfigurationChange(
         bool isOverlayActive,
-        RenderQuality quality)
-    {
-        return _isOverlayActive != isOverlayActive || Quality != quality;
-    }
+        RenderQuality quality) =>
+        _isOverlayActive != isOverlayActive || Quality != quality;
 
     private void ApplyConfiguration(
         bool isOverlayActive,
@@ -247,13 +305,14 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     {
         _isOverlayActive = isOverlayActive;
         Quality = quality;
-        base._smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+        base._smoothingFactor = isOverlayActive ? OVERLAY_SMOOTHING_FACTOR : NORMAL_SMOOTHING_FACTOR;
         _rendererSmoothingFactor = CalculateRendererSmoothingFactor(isOverlayActive);
-        _transitionSmoothness = isOverlayActive ? 0.7f : 0.5f;
+        _transitionSmoothness = isOverlayActive ? OVERLAY_TRANSITION_SMOOTHNESS : NORMAL_TRANSITION_SMOOTHNESS;
     }
 
-    private static float CalculateRendererSmoothingFactor(bool isOverlayActive) => 
-        isOverlayActive ? 0.6f : (MEDIUM_SMOOTHING_FACTOR * 0.2f);
+    private static float CalculateRendererSmoothingFactor(bool isOverlayActive) =>
+        isOverlayActive ? OVERLAY_RENDERER_SMOOTHING_FACTOR :
+                         (MEDIUM_SMOOTHING_FACTOR * NORMAL_RENDERER_SMOOTHING_FACTOR_MULTIPLIER);
 
     protected override void OnConfigurationChanged()
     {
@@ -268,7 +327,9 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     {
         Log(LogLevel.Information,
             LOG_PREFIX,
-            $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
+            $"Configuration changed. Quality: {Quality}, " +
+            $"Overlay: {_isOverlayActive}, " +
+            $"Alpha: {_overlayAlphaFactor}");
     }
 
     protected override void ApplyQualitySettings()
@@ -289,6 +350,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             _isConfiguring = true;
             base.ApplyQualitySettings();
             ApplyQualitySettingsInternal();
+            _overlayStateChanged = true;
         }
         finally
         {
@@ -377,6 +439,29 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             $"Shadows: {_useShadows}, Glow: {_useGlow}, BarBlur: {_useBarBlur}");
     }
 
+    private int LimitBarCount(int barCount)
+    {
+        if (Quality == RenderQuality.Low)
+            return barCount;
+
+        if (_isOverlayActive)
+        {
+            return Quality == RenderQuality.High
+                ? Math.Min(barCount, MAX_BAR_COUNT_HIGH_OVERLAY)
+                : Math.Min(barCount, MAX_BAR_COUNT_MEDIUM_OVERLAY);
+        }
+
+        return Math.Min(barCount, MAX_BAR_COUNT_MEDIUM_HIGH);
+    }
+
+    private static float CalculateBarWidthAdjustment(int requestedBarCount, int limitedBarCount)
+    {
+        if (requestedBarCount <= limitedBarCount)
+            return 1.0f;
+
+        return (float)requestedBarCount / limitedBarCount;
+    }
+
     protected override void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
@@ -390,10 +475,38 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             return;
 
         ExecuteSafely(
-            () => ExecuteRender(canvas, spectrum, info, barWidth, barSpacing, barCount),
+            () => RenderEffectInternal(canvas, spectrum, info, barWidth, barSpacing, barCount),
             nameof(RenderEffect),
             "Error during rendering"
         );
+    }
+
+    private void RenderEffectInternal(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount)
+    {
+        int limitedBarCount = LimitBarCount(barCount);
+        float widthAdjustment = CalculateBarWidthAdjustment(barCount, limitedBarCount);
+
+        float adjustedBarWidth = barWidth * widthAdjustment;
+        float adjustedBarSpacing = barSpacing * widthAdjustment;
+
+        if (_overlayStateChangeRequested)
+        {
+            _overlayStateChangeRequested = false;
+            _overlayStateChanged = true;
+        }
+
+        ExecuteRender(canvas, spectrum, info, adjustedBarWidth, adjustedBarSpacing, limitedBarCount);
+
+        if (_overlayStateChanged)
+        {
+            _overlayStateChanged = false;
+        }
     }
 
     private void ExecuteRender(
@@ -405,7 +518,6 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         int barCount)
     {
         float totalBarWidth = barWidth + barSpacing;
-
         UpdateState(canvas, spectrum, info, barCount);
         RenderFrame(canvas, info, barWidth, barSpacing, totalBarWidth);
     }
@@ -413,14 +525,20 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     protected override void OnInvalidateCachedResources()
     {
         ExecuteSafely(
-            LogResourceInvalidation,
+            () => {
+                _overlayStateChanged = true;
+                LogResourceInvalidation();
+            },
             nameof(OnInvalidateCachedResources),
             "Failed to invalidate cached resources"
         );
     }
 
-    private static void LogResourceInvalidation() => 
+    private static bool LogResourceInvalidation()
+    {
         Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+        return true;
+    }
 
     protected override void OnDispose()
     {
@@ -445,7 +563,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     private void InitializeBufferPools()
     {
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < SMALL_BUFFER_COUNT; i++)
         {
             _floatBufferPool.Enqueue(new float[INITIAL_BUFFER_SIZE]);
             _dateTimeBufferPool.Enqueue(new DateTime[INITIAL_BUFFER_SIZE]);
@@ -536,15 +654,115 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         float barSpacing,
         float totalBarWidth)
     {
-        if (_renderBarValues == null || _renderPeaks == null || _currentBarCount == 0)
+        if (!CheckRenderValidity())
             return;
 
-        int renderCount = Min(_currentBarCount, _renderBarValues.Length);
+        PreparePaths(info, barWidth, barSpacing, totalBarWidth);
+
+        if (_isOverlayActive)
+        {
+            RenderInOverlayMode(canvas);
+        }
+        else
+        {
+            RenderInStandardMode(canvas);
+        }
+    }
+
+    private void RenderInStandardMode(SKCanvas canvas)
+    {
+        if (ShouldRenderShadows())
+            RenderShadows(canvas);
+
+        RenderBars(canvas);
+
+        if (ShouldRenderGlow())
+            RenderGlow(canvas);
+
+        RenderPeaks(canvas);
+    }
+
+    private bool ShouldRenderShadows() =>
+        _useShadows &&
+        _cachedBarPath != null &&
+        !_cachedBarPath.IsEmpty &&
+        _cachedShadowPath != null;
+
+    private bool ShouldRenderGlow() =>
+        _useGlow &&
+        _cachedBarPath != null &&
+        !_cachedBarPath.IsEmpty;
+
+    private void RenderShadows(SKCanvas canvas)
+    {
+        using var shadowPaint = GetShadowPaint();
+        canvas.DrawPath(_cachedShadowPath!, shadowPaint);
+    }
+
+    private SKPaint GetShadowPaint()
+    {
+        var shadowPaint = _paintPool.Get();
+        shadowPaint.Color = SKColors.Black.WithAlpha((byte)(_shadowOpacity * 255));
+        shadowPaint.IsAntialias = UseAntiAlias;
+
+        if (_useAdvancedEffects)
+            shadowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _shadowBlur);
+
+        return shadowPaint;
+    }
+
+    private void RenderGlow(SKCanvas canvas)
+    {
+        using var glowPaint = GetGlowPaint();
+        canvas.DrawPath(_cachedBarPath!, glowPaint);
+    }
+
+    private SKPaint GetGlowPaint()
+    {
+        var glowPaint = _paintPool.Get();
+        glowPaint.Color = SKColors.White.WithAlpha((byte)(_glowIntensity * 255));
+        glowPaint.IsAntialias = UseAntiAlias;
+        glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _glowRadius);
+        glowPaint.Shader = _barGradient;
+        return glowPaint;
+    }
+
+    private bool CheckRenderValidity() =>
+        _renderBarValues != null &&
+        _renderPeaks != null &&
+        _currentBarCount > 0 &&
+        _renderBarValues.Length > 0;
+
+    private void PreparePaths(
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        float totalBarWidth)
+    {
+        int renderCount = Min(_currentBarCount, _renderBarValues?.Length ?? 0);
         if (renderCount <= 0)
             return;
 
         UpdatePathsIfNeeded(info, barWidth, barSpacing, totalBarWidth, renderCount);
-        RenderBarElements(canvas, info);
+    }
+
+    private void RenderInOverlayMode(SKCanvas canvas)
+    {
+        using var overlayPaint = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, (byte)(255 * _overlayAlphaFactor))
+        };
+
+        canvas.SaveLayer(overlayPaint);
+        try
+        {
+            RenderBars(canvas);
+            RenderPeaks(canvas);
+        }
+        finally
+        {
+            canvas.Restore();
+        }
     }
 
     private void UpdatePathsIfNeeded(
@@ -567,7 +785,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         SKCanvas canvas)
     {
         bool canvasSizeChanged =
-            MathF.Abs(_lastCanvasHeight - info.Height) > 0.5f;
+            MathF.Abs(_lastCanvasHeight - info.Height) > CANVAS_SIZE_CHANGE_THRESHOLD;
 
         if (canvasSizeChanged)
         {
@@ -623,7 +841,16 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         {
             try
             {
-                ProcessCalculationLoop(ct);
+                if (!_dataAvailableEvent.WaitOne((int)CALCULATION_WAIT_TIME_MS))
+                    continue;
+
+                if (ct.IsCancellationRequested)
+                    break;
+
+                var (data, barCount, canvasHeight) = ExtractPendingSpectrumData(ct);
+
+                if (data != null && data.Length > 0)
+                    ProcessSpectrumData(data, barCount, canvasHeight);
             }
             catch (OperationCanceledException)
             {
@@ -636,24 +863,10 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void ProcessCalculationLoop(CancellationToken ct)
-    {
-        if (!_dataAvailableEvent.WaitOne(50))
-            return;
-
-        if (ct.IsCancellationRequested)
-            return;
-
-        var (data, barCount, canvasHeight) = ExtractPendingSpectrumData(ct);
-
-        if (data != null && data.Length > 0)
-            ProcessSpectrumData(data, barCount, canvasHeight);
-    }
-
     private static void HandleCalculationError(Exception ex)
     {
         Log(LogLevel.Error, LOG_PREFIX, $"Calculation error: {ex.Message}");
-        Thread.Sleep(100);
+        Thread.Sleep((int)CALCULATION_SLEEP_MS);
     }
 
     private (float[]? data, int barCount, int canvasHeight) ExtractPendingSpectrumData(
@@ -692,36 +905,28 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
         InitializeBuffersIfNeeded(actualBarCount);
 
-        var (scaledSpectrum, computedBarValues, computedPeaks) =
-            PrepareBuffers(actualBarCount);
+        var (scaledSpectrum, computedBarValues, computedPeaks) = PrepareBuffers(actualBarCount);
 
         ScaleSpectrumData(spectrum, scaledSpectrum, actualBarCount, spectrumLength);
-        ProcessAnimation(scaledSpectrum, computedBarValues, computedPeaks,
-            canvasHeight, actualBarCount);
+        ProcessAnimation(scaledSpectrum, computedBarValues, computedPeaks, canvasHeight, actualBarCount);
         UpdateRenderingBuffers(computedBarValues, computedPeaks, actualBarCount);
         ReturnToPool(scaledSpectrum, computedBarValues, computedPeaks);
 
         _pathsNeedRebuild = true;
     }
 
-    private (float[] scaled, float[] bars, float[] peaks) PrepareBuffers(
-        int actualBarCount)
-    {
-        return (
-            GetFloatBuffer(actualBarCount),
-            GetFloatBuffer(actualBarCount),
-            GetFloatBuffer(actualBarCount)
-        );
-    }
+    private (float[] scaled, float[] bars, float[] peaks) PrepareBuffers(int actualBarCount) => (
+        GetFloatBuffer(actualBarCount),
+        GetFloatBuffer(actualBarCount),
+        GetFloatBuffer(actualBarCount)
+    );
 
     private static void ScaleSpectrumData(
         float[] spectrum,
         float[] scaledSpectrum,
         int actualBarCount,
-        int spectrumLength)
-    {
+        int spectrumLength) =>
         ScaleSpectrum(spectrum, scaledSpectrum, actualBarCount, spectrumLength);
-    }
 
     private void ProcessAnimation(
         float[] scaledSpectrum,
@@ -772,70 +977,62 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         int renderCount)
     {
         ResetAllPaths();
-        BuildSimpleBarPaths(info, barWidth, barSpacing, totalBarWidth, renderCount);
+        BuildPaths(info, barWidth, barSpacing, totalBarWidth, renderCount);
     }
 
-    private void BuildSimpleBarPaths(
+    private void BuildPaths(
         SKImageInfo info,
         float barWidth,
         float barSpacing,
         float totalBarWidth,
         int renderCount)
     {
-        if (_renderBarValues == null || _renderPeaks == null ||
-            _cachedBarPath == null || _cachedPeakPath == null)
+        if (!ValidatePathBuildingRequirements(renderCount))
             return;
 
-        float minVisibleValue = 1f;
-
-        for (int i = 0; i < renderCount && i < _renderBarValues.Length; i++)
-        {
-            float x = i * (barWidth + barSpacing);
-            AddBarAndPeak(info, barWidth, minVisibleValue, i, x);
-        }
+        int step = CalculateRenderStep(renderCount);
+        BuildVisibleBars(info, barWidth, barSpacing, renderCount, step);
     }
 
-    private void AddBarAndPeak(
+    private int CalculateRenderStep(int renderCount) =>
+        Quality == RenderQuality.High && renderCount > HIGH_RENDER_STEP_THRESHOLD ? 2 : 1;
+
+    private void BuildVisibleBars(
         SKImageInfo info,
         float barWidth,
-        float minVisibleValue,
-        int i,
-        float x)
+        float barSpacing,
+        int renderCount,
+        int step)
     {
-        float barValue = _renderBarValues![i];
-
-        if (barValue > minVisibleValue)
+        for (int i = 0; i < renderCount; i += step)
         {
-            AddBar(info, barWidth, x, barValue);
-            AddShadow(info, barWidth, x, barValue);
-        }
+            if (i >= _renderBarValues!.Length)
+                break;
 
-        if (i < _renderPeaks!.Length && _renderPeaks[i] > minVisibleValue)
-        {
-            AddPeak(info, barWidth, x, i);
+            float x = i * (barWidth + barSpacing);
+            float barValue = _renderBarValues[i];
+
+            BuildBarPath(info, x, barWidth, barValue);
+            BuildPeakPath(info, x, barWidth, i);
         }
     }
 
-    private void AddBar(
+    private void BuildBarPath(
         SKImageInfo info,
-        float barWidth,
         float x,
+        float barWidth,
         float barValue)
     {
+        if (barValue <= MIN_VISIBLE_VALUE)
+            return;
+
         float barTop = info.Height - barValue;
         _cachedBarPath!.AddRect(SKRect.Create(x, barTop, barWidth, barValue));
-    }
 
-    private void AddShadow(
-        SKImageInfo info,
-        float barWidth,
-        float x,
-        float barValue)
-    {
         if (_useShadows && _cachedShadowPath != null)
         {
-            float shadowOffset = 2f;
-            float barTop = info.Height - barValue;
+            float shadowOffset = Quality == RenderQuality.High ?
+                SHADOW_OFFSET_HIGH : SHADOW_OFFSET_MEDIUM;
             _cachedShadowPath.AddRect(SKRect.Create(
                 x + shadowOffset,
                 barTop + shadowOffset,
@@ -844,19 +1041,30 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void AddPeak(
+    private void BuildPeakPath(
         SKImageInfo info,
-        float barWidth,
         float x,
-        int i)
+        float barWidth,
+        int index)
     {
-        float peakY = info.Height - _renderPeaks![i];
+        if (index >= _renderPeaks!.Length || _renderPeaks[index] <= MIN_VISIBLE_VALUE)
+            return;
+
+        float peakY = info.Height - _renderPeaks[index];
         _cachedPeakPath!.AddRect(SKRect.Create(
             x,
             peakY - _peakHeight,
             barWidth,
             _peakHeight));
     }
+
+    private bool ValidatePathBuildingRequirements(int renderCount) =>
+        _renderBarValues != null &&
+        _renderPeaks != null &&
+        _cachedBarPath != null &&
+        _cachedPeakPath != null &&
+        renderCount > 0 &&
+        _renderBarValues.Length > 0;
 
     private void ResetAllPaths()
     {
@@ -865,38 +1073,13 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         _cachedShadowPath?.Reset();
     }
 
-    private void RenderBarElements(SKCanvas canvas, SKImageInfo info)
-    {
-        RenderShadows(canvas);
-        RenderBars(canvas);
-        RenderBarGlow(canvas);
-        RenderPeaks(canvas);
-    }
-
-    private void RenderShadows(SKCanvas canvas)
-    {
-        if (_useShadows && _cachedShadowPath != null)
-        {
-            var shadowPaint = ConfigureShadowPaint();
-            canvas.DrawPath(_cachedShadowPath, shadowPaint);
-        }
-    }
-
-    private SKPaint ConfigureShadowPaint()
-    {
-        var shadowPaint = _shadowPaint;
-        shadowPaint.Color = SKColors.Black.WithAlpha((byte)(_shadowOpacity * 255));
-        shadowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _shadowBlur);
-        return shadowPaint;
-    }
-
     private void RenderBars(SKCanvas canvas)
     {
-        if (_cachedBarPath != null)
-        {
-            using var barPaint = CreateBarPaint();
-            canvas.DrawPath(_cachedBarPath, barPaint);
-        }
+        if (_cachedBarPath == null || _cachedBarPath.IsEmpty)
+            return;
+
+        using var barPaint = CreateBarPaint();
+        canvas.DrawPath(_cachedBarPath, barPaint);
     }
 
     private SKPaint CreateBarPaint()
@@ -904,34 +1087,18 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         var barPaint = CreateStandardPaint(SKColors.White);
         barPaint.Shader = _barGradient;
 
-        if (_useBarBlur)
+        if (_useBarBlur && _useAdvancedEffects)
             barPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _barBlur);
 
         return barPaint;
     }
 
-    private void RenderBarGlow(SKCanvas canvas)
-    {
-        if (_useGlow && _cachedBarPath != null)
-        {
-            var glowPaint = ConfigureGlowPaint();
-            canvas.DrawPath(_cachedBarPath, glowPaint);
-        }
-    }
-
-    private SKPaint ConfigureGlowPaint()
-    {
-        var glowPaint = _glowPaint;
-        glowPaint.Color = SKColors.White.WithAlpha((byte)(_glowIntensity * 255));
-        glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _glowRadius);
-        glowPaint.Shader = _barGradient;
-        return glowPaint;
-    }
-
     private void RenderPeaks(SKCanvas canvas)
     {
-        if (_cachedPeakPath != null)
-            canvas.DrawPath(_cachedPeakPath, _peakPaint);
+        if (_cachedPeakPath == null || _cachedPeakPath.IsEmpty)
+            return;
+
+        canvas.DrawPath(_cachedPeakPath, _peakPaint);
     }
 
     private void CreateGradients(float height)
@@ -955,10 +1122,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             SKShaderTileMode.Clamp);
     }
 
-    private void DisposeGradients()
-    {
-        _barGradient?.Dispose();
-    }
+    private void DisposeGradients() => _barGradient?.Dispose();
 
     private float[] GetFloatBuffer(int size)
     {
@@ -1003,15 +1167,13 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         }
     }
 
-    private bool NeedBufferReinitialization(int actualBarCount)
-    {
-        return !_buffersInitialized
-            || _previousSpectrumBuffer == null
-            || _velocities == null
-            || _peaks == null
-            || _peakHoldTimes == null
-            || _previousSpectrumBuffer.Length < actualBarCount;
-    }
+    private bool NeedBufferReinitialization(int actualBarCount) =>
+        !_buffersInitialized ||
+        _previousSpectrumBuffer == null ||
+        _velocities == null ||
+        _peaks == null ||
+        _peakHoldTimes == null ||
+        _previousSpectrumBuffer.Length < actualBarCount;
 
     private void ReinitializeBuffers(int actualBarCount)
     {
@@ -1056,23 +1218,119 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         if (!EnsureBuffersForAnimation(actualBarCount))
             return;
 
+        if (canvasHeight < MIN_CANVAS_HEIGHT || actualBarCount < MIN_BAR_COUNT)
+        {
+            ProcessMinimalSpectrum(scaledSpectrum, computedBarValues, computedPeaks, canvasHeight, actualBarCount);
+            return;
+        }
+
         var animationParams = CalculateAnimationParameters(canvasHeight);
         var physicsParams = CalculatePhysicsParameters();
 
-        const int batchSize = 64;
-        for (int batchStart = 0; batchStart < actualBarCount; batchStart += batchSize)
+        ProcessSpectrumAnimationBatched(
+            scaledSpectrum,
+            computedBarValues,
+            computedPeaks,
+            currentTime,
+            canvasHeight,
+            actualBarCount,
+            animationParams,
+            physicsParams);
+    }
+
+    private void ProcessSpectrumAnimationBatched(
+        float[] scaledSpectrum,
+        float[] computedBarValues,
+        float[] computedPeaks,
+        DateTime currentTime,
+        float canvasHeight,
+        int actualBarCount,
+        (float smoothFactor, float peakFallRate, double peakHoldTimeMs) animParams,
+        (float maxChangeThreshold, float velocityDamping, float springStiffness) physicsParams)
+    {
+        int batchSize = CalculateBatchSize(actualBarCount);
+
+        if (ShouldUseParallelProcessing(actualBarCount))
         {
-            int batchEnd = Min(batchStart + batchSize, actualBarCount);
-            ProcessBatch(
-                batchStart,
-                batchEnd,
+            ProcessAnimationInParallel(
                 scaledSpectrum,
                 computedBarValues,
                 computedPeaks,
                 currentTime,
                 canvasHeight,
-                animationParams,
+                actualBarCount,
+                animParams,
+                physicsParams,
+                batchSize);
+        }
+        else
+        {
+            ProcessBatchSequential(
+                0,
+                actualBarCount,
+                scaledSpectrum,
+                computedBarValues,
+                computedPeaks,
+                currentTime,
+                canvasHeight,
+                animParams,
                 physicsParams);
+        }
+    }
+
+    private static bool ShouldUseParallelProcessing(int actualBarCount) =>
+        actualBarCount >= PARALLEL_THRESHOLD;
+
+    private static int CalculateBatchSize(int actualBarCount) =>
+        actualBarCount > 256 ? BATCH_SIZE_LARGE : Constants.BATCH_SIZE;
+
+    private void ProcessAnimationInParallel(
+        float[] scaledSpectrum,
+        float[] computedBarValues,
+        float[] computedPeaks,
+        DateTime currentTime,
+        float canvasHeight,
+        int actualBarCount,
+        (float smoothFactor, float peakFallRate, double peakHoldTimeMs) animParams,
+        (float maxChangeThreshold, float velocityDamping, float springStiffness) physicsParams,
+        int batchSize)
+    {
+        Parallel.For(0, (actualBarCount + batchSize - 1) / batchSize,
+            new ParallelOptions { MaxDegreeOfParallelism = MAX_PARALLEL_THREADS },
+            batchIndex =>
+            {
+                int start = batchIndex * batchSize;
+                int end = Math.Min(start + batchSize, actualBarCount);
+
+                ProcessBatchSequential(
+                    start,
+                    end,
+                    scaledSpectrum,
+                    computedBarValues,
+                    computedPeaks,
+                    currentTime,
+                    canvasHeight,
+                    animParams,
+                    physicsParams);
+            });
+    }
+
+    private static void ProcessMinimalSpectrum(
+        float[] scaledSpectrum,
+        float[] computedBarValues,
+        float[] computedPeaks,
+        float canvasHeight,
+        int actualBarCount)
+    {
+        for (int i = 0; i < actualBarCount; i++)
+        {
+            if (i >= scaledSpectrum.Length
+                || i >= computedBarValues.Length
+                || i >= computedPeaks.Length)
+                continue;
+
+            computedBarValues[i] = scaledSpectrum[i] * canvasHeight;
+            computedPeaks[i] = scaledSpectrum[i] * canvasHeight;
         }
     }
 
@@ -1091,24 +1349,20 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     }
 
     private (float smoothFactor, float peakFallRate, double peakHoldTimeMs)
-        CalculateAnimationParameters(float canvasHeight)
-    {
-        float smoothFactor = _rendererSmoothingFactor * _animationSpeed;
-        float peakFallRate = _peakFallSpeed * canvasHeight * _animationSpeed;
-        double peakHoldTimeMs = _peakHoldTime;
-        return (smoothFactor, peakFallRate, peakHoldTimeMs);
-    }
+        CalculateAnimationParameters(float canvasHeight) => (
+            _rendererSmoothingFactor * _animationSpeed,
+            _peakFallSpeed * canvasHeight * _animationSpeed,
+            _peakHoldTime
+        );
 
     private (float maxChangeThreshold, float velocityDamping, float springStiffness)
-        CalculatePhysicsParameters()
-    {
-        float maxChangeThreshold = 0.3f;
-        float velocityDamping = 0.8f * _transitionSmoothness;
-        float springStiffness = 0.2f * (1 - _transitionSmoothness);
-        return (maxChangeThreshold, velocityDamping, springStiffness);
-    }
+        CalculatePhysicsParameters() => (
+            MAX_CHANGE_THRESHOLD,
+            VELOCITY_DAMPING * _transitionSmoothness,
+            SPRING_STIFFNESS * (1 - _transitionSmoothness)
+        );
 
-    private void ProcessBatch(
+    private void ProcessBatchSequential(
         int batchStart,
         int batchEnd,
         float[] scaledSpectrum,
@@ -1122,60 +1376,129 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         if (!ValidateAnimationBuffers())
             return;
 
+        var prevSpectrumBuffer = _previousSpectrumBuffer!;
+        var velocities = _velocities!;
+        var peaks = _peaks!;
+        var peakHoldTimes = _peakHoldTimes!;
+
+        float velocityDamping = physicsParams.velocityDamping;
+        float springStiffness = physicsParams.springStiffness;
+        float smoothFactor = animParams.smoothFactor;
+        float maxChangeThreshold = physicsParams.maxChangeThreshold;
+        float peakFallRate = animParams.peakFallRate;
+        double peakHoldTimeMs = animParams.peakHoldTimeMs;
+
         for (int i = batchStart; i < batchEnd; i++)
         {
-            if (i >= _velocities!.Length || i >= _previousSpectrumBuffer!.Length)
+            if (i >= scaledSpectrum.Length || i >= prevSpectrumBuffer.Length ||
+                i >= computedBarValues.Length)
                 continue;
 
-            ProcessSingleBar(
-                i,
-                scaledSpectrum,
-                computedBarValues,
-                computedPeaks,
-                currentTime,
-                canvasHeight,
-                animParams,
-                physicsParams);
+            float targetValue = scaledSpectrum[i];
+
+            if (targetValue * canvasHeight < PEAK_ANIMATION_THRESHOLD)
+            {
+                ProcessSimplifiedBar(i, targetValue, computedBarValues, computedPeaks,
+                    canvasHeight, peaks);
+                continue;
+            }
+
+            float currentValue = prevSpectrumBuffer[i];
+            float delta = targetValue - currentValue;
+
+            if (MathF.Abs(delta) < MIN_DELTA_THRESHOLD)
+            {
+                ProcessStaticBar(i, currentValue, computedBarValues, computedPeaks,
+                    currentTime, canvasHeight, peakFallRate, peakHoldTimeMs, peaks, peakHoldTimes);
+                continue;
+            }
+
+            ProcessAnimatedBar(
+                i, delta, targetValue, currentValue,
+                computedBarValues, computedPeaks,
+                currentTime, canvasHeight,
+                smoothFactor, maxChangeThreshold, velocityDamping, springStiffness,
+                peakFallRate, peakHoldTimeMs,
+                prevSpectrumBuffer, velocities, peaks, peakHoldTimes);
         }
     }
 
-    private bool ValidateAnimationBuffers()
+    private void ProcessSimplifiedBar(
+        int i,
+        float targetValue,
+        float[] computedBarValues,
+        float[] computedPeaks,
+        float canvasHeight,
+        float[] peaks)
     {
-        return _velocities != null
-            && _previousSpectrumBuffer != null
-            && _peaks != null
-            && _peakHoldTimes != null;
+        _previousSpectrumBuffer![i] = targetValue;
+        computedBarValues[i] = targetValue * canvasHeight;
+
+        if (peaks != null && i < peaks.Length)
+        {
+            peaks[i] = MathF.Max(0, peaks[i] - SIMPLIFIED_BAR_PEAK_FALL_RATE);
+            computedPeaks[i] = peaks[i];
+        }
     }
 
-    private void ProcessSingleBar(
+    private static void ProcessStaticBar(
         int i,
-        float[] scaledSpectrum,
+        float currentValue,
         float[] computedBarValues,
         float[] computedPeaks,
         DateTime currentTime,
         float canvasHeight,
-        (float smoothFactor, float peakFallRate, double peakHoldTimeMs) animParams,
-        (float maxChangeThreshold, float velocityDamping, float springStiffness) physicsParams)
+        float peakFallRate,
+        double peakHoldTimeMs,
+        float[] peaks,
+        DateTime[] peakHoldTimes)
     {
-        float targetValue = scaledSpectrum[i];
-        float currentValue = _previousSpectrumBuffer![i];
-        float delta = targetValue - currentValue;
+        computedBarValues[i] = currentValue * canvasHeight;
+        UpdatePeak(i, computedBarValues[i], computedPeaks, currentTime,
+            peakFallRate, peakHoldTimeMs, peaks, peakHoldTimes);
+    }
 
+    private static void ProcessAnimatedBar(
+        int i,
+        float delta,
+        float targetValue,
+        float currentValue,
+        float[] computedBarValues,
+        float[] computedPeaks,
+        DateTime currentTime,
+        float canvasHeight,
+        float smoothFactor,
+        float maxChangeThreshold,
+        float velocityDamping,
+        float springStiffness,
+        float peakFallRate,
+        double peakHoldTimeMs,
+        float[] prevSpectrumBuffer,
+        float[] velocities,
+        float[] peaks,
+        DateTime[] peakHoldTimes)
+    {
         float adaptiveSmoothFactor = CalculateAdaptiveSmoothFactor(
-            delta,
-            canvasHeight,
-            animParams.smoothFactor,
-            physicsParams.maxChangeThreshold);
+            delta, canvasHeight, smoothFactor, maxChangeThreshold);
 
-        UpdateBarValue(
-            i,
-            delta,
-            adaptiveSmoothFactor,
-            physicsParams.velocityDamping,
-            physicsParams.springStiffness);
+        UpdateBarVelocity(i, delta, velocityDamping, springStiffness, velocities);
 
-        computedBarValues[i] = _previousSpectrumBuffer[i] * canvasHeight;
-        UpdatePeak(i, computedBarValues[i], computedPeaks, currentTime, animParams, physicsParams);
+        float newValue = prevSpectrumBuffer[i] + velocities[i] + delta * adaptiveSmoothFactor;
+        prevSpectrumBuffer[i] = MathF.Max(SMALL_BAR_VALUE_MIN, MathF.Min(SMALL_BAR_VALUE_MAX, newValue));
+
+        computedBarValues[i] = prevSpectrumBuffer[i] * canvasHeight;
+        UpdatePeak(i, computedBarValues[i], computedPeaks, currentTime,
+            peakFallRate, peakHoldTimeMs, peaks, peakHoldTimes);
+    }
+
+    private static void UpdateBarVelocity(
+        int i,
+        float delta,
+        float velocityDamping,
+        float springStiffness,
+        float[] velocities)
+    {
+        velocities[i] = velocities[i] * velocityDamping + delta * springStiffness;
     }
 
     private static float CalculateAdaptiveSmoothFactor(
@@ -1188,66 +1511,73 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
         if (absDelta > maxChangeThreshold)
         {
-            float changeRatio = MathF.Min(1.0f, absDelta / (canvasHeight * 0.7f));
+            float changeRatio = MathF.Min(1.0f, absDelta / (canvasHeight * CHANGE_RATIO_DIVISOR));
             return MathF.Max(
-                smoothFactor * 0.3f,
-                smoothFactor * (1.0f + changeRatio * 0.5f));
+                smoothFactor * SMOOTH_FACTOR_MIN_MULTIPLIER,
+                smoothFactor * (1.0f + changeRatio * SMOOTH_FACTOR_DELTA_MULTIPLIER));
         }
 
         return smoothFactor;
     }
 
-    private void UpdateBarValue(
-        int i,
-        float delta,
-        float adaptiveSmoothFactor,
-        float velocityDamping,
-        float springStiffness)
-    {
-        _velocities![i] = _velocities[i] * velocityDamping + delta * springStiffness;
-        float newValue = _previousSpectrumBuffer![i] + _velocities[i] + delta * adaptiveSmoothFactor;
-        _previousSpectrumBuffer[i] = MathF.Max(0f, MathF.Min(1f, newValue));
-    }
-
-    private void UpdatePeak(
+    private static void UpdatePeak(
         int i,
         float barValue,
         float[] computedPeaks,
         DateTime currentTime,
-        (float smoothFactor, float peakFallRate, double peakHoldTimeMs) animParams,
-        (float maxChangeThreshold, float velocityDamping, float springStiffness) physicsParams)
+        float peakFallRate,
+        double peakHoldTimeMs,
+        float[] peaks,
+        DateTime[] peakHoldTimes)
     {
-        float currentPeak = _peaks![i];
+        float currentPeak = peaks[i];
 
         if (barValue > currentPeak)
         {
-            SetNewPeak(i, barValue, currentTime);
+            SetNewPeak(i, barValue, currentTime, peaks, peakHoldTimes);
         }
-        else if (ShouldPeakFall(i, currentTime, animParams.peakHoldTimeMs))
+        else if (IsPeakHoldTimeElapsed(i, currentTime, peakHoldTimeMs, peakHoldTimes))
         {
-            UpdateFallingPeak(i, barValue, animParams.peakFallRate);
+            UpdateFallingPeak(i, barValue, peakFallRate, peaks);
         }
 
-        computedPeaks[i] = _peaks[i];
+        computedPeaks[i] = peaks[i];
     }
 
-    private void SetNewPeak(int i, float barValue, DateTime currentTime)
+    private static bool IsPeakHoldTimeElapsed(
+        int i,
+        DateTime currentTime,
+        double peakHoldTimeMs,
+        DateTime[] peakHoldTimes) =>
+        (currentTime - peakHoldTimes[i]).TotalMilliseconds > peakHoldTimeMs;
+
+    private static void SetNewPeak(
+        int i,
+        float barValue,
+        DateTime currentTime,
+        float[] peaks,
+        DateTime[] peakHoldTimes)
     {
-        _peaks![i] = barValue;
-        _peakHoldTimes![i] = currentTime;
+        peaks[i] = barValue;
+        peakHoldTimes[i] = currentTime;
     }
 
-    private bool ShouldPeakFall(int i, DateTime currentTime, double peakHoldTimeMs)
+    private static void UpdateFallingPeak(
+        int i,
+        float barValue,
+        float peakFallRate,
+        float[] peaks)
     {
-        return (currentTime - _peakHoldTimes![i]).TotalMilliseconds > peakHoldTimeMs;
-    }
-
-    private void UpdateFallingPeak(int i, float barValue, float peakFallRate)
-    {
-        float currentPeak = _peaks![i];
+        float currentPeak = peaks[i];
         float newPeak = currentPeak - peakFallRate;
-        _peaks[i] = MathF.Max(barValue, newPeak);
+        peaks[i] = MathF.Max(barValue, newPeak);
     }
+
+    private bool ValidateAnimationBuffers() =>
+        _velocities != null &&
+        _previousSpectrumBuffer != null &&
+        _peaks != null &&
+        _peakHoldTimes != null;
 
     private void UpdateRenderingBuffers(
         float[] computedBarValues,
@@ -1328,12 +1658,31 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         int spectrumLength)
     {
         float blockSize = spectrumLength / (float)barCount;
-        int maxThreads = (int)MathF.Max(2, ProcessorCount / 2);
 
-        Parallel.For(0, barCount, new ParallelOptions { MaxDegreeOfParallelism = maxThreads }, i =>
+        if (barCount < SMALL_BAR_COUNT_THRESHOLD)
+        {
+            ScaleSpectrumSequential(spectrum, scaledSpectrum, barCount, spectrumLength, blockSize);
+            return;
+        }
+
+        Parallel.For(0, barCount,
+            new ParallelOptions { MaxDegreeOfParallelism = MAX_PARALLEL_THREADS }, i =>
+            {
+                ScaleSpectrumForBar(i, spectrum, scaledSpectrum, spectrumLength, blockSize);
+            });
+    }
+
+    private static void ScaleSpectrumSequential(
+        float[] spectrum,
+        float[] scaledSpectrum,
+        int barCount,
+        int spectrumLength,
+        float blockSize)
+    {
+        for (int i = 0; i < barCount; i++)
         {
             ScaleSpectrumForBar(i, spectrum, scaledSpectrum, spectrumLength, blockSize);
-        });
+        }
     }
 
     private static void ScaleSpectrumForBar(
@@ -1358,6 +1707,38 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     }
 
     private static (float sum, float peak) CalculateBlockStatistics(
+        float[] spectrum,
+        int start,
+        int end,
+        int count)
+    {
+        if (count < SIMD_THRESHOLD)
+        {
+            return CalculateBlockStatisticsFast(spectrum, start, end);
+        }
+
+        return CalculateBlockStatisticsSIMD(spectrum, start, end, count);
+    }
+
+    private static (float sum, float peak) CalculateBlockStatisticsFast(
+        float[] spectrum,
+        int start,
+        int end)
+    {
+        float sum = 0f;
+        float peak = float.MinValue;
+
+        for (int j = start; j < end; j++)
+        {
+            float value = spectrum[j];
+            sum += value;
+            peak = MathF.Max(peak, value);
+        }
+
+        return (sum, peak);
+    }
+
+    private static (float sum, float peak) CalculateBlockStatisticsSIMD(
         float[] spectrum,
         int start,
         int end,
@@ -1401,11 +1782,11 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         int barIndex,
         int spectrumLength)
     {
-        float average = sum / count;
+        float average = count <= 1 ? sum : sum / count;
         float weight = SPECTRUM_WEIGHT;
         float baseValue = average * (1.0f - weight) + peak * weight;
 
-        if (barIndex > spectrumLength / 2)
+        if (barIndex > spectrumLength / SPECTRUM_HALF_DIVIDER)
         {
             float boost = 1.0f + (float)barIndex / spectrumLength * BOOST_FACTOR;
             baseValue *= boost;
@@ -1421,7 +1802,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
         try
         {
-            _calculationTask?.Wait(500);
+            _calculationTask?.Wait(DISPOSE_WAIT_TIMEOUT);
         }
         catch (Exception ex)
         {
