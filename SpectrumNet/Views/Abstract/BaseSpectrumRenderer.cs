@@ -41,6 +41,12 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     private static readonly bool _isHardwareAcceleratedCached = IsHardwareAccelerated;
     protected static bool IsHardwareAccelerated => _isHardwareAcceleratedCached;
 
+    public virtual void SetOverlayTransparency(float level)
+    {
+        // Базовая реализация пустая, потому что не все рендереры 
+        // поддерживают прозрачность
+    }
+
     public RenderQuality Quality
     {
         get => _quality;
@@ -388,6 +394,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected virtual void OnConfigurationChanged() { }
 
     protected virtual void OnInitialize() { }
+
+    public virtual bool RequiresRedraw() { return false; }
 
     protected static void Log(LogLevel level, string prefix, string message)
     {

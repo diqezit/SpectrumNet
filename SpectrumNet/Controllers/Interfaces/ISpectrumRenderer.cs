@@ -14,4 +14,6 @@ public interface ISpectrumRenderer : IDisposable
     void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
     RenderQuality Quality { get; set; }
     bool IsOverlayActive { get; }
+
+    void SetOverlayTransparency(float level);
 }

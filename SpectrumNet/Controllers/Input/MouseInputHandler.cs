@@ -1,10 +1,13 @@
 ﻿#nullable enable
 
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+
 namespace SpectrumNet.Controllers.Input;
 
 public class MouseInputHandler(IMainController controller) : IInputHandler
 {
     private readonly IMainController _controller = controller;
+    private readonly RendererTransparencyManager _transparencyManager = RendererTransparencyManager.Instance;
     private bool _isTrackingMouse;
 
     public bool HandleMouseDown(object? sender, MouseButtonEventArgs e)
@@ -19,8 +22,10 @@ public class MouseInputHandler(IMainController controller) : IInputHandler
         return false;
     }
 
-    public bool HandleMouseMove(object? sender, System.Windows.Input.MouseEventArgs e)
+    public bool HandleMouseMove(object? sender, MouseEventArgs e)
     {
+        _transparencyManager.OnMouseMove();
+
         if (!TryGetUiElementAndSkPoint(sender, e, out _, out var skPoint))
             return false;
 
@@ -73,11 +78,17 @@ public class MouseInputHandler(IMainController controller) : IInputHandler
         return true;
     }
 
-    public void HandleMouseEnter(object? sender, System.Windows.Input.MouseEventArgs e)
-        => HandlePlaceholderMouseEnterIfRelevant();
-
-    public void HandleMouseLeave(object? sender, System.Windows.Input.MouseEventArgs e)
+    public void HandleMouseEnter(object? sender, MouseEventArgs e)
     {
+        _transparencyManager.OnMouseEnter();
+
+        HandlePlaceholderMouseEnterIfRelevant();
+    }
+
+    public void HandleMouseLeave(object? sender, MouseEventArgs e)
+    {
+        _transparencyManager.OnMouseLeave();
+
         HandlePlaceholderMouseLeaveIfRelevant();
 
         if (_isTrackingMouse && sender is UIElement element)
@@ -93,7 +104,7 @@ public class MouseInputHandler(IMainController controller) : IInputHandler
 
     private static bool TryGetUiElementAndSkPoint(
         object? sender,
-        System.Windows.Input.MouseEventArgs e,
+        MouseEventArgs e,
         [NotNullWhen(true)] out UIElement? element,
         out SKPoint skPoint)
     {

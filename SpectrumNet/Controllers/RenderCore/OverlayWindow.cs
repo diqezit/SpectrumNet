@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+
 namespace SpectrumNet.Controllers.RenderCore;
 
 public sealed class OverlayWindow : Window, IDisposable
@@ -20,7 +22,7 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private readonly FpsLimiter _fpsLimiter = FpsLimiter.Instance;
     private readonly Stopwatch _frameTimeWatch = new();
-    private readonly object _renderLock = new();
+    private readonly ITransparencyManager _transparencyManager;
 
     private int _consecutiveSkips;
     private nint _windowHandle;
@@ -33,6 +35,7 @@ public sealed class OverlayWindow : Window, IDisposable
     {
         ArgumentNullException.ThrowIfNull(controller);
         _configuration = configuration ?? new();
+        _transparencyManager = RendererTransparencyManager.Instance;
 
         try
         {
@@ -41,12 +44,22 @@ public sealed class OverlayWindow : Window, IDisposable
             _frameTimeWatch.Start();
 
             controller.InputController.RegisterWindow(this);
+
+            _transparencyManager.TransparencyChanged += OnTransparencyChanged;
         }
         catch (Exception ex)
         {
             Error(LogSource, "Failed to initialize overlay window", ex);
             throw;
         }
+    }
+
+    private void OnTransparencyChanged(float level)
+    {
+        Dispatcher.Invoke(() => {
+            Opacity = level;
+            ForceRedraw();
+        });
     }
 
     public void ForceRedraw()
@@ -107,7 +120,7 @@ public sealed class OverlayWindow : Window, IDisposable
         ShowInTaskbar = _configuration.ShowInTaskbar;
     }
 
-    private void ConfigureWindowInteraction() => IsHitTestVisible = false;
+    private void ConfigureWindowInteraction() => IsHitTestVisible = true; 
 
     private void CreateRenderContext(IMainController controller)
     {
@@ -121,7 +134,7 @@ public sealed class OverlayWindow : Window, IDisposable
         controller.PropertyChanged += OnControllerPropertyChanged;
     }
 
-    private static SKElement CreateSkElement()
+    private SKElement CreateSkElement()
     {
         var element = new SKElement
         {
@@ -132,6 +145,11 @@ public sealed class OverlayWindow : Window, IDisposable
         };
 
         OptimizeElementForRender(element);
+
+        // Важно: передаем события мыши в менеджер прозрачности
+        element.MouseMove += (s, e) => _transparencyManager.OnMouseMove();
+        element.MouseEnter += (s, e) => _transparencyManager.OnMouseEnter();
+        element.MouseLeave += (s, e) => _transparencyManager.OnMouseLeave();
 
         return element;
     }
@@ -180,15 +198,35 @@ public sealed class OverlayWindow : Window, IDisposable
 
         DpiChanged += OnDpiChanged;
         IsVisibleChanged += OnIsVisibleChanged;
+
+        MouseMove += OnMouseMove;
+        MouseEnter += OnMouseEnter;
+        MouseLeave += OnMouseLeave;
+    }
+
+    private void OnMouseMove(object sender, MouseEventArgs e)
+    {
+        _transparencyManager.OnMouseMove();
+        e.Handled = true;
+    }
+
+    private void OnMouseEnter(object sender, MouseEventArgs e)
+    {
+        _transparencyManager.OnMouseEnter();
+        e.Handled = true;
+    }
+
+    private void OnMouseLeave(object sender, MouseEventArgs e)
+    {
+        _transparencyManager.OnMouseLeave();
+        e.Handled = true;
     }
 
     private void OnControllerPropertyChanged(
         object? sender,
         PropertyChangedEventArgs e)
     {
-        if (string.Equals(
-            e.PropertyName,
-            nameof(IMainController.LimitFpsTo60)))
+        if (string.Equals(e.PropertyName, nameof(IMainController.LimitFpsTo60)))
         {
             UpdateFpsLimit();
         }
@@ -219,11 +257,13 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private bool ShouldRender()
     {
-        //if (_consecutiveSkips >= MaxConsecutiveRenderSkips)
+        if (_consecutiveSkips >= MaxConsecutiveRenderSkips)
+            return true;
 
-            return true; // Всегда отрисовывать для оверлея, игнорируя глобальную настройку FPS лимитера.
+        if (_transparencyManager.IsActive)
+            return true;
 
-        //return !_fpsLimiter.IsEnabled || _fpsLimiter.ShouldRenderFrame();
+        return !_fpsLimiter.IsEnabled || _fpsLimiter.ShouldRenderFrame();
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)
@@ -243,10 +283,14 @@ public sealed class OverlayWindow : Window, IDisposable
         InitializeWindowHandle();
         ApplyWindowOptimizations();
         StartRenderTimer();
+
+        // Активируем прозрачность при запуске
+        _transparencyManager.ActivateTransparency();
+
         ForceRedraw();
     }
 
-    private void InitializeWindowHandle() => 
+    private void InitializeWindowHandle() =>
         _windowHandle = new WindowInteropHelper(this).Handle;
 
     private void ApplyWindowOptimizations()
@@ -262,8 +306,10 @@ public sealed class OverlayWindow : Window, IDisposable
     private void ConfigureWindowStyleEx()
     {
         var extendedStyle = NativeMethods.GetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE);
+
+        // тут используем WS_EX_TRANSPARENT, чтобы окно могло получать события мыши
         _ = NativeMethods.SetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE,
-            extendedStyle | NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED);
+            extendedStyle | NativeMethods.WS_EX_LAYERED);
     }
 
     private void StartRenderTimer()
@@ -311,6 +357,7 @@ public sealed class OverlayWindow : Window, IDisposable
         if (IsVisible)
         {
             StartRenderTimer();
+            _transparencyManager.ActivateTransparency();
             ForceRedraw();
         }
         else
@@ -346,7 +393,7 @@ public sealed class OverlayWindow : Window, IDisposable
         RecordPerformanceMetrics();
     }
 
-    private static void ClearCanvas(SKCanvas canvas) => 
+    private static void ClearCanvas(SKCanvas canvas) =>
         canvas.Clear(SKColors.Transparent);
 
     private void RenderSpectrum(object? sender, SKPaintSurfaceEventArgs args)
@@ -355,12 +402,14 @@ public sealed class OverlayWindow : Window, IDisposable
         _renderContext.Value.Controller.OnPaintSurface(sender, args);
     }
 
-    private static void RecordPerformanceMetrics() => 
+    private static void RecordPerformanceMetrics() =>
         PerformanceMetricsManager.RecordFrameTime();
 
     public void Dispose()
     {
         if (_isDisposed) return;
+
+        _transparencyManager.TransparencyChanged -= OnTransparencyChanged;
 
         _isDisposed = true;
         UnsubscribeFromEvents();
@@ -378,7 +427,13 @@ public sealed class OverlayWindow : Window, IDisposable
     {
         if (_renderContext is null) return;
 
-        _renderContext.Value.SkElement.PaintSurface -= HandlePaintSurface;
+        var element = _renderContext.Value.SkElement;
+
+        element.PaintSurface -= HandlePaintSurface;
+        element.MouseMove -= (s, e) => _transparencyManager.OnMouseMove();
+        element.MouseEnter -= (s, e) => _transparencyManager.OnMouseEnter();
+        element.MouseLeave -= (s, e) => _transparencyManager.OnMouseLeave();
+
         _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
         _renderContext.Value.RenderTimer.Stop();
     }
@@ -393,6 +448,10 @@ public sealed class OverlayWindow : Window, IDisposable
 
         DpiChanged -= OnDpiChanged;
         IsVisibleChanged -= OnIsVisibleChanged;
+
+        MouseMove -= OnMouseMove;
+        MouseEnter -= OnMouseEnter;
+        MouseLeave -= OnMouseLeave;
     }
 
     private void UnregisterControllerEvents()

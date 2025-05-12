@@ -4,10 +4,10 @@ using static SpectrumNet.Views.Renderers.LedMeterRenderer.Constants;
 using static SpectrumNet.Views.Renderers.LedMeterRenderer.Constants.Quality;
 
 namespace SpectrumNet.Views.Renderers;
- 
+
 public sealed class LedMeterRenderer : EffectSpectrumRenderer
 {
-    private static readonly Lazy<LedMeterRenderer> _instance = 
+    private static readonly Lazy<LedMeterRenderer> _instance =
         new(() => new LedMeterRenderer());
 
     private LedMeterRenderer() { }
@@ -23,8 +23,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             SMOOTHING_FACTOR_NORMAL = 0.3f,
             SMOOTHING_FACTOR_OVERLAY = 0.5f,
             PEAK_DECAY_RATE = 0.04f,
-            GLOW_INTENSITY = 0.3f,
-            OVERLAY_ALPHA_FACTOR = 0.7f;
+            GLOW_INTENSITY = 0.3f;
 
         public const float
             MIN_LOUDNESS_THRESHOLD = 0.001f,
@@ -75,8 +74,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         _animationPhase,
         _vibrationOffset,
         _previousLoudness,
-        _peakLoudness,
-        _overlayAlphaFactor = 1.0f;
+        _peakLoudness;
 
     private float? _cachedLoudness;
     private float[] _ledAnimationPhases = [];
@@ -98,10 +96,17 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
     private readonly object _loudnessLock = new();
     private readonly object _configLock = new();
 
-    private volatile bool 
-        _isConfiguring,
-        _overlayStateChanged,
-        _overlayStateChangeRequested;
+    private volatile bool _isConfiguring;
+
+    public override void SetOverlayTransparency(float level)
+    {
+        if (Math.Abs(_overlayAlphaFactor - level) < float.Epsilon)
+            return;
+
+        _overlayAlphaFactor = level;
+        _overlayStateChangeRequested = true;
+        _overlayStateChanged = true;
+    }
 
     protected override void OnInitialize()
     {
@@ -125,7 +130,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         ResetState();
     }
 
-    private void InitializeQualityParams() => 
+    private void InitializeQualityParams() =>
         ApplyQualitySettingsInternal();
 
     private void InitializeVariations()
@@ -192,8 +197,8 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
     }
 
     public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
+            bool isOverlayActive,
+            RenderQuality quality)
     {
         lock (_configLock)
         {
@@ -209,14 +214,11 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
                         SMOOTHING_FACTOR_OVERLAY :
                         SMOOTHING_FACTOR_NORMAL;
 
-                    _overlayAlphaFactor = isOverlayActive ?
-                        OVERLAY_ALPHA_FACTOR :
-                        1.0f;
-
                     if (overlayChanged)
                     {
                         _overlayStateChangeRequested = true;
                         _overlayStateChanged = true;
+                        _overlayAlphaFactor = isOverlayActive ? HOVER_OVERLAY_ALPHA_FACTOR : DEFAULT_OVERLAY_ALPHA_FACTOR;
 
                         Log(LogLevel.Information, LOG_PREFIX,
                             $"Overlay state changed from {!isOverlayActive} to {isOverlayActive}");
@@ -343,13 +345,13 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
     }
 
     protected override void RenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint paint)
+            SKCanvas canvas,
+            float[] spectrum,
+            SKImageInfo info,
+            float barWidth,
+            float barSpacing,
+            int barCount,
+            SKPaint paint)
     {
         if (!ValidateRenderParameters(canvas, spectrum, info, paint))
             return;
@@ -364,7 +366,8 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
                 }
 
                 UpdateRenderState(info, spectrum);
-                ExecuteRendering(canvas, info);
+
+                RenderWithOverlay(canvas, () => ExecuteRendering(canvas, info));
 
                 if (_overlayStateChanged)
                 {
@@ -459,7 +462,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void UpdateAnimationPhase() => 
+    private void UpdateAnimationPhase() =>
         _animationPhase = (_animationPhase + ANIMATION_SPEED) % 1.0f;
 
     private void UpdatePeakLoudness(float loudness)
@@ -537,51 +540,12 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         try
         {
             var dimensions = CalculateDimensions(info);
-
-            if (_isOverlayActive)
-            {
-                RenderOverlayMode(canvas, dimensions, loudness, peakLoudness);
-            }
-            else
-            {
-                RenderNormalMode(canvas, dimensions, loudness, peakLoudness);
-            }
-        }
-        finally
-        {
-            canvas.Restore();
-        }
-    }
-
-    private void RenderOverlayMode(
-        SKCanvas canvas,
-        MeterDimensions dimensions,
-        float loudness,
-        float peakLoudness)
-    {
-        using var overlayPaint = new SKPaint
-        {
-            Color = new SKColor(255, 255, 255, (byte)(255 * _overlayAlphaFactor))
-        };
-
-        canvas.SaveLayer(overlayPaint);
-        try
-        {
             RenderMeterContent(canvas, dimensions, loudness, peakLoudness);
         }
         finally
         {
             canvas.Restore();
         }
-    }
-
-    private void RenderNormalMode(
-        SKCanvas canvas,
-        MeterDimensions dimensions,
-        float loudness,
-        float peakLoudness)
-    {
-        RenderMeterContent(canvas, dimensions, loudness, peakLoudness);
     }
 
     private void RenderMeterContent(
@@ -597,29 +561,11 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         RenderLedSystem(canvas, dimensions, loudness, peakLoudness);
     }
 
-    private void RenderLedSystem(
-        SKCanvas canvas,
-        MeterDimensions dimensions,
-        float loudness,
-        float peakLoudness)
-    {
-        int activeLedCount = (int)(loudness * _ledCount);
-        int peakLedIndex = (int)(peakLoudness * _ledCount);
-
-        var ledDimensions = CalculateLedDimensions(dimensions.MeterRect);
-
-        RenderLedArray(
-            canvas,
-            dimensions.MeterRect,
-            ledDimensions,
-            activeLedCount,
-            peakLedIndex);
-    }
-
-    public bool RequiresRedraw()
+    public override bool RequiresRedraw()
     {
         return _overlayStateChanged ||
                _overlayStateChangeRequested ||
+               _isOverlayActive ||
                _animationPhase != 0;
     }
 
@@ -1298,15 +1244,19 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void RenderLedArray(
+    private void RenderLedSystem(
         SKCanvas canvas,
-        SKRect meterRect,
-        LedDimensions ledDimensions,
-        int activeLedCount,
-        int peakLedIndex)
+        MeterDimensions dimensions,
+        float loudness,
+        float peakLoudness)
     {
-        RenderInactiveLeds(canvas, meterRect, ledDimensions, activeLedCount, peakLedIndex);
-        RenderActiveLeds(canvas, meterRect, ledDimensions, activeLedCount, peakLedIndex);
+        int activeLedCount = (int)(loudness * _ledCount);
+        int peakLedIndex = (int)(peakLoudness * _ledCount);
+
+        var ledDimensions = CalculateLedDimensions(dimensions.MeterRect);
+
+        RenderInactiveLeds(canvas, dimensions.MeterRect, ledDimensions, activeLedCount, peakLedIndex);
+        RenderActiveLeds(canvas, dimensions.MeterRect, ledDimensions, activeLedCount, peakLedIndex);
     }
 
     private void RenderInactiveLeds(

@@ -102,6 +102,16 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         );
     }
 
+    public override void SetOverlayTransparency(float level)
+    {
+        if (Math.Abs(_overlayAlphaFactor - level) < float.Epsilon)
+            return;
+
+        _overlayAlphaFactor = level;
+        _overlayStateChangeRequested = true;
+        _overlayStateChanged = true;
+    }
+
     private void InitializeQualityParams()
     {
         ExecuteSafely(
@@ -155,14 +165,21 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
                 try
                 {
                     _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
+                    bool overlayChanged = _isOverlayActive != isOverlayActive;
+                    bool qualityChanged = Quality != quality;
 
                     _isOverlayActive = isOverlayActive;
                     Quality = quality;
                     _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
 
-                    if (configChanged)
+                    if (overlayChanged)
+                    {
+                        _overlayAlphaFactor = isOverlayActive ? 0.75f : 1.0f;
+                        _overlayStateChangeRequested = true;
+                        _overlayStateChanged = true;
+                    }
+
+                    if (overlayChanged || qualityChanged)
                     {
                         ApplyQualitySettingsInternal();
                         OnConfigurationChanged();
@@ -311,8 +328,19 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
+                if (_overlayStateChangeRequested)
+                {
+                    _overlayStateChangeRequested = false;
+                    _overlayStateChanged = true;
+                }
+
                 UpdateState(spectrum, info);
-                RenderFrame(canvas, info, paint);
+                RenderWithOverlay(canvas, () => RenderFrame(canvas, info, paint));
+
+                if (_overlayStateChanged)
+                {
+                    _overlayStateChanged = false;
+                }
             },
             nameof(RenderEffect),
             "Error during rendering"

@@ -7,6 +7,9 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     private const int DEFAULT_POOL_SIZE = 5;
     private const string LOG_PREFIX = nameof(EffectSpectrumRenderer);
 
+    protected const float DEFAULT_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.INACTIVE_TRANSPARENCY;
+    protected const float HOVER_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.ACTIVE_TRANSPARENCY;
+
     protected readonly ObjectPool<SKPath> _pathPool = new(
         () => new SKPath(),
         path => path.Reset(),
@@ -20,6 +23,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     private readonly object _renderLock = new();
     protected float _time;
     protected DateTime _lastUpdateTime = Now;
+
+    protected float _overlayAlphaFactor = DEFAULT_OVERLAY_ALPHA_FACTOR;
+    protected bool _overlayStateChanged;
+    protected bool _overlayStateChangeRequested;
 
     protected abstract void RenderEffect(
         SKCanvas canvas,
@@ -43,6 +50,22 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
+    public override void SetOverlayTransparency(float level)
+    {
+        if (Math.Abs(_overlayAlphaFactor - level) > float.Epsilon)
+        {
+            _overlayAlphaFactor = level;
+            _overlayStateChanged = true;
+            _overlayStateChangeRequested = true;
+            RequestRedraw();
+        }
+    }
+
+    protected virtual void RequestRedraw()
+    {
+        _overlayStateChangeRequested = true;
+    }
+
     protected override void OnInitialize() { }
 
     public override void Configure(
@@ -56,7 +79,25 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         bool isOverlayActive,
         RenderQuality quality)
     {
-        base.Configure(isOverlayActive, quality);
+        bool overlayChanged = _isOverlayActive != isOverlayActive;
+        bool qualityChanged = _quality != quality;
+
+        _isOverlayActive = isOverlayActive;
+        Quality = quality;
+
+        _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+        if (overlayChanged)
+        {
+            _overlayAlphaFactor = isOverlayActive ? HOVER_OVERLAY_ALPHA_FACTOR : DEFAULT_OVERLAY_ALPHA_FACTOR;
+            _overlayStateChanged = true;
+            _overlayStateChangeRequested = true;
+        }
+
+        if (overlayChanged || qualityChanged)
+        {
+            OnConfigurationChanged();
+        }
     }
 
     protected override void OnConfigurationChanged() { }
@@ -115,6 +156,12 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     {
         lock (_renderLock)
         {
+            if (_overlayStateChangeRequested)
+            {
+                _overlayStateChangeRequested = false;
+                _overlayStateChanged = true;
+            }
+
             UpdateTiming();
             BeforeRender(
                 canvas,
@@ -138,6 +185,11 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
                 canvas,
                 processedSpectrum,
                 info);
+
+            if (_overlayStateChanged)
+            {
+                _overlayStateChanged = false;
+            }
         }
     }
 
@@ -149,6 +201,13 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             (float)(now - _lastUpdateTime).TotalSeconds);
         _lastUpdateTime = now;
         _time += delta;
+    }
+
+    public override bool RequiresRedraw()
+    {
+        return _overlayStateChanged ||
+               _overlayStateChangeRequested ||
+               _isOverlayActive;
     }
 
     public override void Dispose()
@@ -184,7 +243,6 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
                 base.ApplyQualitySettings();
                 OnQualitySettingsApplied();
-
             }
             finally
             {
@@ -196,10 +254,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
     protected virtual void OnQualitySettingsApplied() { }
 
-    protected override (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() => 
+    protected override (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
         base.QualityBasedSettings();
 
-    protected override SKSamplingOptions QualityBasedSamplingOptions() => 
+    protected override SKSamplingOptions QualityBasedSamplingOptions() =>
         base.QualityBasedSamplingOptions();
 
     protected virtual void BeforeRender(
@@ -258,4 +316,37 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         "Failed to invalidate cached resources");
 
     protected virtual void OnInvalidateCachedResources() { }
+
+    protected void RenderWithOverlay(SKCanvas canvas, Action renderAction)
+    {
+        if (_isOverlayActive)
+        {
+            RenderOverlayMode(canvas, renderAction);
+        }
+        else
+        {
+            RenderNormalMode(renderAction);
+        }
+    }
+
+    private void RenderOverlayMode(SKCanvas canvas, Action renderAction)
+    {
+        using var overlayPaint = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, (byte)(255 * _overlayAlphaFactor))
+        };
+
+        canvas.SaveLayer(overlayPaint);
+        try
+        {
+            renderAction();
+        }
+        finally
+        {
+            canvas.Restore();
+        }
+    }
+
+    private void RenderNormalMode(Action renderAction) =>
+        renderAction();
 }

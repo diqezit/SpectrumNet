@@ -24,9 +24,13 @@ public sealed class RendererFactory : IRendererFactory
         _isApplyingGlobalQuality,
         _suppressConfigEvents;
 
+    private readonly RendererTransparencyManager _transparencyManager;
+
     private RendererFactory(RenderQuality initialQuality = RenderQuality.Medium)
     {
         _globalQuality = initialQuality;
+        _transparencyManager = RendererTransparencyManager.Instance;
+        _transparencyManager.SetRendererFactory(this);
     }
 
     public RenderQuality GlobalQuality
@@ -358,8 +362,13 @@ public sealed class RendererFactory : IRendererFactory
                 _rendererCache.Clear();
                 _initializedRenderers.Clear();
                 _rendererQualityState.Clear();
+
+                if (_transparencyManager is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
             }
-        }, 
+        },
         nameof(Dispose),
         "Error during RendererFactory disposal");
     }

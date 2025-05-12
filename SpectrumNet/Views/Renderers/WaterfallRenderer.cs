@@ -59,6 +59,16 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
     private WaterfallRenderer() { }
 
+    public override void SetOverlayTransparency(float level)
+    {
+        if (Math.Abs(_overlayAlphaFactor - level) < float.Epsilon)
+            return;
+
+        _overlayAlphaFactor = level;
+        _overlayStateChangeRequested = true;
+        _overlayStateChanged = true;
+    }
+
     protected override void OnInitialize() =>
         ExecuteSafely(
             PerformInitialization,
@@ -91,15 +101,30 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 try
                 {
                     _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-                    base.Configure(isOverlayActive, quality);
+                    bool overlayChanged = _isOverlayActive != isOverlayActive;
+                    bool qualityChanged = Quality != quality;
+
+                    _isOverlayActive = isOverlayActive;
+                    Quality = quality;
+
+                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+
+                    if (overlayChanged)
+                    {
+                        _overlayStateChangeRequested = true;
+                        _overlayStateChanged = true;
+                        _overlayAlphaFactor = isOverlayActive ? 0.75f : 1.0f;
+
+                        Log(LogLevel.Information, LOG_PREFIX,
+                            $"Overlay state changed from {!isOverlayActive} to {isOverlayActive}");
+                    }
 
                     if (Quality != quality)
                     {
                         ApplyQualitySettings();
                     }
 
-                    if (configChanged && _spectrogramBuffer != null)
+                    if ((overlayChanged || qualityChanged) && _spectrogramBuffer != null)
                     {
                         ResizeBufferForOverlayMode(isOverlayActive);
                     }
@@ -134,10 +159,22 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
+                if (_overlayStateChangeRequested)
+                {
+                    _overlayStateChangeRequested = false;
+                    _overlayStateChanged = true;
+                }
+
                 bool parametersChanged = CheckParametersChanged(barWidth, barSpacing, barCount);
 
                 UpdateState(spectrum, parametersChanged, barCount, barWidth);
-                RenderFrame(canvas, info, barWidth, barSpacing, barCount);
+
+                RenderWithOverlay(canvas, () => RenderFrame(canvas, info, barWidth, barSpacing, barCount));
+
+                if (_overlayStateChanged)
+                {
+                    _overlayStateChanged = false;
+                }
             },
             nameof(RenderEffect),
             "Error during rendering"
@@ -1027,6 +1064,13 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float t = (normalized - YELLOW_THRESHOLD) /
                   (1f - YELLOW_THRESHOLD);
         return new SKColor(255, (byte)(255 - t * 255), 0, 255);
+    }
+
+    public override bool RequiresRedraw()
+    {
+        return _overlayStateChanged ||
+               _overlayStateChangeRequested ||
+               _isOverlayActive;
     }
 
     protected override void OnDispose() =>
