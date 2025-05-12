@@ -8,13 +8,11 @@ public class KeyboardInputHandler : IInputHandler
 {
     private readonly IMainController _controller;
     private readonly Dictionary<Key, Action> _globalKeyActions;
-    private readonly Dictionary<(Key Key, ModifierKeys Modifiers), Action> _modifiedKeyActions;
 
     public KeyboardInputHandler(IMainController controller)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _globalKeyActions = CreateGlobalKeyActionsMap();
-        _modifiedKeyActions = CreateModifiedKeyActionsMap();
     }
 
     public bool HandleKeyDown(KeyEventArgs e, IInputElement? focusedElement)
@@ -22,8 +20,9 @@ public class KeyboardInputHandler : IInputHandler
         if (ShouldIgnoreKeyPress(focusedElement))
             return false;
 
-        if (TryExecuteModifiedKeyAction(e.Key))
+        if (e.Key == Space && !e.IsRepeat)
         {
+            _ = _controller.ToggleCaptureAsync();
             e.Handled = true;
             return true;
         }
@@ -37,22 +36,8 @@ public class KeyboardInputHandler : IInputHandler
         return false;
     }
 
-    private bool ShouldIgnoreKeyPress(IInputElement? focusedElement) =>
+    private static bool ShouldIgnoreKeyPress(IInputElement? focusedElement) =>
         focusedElement is TextBox or PasswordBox or ComboBox;
-
-    private bool TryExecuteModifiedKeyAction(Key key)
-    {
-        if (Keyboard.Modifiers == ModifierKeys.None)
-            return false;
-
-        if (_modifiedKeyActions.TryGetValue((key, Keyboard.Modifiers), out var action))
-        {
-            ExecuteAction(action, $"modified key action for {key}");
-            return true;
-        }
-
-        return false;
-    }
 
     private bool TryExecuteGlobalKeyAction(Key key)
     {
@@ -77,7 +62,8 @@ public class KeyboardInputHandler : IInputHandler
 
     private Dictionary<Key, Action> CreateGlobalKeyActionsMap() => new()
     {
-        { Space, () => _ = _controller.ToggleCaptureAsync() },
+        { Key.O, () => ToggleOverlay() },
+        { Key.P, () => _controller.ToggleControlPanel() },
         { Key.Q, () => _controller.RenderQuality = RenderQuality.Low },
         { Key.W, () => _controller.RenderQuality = RenderQuality.Medium },
         { Key.E, () => _controller.RenderQuality = RenderQuality.High },
@@ -91,12 +77,6 @@ public class KeyboardInputHandler : IInputHandler
         else if (_controller.IsOverlayActive)
             _controller.CloseOverlay();
     }
-
-    private Dictionary<(Key, ModifierKeys), Action> CreateModifiedKeyActionsMap() => new()
-    {
-        { (O, ModifierKeys.Control), () => ToggleOverlay() },
-        { (P, ModifierKeys.Control), () => _controller.ToggleControlPanel() }
-    };
 
     private void ToggleOverlay()
     {
