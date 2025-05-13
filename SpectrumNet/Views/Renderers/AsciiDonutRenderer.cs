@@ -8,6 +8,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<AsciiDonutRenderer> _instance = new(() => new AsciiDonutRenderer());
+    private const string LOG_PREFIX = "AsciiDonutRenderer";
 
     private AsciiDonutRenderer() { }
 
@@ -143,8 +144,6 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
     private int _parallelThreshold;
     private bool _useParallelProcessing;
     private bool _useLightEffects;
-    private new bool _useAdvancedEffects;
-    private new bool _useAntiAlias;
 
     private float _rotationAngleX, _rotationAngleY, _rotationAngleZ;
     private float _currentRotationIntensity = DEFAULT_ROTATION_INTENSITY;
@@ -162,8 +161,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
     private readonly Dictionary<int, List<ProjectedVertex>> _verticesByCharIndex = [];
     private readonly object _renderDataLock = new();
 
-    private volatile bool _isConfiguring;
-    private volatile bool _isRenderingDataDirty;
+    private bool _isRenderingDataDirty;
 
     static AsciiDonutRenderer()
     {
@@ -181,22 +179,9 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeResources();
-                InitializeQualityParams();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed to initialize renderer"
-        );
-    }
-
-    private void InitializeQualityParams()
-    {
-        ApplyQualitySettingsInternal();
+        base.OnInitialize();
+        InitializeResources();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     private void InitializeResources()
@@ -229,85 +214,15 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         );
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}");
-
-                _isRenderingDataDirty = true;
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
+        _isRenderingDataDirty = true;
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}");
     }
 
-    protected override void ApplyQualitySettings()
+    protected override void OnQualitySettingsApplied()
     {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                    InvalidateCachedResources();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
-    {
-        int oldSkipVertexCount = _skipVertexCount;
-
         switch (Quality)
         {
             case RenderQuality.Low:
@@ -321,21 +236,9 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
                 break;
         }
 
-        _samplingOptions = QualityBasedSamplingOptions();
-
-        if (_skipVertexCount != oldSkipVertexCount)
-        {
-            lock (_renderDataLock)
-            {
-                _dataReady = false;
-                _currentRenderData = null;
-                _isRenderingDataDirty = true;
-            }
-            OnInvalidateCachedResources();
-        }
-
+        _isRenderingDataDirty = true;
         Log(LogLevel.Information, LOG_PREFIX,
-            $"Quality settings applied: {Quality}, AntiAlias: {_useAntiAlias}");
+            $"Quality settings applied: {Quality}");
     }
 
     private void LowQualitySettings()
@@ -383,9 +286,6 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint, barCount))
-            return;
-
         ExecuteSafely(
             () =>
             {
@@ -407,7 +307,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         );
     }
 
-    private bool HasInfoSizeChanged(SKImageInfo info) => 
+    private bool HasInfoSizeChanged(SKImageInfo info) =>
         _lastImageInfo.Width != info.Width || _lastImageInfo.Height != info.Height;
 
     private void ResetRenderState()
@@ -424,70 +324,6 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
             nameof(ResetRenderState),
             "Failed to reset render state"
         );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint,
-        int barCount)
-    {
-        if (!_isInitialized)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is not initialized");
-            return false;
-        }
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (!IsBarCountValid(barCount)) return false;
-        if (IsDisposed()) return false;
-
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private static bool IsBarCountValid(int barCount)
-    {
-        if (barCount > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Bar count must be greater than zero");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
     }
 
     private void UpdateState(
@@ -1002,18 +838,11 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInvalidateCachedResources();
-                _dataReady = false;
-                _currentRenderData = null;
-                _isRenderingDataDirty = true;
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
-            },
-            nameof(OnInvalidateCachedResources),
-            "Failed to invalidate cached resources"
-        );
+        base.OnInvalidateCachedResources();
+        _dataReady = false;
+        _currentRenderData = null;
+        _isRenderingDataDirty = true;
+        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     private void InitializeVertices()
@@ -1070,34 +899,14 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         float max) =>
         value < min ? min : value > max ? max : value;
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () => OnDispose(),
-            nameof(Dispose),
-            "Error during renderer disposal"
-        );
-
-        _disposed = true;
-        base.Dispose();
-        GC.SuppressFinalize(this);
-
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
+    public override bool RequiresRedraw() => 
+        base.RequiresRedraw() || _isRenderingDataDirty;
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during OnDispose"
-        );
+        DisposeManagedResources();
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     private void DisposeManagedResources()

@@ -7,7 +7,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     private const int DEFAULT_POOL_SIZE = 5;
     private const string LOG_PREFIX = nameof(EffectSpectrumRenderer);
 
-    protected const float 
+    protected const float
         DEFAULT_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.Constants.INACTIVE_TRANSPARENCY,
         HOVER_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.Constants.ACTIVE_TRANSPARENCY;
 
@@ -26,7 +26,6 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     protected DateTime _lastUpdateTime = Now;
 
     protected float _overlayAlphaFactor = DEFAULT_OVERLAY_ALPHA_FACTOR;
-    protected bool _overlayStateChanged;
     protected bool _overlayStateChangeRequested;
 
     protected abstract void RenderEffect(
@@ -39,17 +38,15 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         SKPaint paint);
 
     public override void Initialize() => ExecuteSafely(
-        InitializeRenderer,
+        () =>
+        {
+            base.Initialize();
+            ApplyQualitySettings();
+            OnInitialize();
+            Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        },
         nameof(Initialize),
         "Failed to initialize renderer");
-
-    private void InitializeRenderer()
-    {
-        base.Initialize();
-        ApplyQualitySettings();
-        OnInitialize();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-    }
 
     public override void SetOverlayTransparency(float level)
     {
@@ -64,10 +61,9 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
     protected virtual void RequestRedraw()
     {
+        _needsRedraw = true;
         _overlayStateChangeRequested = true;
     }
-
-    protected override void OnInitialize() { }
 
     public override void Configure(
         bool isOverlayActive,
@@ -93,15 +89,15 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             _overlayAlphaFactor = isOverlayActive ? HOVER_OVERLAY_ALPHA_FACTOR : DEFAULT_OVERLAY_ALPHA_FACTOR;
             _overlayStateChanged = true;
             _overlayStateChangeRequested = true;
+            _needsRedraw = true;
         }
 
         if (overlayChanged || qualityChanged)
         {
+            ApplyQualitySettings();
             OnConfigurationChanged();
         }
     }
-
-    protected override void OnConfigurationChanged() { }
 
     public override void Render(
         SKCanvas? canvas,
@@ -113,6 +109,12 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         SKPaint? paint,
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
     {
+        if (!ValidateRenderParameters(canvas, spectrum, info, barWidth, barSpacing, barCount, paint))
+        {
+            drawPerformanceInfo?.Invoke(canvas!, info);
+            return;
+        }
+
         var (isValid, processed) = PrepareRender(
             canvas,
             spectrum,
@@ -139,6 +141,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
                 info,
                 barWidth,
                 barSpacing,
+                barCount,
                 pt),
             nameof(Render),
             "Error during rendering");
@@ -153,6 +156,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         SKImageInfo info,
         float barWidth,
         float barSpacing,
+        int barCount,
         SKPaint paint)
     {
         lock (_renderLock)
@@ -190,6 +194,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             if (_overlayStateChanged)
             {
                 _overlayStateChanged = false;
+                _needsRedraw = false;
             }
         }
     }
@@ -206,60 +211,9 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
     public override bool RequiresRedraw()
     {
-        return _overlayStateChanged ||
-               _overlayStateChangeRequested ||
-               _isOverlayActive;
+        return _needsRedraw || _overlayStateChanged ||
+               _overlayStateChangeRequested || _isOverlayActive;
     }
-
-    public override void Dispose()
-    {
-        if (!_disposed)
-        {
-            ExecuteSafely(
-                () =>
-                {
-                    OnDispose();
-                    _pathPool.Dispose();
-                    _paintPool.Dispose();
-                    base.Dispose();
-                    _disposed = true;
-                },
-                nameof(Dispose),
-                "Error during disposal");
-
-            GC.SuppressFinalize(this);
-        }
-    }
-
-    protected virtual void OnDispose() { }
-
-    protected override void ApplyQualitySettings() => ExecuteSafely(
-        () =>
-        {
-            if (_isApplyingQuality) return;
-
-            try
-            {
-                _isApplyingQuality = true;
-
-                base.ApplyQualitySettings();
-                OnQualitySettingsApplied();
-            }
-            finally
-            {
-                _isApplyingQuality = false;
-            }
-        },
-        nameof(ApplyQualitySettings),
-        "Failed to apply quality settings");
-
-    protected virtual void OnQualitySettingsApplied() { }
-
-    protected override (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
-        base.QualityBasedSettings();
-
-    protected override SKSamplingOptions QualityBasedSamplingOptions() =>
-        base.QualityBasedSamplingOptions();
 
     protected virtual void BeforeRender(
         SKCanvas? canvas,
@@ -350,4 +304,46 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
     private void RenderNormalMode(Action renderAction) =>
         renderAction();
+
+    protected override void ApplyQualitySettings() => ExecuteSafely(
+        () =>
+        {
+            if (_isApplyingQuality) return;
+
+            try
+            {
+                _isApplyingQuality = true;
+
+                base.ApplyQualitySettings();
+                OnQualitySettingsApplied();
+            }
+            finally
+            {
+                _isApplyingQuality = false;
+            }
+        },
+        nameof(ApplyQualitySettings),
+        "Failed to apply quality settings");
+
+    protected override void OnQualitySettingsApplied() { }
+
+    public override void Dispose()
+    {
+        if (!_disposed)
+        {
+            ExecuteSafely(
+                () =>
+                {
+                    OnDispose();
+                    _pathPool.Dispose();
+                    _paintPool.Dispose();
+                    base.Dispose();
+                    _disposed = true;
+                },
+                nameof(Dispose),
+                "Error during disposal");
+
+            GC.SuppressFinalize(this);
+        }
+    }
 }

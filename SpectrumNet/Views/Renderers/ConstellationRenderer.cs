@@ -10,6 +10,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<ConstellationRenderer> _instance =
         new(() => new ConstellationRenderer());
+    private const string LOG_PREFIX = "ConstellationRenderer";
 
     private ConstellationRenderer() { }
 
@@ -73,7 +74,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private Star[]? _stars;
 
-    private float 
+    private float
         _lowSpectrum,
         _midSpectrum,
         _highSpectrum,
@@ -83,153 +84,40 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     private int _starCount;
     private bool _useGlowEffect;
     private float _glowRadius;
-    private volatile bool _isConfiguring;
     private readonly Random _random = new();
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeRendererState();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed to initialize renderer"
-        );
-    }
-
-    private void InitializeRendererState()
-    {
-        _starCount = _isOverlayActive
-            ? OVERLAY_STAR_COUNT
-            : DEFAULT_STAR_COUNT;
+        base.OnInitialize();
         InitializeStars();
-        ApplyQualitySettings();
-    }
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    ProcessConfiguration(isOverlayActive, quality);
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
-    private void ProcessConfiguration(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        bool configChanged = IsConfigurationChanged(
-            isOverlayActive, quality);
-        ApplyConfiguration(isOverlayActive, quality);
-
-        if (configChanged)
-        {
-            HandleConfigurationChange();
-        }
-    }
-
-    private bool IsConfigurationChanged(
-        bool isOverlayActive,
-        RenderQuality quality) =>
-        _isOverlayActive != isOverlayActive || Quality != quality;
-
-    private void ApplyConfiguration(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        _isOverlayActive = isOverlayActive;
-        Quality = quality;
-        _smoothingFactor = isOverlayActive ? 0.15f : 0.1f;
-        _starCount = isOverlayActive
-            ? OVERLAY_STAR_COUNT
-            : DEFAULT_STAR_COUNT;
-    }
-
-    private void HandleConfigurationChange()
-    {
-        base.ApplyQualitySettings();
-        ApplyQualitySettings();
-        InitializeStars();
-        OnConfigurationChanged();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Debug,
-                    LOG_PREFIX,
-                    $"Configuration changed. Quality: {Quality}, Stars: {_starCount}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
+        _starCount = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
+        InitializeStars();
+
+        Log(LogLevel.Debug, LOG_PREFIX,
+            $"Configuration changed. Quality: {Quality}, Stars: {_starCount}");
     }
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            ProcessQualitySettings,
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ProcessQualitySettings()
-    {
-        if (_isConfiguring) return;
-
-        try
-        {
-            _isConfiguring = true;
-            base.ApplyQualitySettings();
-            SetQualityLevelSettings();
-            Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
-        }
-        finally
-        {
-            _isConfiguring = false;
-        }
-    }
-
-    private void SetQualityLevelSettings()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
                 ApplyLowQualitySettings();
                 break;
-
             case RenderQuality.Medium:
                 ApplyMediumQualitySettings();
                 break;
-
             case RenderQuality.High:
                 ApplyHighQualitySettings();
                 break;
         }
 
-        _samplingOptions = QualityBasedSamplingOptions();
+        Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
     }
 
     private void ApplyLowQualitySettings()
@@ -265,27 +153,15 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(
-            canvas, spectrum, info, paint, barCount))
-            return;
-
         ExecuteSafely(
-            () => ExecuteRenderProcess(
-                canvas, spectrum, info, barWidth, barSpacing),
+            () =>
+            {
+                UpdateRenderer(spectrum, info);
+                RenderStars(canvas, info, paint);
+            },
             nameof(RenderEffect),
             "Error during rendering"
         );
-    }
-
-    private void ExecuteRenderProcess(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float _,
-        float __)
-    {
-        UpdateRenderer(spectrum, info);
-        RenderStars(canvas, info);
     }
 
     private void UpdateRenderer(
@@ -294,61 +170,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         UpdateState(spectrum);
         UpdateStars(TIME_STEP, info.Width, info.Height);
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint,
-        int barCount) =>
-        ValidateCanvas(canvas) &&
-        ValidateSpectrum(spectrum) &&
-        ValidatePaint(paint) &&
-        ValidateDimensions(info) &&
-        ValidateBarCount(barCount) &&
-        !IsDisposed();
-
-    private static bool ValidateCanvas(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool ValidateSpectrum(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool ValidatePaint(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool ValidateDimensions(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private static bool ValidateBarCount(int barCount)
-    {
-        if (barCount > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Invalid bar count");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
     }
 
     private void UpdateState(float[] spectrum)
@@ -727,7 +548,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         return new SKColor(r, g, b);
     }
 
-    private void RenderStars(SKCanvas canvas, SKImageInfo _)
+    private void RenderStars(SKCanvas canvas, SKImageInfo info, SKPaint basePaint)
     {
         if (_stars == null) return;
 
@@ -837,6 +658,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void InitializeStars()
     {
+        _starCount = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
         _stars = new Star[_starCount];
         for (int i = 0; i < _starCount; i++)
         {
@@ -846,7 +668,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private struct Star
     {
-        public float 
+        public float
             X,
             Y,
             Size,
@@ -864,33 +686,10 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         public bool IsActive;
     }
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () => OnDispose(),
-            nameof(Dispose),
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        base.Dispose();
-        GC.SuppressFinalize(this);
-
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                _stars = null;
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
+        _stars = null;
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

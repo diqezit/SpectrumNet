@@ -8,6 +8,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<CircularWaveRenderer> _instance = new(() => new CircularWaveRenderer());
+    private const string LOG_PREFIX = "CircularWaveRenderer";
 
     private CircularWaveRenderer() { }
 
@@ -78,123 +79,38 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     private int _pointsPerCircle;
     private float _glowRadius;
     private bool _useGlowEffect;
-    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeQualityParams();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            "OnInitialize",
-            "Failed during renderer initialization"
-        );
-    }
-
-    private void InitializeQualityParams()
-    {
-        ApplyQualitySettingsInternal();
+        base.OnInitialize();
         CreateCirclePointsCache();
-    }
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                    || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        CreateCirclePointsCache();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            "Configure",
-            "Failed to configure renderer"
-        );
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
-                    $"AdvancedEffects: {_useAdvancedEffects}, PointsPerCircle: {_pointsPerCircle}, " +
-                    $"GlowRadius: {_glowRadius}");
-            },
-            "OnConfigurationChanged",
-            "Failed to handle configuration change"
-        );
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
+            $"AdvancedEffects: {_useAdvancedEffects}, PointsPerCircle: {_pointsPerCircle}, " +
+            $"GlowRadius: {_glowRadius}");
     }
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                    CreateCirclePointsCache();
-                    InvalidateCachedResources();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            "ApplyQualitySettings",
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
                 LowQualitySettings();
                 break;
-
             case RenderQuality.Medium:
                 MediumQualitySettings();
                 break;
-
             case RenderQuality.High:
                 HighQualitySettings();
                 break;
         }
 
-        _samplingOptions = QualityBasedSamplingOptions();
+        CreateCirclePointsCache();
 
         Log(LogLevel.Information, LOG_PREFIX,
             $"Quality settings applied: {Quality}, AntiAlias: {_useAntiAlias}, " +
@@ -238,72 +154,18 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint, barCount)) return;
-
         ExecuteSafely(
             () =>
             {
-                UpdateState(canvas, spectrum, info, barCount);
+                UpdateState(spectrum, info, barCount);
                 RenderFrame(canvas, info, paint, barWidth, barSpacing);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
     }
 
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint,
-        int barCount)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (barCount <= 0) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
-    }
-
     private void UpdateState(
-        SKCanvas _,
         float[] spectrum,
         SKImageInfo info,
         int barCount)
@@ -385,7 +247,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         float deltaTime = Max(0, (float)(Now - _lastUpdateTime).TotalSeconds);
         _angle = (float)((_angle + _rotationSpeed * deltaTime) % Tau);
 
-        if (_angle < 0) _angle += MathF.    Tau;
+        if (_angle < 0) _angle += MathF.Tau;
     }
 
     private static float CalculateAverageIntensity(float[] spectrum)
@@ -462,7 +324,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
                     LOG_PREFIX,
                     $"Circle points cache created with {_pointsPerCircle} points.");
             },
-            "CreateCirclePointsCache",
+            nameof(CreateCirclePointsCache),
             "Failed to create circle points cache"
         );
     }
@@ -654,39 +516,19 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         }
     }
 
-    public override void Dispose()
+    protected override void OnInvalidateCachedResources()
     {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () => OnDispose(),
-            "Dispose",
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        base.Dispose();
-        GC.SuppressFinalize(this);
-
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        base.OnInvalidateCachedResources();
+        _ringMagnitudes = null;
+        _circlePoints = null;
+        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            "OnDispose",
-            "Error during specific disposal"
-        );
-    }
-
-    private void DisposeManagedResources()
-    {
         _ringMagnitudes = null;
         _circlePoints = null;
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

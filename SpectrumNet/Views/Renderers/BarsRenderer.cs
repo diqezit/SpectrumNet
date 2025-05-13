@@ -9,6 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class BarsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<BarsRenderer> _instance = new(() => new BarsRenderer());
+    private const string LOG_PREFIX = "BarsRenderer";
 
     private BarsRenderer() { }
 
@@ -89,7 +90,6 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
     private float _glowRadius;
     private bool _useGlowEffect;
-    private volatile bool _isConfiguring;
     private float _glowAlpha;
     private float _intensityThreshold;
     private float _alphaMultiplier;
@@ -97,108 +97,31 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     private float _edgeStrokeWidth;
     private float _edgeBlurRadius;
 
-
     private SKRect _lastRenderArea = SKRect.Empty;
     private SKMatrix _lastTransform = SKMatrix.Identity;
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                ApplyQualitySettings();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            "OnInitialize",
-            "Failed to initialize renderer"
-        );
+        base.OnInitialize();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium)
+    protected override void OnQualitySettingsApplied()
     {
-        if (_isConfiguring) return;
+        switch (Quality)
+        {
+            case RenderQuality.Low:
+                LowQualitySettings();
+                break;
+            case RenderQuality.Medium:
+                MediumQualitySettings();
+                break;
+            case RenderQuality.High:
+                HighQualitySettings();
+                break;
+        }
 
-        ExecuteSafely(
-            () =>
-            {
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettings();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            "Configure",
-            "Failed to configure renderer"
-        );
-    }
-
-    protected override void OnConfigurationChanged()
-    {
-        ExecuteSafely(
-            () => { },
-            "OnConfigurationChanged",
-            "Failed to apply configuration changes"
-        );
-    }
-
-    protected override void ApplyQualitySettings()
-    {
-        if (_isConfiguring) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                try
-                {
-                    _isConfiguring = true;
-
-                    switch (Quality)
-                    {
-                        case RenderQuality.Low:
-                            LowQualitySettings();
-                            break;
-
-                        case RenderQuality.Medium:
-                            MediumQualitySettings();
-                            break;
-
-                        case RenderQuality.High:
-                            HighQualitySettings();
-                            break;
-                    }
-
-                    _samplingOptions = QualityBasedSamplingOptions();
-
-                    Log(LogLevel.Debug,
-                        LOG_PREFIX,
-                        $"Quality changed to {Quality}");
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            "ApplyQualitySettings",
-            "Failed to apply quality settings"
-        );
+        Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
     }
 
     private void HighQualitySettings()
@@ -243,15 +166,6 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         _edgeBlurRadius = LOW_EDGE_BLUR_RADIUS;
     }
 
-    protected override SKSamplingOptions QualityBasedSamplingOptions() =>
-        Quality switch
-        {
-            RenderQuality.Low => new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None),
-            RenderQuality.Medium => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
-            RenderQuality.High => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
-            _ => new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear)
-        };
-
     protected override void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
@@ -261,68 +175,15 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint, barCount)) return;
-
         ExecuteSafely(
             () =>
             {
                 UpdateState(canvas, spectrum, info, barCount);
                 RenderFrame(canvas, spectrum, info, barWidth, barSpacing, barCount, paint);
             },
-            "RenderEffect",
+            nameof(RenderEffect),
             "Error during rendering"
         );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint,
-        int barCount)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (barCount <= 0) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
     }
 
     private void UpdateState(
@@ -585,30 +446,9 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
            edgePaint);
     }
 
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () => OnDispose(),
-            "Dispose",
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        base.Dispose();
-        GC.SuppressFinalize(this);
-
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () => base.OnDispose(),
-            "OnDispose",
-            "Error during specific disposal"
-        );
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

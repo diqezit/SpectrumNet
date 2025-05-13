@@ -34,6 +34,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected volatile bool _isApplyingQuality;
 
     protected bool _isOverlayActive;
+    protected bool _overlayStateChanged;
+    protected bool _needsRedraw;
 
     protected readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
     protected readonly object _spectrumLock = new();
@@ -43,8 +45,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 
     public virtual void SetOverlayTransparency(float level)
     {
-        // Базовая реализация пустая, потому что не все рендереры 
-        // поддерживают прозрачность
+        // Базовая реализация пустая, переопределяется в потомках
     }
 
     public RenderQuality Quality
@@ -71,11 +72,14 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                 if (!_isInitialized)
                 {
                     _isInitialized = true;
+                    OnInitialize();
                     Log(LogLevel.Debug, GetType().Name, "Initialized");
                 }
             },
             nameof(Initialize),
             "Failed to initialize renderer");
+
+    protected virtual void OnInitialize() { }
 
     public virtual void Configure(
         bool isOverlayActive,
@@ -98,12 +102,16 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                     Log(LogLevel.Debug, GetType().Name, $"Configuration changed. New Quality: {Quality}");
 
                     ApplyQualitySettings();
+                    _overlayStateChanged = overlayChanged;
+                    _needsRedraw = true;
 
                     OnConfigurationChanged();
                 }
             },
             nameof(Configure),
             "Failed to configure renderer");
+
+    protected virtual void OnConfigurationChanged() { }
 
     public abstract void Render(
         SKCanvas? canvas,
@@ -115,22 +123,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         SKPaint? paint,
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo);
 
-    public virtual void Dispose() =>
-        ExecuteSafely(
-            () =>
-            {
-                if (!_disposed)
-                {
-                    _spectrumSemaphore.Dispose();
-                    _previousSpectrum = null;
-                    _processedSpectrum = null;
-                    Log(LogLevel.Debug, GetType().Name, "Disposed");
-                    _disposed = true;
-                    GC.SuppressFinalize(this);
-                }
-            },
-            nameof(Dispose),
-            "Error during base disposal");
+    public virtual bool RequiresRedraw() => _needsRedraw || _overlayStateChanged || _isOverlayActive;
 
     protected virtual void ApplyQualitySettings() => ExecuteSafely(
         () =>
@@ -145,6 +138,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                 (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
                 _samplingOptions = QualityBasedSamplingOptions();
 
+                OnQualitySettingsApplied();
             }
             finally
             {
@@ -153,6 +147,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         },
         nameof(ApplyQualitySettings),
         "Failed to apply base quality settings");
+
+    protected virtual void OnQualitySettingsApplied() { }
 
     protected virtual (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
         _quality switch
@@ -184,6 +180,60 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         && paint != null
         && info.Width > 0
         && info.Height > 0;
+
+    protected bool ValidateRenderParameters(
+        SKCanvas? canvas,
+        float[]? spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint? paint)
+    {
+        if (!_isInitialized)
+        {
+            Log(LogLevel.Error, GetType().Name, "Renderer is not initialized");
+            return false;
+        }
+
+        if (canvas == null)
+        {
+            Log(LogLevel.Error, GetType().Name, "Canvas is null");
+            return false;
+        }
+
+        if (spectrum == null || spectrum.Length == 0)
+        {
+            Log(LogLevel.Error, GetType().Name, "Spectrum is null or empty");
+            return false;
+        }
+
+        if (paint == null)
+        {
+            Log(LogLevel.Error, GetType().Name, "Paint is null");
+            return false;
+        }
+
+        if (info.Width <= 0 || info.Height <= 0)
+        {
+            Log(LogLevel.Error, GetType().Name, $"Invalid image dimensions: {info.Width}x{info.Height}");
+            return false;
+        }
+
+        if (barCount <= 0)
+        {
+            Log(LogLevel.Error, GetType().Name, "Bar count must be greater than zero");
+            return false;
+        }
+
+        if (_disposed)
+        {
+            Log(LogLevel.Error, GetType().Name, "Renderer is disposed");
+            return false;
+        }
+
+        return true;
+    }
 
     protected static bool IsRenderAreaVisible(
         SKCanvas? canvas,
@@ -218,45 +268,6 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         return (true, processed);
     }
 
-    protected static float[] ScaleSpectrum(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
-        var result = new float[targetCount];
-        float blockSize = spectrumLength / (float)targetCount;
-
-        // Используем кэшированное значение IsHardwareAccelerated
-        if (targetCount >= PARALLEL_BATCH_SIZE && IsHardwareAccelerated)
-            ScaleSpectrumParallel(spectrum, result, targetCount, spectrumLength, blockSize);
-        else
-            ScaleSpectrumSequential(spectrum, result, targetCount, spectrumLength, blockSize);
-
-        return result;
-    }
-
-    protected float[] SmoothSpectrum(
-        float[] spectrum,
-        int targetCount,
-        float? customFactor = null)
-    {
-        float factor = customFactor ?? _smoothingFactor;
-        if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
-        {
-            _previousSpectrum = new float[targetCount];
-            if (spectrum.Length >= targetCount)
-                Array.Copy(spectrum, _previousSpectrum, targetCount);
-        }
-
-        var smoothed = new float[targetCount];
-        if (IsHardwareAccelerated && targetCount >= Vector<float>.Count)
-            SmoothSpectrumVectorized(spectrum, smoothed, targetCount, factor);
-        else
-            SmoothSpectrumSequential(spectrum, smoothed, targetCount, factor);
-
-        return smoothed;
-    }
-
     protected float[] PrepareSpectrum(
         float[] spectrum,
         int targetCount,
@@ -277,6 +288,44 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
             if (locked)
                 _spectrumSemaphore.Release();
         }
+    }
+
+    private void PerformSpectrumProcessing(
+        float[] spectrum,
+        int count,
+        int length)
+    {
+        var scaled = ScaleSpectrum(spectrum, count, length);
+        _processedSpectrum = SmoothSpectrum(scaled, count);
+    }
+
+    private float[] GetProcessedSpectrum(
+        float[] spectrum,
+        int count,
+        int length)
+    {
+        if (_processedSpectrum != null && _processedSpectrum.Length == count)
+            return _processedSpectrum;
+
+        var scaled = ScaleSpectrum(spectrum, count, length);
+        _processedSpectrum = SmoothSpectrum(scaled, count);
+        return _processedSpectrum;
+    }
+
+    protected static float[] ScaleSpectrum(
+        float[] spectrum,
+        int targetCount,
+        int spectrumLength)
+    {
+        var result = new float[targetCount];
+        float blockSize = spectrumLength / (float)targetCount;
+
+        if (targetCount >= PARALLEL_BATCH_SIZE && IsHardwareAccelerated)
+            ScaleSpectrumParallel(spectrum, result, targetCount, spectrumLength, blockSize);
+        else
+            ScaleSpectrumSequential(spectrum, result, targetCount, spectrumLength, blockSize);
+
+        return result;
     }
 
     private static void ScaleSpectrumParallel(
@@ -319,6 +368,28 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
                 ? CalculateBlockAverage(spectrum, start, end)
                 : 0;
         }
+    }
+
+    protected float[] SmoothSpectrum(
+        float[] spectrum,
+        int targetCount,
+        float? customFactor = null)
+    {
+        float factor = customFactor ?? _smoothingFactor;
+        if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
+        {
+            _previousSpectrum = new float[targetCount];
+            if (spectrum.Length >= targetCount)
+                Array.Copy(spectrum, _previousSpectrum, targetCount);
+        }
+
+        var smoothed = new float[targetCount];
+        if (IsHardwareAccelerated && targetCount >= Vector<float>.Count)
+            SmoothSpectrumVectorized(spectrum, smoothed, targetCount, factor);
+        else
+            SmoothSpectrumSequential(spectrum, smoothed, targetCount, factor);
+
+        return smoothed;
     }
 
     private void SmoothSpectrumVectorized(
@@ -365,28 +436,6 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         }
     }
 
-    private void PerformSpectrumProcessing(
-        float[] spectrum,
-        int count,
-        int length)
-    {
-        var scaled = ScaleSpectrum(spectrum, count, length);
-        _processedSpectrum = SmoothSpectrum(scaled, count);
-    }
-
-    private float[] GetProcessedSpectrum(
-        float[] spectrum,
-        int count,
-        int length)
-    {
-        if (_processedSpectrum != null && _processedSpectrum.Length == count)
-            return _processedSpectrum;
-
-        var scaled = ScaleSpectrum(spectrum, count, length);
-        _processedSpectrum = SmoothSpectrum(scaled, count);
-        return _processedSpectrum;
-    }
-
     [MethodImpl(AggressiveInlining)]
     private static float CalculateBlockAverage(
         float[] spectrum,
@@ -399,11 +448,25 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         return sum / (end - start);
     }
 
-    protected virtual void OnConfigurationChanged() { }
+    public virtual void Dispose() =>
+        ExecuteSafely(
+            () =>
+            {
+                if (!_disposed)
+                {
+                    OnDispose();
+                    _spectrumSemaphore.Dispose();
+                    _previousSpectrum = null;
+                    _processedSpectrum = null;
+                    Log(LogLevel.Debug, GetType().Name, "Disposed");
+                    _disposed = true;
+                    GC.SuppressFinalize(this);
+                }
+            },
+            nameof(Dispose),
+            "Error during base disposal");
 
-    protected virtual void OnInitialize() { }
-
-    public virtual bool RequiresRedraw() { return false; }
+    protected virtual void OnDispose() { }
 
     protected static void Log(LogLevel level, string prefix, string message)
     {
