@@ -101,7 +101,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         RequestRender();
     }
 
-    private UIController CreateUIController() => new(this);
+    private UIController CreateUIController() => new(this, RendererTransparencyManager.Instance);
     private AudioController CreateAudioController() => new(this, SynchronizationContext.Current!);
     private ViewController CreateViewController() => new(this, _renderElement, _rendererFactory);
 

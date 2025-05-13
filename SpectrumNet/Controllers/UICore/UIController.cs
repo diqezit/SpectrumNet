@@ -2,13 +2,18 @@
 
 namespace SpectrumNet.Controllers.UICore;
 
-public class UIController(IMainController mainController)
+public class UIController(
+    IMainController mainController,
+    ITransparencyManager transparencyManager)
     : AsyncDisposableBase, IUIController
 {
     private const string LogPrefix = nameof(UIController);
 
     private readonly IMainController _mainController = mainController ??
         throw new ArgumentNullException(nameof(mainController));
+
+    private readonly ITransparencyManager _transparencyManager = transparencyManager ??
+        throw new ArgumentNullException(nameof(transparencyManager));
 
     private OverlayWindow? _overlayWindow;
     private ControlPanelWindow? _controlPanelWindow;
@@ -127,7 +132,7 @@ public class UIController(IMainController mainController)
         CreateOverlayWindow(config);
         RegisterOverlayEvents();
         ShowOverlayWindow();
-        EnableGlobalMouseTracking();
+        _transparencyManager.EnableGlobalMouseTracking();
         ActivateOverlay();
         UpdateOverlayDimensions();
     }
@@ -154,9 +159,6 @@ public class UIController(IMainController mainController)
 
     private void ShowOverlayWindow() => _overlayWindow?.Show();
 
-    private static void EnableGlobalMouseTracking() =>
-        RendererTransparencyManager.Instance.EnableGlobalMouseTracking();
-
     private void ActivateOverlay()
     {
         IsOverlayActive = true;
@@ -171,15 +173,12 @@ public class UIController(IMainController mainController)
     private void OnOverlayClosed() =>
         Safe(() =>
         {
-            DisableGlobalMouseTracking();
+            _transparencyManager.DisableGlobalMouseTracking();
             DisposeOverlayWindow();
             ClearOverlayState();
             ActivateOwnerWindow();
         },
         new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling overlay closed" });
-
-    private static void DisableGlobalMouseTracking() =>
-        RendererTransparencyManager.Instance.DisableGlobalMouseTracking();
 
     private void DisposeOverlayWindow()
     {

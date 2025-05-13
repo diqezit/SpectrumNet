@@ -134,11 +134,11 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         }
     }
 
-    private static bool ShouldSkipTransparencyUpdate(float transparencyLevel, float currentValue) =>
-        Math.Abs(currentValue - transparencyLevel) < float.Epsilon;
+    private static bool ShouldSkipTransparencyUpdate(float desired, float current) =>
+        Abs(current - desired) < 0.0001f;
 
-    private bool ShouldSkipTransparencyUpdate(float transparencyLevel) =>
-        ShouldSkipTransparencyUpdate(transparencyLevel, _currentTransparencyValue);
+    private bool ShouldSkipTransparencyUpdate(float desired) =>
+        ShouldSkipTransparencyUpdate(desired, _currentTransparencyValue);
 
     private static void LogTransparencyUpdate(float transparencyLevel) =>
         Log(LogLevel.Debug, LOG_PREFIX, $"Updating transparency to {transparencyLevel}");
@@ -175,57 +175,46 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
 
         lock (_stateLock)
         {
-            if (!_isTransparencyActive)
-                return;
-
-            if (HasTimeoutExpired())
-            {
+            if (!_isTransparencyActive) return;
+            if ((Now - _lastMouseActivity).TotalSeconds >= OVERLAY_TIMEOUT_SECONDS)
                 DeactivateTransparency();
-            }
         }
     }
 
-    private bool HasTimeoutExpired()
+    public void DeactivateTransparency()
     {
-        TimeSpan elapsed = Now - _lastMouseActivity;
-        return elapsed.TotalSeconds >= OVERLAY_TIMEOUT_SECONDS;
-    }
-
-    private void DeactivateTransparency()
-    {
-        _isTransparencyActive = false;
-        UpdateTransparency(INACTIVE_TRANSPARENCY);
+        lock (_stateLock)
+        {
+            _isTransparencyActive = false;
+            UpdateTransparency(INACTIVE_TRANSPARENCY);
+        }
     }
 
     public void EnableGlobalMouseTracking()
     {
         if (_isMouseHookActive) return;
 
-        InstallMouseHook();
-        MarkMouseHookActive();
-        LogMouseTrackingEnabled();
+        _mouseHook = SetWindowsHookEx(
+            WH_MOUSE_LL,
+            _mouseHookDelegate,
+            GetModuleHandle(null),
+            0);
+
+        if (_mouseHook != IntPtr.Zero)
+        {
+            _isMouseHookActive = true;
+            LogMouseTrackingEnabled();
+        }
     }
 
     public void DisableGlobalMouseTracking()
     {
-        if (!_isMouseHookActive) return;
-
-        UninstallMouseHook();
-        MarkMouseHookInactive();
+        if (!_isMouseHookActive || _mouseHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_mouseHook);
+        _mouseHook = IntPtr.Zero;
+        _isMouseHookActive = false;
         LogMouseTrackingDisabled();
     }
-
-    private void InstallMouseHook() =>
-        _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseHookDelegate, GetModuleHandle(null), 0);
-
-    private void UninstallMouseHook() =>
-        UnhookWindowsHookEx(_mouseHook);
-
-    private void MarkMouseHookActive() =>
-        _isMouseHookActive = true;
-
-    private void MarkMouseHookInactive() =>
-        _isMouseHookActive = false;
 
     private static void LogMouseTrackingEnabled() =>
         Log(LogLevel.Debug, LOG_PREFIX, "Global mouse tracking enabled");
@@ -247,28 +236,20 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         }
     }
 
-    public static bool RequiresRedraw() => true;
-
     public void Dispose()
     {
         if (_disposed) return;
 
-        CleanupResources();
-        MarkAsDisposed();
+        _transparencyTimer.Tick -= CheckTransparencyTimeout;
+        _transparencyTimer.Stop();
+
+        if (_isMouseHookActive && _mouseHook != IntPtr.Zero)
+            UnhookWindowsHookEx(_mouseHook);
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
         LogDisposal();
     }
-
-    private void CleanupResources()
-    {
-        DisableGlobalMouseTracking();
-        StopTransparencyTimer();
-    }
-
-    private void StopTransparencyTimer() =>
-        _transparencyTimer?.Stop();
-
-    private void MarkAsDisposed() =>
-        _disposed = true;
 
     private static void LogDisposal() =>
         Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
