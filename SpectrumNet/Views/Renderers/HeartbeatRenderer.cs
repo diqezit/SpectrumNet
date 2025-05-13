@@ -9,6 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<HeartbeatRenderer> _instance = new(() => new HeartbeatRenderer());
+    private const string LOG_PREFIX = "HeartbeatRenderer";
 
     private HeartbeatRenderer() { }
 
@@ -82,141 +83,38 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
     private float[]? _cachedSmoothedSpectrum;
     private Task? _spectrumProcessingTask;
     private bool _dataReady;
-    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeResources();
-                InitializeQualityParams();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed to initialize renderer"
-        );
-    }
-
-    private void InitializeResources()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                UpdateConfiguration(DEFAULT_CONFIG);
-                PrecomputeTrigValues();
-            },
-            nameof(InitializeResources),
-            "Failed to initialize renderer resources"
-        );
-    }
-
-    private void InitializeQualityParams()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                ApplyQualitySettingsInternal();
-            },
-            nameof(InitializeQualityParams),
-            "Failed to initialize quality parameters"
-        );
-    }
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive
-                        ? SMOOTHING_FACTOR_OVERLAY
-                        : SMOOTHING_FACTOR_NORMAL;
-
-                    UpdateConfiguration(
-                        isOverlayActive
-                            ? OVERLAY_CONFIG
-                            : DEFAULT_CONFIG
-                    );
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
+        base.OnInitialize();
+        UpdateConfiguration(DEFAULT_CONFIG);
+        PrecomputeTrigValues();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                InvalidateCachedResources();
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
+        _smoothingFactor = _isOverlayActive ? SMOOTHING_FACTOR_OVERLAY : SMOOTHING_FACTOR_NORMAL;
+
+        UpdateConfiguration(
+            _isOverlayActive ? OVERLAY_CONFIG : DEFAULT_CONFIG
         );
+
+        InvalidateCachedResources();
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
     }
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
             case RenderQuality.Low:
                 LowQualitySettings();
                 break;
-
             case RenderQuality.Medium:
                 MediumQualitySettings();
                 break;
-
             case RenderQuality.High:
                 HighQualitySettings();
                 break;
@@ -256,8 +154,6 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
         ExecuteSafely(
             () =>
             {
@@ -275,60 +171,20 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         );
     }
 
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (canvas == null || spectrum == null || paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Invalid render parameters: null values");
-            return false;
-        }
-
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
-
-        if (spectrum.Length == 0)
-        {
-            Log(LogLevel.Warning, LOG_PREFIX, "Empty spectrum data");
-            return false;
-        }
-
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
-
-        return true;
-    }
-
     private void UpdateState(
         float[] spectrum,
         int barCount,
         SKImageInfo info,
         float barSpacing)
     {
-        ExecuteSafely(
-            () =>
-            {
-                AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
-                int actualHeartCount = (int)Min(spectrum.Length, _heartCount);
-                ProcessSpectrumData(spectrum, actualHeartCount);
+        AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
+        int actualHeartCount = (int)Min(spectrum.Length, _heartCount);
+        ProcessSpectrumData(spectrum, actualHeartCount);
 
-                if (_cachedSmoothedSpectrum != null)
-                {
-                    _dataReady = true;
-                }
-            },
-            nameof(UpdateState),
-            "Error updating renderer state"
-        );
+        if (_cachedSmoothedSpectrum != null)
+        {
+            _dataReady = true;
+        }
     }
 
     private void RenderFrame(
@@ -336,52 +192,29 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         SKPaint basePaint)
     {
-        ExecuteSafely(
-            () =>
-            {
-                if (_cachedSmoothedSpectrum == null)
-                {
-                    return;
-                }
+        if (_cachedSmoothedSpectrum == null)
+            return;
 
-                RenderHeartbeats(canvas, _cachedSmoothedSpectrum, info, basePaint);
-            },
-            nameof(RenderFrame),
-            "Error rendering frame"
-        );
+        RenderHeartbeats(canvas, _cachedSmoothedSpectrum, info, basePaint);
     }
 
     private void UpdateConfiguration((float Size, float Spacing, int Count) config)
     {
-        ExecuteSafely(
-            () =>
-            {
-                (_heartSize, _heartSpacing, _heartCount) = config;
-                base._previousSpectrum = _cachedScaledSpectrum = _cachedSmoothedSpectrum = null;
-                _lastSpectrumLength = _lastTargetCount = 0;
-                PrecomputeTrigValues();
-                InvalidateCachedResources();
-            },
-            nameof(UpdateConfiguration),
-            "Failed to update configuration"
-        );
+        (_heartSize, _heartSpacing, _heartCount) = config;
+        _previousSpectrum = _cachedScaledSpectrum = _cachedSmoothedSpectrum = null;
+        _lastSpectrumLength = _lastTargetCount = 0;
+        PrecomputeTrigValues();
+        InvalidateCachedResources();
     }
 
     private void AdjustConfiguration(int barCount, float barSpacing, int canvasWidth, int canvasHeight)
     {
-        ExecuteSafely(
-            () =>
-            {
-                _heartSize = CalculateHeartSize(barCount, barSpacing);
-                _heartSpacing = CalculateHeartSpacing(barCount, barSpacing);
-                _heartCount = CalculateHeartCount(barCount);
+        _heartSize = CalculateHeartSize(barCount, barSpacing);
+        _heartSpacing = CalculateHeartSpacing(barCount, barSpacing);
+        _heartCount = CalculateHeartCount(barCount);
 
-                AdjustHeartSizeToCanvas(canvasWidth, canvasHeight);
-                EnsureTrigValuesInitialized();
-            },
-            nameof(AdjustConfiguration),
-            "Failed to adjust configuration"
-        );
+        AdjustHeartSizeToCanvas(canvasWidth, canvasHeight);
+        EnsureTrigValuesInitialized();
     }
 
     private static float CalculateHeartSize(int barCount, float barSpacing) =>
@@ -412,23 +245,16 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 
     private void PrecomputeTrigValues()
     {
-        ExecuteSafely(
-            () =>
-            {
-                _cosValues = new float[_heartCount];
-                _sinValues = new float[_heartCount];
-                float angleStep = 360f / _heartCount * RADIANS_PER_DEGREE;
+        _cosValues = new float[_heartCount];
+        _sinValues = new float[_heartCount];
+        float angleStep = 360f / _heartCount * RADIANS_PER_DEGREE;
 
-                for (int i = 0; i < _heartCount; i++)
-                {
-                    float angle = i * angleStep;
-                    _cosValues[i] = Cos(angle);
-                    _sinValues[i] = Sin(angle);
-                }
-            },
-            nameof(PrecomputeTrigValues),
-            "Failed to precompute trigonometric values"
-        );
+        for (int i = 0; i < _heartCount; i++)
+        {
+            float angle = i * angleStep;
+            _cosValues[i] = Cos(angle);
+            _sinValues[i] = Sin(angle);
+        }
     }
 
     private void ProcessSpectrumData(float[] spectrum, int actualHeartCount)
@@ -445,43 +271,27 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 
     private void ProcessSpectrumAsync(float[] spectrum, int targetCount)
     {
-        ExecuteSafely(
-            () =>
-            {
-                if (_spectrumProcessingTask != null && !_spectrumProcessingTask.IsCompleted)
-                {
-                    return;
-                }
+        if (_spectrumProcessingTask != null && !_spectrumProcessingTask.IsCompleted)
+            return;
 
-                _spectrumProcessingTask = Task.Run(() =>
-                {
-                    lock (_renderDataLock)
-                    {
-                        ProcessSpectrum(spectrum, targetCount);
-                    }
-                });
-            },
-            nameof(ProcessSpectrumAsync),
-            "Failed to process spectrum asynchronously"
-        );
+        _spectrumProcessingTask = Task.Run(() =>
+        {
+            lock (_renderDataLock)
+            {
+                ProcessSpectrum(spectrum, targetCount);
+            }
+        });
     }
 
     private void ProcessSpectrum(float[] spectrum, int targetCount)
     {
-        ExecuteSafely(
-            () =>
-            {
-                EnsureSpectrumBuffers(spectrum, targetCount);
-                ScaleSpectrum(spectrum, targetCount);
-                EnsureSmoothedBuffer(targetCount);
-                SmoothSpectrum(
-                    _cachedScaledSpectrum!,
-                    _cachedSmoothedSpectrum!,
-                    targetCount
-                );
-            },
-            nameof(ProcessSpectrum),
-            "Failed to process spectrum"
+        EnsureSpectrumBuffers(spectrum, targetCount);
+        ScaleSpectrum(spectrum, targetCount);
+        EnsureSmoothedBuffer(targetCount);
+        SmoothSpectrum(
+            _cachedScaledSpectrum!,
+            _cachedSmoothedSpectrum!,
+            targetCount
         );
     }
 
@@ -639,23 +449,16 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private void SmoothSpectrum(float[] source, float[] target, int count)
     {
-        ExecuteSafely(
-            () =>
-            {
-                EnsurePreviousSpectrumBuffer(source, count);
+        EnsurePreviousSpectrumBuffer(source, count);
 
-                if (CanUseVectorization(count))
-                {
-                    SmoothSpectrumVectorized(source, target, count);
-                }
-                else
-                {
-                    SmoothSpectrumSequential(source, target, count);
-                }
-            },
-            nameof(SmoothSpectrum),
-            "Failed to smooth spectrum"
-        );
+        if (CanUseVectorization(count))
+        {
+            SmoothSpectrumVectorized(source, target, count);
+        }
+        else
+        {
+            SmoothSpectrumSequential(source, target, count);
+        }
     }
 
     private static bool CanUseVectorization(int count) =>
@@ -663,10 +466,10 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 
     private void EnsurePreviousSpectrumBuffer(float[] source, int count)
     {
-        if (base._previousSpectrum == null || base._previousSpectrum.Length != count)
+        if (_previousSpectrum == null || _previousSpectrum.Length != count)
         {
-            base._previousSpectrum = new float[count];
-            Array.Copy(source, base._previousSpectrum, count);
+            _previousSpectrum = new float[count];
+            Array.Copy(source, _previousSpectrum, count);
         }
     }
 
@@ -680,7 +483,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         for (int i = 0; i < vectorized; i += Vector<float>.Count)
         {
             Vector<float> sourceVector = new(source, i);
-            Vector<float> previousVector = new(base._previousSpectrum!, i);
+            Vector<float> previousVector = new(_previousSpectrum!, i);
 
             Vector<float> resultVector = CalculateSmoothingVectorized(
                 sourceVector,
@@ -688,10 +491,9 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
             );
 
             resultVector.CopyTo(target, i);
-            resultVector.CopyTo(base._previousSpectrum!, i);
+            resultVector.CopyTo(_previousSpectrum!, i);
         }
 
-        // Process remaining elements
         SmoothSpectrumSequential(source, target, count, vectorized);
     }
 
@@ -708,8 +510,8 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
     {
         for (int i = startIndex; i < count; i++)
         {
-            target[i] = base._previousSpectrum![i] + (source[i] - base._previousSpectrum[i]) * _smoothingFactor;
-            base._previousSpectrum[i] = target[i];
+            target[i] = _previousSpectrum![i] + (source[i] - _previousSpectrum[i]) * _smoothingFactor;
+            _previousSpectrum[i] = target[i];
         }
     }
 
@@ -719,45 +521,33 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         SKPaint basePaint)
     {
-        ExecuteSafely(
-            () =>
-            {
-                (float centerX, float centerY, float radius) = CalculateRenderGeometry(info);
+        (float centerX, float centerY, float radius) = CalculateRenderGeometry(info);
 
-                var pathPool = _pathPool;
-                if (pathPool == null) return;
+        using var heartPath = _pathPool.Get();
+        EnsureCachedHeartPicture(heartPath, basePaint);
 
-                using var heartPath = pathPool.Get();
-                if (heartPath == null) return;
+        using var heartPaint = ConfigureHeartPaint();
+        using var glowPaint = ConfigureGlowPaint();
 
-                EnsureCachedHeartPicture(heartPath, basePaint);
+        int heartSides = GetHeartSidesForQuality();
+        float simplificationFactor = GetSimplificationFactorForQuality();
 
-                using var heartPaint = ConfigureHeartPaint();
-                using var glowPaint = ConfigureGlowPaint();
-
-                int heartSides = GetHeartSidesForQuality();
-                float simplificationFactor = GetSimplificationFactorForQuality();
-
-                lock (_renderDataLock)
-                {
-                    DrawHearts(
-                        canvas,
-                        spectrum,
-                        centerX,
-                        centerY,
-                        radius,
-                        heartPath,
-                        heartPaint,
-                        glowPaint,
-                        basePaint,
-                        heartSides,
-                        simplificationFactor
-                    );
-                }
-            },
-            nameof(RenderHeartbeats),
-            "Failed to render heartbeats"
-        );
+        lock (_renderDataLock)
+        {
+            DrawHearts(
+                canvas,
+                spectrum,
+                centerX,
+                centerY,
+                radius,
+                heartPath,
+                heartPaint,
+                glowPaint,
+                basePaint,
+                heartSides,
+                simplificationFactor
+            );
+        }
     }
 
     private static (float centerX, float centerY, float radius) CalculateRenderGeometry(SKImageInfo info)
@@ -784,12 +574,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 
     private SKPaint ConfigureHeartPaint()
     {
-        var paintPool = _paintPool;
-        if (paintPool == null) return new SKPaint();
-
-        var heartPaint = paintPool.Get();
-        if (heartPaint == null) return new SKPaint();
-
+        var heartPaint = _paintPool.Get();
         heartPaint.IsAntialias = UseAntiAlias;
         heartPaint.Style = SKPaintStyle.Fill;
         return heartPaint;
@@ -798,16 +583,9 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
     private SKPaint? ConfigureGlowPaint()
     {
         if (!UseAdvancedEffects)
-        {
             return null;
-        }
 
-        var paintPool = _paintPool;
-        if (paintPool == null) return null;
-
-        var glowPaint = paintPool.Get();
-        if (glowPaint == null) return null;
-
+        var glowPaint = _paintPool.Get();
         glowPaint.IsAntialias = UseAntiAlias;
         glowPaint.Style = SKPaintStyle.Fill;
         return glowPaint;
@@ -830,9 +608,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         {
             float magnitude = spectrum[i];
             if (magnitude < MIN_MAGNITUDE_THRESHOLD)
-            {
                 continue;
-            }
 
             DrawSingleHeart(
                 canvas,
@@ -882,9 +658,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         SKRect heartBounds = CalculateHeartBounds(x, y, heartSize);
 
         if (canvas.QuickReject(heartBounds))
-        {
             return;
-        }
 
         byte alpha = CalculateAlpha(magnitude);
         heartPaint.Color = basePaint.Color.WithAlpha(alpha);
@@ -998,22 +772,15 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         int sides,
         float simplificationFactor)
     {
-        ExecuteSafely(
-            () =>
-            {
-                CreatePolygonHeartPath(path, x, y, size, sides, simplificationFactor);
-                DrawHeartWithGlowEffect(
-                    canvas,
-                    path,
-                    heartPaint,
-                    UseAdvancedEffects ? glowPaint : null,
-                    alpha,
-                    size,
-                    simplificationFactor);
-            },
-            nameof(DrawSimplifiedHeart),
-            "Failed to draw simplified heart"
-        );
+        CreatePolygonHeartPath(path, x, y, size, sides, simplificationFactor);
+        DrawHeartWithGlowEffect(
+            canvas,
+            path,
+            heartPaint,
+            UseAdvancedEffects ? glowPaint : null,
+            alpha,
+            size,
+            simplificationFactor);
     }
 
     private static void CreatePolygonHeartPath(
@@ -1071,51 +838,24 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         SKPaint? glowPaint,
         byte alpha)
     {
-        ExecuteSafely(
-            () =>
-            {
-                SetupHeartTransform(canvas, x, y, size);
-                DrawCachedHeartWithEffects(canvas, heartPaint, glowPaint, alpha, size);
-                canvas.Restore();
-            },
-            nameof(DrawCachedHeart),
-            "Failed to draw cached heart"
-        );
-    }
-
-    private static void SetupHeartTransform(SKCanvas canvas, float x, float y, float size)
-    {
         canvas.Save();
         canvas.Translate(x, y);
         canvas.Scale(size, size);
-    }
 
-    private void DrawCachedHeartWithEffects(
-        SKCanvas canvas,
-        SKPaint heartPaint,
-        SKPaint? glowPaint,
-        byte alpha,
-        float size)
-    {
         if (UseAdvancedEffects && glowPaint != null && _cachedHeartPicture != null)
         {
-            ConfigureGlowEffect(glowPaint, heartPaint.Color, alpha, size);
+            glowPaint.Color = heartPaint.Color.WithAlpha((byte)(alpha / GLOW_ALPHA_DIVISOR));
+            glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
+                SKBlurStyle.Normal,
+                size * GLOW_INTENSITY
+            );
             canvas.DrawPicture(_cachedHeartPicture, glowPaint);
         }
 
         if (_cachedHeartPicture != null)
-        {
             canvas.DrawPicture(_cachedHeartPicture, heartPaint);
-        }
-    }
 
-    private static void ConfigureGlowEffect(SKPaint glowPaint, SKColor baseColor, byte alpha, float size)
-    {
-        glowPaint.Color = baseColor.WithAlpha((byte)(alpha / GLOW_ALPHA_DIVISOR));
-        glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
-            SKBlurStyle.Normal,
-            size * GLOW_INTENSITY
-        );
+        canvas.Restore();
     }
 
     private static void CreateHeartPath(SKPath path, float x, float y, float size)
@@ -1129,54 +869,21 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(
-            () =>
-            {
-                _cachedHeartPicture?.Dispose();
-                _cachedHeartPicture = null;
-                _dataReady = false;
+        _cachedHeartPicture?.Dispose();
+        _cachedHeartPicture = null;
+        _dataReady = false;
 
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
-            },
-            nameof(OnInvalidateCachedResources),
-            "Failed to invalidate cached resources"
-        );
-    }
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
-    }
-
-    private void DisposeManagedResources()
-    {
         WaitForPendingTasks();
         DisposeHeartResources();
         ClearBuffers();
+
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     private void WaitForPendingTasks()
@@ -1192,7 +899,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 
     private void ClearBuffers()
     {
-        base._previousSpectrum = _cachedScaledSpectrum = _cachedSmoothedSpectrum = null;
+        _previousSpectrum = _cachedScaledSpectrum = _cachedSmoothedSpectrum = null;
         _cosValues = _sinValues = [];
     }
 }

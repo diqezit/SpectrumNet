@@ -9,6 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class CubesRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<CubesRenderer> _instance = new(() => new CubesRenderer());
+    private const string LOG_PREFIX = "CubesRenderer";
 
     private CubesRenderer() { }
 
@@ -76,110 +77,23 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         }
     }
 
-    private new bool _useAntiAlias = true;
-    private new bool _useAdvancedEffects = true;
     private bool _useTopFaceEffect = true;
     private bool _useSideFaceEffect = true;
     private float _topAlphaFactor = TOP_ALPHA_FACTOR;
     private float _sideFaceAlphaFactor = SIDE_FACE_ALPHA_FACTOR;
     private float _topWidthProportion = CUBE_TOP_WIDTH_PROPORTION;
     private float _topHeightProportion = CUBE_TOP_HEIGHT_PROPORTION;
-    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                if (_disposed) ResetRendererState();
-                InitializeQualitySettings();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed during renderer initialization"
-        );
+        base.OnInitialize();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
-    private void InitializeQualitySettings() => 
-        ApplyQualitySettingsInternal();
+    protected override void OnConfigurationChanged() => 
+        Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
 
-    private void ResetRendererState() =>
-        _disposed = false;
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
-    protected override void OnConfigurationChanged()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Debug,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
-    }
-
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
@@ -236,18 +150,6 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         _topHeightProportion = HIGH_TOP_HEIGHT_PROPORTION;
     }
 
-    protected override void OnQualitySettingsApplied()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnQualitySettingsApplied();
-            },
-            nameof(OnQualitySettingsApplied),
-            "Failed to apply specific quality settings"
-        );
-    }
-
     protected override void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
@@ -257,8 +159,6 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
         ExecuteSafely(
             () =>
             {
@@ -386,82 +286,9 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         canvas.DrawPath(sidePath, sidePaint);
     }
 
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error,
-            LOG_PREFIX,
-            $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
-    }
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

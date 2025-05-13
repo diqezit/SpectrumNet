@@ -9,8 +9,13 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class DotsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<DotsRenderer> _instance = new(() => new DotsRenderer());
+    private const string LOG_PREFIX = "DotsRenderer";
 
-    private DotsRenderer() { }
+    private DotsRenderer()
+    {
+        _dotPaint = new SKPaint();
+        _glowPaint = new SKPaint();
+    }
 
     public static DotsRenderer GetInstance() => _instance.Value;
 
@@ -93,7 +98,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         float MaxSpectrum,
         int BarCount)
     {
-        public readonly float AlphaFactor => 
+        public readonly float AlphaFactor =>
             MathF.Max(0.3f, MathF.Min(1.0f, MaxSpectrum + 0.3f));
     }
 
@@ -105,38 +110,24 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     private float _maxSpectrum;
     private int _dotCount = DEFAULT_DOT_COUNT;
     private float _globalRadiusMultiplier = 1.0f;
-    private new bool _useAdvancedEffects;
     private bool _useGlowEffects;
-    private new bool _useAntiAlias;
     private float _glowRadiusFactor = GLOW_RADIUS_FACTOR;
     private float _glowAlpha = BASE_GLOW_ALPHA;
     private float _dotSpeedFactor = 1.0f;
-    private volatile bool _isConfiguring;
 
     private readonly object _renderDataLock = new();
     private bool _dataReady;
     private RenderData? _currentRenderData;
 
-    private readonly SKPaint _dotPaint = new();
-    private readonly SKPaint _glowPaint = new();
+    private readonly SKPaint _dotPaint;
+    private readonly SKPaint _glowPaint;
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeResources();
-                InitializeQualitySettings();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed during renderer initialization"
-        );
+        base.OnInitialize();
+        InitializeResources();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
-
-    private void InitializeQualitySettings() => 
-        ApplyQualitySettingsInternal();
 
     private void InitializeResources()
     {
@@ -192,79 +183,10 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         return new SKColor(r, g, b);
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
+    protected override void OnConfigurationChanged() => 
+        Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
 
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
-    protected override void OnConfigurationChanged()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Debug,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
-    }
-
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
@@ -348,8 +270,6 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
         ExecuteSafely(
             () =>
             {
@@ -359,57 +279,6 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             nameof(RenderEffect),
             "Error during rendering"
         );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error,
-            LOG_PREFIX,
-            $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
     }
 
     private void UpdateState(
@@ -621,50 +490,18 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(
-            () =>
-            {
-                _dataReady = false;
-                _currentRenderData = null;
-            },
-            nameof(OnInvalidateCachedResources),
-            "Failed to invalidate cached resources"
-        );
-    }
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        base.OnInvalidateCachedResources();
+        _dataReady = false;
+        _currentRenderData = null;
+        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
-    }
-
-    private void DisposeManagedResources()
-    {
         _dotPaint?.Dispose();
         _glowPaint?.Dispose();
         _dots = [];
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

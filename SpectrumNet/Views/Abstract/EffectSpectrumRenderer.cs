@@ -251,7 +251,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             blur);
     }
 
-    private SKPaint InitPaint(
+    protected SKPaint InitPaint(
         SKColor color,
         SKPaintStyle style,
         SKMaskFilter? maskFilter)

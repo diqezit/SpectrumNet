@@ -9,6 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class GaugeRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<GaugeRenderer> _instance = new(() => new GaugeRenderer());
+    private const string LOG_PREFIX = "GaugeRenderer";
 
     private GaugeRenderer() { }
 
@@ -163,8 +164,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     private readonly object _stateLock = new();
     private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
 
-    private volatile bool _isConfiguring;
-
     static GaugeRenderer()
     {
         InitializeMinorMarks();
@@ -172,23 +171,10 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-
-                lock (_stateLock)
-                {
-                    _state = new GaugeState();
-                    _config = GaugeConfig.Default;
-                }
-
-                InitializeQualityParams();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed to initialize renderer"
-        );
+        base.OnInitialize();
+        _state = new GaugeState();
+        _config = GaugeConfig.Default;
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     public override void SetOverlayTransparency(float level)
@@ -201,99 +187,22 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         _overlayStateChanged = true;
     }
 
-    private void InitializeQualityParams()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                ApplyQualitySettingsInternal();
-            },
-            nameof(InitializeQualityParams),
-            "Failed to initialize quality parameters"
-        );
-    }
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool overlayChanged = _isOverlayActive != isOverlayActive;
-                    bool qualityChanged = Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-                    _config = _config.WithOverlayMode(isOverlayActive);
-
-                    if (overlayChanged)
-                    {
-                        _overlayAlphaFactor = isOverlayActive ? 0.75f : 1.0f;
-                        _overlayStateChanged = true;
-                        _overlayStateChangeRequested = true;
-                    }
-
-                    if (overlayChanged || qualityChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to apply configuration changes"
-        );
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
+
+        _config = _config.WithOverlayMode(_isOverlayActive);
+
+        if (_isOverlayActive)
+        {
+            _overlayAlphaFactor = 0.75f;
+            _overlayStateChanged = true;
+            _overlayStateChangeRequested = true;
+        }
     }
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
@@ -315,20 +224,20 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     private void LowQualitySettings()
     {
-        base._useAntiAlias = LOW_USE_ANTIALIASING;
-        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = LOW_USE_ANTIALIASING;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
     }
 
     private void MediumQualitySettings()
     {
-        base._useAntiAlias = MEDIUM_USE_ANTIALIASING;
-        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
     }
 
     private void HighQualitySettings()
     {
-        base._useAntiAlias = HIGH_USE_ANTIALIASING;
-        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = HIGH_USE_ANTIALIASING;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
     }
 
     protected override void RenderEffect(
@@ -340,9 +249,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-            return;
-
         ExecuteSafely(
             () =>
             {
@@ -367,108 +273,35 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     private void UpdateState(float[] spectrum)
     {
-        ExecuteSafely(
-            () =>
+        bool semaphoreAcquired = false;
+        try
+        {
+            semaphoreAcquired = _renderSemaphore.Wait(0);
+            if (semaphoreAcquired)
             {
-                bool semaphoreAcquired = false;
-                try
-                {
-                    semaphoreAcquired = _renderSemaphore.Wait(0);
-                    if (semaphoreAcquired)
-                    {
-                        UpdateGaugeState(spectrum);
-                    }
-                }
-                finally
-                {
-                    if (semaphoreAcquired)
-                        _renderSemaphore.Release();
-                }
-            },
-            nameof(UpdateState),
-            "Error updating state"
-        );
+                UpdateGaugeState(spectrum);
+            }
+        }
+        finally
+        {
+            if (semaphoreAcquired)
+                _renderSemaphore.Release();
+        }
     }
 
     private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint)
     {
-        ExecuteSafely(
-            () =>
-            {
-                RenderGaugeComponents(canvas, info, paint);
-            },
-            nameof(RenderFrame),
-            "Error rendering frame"
-        );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Warning, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
-    }
-
-    private void RenderGaugeComponents(
-        SKCanvas canvas,
-        SKImageInfo info,
-        SKPaint basePaint)
-    {
         var gaugeRect = CalculateGaugeRect(info);
-        bool isOverlayActive = _config.SmoothingFactorIncrease == 0.1f;
+        bool isOverlayActive = _isOverlayActive;
 
         DrawGaugeBackground(canvas, gaugeRect);
         DrawScale(canvas, gaugeRect, isOverlayActive);
-        DrawNeedle(canvas, gaugeRect, _state.CurrentNeedlePosition, isOverlayActive, basePaint);
+        DrawNeedle(canvas, gaugeRect, _state.CurrentNeedlePosition, isOverlayActive, paint);
         DrawPeakLamp(canvas, gaugeRect, isOverlayActive);
     }
 
     private void DrawGaugeBackground(SKCanvas canvas, SKRect rect)
     {
-        // Draw outer frame
         using var outerFramePaint = _paintPool.Get();
         ConfigureOuterFramePaint(outerFramePaint);
         canvas.DrawRoundRect(
@@ -477,7 +310,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             BG_OUTER_FRAME_CORNER_RADIUS,
             outerFramePaint);
 
-        // Draw inner frame
         var innerFrameRect = GetInnerFrameRect(rect);
         using var innerFramePaint = _paintPool.Get();
         ConfigureInnerFramePaint(innerFramePaint);
@@ -487,7 +319,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             BG_INNER_FRAME_CORNER_RADIUS,
             innerFramePaint);
 
-        // Draw background
         var backgroundRect = GetBackgroundRect(innerFrameRect);
         using var backgroundPaint = _paintPool.Get();
         ConfigureBackgroundPaint(backgroundPaint, backgroundRect);
@@ -497,7 +328,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             BG_BACKGROUND_CORNER_RADIUS,
             backgroundPaint);
 
-        // Draw VU text
         DrawVuText(canvas, backgroundRect, rect.Height);
     }
 
@@ -578,11 +408,9 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
         ConfigureScalePaints(tickPaint, textPaint);
 
-        // Draw major marks
         foreach (var (value, label) in _majorMarks)
             DrawMark(canvas, scaleParams, value, label, isOverlayActive, tickPaint, textPaint);
 
-        // Draw minor marks
         foreach (float value in _minorMarkValues)
             DrawMark(canvas, scaleParams, value, null, isOverlayActive, tickPaint, null);
     }
@@ -706,7 +534,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         bool isOverlayActive,
         SKPaint textPaint)
     {
-        // Position text along the scale arc, slightly outward from tick end
         float textOffset = radiusY * (isOverlayActive ? SCALE_TEXT_OFFSET_FACTOR_OVERLAY : SCALE_TEXT_OFFSET_FACTOR);
         float textSize = radiusY * (isOverlayActive ? SCALE_TEXT_SIZE_FACTOR_OVERLAY : SCALE_TEXT_SIZE_FACTOR);
 
@@ -773,13 +600,8 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         needleParams)
     {
         var (centerX, centerY, radiusX, radiusY, angle, needleLength) = needleParams;
-        var pathPool = _pathPool;
 
-        if (pathPool == null) return;
-
-        using var needlePath = pathPool.Get();
-        if (needlePath == null) return;
-
+        using var needlePath = _pathPool.Get();
         var (ellipseX, ellipseY) = CalculatePointOnEllipse(centerX, centerY, radiusX, radiusY, angle);
         var (unitX, unitY, _) = NormalizeVector(ellipseX - centerX, ellipseY - centerY);
 
@@ -799,21 +621,13 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         needlePath.LineTo(baseRightX, baseRightY);
         needlePath.Close();
 
-        // Draw needle
         using var needlePaint = _paintPool.Get();
-        if (needlePaint != null)
-        {
-            ConfigureNeedlePaint(needlePaint, centerX, centerY, tipX, tipY, needleParams.angle);
-            canvas.DrawPath(needlePath, needlePaint);
-        }
+        ConfigureNeedlePaint(needlePaint, centerX, centerY, tipX, tipY, needleParams.angle);
+        canvas.DrawPath(needlePath, needlePaint);
 
-        // Draw needle outline
         using var outlinePaint = _paintPool.Get();
-        if (outlinePaint != null)
-        {
-            ConfigureNeedleOutlinePaint(outlinePaint);
-            canvas.DrawPath(needlePath, outlinePaint);
-        }
+        ConfigureNeedleOutlinePaint(outlinePaint);
+        canvas.DrawPath(needlePath, outlinePaint);
     }
 
     private void ConfigureNeedlePaint(
@@ -858,25 +672,17 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         float centerCircleRadius = needleParams.radiusX *
             (isOverlayActive ? NEEDLE_CENTER_CIRCLE_RADIUS_OVERLAY : NEEDLE_CENTER_CIRCLE_RADIUS);
 
-        // Draw center circle
         using var centerCirclePaint = _paintPool.Get();
-        if (centerCirclePaint != null)
-        {
-            ConfigureCenterCirclePaint(centerCirclePaint, centerX, centerY, centerCircleRadius);
-            canvas.DrawCircle(centerX, centerY, centerCircleRadius, centerCirclePaint);
-        }
+        ConfigureCenterCirclePaint(centerCirclePaint, centerX, centerY, centerCircleRadius);
+        canvas.DrawCircle(centerX, centerY, centerCircleRadius, centerCirclePaint);
 
-        // Draw highlight
         using var highlightPaint = _paintPool.Get();
-        if (highlightPaint != null)
-        {
-            ConfigureHighlightPaint(highlightPaint);
-            canvas.DrawCircle(
-                centerX - centerCircleRadius * 0.25f,
-                centerY - centerCircleRadius * 0.25f,
-                centerCircleRadius * 0.4f,
-                highlightPaint);
-        }
+        ConfigureHighlightPaint(highlightPaint);
+        canvas.DrawCircle(
+            centerX - centerCircleRadius * 0.25f,
+            centerY - centerCircleRadius * 0.25f,
+            centerCircleRadius * 0.4f,
+            highlightPaint);
     }
 
     private void ConfigureCenterCirclePaint(SKPaint paint, float centerX, float centerY, float radius)
@@ -941,15 +747,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         var (lampX, lampY, lampRadius) = lampParams;
 
         using var glowPaint = _paintPool.Get();
-        if (glowPaint != null)
-        {
-            ConfigureGlowPaint(glowPaint, lampRadius);
-            canvas.DrawCircle(
-                lampX,
-                lampY,
-                lampRadius * PEAK_LAMP_GLOW_RADIUS_MULTIPLIER,
-                glowPaint);
-        }
+        ConfigureGlowPaint(glowPaint, lampRadius);
+        canvas.DrawCircle(
+            lampX,
+            lampY,
+            lampRadius * PEAK_LAMP_GLOW_RADIUS_MULTIPLIER,
+            glowPaint);
     }
 
     private void ConfigureGlowPaint(SKPaint paint, float radius)
@@ -966,41 +769,26 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         (float lampX, float lampY, float lampRadius) lampParams)
     {
         var (lampX, lampY, lampRadius) = lampParams;
-        var paintPool = _paintPool;
 
-        if (paintPool == null) return;
+        using var innerPaint = _paintPool.Get();
+        ConfigureInnerLampPaint(innerPaint, lampX, lampY, lampRadius);
+        canvas.DrawCircle(
+            lampX,
+            lampY,
+            lampRadius * PEAK_LAMP_INNER_RADIUS_MULTIPLIER,
+            innerPaint);
 
-        // Draw inner lamp
-        using var innerPaint = paintPool.Get();
-        if (innerPaint != null)
-        {
-            ConfigureInnerLampPaint(innerPaint, lampX, lampY, lampRadius);
-            canvas.DrawCircle(
-                lampX,
-                lampY,
-                lampRadius * PEAK_LAMP_INNER_RADIUS_MULTIPLIER,
-                innerPaint);
-        }
+        using var reflectionPaint = _paintPool.Get();
+        ConfigureReflectionPaint(reflectionPaint);
+        canvas.DrawCircle(
+            lampX - lampRadius * 0.3f,
+            lampY - lampRadius * 0.3f,
+            lampRadius * 0.25f,
+            reflectionPaint);
 
-        // Draw reflection highlight
-        using var reflectionPaint = paintPool.Get();
-        if (reflectionPaint != null)
-        {
-            ConfigureReflectionPaint(reflectionPaint);
-            canvas.DrawCircle(
-                lampX - lampRadius * 0.3f,
-                lampY - lampRadius * 0.3f,
-                lampRadius * 0.25f,
-                reflectionPaint);
-        }
-
-        // Draw outer rim
-        using var rimPaint = paintPool.Get();
-        if (rimPaint != null)
-        {
-            ConfigureRimPaint(rimPaint);
-            canvas.DrawCircle(lampX, lampY, lampRadius, rimPaint);
-        }
+        using var rimPaint = _paintPool.Get();
+        ConfigureRimPaint(rimPaint);
+        canvas.DrawCircle(lampX, lampY, lampRadius, rimPaint);
     }
 
     private void ConfigureInnerLampPaint(SKPaint paint, float lampX, float lampY, float radius)
@@ -1038,26 +826,23 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         var (lampX, lampY, lampRadius) = lampParams;
 
         using var peakTextPaint = _paintPool.Get();
-        if (peakTextPaint != null)
-        {
-            ConfigurePeakTextPaint(peakTextPaint);
+        ConfigurePeakTextPaint(peakTextPaint);
 
-            float textSize = lampRadius *
-                (isOverlayActive ? PEAK_LAMP_TEXT_SIZE_FACTOR_OVERLAY : PEAK_LAMP_TEXT_SIZE_FACTOR) * 1.2f;
+        float textSize = lampRadius *
+            (isOverlayActive ? PEAK_LAMP_TEXT_SIZE_FACTOR_OVERLAY : PEAK_LAMP_TEXT_SIZE_FACTOR) * 1.2f;
 
-            using var font = new SKFont(
-                SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold), textSize);
+        using var font = new SKFont(
+            SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold), textSize);
 
-            float textYOffset = lampRadius * PEAK_LAMP_TEXT_Y_OFFSET_FACTOR + font.Metrics.Descent;
+        float textYOffset = lampRadius * PEAK_LAMP_TEXT_Y_OFFSET_FACTOR + font.Metrics.Descent;
 
-            canvas.DrawText(
-                "PEAK",
-                lampX,
-                lampY + textYOffset,
-                SKTextAlign.Center,
-                font,
-                peakTextPaint);
-        }
+        canvas.DrawText(
+            "PEAK",
+            lampX,
+            lampY + textYOffset,
+            SKTextAlign.Center,
+            font,
+            peakTextPaint);
     }
 
     private void ConfigurePeakTextPaint(SKPaint paint)
@@ -1211,40 +996,10 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return new SKRect(left, top, left + width, top + height);
     }
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during renderer disposal"
-        );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during OnDispose"
-        );
-    }
-
-    private void DisposeManagedResources()
-    {
         _renderSemaphore?.Dispose();
-        // _paintPool и _pathPool управляются базовым классом
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }

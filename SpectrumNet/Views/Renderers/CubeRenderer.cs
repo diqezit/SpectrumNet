@@ -8,6 +8,23 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class CubeRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<CubeRenderer> _instance = new(() => new CubeRenderer());
+    private const string LOG_PREFIX = "CubeRenderer";
+
+    private CubeRenderer()
+    {
+        _vertices = CreateCubeVertices();
+        _faces = CreateCubeFaces();
+        _faceNormalVectors = CalculateFaceNormals();
+        _projectedVertices = new ProjectedVertex[_vertices.Length];
+        _faceDepths = new float[_faces.Length];
+        _faceNormals = new float[_faces.Length];
+        _faceLightIntensities = new float[_faces.Length];
+        _facePaints = CreateFacePaints();
+        _edgePaint = CreateEdgePaint();
+        InitializeRotationSpeeds();
+    }
+
+    public static CubeRenderer GetInstance() => _instance.Value;
 
     public record Constants
     {
@@ -144,126 +161,28 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     private AutoResetEvent? _processingComplete;
     private readonly object _renderDataLock = new();
     private volatile bool _processingRunning;
-    private volatile bool _isConfiguring;
     private bool _dataReady;
     private float[]? _spectrumToProcess;
     private int _barCountToProcess;
     private RenderData? _currentRenderData;
 
     private bool _useGlowEffects;
-    private new bool _useAdvancedEffects;
-    private new bool _useAntiAlias;
     private byte _edgeBlurRadius;
     private byte _edgeStrokeWidth;
 
-    private CubeRenderer()
-    {
-        _vertices = CreateCubeVertices();
-        _faces = CreateCubeFaces();
-        _faceNormalVectors = CalculateFaceNormals();
-        _projectedVertices = new ProjectedVertex[_vertices.Length];
-        _faceDepths = new float[_faces.Length];
-        _faceNormals = new float[_faces.Length];
-        _faceLightIntensities = new float[_faces.Length];
-        _facePaints = CreateFacePaints();
-        _edgePaint = CreateEdgePaint();
-        InitializeRotationSpeeds();
-    }
-
-    public static CubeRenderer GetInstance() => _instance.Value;
-
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeResources();
-                InitializeQualitySettings();
-                InitializeThreading();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed during renderer initialization"
-        );
-    }
-
-    private static void InitializeResources() { }
-
-    private void InitializeQualitySettings() => ApplyQualitySettingsInternal();
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
+        base.OnInitialize();
+        InitializeThreading();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Debug,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
+        Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
     }
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
@@ -323,73 +242,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         _edgePaint.StrokeWidth = _edgeStrokeWidth;
     }
 
-    protected override void OnQualitySettingsApplied()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnQualitySettingsApplied();
-            },
-            nameof(OnQualitySettingsApplied),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed())
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error,
-            LOG_PREFIX,
-            $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
-    }
-
     protected override void BeforeRender(
         SKCanvas? canvas,
         float[]? spectrum,
@@ -423,7 +275,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
         ExecuteSafely(
             () =>
             {
@@ -463,9 +314,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         };
         _processingThread.Start();
 
-        Log(LogLevel.Debug,
-            LOG_PREFIX,
-            "Processing thread started.");
+        Log(LogLevel.Debug, LOG_PREFIX, "Processing thread started.");
     }
 
     private void StopProcessingThread()
@@ -483,34 +332,17 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         _processingComplete = null;
         _processingThread = null;
 
-        Log(LogLevel.Debug,
-            LOG_PREFIX,
-            "Processing thread stopped.");
+        Log(LogLevel.Debug, LOG_PREFIX, "Processing thread stopped.");
     }
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                StopProcessingThread();
-                DisposeResources();
-                base.OnDispose();
-
-                Log(LogLevel.Debug,
-                    LOG_PREFIX,
-                    "Renderer specific resources released.");
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
-    }
-
-    private void DisposeResources()
-    {
+        StopProcessingThread();
         foreach (var paint in _facePaints) paint?.Dispose();
         _edgePaint?.Dispose();
         _currentRenderData = null;
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Renderer disposed");
     }
 
     private static Vertex[] CreateCubeVertices() =>
@@ -876,9 +708,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
     private void ProcessSpectrumThreadEntry()
     {
-        Log(LogLevel.Debug,
-            LOG_PREFIX,
-            "Processing thread loop started.");
+        Log(LogLevel.Debug, LOG_PREFIX, "Processing thread loop started.");
         try
         {
             while (_processingRunning
@@ -903,20 +733,15 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         }
         catch (OperationCanceledException)
         {
-            Log(LogLevel.Debug,
-                LOG_PREFIX,
-                "Processing thread cancelled.");
+            Log(LogLevel.Debug, LOG_PREFIX, "Processing thread cancelled.");
         }
         catch (ObjectDisposedException)
         {
-            Log(LogLevel.Debug,
-                LOG_PREFIX,
-                "Processing thread synchronization object disposed.");
+            Log(LogLevel.Debug, LOG_PREFIX, "Processing thread synchronization object disposed.");
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error,
-                LOG_PREFIX,
+            Log(LogLevel.Error, LOG_PREFIX,
                 $"Unhandled error in cube processing thread: {ex.Message}\n{ex.StackTrace}");
         }
         finally

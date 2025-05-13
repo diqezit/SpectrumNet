@@ -8,6 +8,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class FireRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<FireRenderer> _instance = new(() => new FireRenderer());
+    private const string LOG_PREFIX = "FireRenderer";
 
     private FireRenderer() { }
 
@@ -85,125 +86,25 @@ public sealed class FireRenderer : EffectSpectrumRenderer
     private bool _dataReady;
     private float _glowRadius = MEDIUM_GLOW_RADIUS;
     private int _maxDetailLevel = MEDIUM_MAX_DETAIL_LEVEL;
-    private volatile bool _isConfiguring;
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                _time = 0f;
-                InitializeResources();
-                InitializeQualityParams();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed to initialize renderer"
-        );
-    }
-
-    private void InitializeQualityParams()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                ApplyQualitySettingsInternal();
-            },
-            nameof(InitializeQualityParams),
-            "Failed to initialize quality parameters"
-        );
-    }
-
-    private void InitializeResources()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                _flameHeights = [];
-                InvalidateCachedResources();
-            },
-            nameof(InitializeResources),
-            "Failed to initialize resources"
-        );
-    }
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                      || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
+        base.OnInitialize();
+        _flameHeights = [];
+        _cachedBasePicture = null;
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                InvalidateCachedResources();
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, " +
-                    $"AntiAlias: {_useAntiAlias}, AdvancedEffects: {_useAdvancedEffects}, " +
-                    $"GlowRadius: {_glowRadius}, MaxDetailLevel: {_maxDetailLevel}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
+        InvalidateCachedResources();
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. New Quality: {Quality}, " +
+            $"AntiAlias: {_useAntiAlias}, AdvancedEffects: {_useAdvancedEffects}, " +
+            $"GlowRadius: {_glowRadius}, MaxDetailLevel: {_maxDetailLevel}");
     }
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
@@ -218,7 +119,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
                 break;
         }
 
-        _samplingOptions = QualityBasedSamplingOptions();
         InvalidateCachedResources();
 
         Log(LogLevel.Debug, LOG_PREFIX,
@@ -251,19 +151,14 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         _useAntiAlias = HIGH_USE_ANTI_ALIAS;
     }
 
-    private new void InvalidateCachedResources()
+    protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(
-            () =>
-            {
-                _cachedBasePicture?.Dispose();
-                _cachedBasePicture = null;
-                _dataReady = false;
-                base._processedSpectrum = null;
-            },
-            nameof(InvalidateCachedResources),
-            "Failed to invalidate cached resources"
-        );
+        base.OnInvalidateCachedResources();
+        _cachedBasePicture?.Dispose();
+        _cachedBasePicture = null;
+        _dataReady = false;
+        _processedSpectrum = null;
+        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     protected override void RenderEffect(
@@ -275,8 +170,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
         ExecuteSafely(
             () =>
             {
@@ -286,55 +179,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             nameof(RenderEffect),
             "Error during rendering"
         );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
     }
 
     private void UpdateState(float[] spectrum, int barCount)
@@ -369,8 +213,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 
                 lock (_spectrumLock)
                 {
-                    // Используем base._processedSpectrum
-                    base._processedSpectrum = scaledSpectrum;
+                    _processedSpectrum = scaledSpectrum;
                     _dataReady = true;
                 }
             },
@@ -385,110 +228,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         {
             _flameHeights = new float[length];
         }
-    }
-
-    [MethodImpl(AggressiveOptimization)]
-    private static new float[] ScaleSpectrum(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
-        float[] scaledSpectrum = new float[targetCount];
-        float blockSize = (float)spectrumLength / targetCount;
-
-        if (IsHardwareAccelerated && targetCount >= SPECTRUM_PROCESSING_CHUNK_SIZE)
-        {
-            ScaleSpectrumParallel(
-                spectrum,
-                scaledSpectrum,
-                targetCount,
-                blockSize,
-                spectrumLength);
-        }
-        else
-        {
-            ScaleSpectrumSequential(
-                spectrum,
-                scaledSpectrum,
-                targetCount,
-                blockSize,
-                spectrumLength);
-        }
-
-        return scaledSpectrum;
-    }
-
-    private static void ScaleSpectrumParallel(
-        float[] spectrum,
-        float[] scaledSpectrum,
-        int targetCount,
-        float blockSize,
-        int spectrumLength)
-    {
-        int chunkSize = Min(SPECTRUM_PROCESSING_CHUNK_SIZE, targetCount);
-
-        Parallel.For(
-            0,
-            (targetCount + chunkSize - 1) / chunkSize,
-            chunkIndex =>
-            {
-                int startIdx = chunkIndex * chunkSize;
-                int endIdx = Min(startIdx + chunkSize, targetCount);
-
-                for (int i = startIdx; i < endIdx; i++)
-                {
-                    ProcessSpectrumBlock(
-                        spectrum,
-                        scaledSpectrum,
-                        i,
-                        blockSize,
-                        spectrumLength);
-                }
-            });
-    }
-
-    private static void ScaleSpectrumSequential(
-        float[] spectrum,
-        float[] scaledSpectrum,
-        int targetCount,
-        float blockSize,
-        int spectrumLength)
-    {
-        for (int i = 0; i < targetCount; i++)
-        {
-            ProcessSpectrumBlock(
-                spectrum,
-                scaledSpectrum,
-                i,
-                blockSize,
-                spectrumLength);
-        }
-    }
-
-    private static void ProcessSpectrumBlock(
-        float[] spectrum,
-        float[] scaledSpectrum,
-        int blockIndex,
-        float blockSize,
-        int spectrumLength)
-    {
-        int start = (int)(blockIndex * blockSize);
-        int end = (int)((blockIndex + 1) * blockSize);
-        end = Min(end, spectrumLength);
-
-        if (end <= start)
-        {
-            scaledSpectrum[blockIndex] = 0;
-            return;
-        }
-
-        float sum = 0;
-        for (int j = start; j < end; j++)
-        {
-            sum += spectrum[j];
-        }
-
-        scaledSpectrum[blockIndex] = sum / (end - start);
     }
 
     private void UpdatePreviousSpectrum(float[] spectrum)
@@ -541,11 +280,11 @@ public sealed class FireRenderer : EffectSpectrumRenderer
     {
         lock (_spectrumLock)
         {
-            if (!_dataReady || base._processedSpectrum == null)
+            if (!_dataReady || _processedSpectrum == null)
             {
                 return null;
             }
-            return base._processedSpectrum;
+            return _processedSpectrum;
         }
     }
 
@@ -598,7 +337,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             _glowPaint = renderer._paintPool.Get();
             ConfigureGlowPaint();
 
-            _useAdvancedEffects = _renderer.UseAdvancedEffects;
+            _useAdvancedEffects = _renderer._useAdvancedEffects;
         }
 
         private void ConfigureWorkingPaint()
@@ -607,7 +346,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             _workingPaint.Style = _basePaint.Style;
             _workingPaint.StrokeWidth = _basePaint.StrokeWidth;
             _workingPaint.IsStroke = _basePaint.IsStroke;
-            _workingPaint.IsAntialias = _renderer.UseAntiAlias;
+            _workingPaint.IsAntialias = _renderer._useAntiAlias;
             _workingPaint.ImageFilter = _basePaint.ImageFilter;
             _workingPaint.Shader = _basePaint.Shader;
         }
@@ -618,7 +357,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             _glowPaint.Style = _basePaint.Style;
             _glowPaint.StrokeWidth = _basePaint.StrokeWidth;
             _glowPaint.IsStroke = _basePaint.IsStroke;
-            _glowPaint.IsAntialias = _renderer.UseAntiAlias;
+            _glowPaint.IsAntialias = _renderer._useAntiAlias;
             _glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
                 SKBlurStyle.Normal,
                 _renderer._glowRadius);
@@ -768,7 +507,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         }
 
         private bool ShouldRenderGlow(FlameParameters parameters) =>
-            _renderer.UseAdvancedEffects
+            _useAdvancedEffects
             && parameters.CurrentHeight
             / parameters.CanvasHeight > HIGH_INTENSITY_THRESHOLD;
 
@@ -996,62 +735,13 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         }
     }
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
     protected override void OnDispose()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
-    }
-
-    private void DisposeManagedResources()
     {
         _cachedBasePicture?.Dispose();
         _cachedBasePicture = null;
-
-        _pathPool?.Dispose();
-
         _flameHeights = [];
         _processedSpectrum = null;
-    }
-
-    protected override void OnInvalidateCachedResources()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInvalidateCachedResources();
-                _cachedBasePicture?.Dispose();
-                _cachedBasePicture = null;
-                _dataReady = false;
-                base._processedSpectrum = null;
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
-            },
-            nameof(OnInvalidateCachedResources),
-            "Error invalidating cached resources"
-        );
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 }
