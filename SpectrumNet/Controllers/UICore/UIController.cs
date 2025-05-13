@@ -311,8 +311,25 @@ public class UIController(IMainController mainController)
 
     protected override void DisposeManaged()
     {
-        CloseOverlay();
-        CloseControlPanel();
+        try
+        {
+            if (IsOverlayActive)
+                _overlayWindow?.Close();
+
+            if (IsControlPanelOpen)
+                _controlPanelWindow?.Close();
+        }
+        finally
+        {
+            if (_overlayWindow is IDisposable disposableOverlay)
+                disposableOverlay.Dispose();
+
+            if (_controlPanelWindow is IDisposable disposableControlPanel)
+                disposableControlPanel.Dispose();
+
+            _overlayWindow = null;
+            _controlPanelWindow = null;
+        }
     }
 
     protected override ValueTask DisposeAsyncManagedResources()

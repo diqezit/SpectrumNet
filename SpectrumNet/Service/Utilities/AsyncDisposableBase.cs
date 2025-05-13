@@ -1,25 +1,47 @@
-﻿// AsyncDisposableBase.cs
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet.Service.Utilities;
 
-public abstract class AsyncDisposableBase 
+public abstract class AsyncDisposableBase
     : IAsyncDisposable, IDisposable
 {
     protected bool _isDisposed;
     private readonly SemaphoreSlim _disposeLock = new(1, 1);
+    private int _disposeState = 0;
 
     public void Dispose()
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
+        if (Interlocked.CompareExchange(ref _disposeState, 1, 0) != 0)
+            return;
+
+        try
+        {
+            Dispose(true);
+        }
+        finally
+        {
+            _isDisposed = true;
+            Interlocked.Exchange(ref _disposeState, 2);
+            GC.SuppressFinalize(this);
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
-        await DisposeAsyncCore().ConfigureAwait(false);
-        Dispose(false);
-        GC.SuppressFinalize(this);
+        if (Interlocked.CompareExchange(ref _disposeState, 1, 0) != 0)
+            return;
+
+        try
+        {
+            await DisposeAsyncCore().ConfigureAwait(false);
+            Dispose(false);
+        }
+        finally
+        {
+            _isDisposed = true;
+            Interlocked.Exchange(ref _disposeState, 2);
+            GC.SuppressFinalize(this);
+        }
     }
 
     protected virtual void Dispose(bool disposing)

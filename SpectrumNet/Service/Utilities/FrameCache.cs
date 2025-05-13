@@ -51,23 +51,45 @@ public class FrameCache : IDisposable
 
     private void RecreateCache(SKImageInfo info)
     {
-        _cachedFrame?.Dispose();
+        var oldFrame = _cachedFrame;
+        SKBitmap? newFrame = null;
 
-        _cachedFrame = new SKBitmap(
-            info.Width,
-            info.Height,
-            info.ColorType,
-            info.AlphaType);
+        try
+        {
+            newFrame = new SKBitmap(
+                info.Width,
+                info.Height,
+                info.ColorType,
+                info.AlphaType);
 
-        _lastInfo = info;
+            _cachedFrame = newFrame;
+            _lastInfo = info;
+        }
+        catch
+        {
+            newFrame?.Dispose();
+            throw;
+        }
+        finally
+        {
+            oldFrame?.Dispose();
+        }
     }
 
     private void CopyFromSurfaceToCache(SKSurface surface, SKImageInfo info)
     {
         if (_cachedFrame == null) return;
 
-        using var snapshot = surface.Snapshot();
-        snapshot.ReadPixels(info, _cachedFrame.GetPixels(), _cachedFrame.RowBytes);
+        SKImage? snapshot = null;
+        try
+        {
+            snapshot = surface.Snapshot();
+            snapshot.ReadPixels(info, _cachedFrame.GetPixels(), _cachedFrame.RowBytes);
+        }
+        finally
+        {
+            snapshot?.Dispose();
+        }
     }
 
     public void DrawCachedFrame(SKCanvas canvas)

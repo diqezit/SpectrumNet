@@ -69,7 +69,10 @@ public sealed class SpectrumAnalyzer
     public SpectralData? GetCurrentSpectrum()
     {
         ThrowIfDisposed();
-        return _lastData;
+        lock (_lock)
+        {
+            return _lastData;
+        }
     }
 
     public async Task AddSamplesAsync(
@@ -328,10 +331,11 @@ public sealed class SpectrumAnalyzer
         if (_isDisposed || e.Result.Length == 0 || _cts.IsCancellationRequested)
             return;
 
-        if (!TryEnqueueFftResult(e.Result, e.SampleRate))
-            Log(LogLevel.Warning,
-                LOG_SOURCE,
-                "Processing channel is full, dropping FFT result");
+        Complex[] resultCopy = new Complex[e.Result.Length];
+        Array.Copy(e.Result, resultCopy, e.Result.Length);
+
+        if (!TryEnqueueFftResult(resultCopy, e.SampleRate))
+            Log(LogLevel.Warning, LOG_SOURCE, "Processing channel is full, dropping FFT result");
     }
 
     private bool TryEnqueueFftResult(Complex[] fftResult, int sampleRate) =>

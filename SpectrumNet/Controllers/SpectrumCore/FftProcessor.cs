@@ -240,16 +240,22 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
         "Error processing batch");
     }
 
-    private void PerformFftAndNotify(
-        int rate,
-        CancellationToken cancellationToken)
+    private void PerformFftAndNotify(int rate, CancellationToken cancellationToken)
     {
         Safe(() =>
         {
             Complex[] fftBuffer = _complexArrayPool.Rent(_fftSize);
-            Array.Copy(_buffer, fftBuffer, _fftSize);
+            try
+            {
+                Array.Copy(_buffer, fftBuffer, _fftSize);
 
-            ScheduleFftCalculation(fftBuffer, rate, cancellationToken);
+                ScheduleFftCalculation(fftBuffer, rate, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _complexArrayPool.Return(fftBuffer);
+                Log(LogLevel.Error, LOG_SOURCE, $"Error preparing FFT: {ex.Message}");
+            }
         },
         LOG_SOURCE,
         "Error preparing FFT");

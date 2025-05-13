@@ -22,6 +22,9 @@ public sealed class Renderer : AsyncDisposableBase
     private readonly FrameCache _frameCache = new();
     private readonly IRendererFactory _rendererFactory;
 
+    private readonly SKFont _performanceFont;
+    private readonly SKPaint _performancePaint;
+
     private readonly SKElement? _skElement;
     private RenderState _currentState = default!;
 
@@ -53,6 +56,9 @@ public sealed class Renderer : AsyncDisposableBase
         _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
         _skElement = element ?? throw new ArgumentNullException(nameof(element));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+
+        _performanceFont = new SKFont { Size = 12, Edging = SKFontEdging.SubpixelAntialias };
+        _performancePaint = new SKPaint { IsAntialias = true };
 
         ShouldShowPlaceholder = !_controller.IsRecording;
         InitializeRenderer();
@@ -264,9 +270,14 @@ public sealed class Renderer : AsyncDisposableBase
     private void RenderNewFrame(object? sender, SKPaintSurfaceEventArgs e)
     {
         ClearCanvas(e.Surface.Canvas);
+        bool renderSuccessful = false;
 
         Safe(
-            () => RenderFrameInternal(e.Surface.Canvas, e.Info),
+            () =>
+            {
+                RenderFrameInternal(e.Surface.Canvas, e.Info);
+                renderSuccessful = true;
+            },
             new ErrorHandlingOptions
             {
                 Source = LOG_PREFIX,
@@ -274,7 +285,8 @@ public sealed class Renderer : AsyncDisposableBase
                 ExceptionHandler = ex => HandleRenderFrameException(ex, e.Surface.Canvas, e.Info)
             });
 
-        UpdateFrameCache(e);
+        if (renderSuccessful)
+            UpdateFrameCache(e);
         RecordFrameMetrics();
     }
 
@@ -698,8 +710,13 @@ public sealed class Renderer : AsyncDisposableBase
         RequestRender();
     }
 
-    protected override void DisposeManaged() =>
-        CleanUp("Renderer disposed");
+    protected override void DisposeManaged()
+    {
+        if (_isDisposed) return;
+        _disposalTokenSource.Cancel();
+        UnsubscribeFromEvents();
+        DisposeResources();
+    }
 
     protected override ValueTask DisposeAsyncManagedResources()
     {
@@ -744,6 +761,12 @@ public sealed class Renderer : AsyncDisposableBase
 
         ExecuteSafely(() => _disposalTokenSource?.Dispose(),
             nameof(DisposeResources), "Error disposing token source");
+
+        ExecuteSafely(() => _performanceFont?.Dispose(),
+            nameof(DisposeResources), "Error disposing performance font");
+
+        ExecuteSafely(() => _performancePaint?.Dispose(),
+            nameof(DisposeResources), "Error disposing performance paint");
     }
 
     private static void ExecuteSafely(Action action, string source, string errorMessage) =>
@@ -762,19 +785,13 @@ public sealed class Renderer : AsyncDisposableBase
         double ram = PerformanceMetricsManager.GetCurrentRamUsageMb();
         PerformanceLevel level = PerformanceMetricsManager.GetCurrentPerformanceLevel();
 
-        using var font = new SKFont { Size = 12, Edging = SKFontEdging.SubpixelAntialias };
-        using var paint = new SKPaint
-        {
-            IsAntialias = true,
-            Color = GetPerformanceTextColor(level)
-        };
+        _performancePaint.Color = GetPerformanceTextColor(level);
 
         string fpsLimiterInfo = FpsLimiter.Instance.IsEnabled ? " [60 FPS Lock]" : "";
-
         string infoText = string.Create(CultureInfo.InvariantCulture,
             $"RAM: {ram:F1} MB | CPU: {cpu:F1}% | FPS: {fps:F0}{fpsLimiterInfo} | {level}");
 
-        canvas.DrawText(infoText, 10, info.Height - 10, font, paint);
+        canvas.DrawText(infoText, 10, info.Height - 10, _performanceFont, _performancePaint);
     }
 
     private static SKColor GetPerformanceTextColor(PerformanceLevel level) =>

@@ -389,11 +389,11 @@ public sealed class AudioCapture : AsyncDisposableBase
 
         if (_isCaptureStopping)
         {
-            Log(LogLevel.Warning,
-                LogPrefix,
-                "Stop capture already in progress");
+            Log(LogLevel.Warning, LogPrefix, "Stop capture already in progress");
             return;
         }
+
+        CaptureState? stateToDispose = null;
 
         try
         {
@@ -401,20 +401,15 @@ public sealed class AudioCapture : AsyncDisposableBase
 
             if (!IsRecording && _state is null)
             {
-                Log(LogLevel.Debug,
-                    LogPrefix,
-                    "Stop capture ignored: Not recording");
+                Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
                 return;
             }
 
-            CaptureState? stateToDispose;
             lock (_stateLock)
             {
                 if (_state is null)
                 {
-                    Log(LogLevel.Warning,
-                        LogPrefix,
-                        "No capture state to dispose");
+                    Log(LogLevel.Warning, LogPrefix, "No capture state to dispose");
                     return;
                 }
 
@@ -425,25 +420,38 @@ public sealed class AudioCapture : AsyncDisposableBase
 
             if (stateToDispose is not null)
             {
-                using var timeoutCts = new CancellationTokenSource(STOP_OPERATION_TIMEOUT_MS);
+                bool stopSuccessful = false;
 
                 try
                 {
-                    await Task.Run(() =>
-                    {
-                        try
-                        {
-                            stateToDispose.Capture.StopRecording();
-                        }
-                        catch (Exception ex)
-                        {
-                            Log(LogLevel.Error,
-                                LogPrefix,
-                                $"Error stopping recording: {ex.Message}");
-                        }
-                    }).WaitAsync(timeoutCts.Token);
+                    using var timeoutCts = new CancellationTokenSource(STOP_OPERATION_TIMEOUT_MS);
 
-                    if (!_controller.IsTransitioning)
+                    try
+                    {
+                        await Task.Run(() =>
+                        {
+                            try
+                            {
+                                stateToDispose.Capture.StopRecording();
+                                stopSuccessful = true;
+                            }
+                            catch (Exception ex)
+                            {
+                                Log(LogLevel.Error, LogPrefix, $"Error stopping recording: {ex.Message}");
+                            }
+                        }).WaitAsync(timeoutCts.Token);
+                    }
+                    catch (TimeoutException)
+                    {
+                        Log(LogLevel.Warning, LogPrefix, "Stop capture operation timed out");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Log(LogLevel.Warning, LogPrefix, "Stop capture operation was canceled");
+                    }
+
+                    if ((stopSuccessful || timeoutCts.IsCancellationRequested) &&
+                        !_controller.IsTransitioning)
                     {
                         try
                         {
@@ -451,17 +459,9 @@ public sealed class AudioCapture : AsyncDisposableBase
                         }
                         catch (Exception ex)
                         {
-                            Log(LogLevel.Error,
-                                LogPrefix,
-                                $"Error resetting analyzer: {ex.Message}");
+                            Log(LogLevel.Error, LogPrefix, $"Error resetting analyzer: {ex.Message}");
                         }
                     }
-                }
-                catch (TimeoutException)
-                {
-                    Log(LogLevel.Warning,
-                        LogPrefix,
-                        "Stop capture operation timed out");
                 }
                 finally
                 {

@@ -286,6 +286,14 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         int length,
         float blockSize)
     {
+        const int MIN_PARALLEL_SIZE = 32;
+
+        if (count < MIN_PARALLEL_SIZE)
+        {
+            ScaleSpectrumSequential(spectrum, target, count, length, blockSize);
+            return;
+        }
+
         Parallel.For(0, count, i =>
         {
             int start = (int)(i * blockSize);
