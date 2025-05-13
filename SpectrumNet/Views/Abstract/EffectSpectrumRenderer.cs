@@ -7,8 +7,9 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     private const int DEFAULT_POOL_SIZE = 5;
     private const string LOG_PREFIX = nameof(EffectSpectrumRenderer);
 
-    protected const float DEFAULT_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.INACTIVE_TRANSPARENCY;
-    protected const float HOVER_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.ACTIVE_TRANSPARENCY;
+    protected const float 
+        DEFAULT_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.Constants.INACTIVE_TRANSPARENCY,
+        HOVER_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.Constants.ACTIVE_TRANSPARENCY;
 
     protected readonly ObjectPool<SKPath> _pathPool = new(
         () => new SKPath(),

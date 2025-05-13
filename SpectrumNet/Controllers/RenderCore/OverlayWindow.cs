@@ -120,7 +120,7 @@ public sealed class OverlayWindow : Window, IDisposable
         ShowInTaskbar = _configuration.ShowInTaskbar;
     }
 
-    private void ConfigureWindowInteraction() => IsHitTestVisible = true; 
+    private void ConfigureWindowInteraction() => IsHitTestVisible = true;
 
     private void CreateRenderContext(IMainController controller)
     {
@@ -305,11 +305,16 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private void ConfigureWindowStyleEx()
     {
+        if (_windowHandle == nint.Zero) return;
+
         var extendedStyle = NativeMethods.GetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE);
 
-        // тут используем WS_EX_TRANSPARENT, чтобы окно могло получать события мыши
-        _ = NativeMethods.SetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE,
-            extendedStyle | NativeMethods.WS_EX_LAYERED);
+        // Включаем WS_EX_TRANSPARENT для пропускания кликов мыши вместе с WS_EX_LAYERED
+        _ = NativeMethods.SetWindowLong(
+            _windowHandle,
+            NativeMethods.GWL_EXSTYLE,
+            extendedStyle | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT
+        );
     }
 
     private void StartRenderTimer()
