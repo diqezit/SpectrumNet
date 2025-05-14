@@ -9,6 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class PolarRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<PolarRenderer> _instance = new(() => new PolarRenderer());
+    private const string LOG_PREFIX = "PolarRenderer";
 
     private PolarRenderer() { }
 
@@ -18,7 +19,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         public const string LOG_PREFIX = "PolarRenderer";
 
-        // Core rendering constants
         public const float
             MIN_RADIUS = 30f,
             RADIUS_MULTIPLIER = 200f,
@@ -28,7 +28,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             CHANGE_THRESHOLD = 0.01f,
             DEG_TO_RAD = (float)(PI / 180.0);
 
-        // Animation constants
         public const float
             ROTATION_SPEED = 0.3f,
             TIME_STEP = 0.016f,
@@ -40,7 +39,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             PULSE_SCALE_MULTIPLIER = 0.1f,
             DASH_PHASE_SPEED = 0.5f;
 
-        // Visual elements constants
         public const float
             DEFAULT_STROKE_WIDTH = 1.5f,
             CENTER_CIRCLE_SIZE = 6f,
@@ -70,7 +68,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             MIN_BAR_WIDTH = 0.5f,
             MAX_BAR_WIDTH = 4.0f;
 
-        // Quality-specific constants
         public const float
             SMOOTHING_FACTOR_LOW = 0.10f,
             SMOOTHING_FACTOR_MEDIUM = 0.15f,
@@ -125,10 +122,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         }
     }
 
-    // Resources for rendering
     private readonly SemaphoreSlim _pathUpdateSemaphore = new(1, 1);
 
-    // Paint resources
     private SKPath? _outerPath;
     private SKPath? _innerPath;
     private SKPaint? _fillPaint;
@@ -137,13 +132,11 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     private SKPaint? _glowPaint;
     private SKPaint? _highlightPaint;
 
-    // Shader and effect resources
     private SKShader? _gradientShader;
     private SKPathEffect? _dashEffect;
     private SKImageFilter? _glowFilter;
     private SKPicture? _cachedCenterCircle;
 
-    // Buffers and data
     private SKPoint[]? _outerPoints;
     private SKPoint[]? _innerPoints;
     private SKColor _lastBaseColor;
@@ -151,14 +144,11 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     private SKRect _clipBounds;
     private float[]? _tempSpectrum;
 
-    // State
     private float _rotation;
     private float _pulseEffect;
     private bool _pathsNeedUpdate;
     private int _currentPointCount;
-    private bool _isConfiguring;
 
-    // Quality settings
     private float _localSmoothingFactor;
     private bool _useGlow;
     private bool _useHighlight;
@@ -168,23 +158,14 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     private float _strokeMultiplier;
     private int _maxPoints;
 
-    // SIMD optimization
     private Vector<float> _smoothingVec;
     private Vector<float> _oneMinusSmoothing;
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeResources();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed during renderer initialization"
-        );
+        base.OnInitialize();
+        InitializeResources();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     private void InitializeResources()
@@ -219,14 +200,14 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     }
 
     private void CreateFillPaint() =>
-        _fillPaint = new SKPaint()
+        _fillPaint = new SKPaint
         {
             IsAntialias = base.UseAntiAlias,
             Style = SKPaintStyle.Fill
         };
 
     private void CreateStrokePaint() =>
-        _strokePaint = new SKPaint()
+        _strokePaint = new SKPaint
         {
             IsAntialias = base.UseAntiAlias,
             Style = SKPaintStyle.Stroke,
@@ -236,14 +217,14 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         };
 
     private void CreateCenterPaint() =>
-        _centerPaint = new SKPaint()
+        _centerPaint = new SKPaint
         {
             IsAntialias = base.UseAntiAlias,
             Style = SKPaintStyle.Fill
         };
 
     private void CreateGlowPaint() =>
-        _glowPaint = new SKPaint()
+        _glowPaint = new SKPaint
         {
             IsAntialias = base.UseAntiAlias,
             Style = SKPaintStyle.Stroke,
@@ -252,7 +233,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         };
 
     private void CreateHighlightPaint() =>
-        _highlightPaint = new SKPaint()
+        _highlightPaint = new SKPaint
         {
             IsAntialias = base.UseAntiAlias,
             Style = SKPaintStyle.Stroke,
@@ -291,48 +272,21 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             -CENTER_CIRCLE_SIZE * 1.5f,
             -CENTER_CIRCLE_SIZE * 1.5f,
             CENTER_CIRCLE_SIZE * 1.5f,
-            CENTER_CIRCLE_SIZE * 1.5f
-        );
+            CENTER_CIRCLE_SIZE * 1.5f);
 
         UpdateCenterCircle(SKColors.White);
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
+    protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
+        base.OnConfigurationChanged();
 
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = base.IsOverlayActive != isOverlayActive
-                                         || Quality != quality;
+        bool isOverlayActive = base.IsOverlayActive;
+        UpdateOverlayState(isOverlayActive);
+        InvalidatePolarCachedResources();
 
-                    base.Configure(isOverlayActive, quality);
-
-                    if (configChanged)
-                    {
-                        ApplyQualityBasedSettings(); 
-                        OnConfigurationChanged();
-                    }
-
-                    if (base.IsOverlayActive != isOverlayActive)
-                    {
-                        UpdateOverlayState(isOverlayActive);
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. Quality: {Quality}, Overlay: {isOverlayActive}");
     }
 
     private void UpdateOverlayState(bool isOverlayActive)
@@ -349,60 +303,10 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     private void MarkPathsForUpdate() =>
         _pathsNeedUpdate = true;
 
-    protected override void OnConfigurationChanged()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnConfigurationChanged();
-                InvalidatePolarCachedResources();
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
-    }
-
     protected override void OnQualitySettingsApplied()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnQualitySettingsApplied();
-                ApplyQualityBasedSettings();
-                Log(LogLevel.Debug,
-                    LOG_PREFIX,
-                    $"Quality settings applied. New Quality: {Quality}");
-            },
-            nameof(OnQualitySettingsApplied),
-            "Failed to apply specific quality settings"
-        );
-    }
+        base.OnQualitySettingsApplied();
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualityBasedSettings();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualityBasedSettings()
-    {
         switch (Quality)
         {
             case RenderQuality.Low:
@@ -419,6 +323,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         }
 
         ApplyQualityDependentChanges();
+
+        Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. Quality: {Quality}");
     }
 
     private void ApplyQualityDependentChanges()
@@ -536,16 +442,9 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInvalidateCachedResources();
-                InvalidatePolarCachedResources();
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
-            },
-            nameof(OnInvalidateCachedResources),
-            "Error invalidating cached resources"
-        );
+        base.OnInvalidateCachedResources();
+        InvalidatePolarCachedResources();
+        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     private void DisposeAllCachedResources()
@@ -589,8 +488,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
         ExecuteSafely(
             () =>
             {
@@ -598,8 +495,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
                 RenderFrame(canvas, info);
             },
             nameof(RenderEffect),
-            "Error during rendering"
-        );
+            "Error during rendering");
     }
 
     private void UpdateState(
@@ -609,19 +505,12 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        ExecuteSafely(
-            () =>
-            {
-                int safeBarCount = GetSafeBarCount(barCount);
+        int safeBarCount = GetSafeBarCount(barCount);
 
-                PrepareClipBounds();
-                ProcessSpectrumAndUpdatePaths(spectrum, safeBarCount, info);
-                UpdateVisualEffects(paint.Color);
-                UpdateEffectParameters(barWidth);
-            },
-            nameof(UpdateState),
-            "Error during state update"
-        );
+        PrepareClipBounds();
+        ProcessSpectrumAndUpdatePaths(spectrum, safeBarCount, info);
+        UpdateVisualEffects(paint.Color);
+        UpdateEffectParameters(barWidth);
     }
 
     private int GetSafeBarCount(int barCount) =>
@@ -631,21 +520,14 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         SKCanvas canvas,
         SKImageInfo info)
     {
-        ExecuteSafely(
-            () =>
-            {
-                if (!AreRenderResourcesValid()) return;
-                if (IsCanvasOutOfBounds(canvas, info)) return;
+        if (!AreRenderResourcesValid()) return;
+        if (IsCanvasOutOfBounds(canvas, info)) return;
 
-                ApplyDashEffectIfNeeded();
+        ApplyDashEffectIfNeeded();
 
-                canvas.Save();
-                RenderGraphWithTransform(canvas, info);
-                canvas.Restore();
-            },
-            nameof(RenderFrame),
-            "Error during frame rendering"
-        );
+        canvas.Save();
+        RenderGraphWithTransform(canvas, info);
+        canvas.Restore();
     }
 
     private void PrepareClipBounds()
@@ -655,8 +537,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
         _clipBounds = new SKRect(
             -maxRadius, -maxRadius,
-            maxRadius, maxRadius
-        );
+            maxRadius, maxRadius);
     }
 
     private static bool IsCanvasOutOfBounds(SKCanvas canvas, SKImageInfo info)
@@ -910,8 +791,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             out int effectivePointCount,
             out int skipFactor,
             out int actualPoints,
-            out float angleStep
-        );
+            out float angleStep);
 
         GeneratePathPoints(effectivePointCount, skipFactor, actualPoints, angleStep);
         CreatePathsFromPoints(effectivePointCount, skipFactor, actualPoints);
@@ -968,8 +848,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
                 i,
                 cosAngle,
                 sinAngle,
-                angleStep
-            );
+                angleStep);
         }
     }
 
@@ -1010,8 +889,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         {
             _outerPoints[pointIndex] = new SKPoint(
                 outerRadius * cosAngle,
-                outerRadius * sinAngle
-            );
+                outerRadius * sinAngle);
         }
     }
 
@@ -1032,8 +910,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         {
             _innerPoints[pointIndex] = new SKPoint(
                 innerRadius * cosAngle,
-                innerRadius * sinAngle
-            );
+                innerRadius * sinAngle);
         }
     }
 
@@ -1251,9 +1128,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             pointCount,
             Min(
                 _tempSpectrum!.Length,
-                Min(base._previousSpectrum!.Length, base._processedSpectrum!.Length)
-            )
-        );
+                Min(base._previousSpectrum!.Length, base._processedSpectrum!.Length)));
 
     private void ProcessSpectrumSIMD(int safePointCount, ref float maxChange)
     {
@@ -1381,7 +1256,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         if (!_useGlow) return;
 
-        using var glowPaint = new SKPaint()
+        using var glowPaint = new SKPaint
         {
             IsAntialias = base.UseAntiAlias,
             Style = SKPaintStyle.Fill,
@@ -1393,8 +1268,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             0,
             0,
             CENTER_CIRCLE_SIZE * CENTER_CIRCLE_GLOW_MULTIPLIER,
-            glowPaint
-        );
+            glowPaint);
     }
 
     private void DrawMainCenterCircle(SKCanvas pictureCanvas) =>
@@ -1402,14 +1276,13 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             0,
             0,
             CENTER_CIRCLE_SIZE * CENTER_CIRCLE_MAIN_MULTIPLIER,
-            _centerPaint!
-        );
+            _centerPaint!);
 
     private void DrawHighlightCircleIfNeeded(SKCanvas pictureCanvas)
     {
         if (!_useHighlight) return;
 
-        using var highlightPaint = new SKPaint()
+        using var highlightPaint = new SKPaint
         {
             IsAntialias = base.UseAntiAlias,
             Style = SKPaintStyle.Fill,
@@ -1420,8 +1293,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             -CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_OFFSET_MULTIPLIER,
             -CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_OFFSET_MULTIPLIER,
             CENTER_CIRCLE_SIZE * CENTER_CIRCLE_HIGHLIGHT_SIZE_MULTIPLIER,
-            highlightPaint
-        );
+            highlightPaint);
     }
 
     private void UpdateVisualEffects(SKColor baseColor)
@@ -1469,8 +1341,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             new SKPoint(0, 0),
             MIN_RADIUS + MAX_SPECTRUM_VALUE * RADIUS_MULTIPLIER,
             [gradientStart, gradientEnd],
-            SKShaderTileMode.Clamp
-        );
+            SKShaderTileMode.Clamp);
 
         _fillPaint!.Shader = _gradientShader;
     }
@@ -1480,8 +1351,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             (byte)Min(255, baseColor.Red * GRADIENT_COLOR_MULTIPLIER),
             (byte)Min(255, baseColor.Green * GRADIENT_COLOR_MULTIPLIER),
             (byte)Min(255, baseColor.Blue * GRADIENT_COLOR_MULTIPLIER),
-            GRADIENT_END_ALPHA
-        );
+            GRADIENT_END_ALPHA);
 
     private void UpdateStrokeColor(SKColor baseColor) =>
         _strokePaint!.Color = baseColor;
@@ -1508,8 +1378,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             (byte)Min(255, baseColor.Red * HIGHLIGHT_FACTOR),
             (byte)Min(255, baseColor.Green * HIGHLIGHT_FACTOR),
             (byte)Min(255, baseColor.Blue * HIGHLIGHT_FACTOR),
-            HIGHLIGHT_ALPHA
-        );
+            HIGHLIGHT_ALPHA);
 
     private void UpdateDashEffectIfNeeded()
     {
@@ -1519,8 +1388,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _dashEffect?.Dispose();
         _dashEffect = SKPathEffect.CreateDash(
             intervals,
-            base._time * DASH_PHASE_SPEED % (DASH_LENGTH * 3)
-        );
+            base._time * DASH_PHASE_SPEED % (DASH_LENGTH * 3));
     }
 
     private void UpdateCenterPaintAndCircle(SKColor baseColor)
@@ -1531,84 +1399,13 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         UpdateCenterCircle(baseColor);
     }
 
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
 
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 1) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or too small");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
-    }
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
+        DisposeManagedResources();
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     private void DisposeManagedResources()

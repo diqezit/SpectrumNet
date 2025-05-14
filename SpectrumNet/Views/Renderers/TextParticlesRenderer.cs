@@ -107,8 +107,6 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
 
     private bool _useBatching;
     private int _cullingLevel;
-    private new bool _isOverlayActive;
-    private volatile bool _isConfiguring;
 
     private readonly Random _random = new();
     private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
@@ -136,7 +134,6 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
                 base.OnInitialize();
                 InitializeParticleBuffer();
                 _renderCache = new RenderCache();
-                ApplyQualityBasedSettings();
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
@@ -193,46 +190,21 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
             _velocityLookup[i] = minVelocity + _velocityRange * i / VELOCITY_LOOKUP_SIZE;
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality) =>
+    protected override void OnConfigurationChanged() =>
         ExecuteSafely(
             () =>
             {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-                    base.Configure(isOverlayActive, quality);
-
-                    if (_isOverlayActive != isOverlayActive)
-                    {
-                        UpdateOverlayState(isOverlayActive);
-                    }
-
-                    if (configChanged)
-                    {
-                        Log(LogLevel.Debug,
-                            LOG_PREFIX,
-                            $"Configuration changed. New Quality: {Quality}");
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
+                UpdateOverlayState(_isOverlayActive);
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}");
             },
-            nameof(Configure),
-            "Failed to configure renderer"
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
         );
 
     private void UpdateOverlayState(bool isOverlayActive)
     {
-        _isOverlayActive = isOverlayActive;
         UpdateParticleSizes();
         InvalidateCachedBackground();
     }
@@ -241,8 +213,22 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                base.OnQualitySettingsApplied();
-                ApplyQualityBasedSettings();
+                switch (Quality)
+                {
+                    case RenderQuality.Low:
+                        ApplyLowQualitySettings();
+                        break;
+                    case RenderQuality.Medium:
+                        ApplyMediumQualitySettings();
+                        break;
+                    case RenderQuality.High:
+                        ApplyHighQualitySettings();
+                        break;
+                }
+
+                UpdateFontQualitySettings();
+                InvalidateCachedBackground();
+
                 Log(LogLevel.Debug,
                     LOG_PREFIX,
                     $"Quality settings applied. New Quality: {Quality}");
@@ -250,27 +236,6 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
             nameof(OnQualitySettingsApplied),
             "Failed to apply specific quality settings"
         );
-
-    private void ApplyQualityBasedSettings()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                ApplyLowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                ApplyHighQualitySettings();
-                break;
-        }
-
-        UpdateFontQualitySettings();
-        InvalidateCachedBackground();
-    }
 
     private void ApplyLowQualitySettings()
     {
@@ -321,8 +286,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-                    return;
+                if (_particleBuffer == null) return;
 
                 int actualBarCount = Min(spectrum.Length, barCount);
                 float[] processedSpectrum = PrepareSpectrum(spectrum, actualBarCount, spectrum.Length);
@@ -333,51 +297,6 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
             nameof(RenderEffect),
             "Error during rendering"
         );
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (_particleBuffer == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Uninitialized buffer");
-            return false;
-        }
-
-        if (canvas == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-            return false;
-        }
-
-        if (spectrum == null || spectrum.Length == 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-            return false;
-        }
-
-        if (paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-            return false;
-        }
-
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Invalid image dimensions");
-            return false;
-        }
-
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
-
-        return true;
-    }
 
     private void UpdateStateAndSpawnParticles(
         float[] processedSpectrum,
@@ -722,40 +641,30 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         _cachedBackground = null;
     }
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
+    protected override void OnInvalidateCachedResources() =>
         ExecuteSafely(
             () =>
             {
-                OnDispose();
+                base.OnInvalidateCachedResources();
+                InvalidateCachedBackground();
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
             },
-            nameof(Dispose),
-            "Error during disposal"
+            nameof(OnInvalidateCachedResources),
+            "Error invalidating cached resources"
         );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
 
     protected override void OnDispose() =>
         ExecuteSafely(
             () =>
             {
-                DisposeManagedResources();
+                ReleaseResources();
+                ClearReferences();
                 base.OnDispose();
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
             nameof(OnDispose),
             "Error during specific disposal"
         );
-
-    private void DisposeManagedResources()
-    {
-        ReleaseResources();
-        ClearReferences();
-    }
 
     private void ReleaseResources()
     {

@@ -78,8 +78,6 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
     // Quality settings
     private bool _useBatchedPoints;
 
-    private volatile bool _isConfiguring;
-
     private struct VoronoiPoint
     {
         public float X, Y, VelocityX, VelocityY, Size;
@@ -92,35 +90,12 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
             () =>
             {
                 base.OnInitialize();
-                InitializeQualityParams();
                 InitializePaints();
                 InitializePoints(GetPointCount());
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
             "Failed during renderer initialization"
-        );
-    }
-
-    public override void SetOverlayTransparency(float level)
-    {
-        if (Math.Abs(_overlayAlphaFactor - level) < float.Epsilon)
-            return;
-
-        _overlayAlphaFactor = level;
-        _overlayStateChangeRequested = true;
-        _overlayStateChanged = true;
-    }
-
-    private void InitializeQualityParams()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                ApplyQualitySettingsInternal();
-            },
-            nameof(InitializeQualityParams),
-            "Failed to initialize quality parameters"
         );
     }
 
@@ -153,48 +128,6 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
             ? OVERLAY_POINT_COUNT
             : DEFAULT_POINT_COUNT;
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool overlayChanged = _isOverlayActive != isOverlayActive;
-                    bool qualityChanged = Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (overlayChanged)
-                    {
-                        _overlayAlphaFactor = isOverlayActive ? 0.75f : 1.0f;
-                        _overlayStateChangeRequested = true;
-                        _overlayStateChanged = true;
-                    }
-
-                    if (overlayChanged || qualityChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
     protected override void OnConfigurationChanged()
     {
         ExecuteSafely(
@@ -210,73 +143,55 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         );
     }
 
-    protected override void ApplyQualitySettings()
+    protected override void OnQualitySettingsApplied()
     {
         ExecuteSafely(
             () =>
             {
-                if (_isConfiguring) return;
+                switch (Quality)
+                {
+                    case RenderQuality.Low:
+                        LowQualitySettings();
+                        break;
+                    case RenderQuality.Medium:
+                        MediumQualitySettings();
+                        break;
+                    case RenderQuality.High:
+                        HighQualitySettings();
+                        break;
+                }
 
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
+                UpdatePaintQualitySettings();
+                InvalidateCachedResources();
+
+                Log(LogLevel.Debug, LOG_PREFIX,
+                    $"Quality settings applied. Quality: {Quality}, " +
+                    $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
+                    $"BatchedPoints: {_useBatchedPoints}");
             },
-            nameof(ApplyQualitySettings),
+            nameof(OnQualitySettingsApplied),
             "Failed to apply quality settings"
         );
     }
 
-    private void ApplyQualitySettingsInternal()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                LowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                MediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                HighQualitySettings();
-                break;
-        }
-
-        UpdatePaintQualitySettings();
-        InvalidateCachedResources();
-
-        Log(LogLevel.Debug, LOG_PREFIX,
-            $"Quality settings applied. Quality: {Quality}, " +
-            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
-            $"BatchedPoints: {_useBatchedPoints}");
-    }
-
     private void LowQualitySettings()
     {
-        base._useAntiAlias = LOW_USE_ANTI_ALIAS;
-        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = LOW_USE_ANTI_ALIAS;
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
         _useBatchedPoints = LOW_USE_BATCHED_POINTS;
     }
 
     private void MediumQualitySettings()
     {
-        base._useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
-        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
         _useBatchedPoints = MEDIUM_USE_BATCHED_POINTS;
     }
 
     private void HighQualitySettings()
     {
-        base._useAntiAlias = HIGH_USE_ANTI_ALIAS;
-        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
         _useBatchedPoints = HIGH_USE_BATCHED_POINTS;
     }
 
@@ -322,78 +237,15 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-            return;
-
         ExecuteSafely(
             () =>
             {
-                if (_overlayStateChangeRequested)
-                {
-                    _overlayStateChangeRequested = false;
-                    _overlayStateChanged = true;
-                }
-
                 UpdateState(spectrum, info);
                 RenderWithOverlay(canvas, () => RenderFrame(canvas, info, paint));
-
-                if (_overlayStateChanged)
-                {
-                    _overlayStateChanged = false;
-                }
             },
             nameof(RenderEffect),
             "Error during rendering"
         );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
     }
 
     private void UpdateState(float[] spectrum, SKImageInfo info)
@@ -681,8 +533,8 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
 
     private void EnsureProcessedSpectrumSize(int freqBands)
     {
-        if (base._processedSpectrum == null || base._processedSpectrum.Length < freqBands)
-            base._processedSpectrum = new float[freqBands];
+        if (_processedSpectrum == null || _processedSpectrum.Length < freqBands)
+            _processedSpectrum = new float[freqBands];
     }
 
     private void CalculateProcessedSpectrum(float[] spectrum, int freqBands)
@@ -704,7 +556,7 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
                     }
 
                     float avg = sum / (endBin - startBin);
-                    base._processedSpectrum![i] = Clamp(
+                    _processedSpectrum![i] = Clamp(
                         avg * SPECTRUM_AMPLIFICATION,
                         0,
                         1);
@@ -725,7 +577,7 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
                     var point = _voronoiPoints[i];
                     int freqIndex = point.FrequencyIndex;
 
-                    if (freqIndex < base._processedSpectrum!.Length)
+                    if (freqIndex < _processedSpectrum!.Length)
                     {
                         UpdatePointProperties(ref point, freqIndex);
                         _voronoiPoints[i] = point;
@@ -739,7 +591,7 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
 
     private void UpdatePointProperties(ref VoronoiPoint point, int freqIndex)
     {
-        float intensity = base._processedSpectrum![freqIndex];
+        float intensity = _processedSpectrum![freqIndex];
         float targetSize = MIN_POINT_SIZE +
                          (MAX_POINT_SIZE - MIN_POINT_SIZE) * intensity;
 
@@ -906,45 +758,24 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         return dx * dx + dy * dy;
     }
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
     protected override void OnDispose()
     {
         ExecuteSafely(
             () =>
             {
-                DisposeManagedResources();
+                _cellPaint?.Dispose();
+                _borderPaint?.Dispose();
+
+                _cellPaint = null;
+                _borderPaint = null;
+                _processedSpectrum = null;
+                _nearestPointGrid = null;
+
                 base.OnDispose();
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
             nameof(OnDispose),
             "Error during specific disposal"
         );
-    }
-
-    private void DisposeManagedResources()
-    {
-        _cellPaint?.Dispose();
-        _borderPaint?.Dispose();
-
-        _cellPaint = null;
-        _borderPaint = null;
-        base._processedSpectrum = null;
-        _nearestPointGrid = null;
     }
 }

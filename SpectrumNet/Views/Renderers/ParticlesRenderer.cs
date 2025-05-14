@@ -9,8 +9,51 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class ParticlesRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<ParticlesRenderer> _instance = new(() => new ParticlesRenderer());
+    private const string LOG_PREFIX = "ParticlesRenderer";
 
-    private struct Particle(
+    private ParticlesRenderer() { }
+
+    public static ParticlesRenderer GetInstance() => _instance.Value;
+
+    public record Constants
+    {
+        public const string LOG_PREFIX = "ParticlesRenderer";
+
+        public const float
+            DEFAULT_LINE_WIDTH = 3f,
+            GLOW_INTENSITY = 0.3f,
+            HIGH_MAGNITUDE_THRESHOLD = 0.7f,
+            OFFSET = 10f,
+            BASELINE_OFFSET = 2f;
+
+        public const float
+            SMOOTHING_FACTOR_NORMAL = 0.3f,
+            SMOOTHING_FACTOR_OVERLAY = 0.5f;
+
+        public const int
+            MAX_SAMPLE_POINTS = 256,
+            VELOCITY_LOOKUP_SIZE = 1024;
+
+        public static class Quality
+        {
+            public const bool
+                LOW_USE_ADVANCED_EFFECTS = false,
+                MEDIUM_USE_ADVANCED_EFFECTS = true,
+                HIGH_USE_ADVANCED_EFFECTS = true;
+
+            public const bool
+                LOW_USE_ANTIALIASING = false,
+                MEDIUM_USE_ANTIALIASING = true,
+                HIGH_USE_ANTIALIASING = true;
+
+            public const int
+                LOW_SAMPLE_COUNT = 1,
+                MEDIUM_SAMPLE_COUNT = 2,
+                HIGH_SAMPLE_COUNT = 4;
+        }
+    }
+
+    private readonly struct Particle(
         float x,
         float y,
         float velocity,
@@ -19,13 +62,15 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         float alpha,
         bool isActive)
     {
-        public float X = x;
-        public float Y = y;
-        public float Velocity = velocity;
-        public float Size = size;
-        public float Life = life;
-        public float Alpha = alpha;
-        public bool IsActive = isActive;
+        public readonly float 
+            X = x,
+            Y = y,
+            Velocity = velocity,
+            Size = size,
+            Life = life,
+            Alpha = alpha;
+
+        public readonly bool IsActive = isActive;
     }
 
     private class CircularParticleBuffer(
@@ -36,13 +81,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     {
         private readonly Particle[] _buffer = new Particle[capacity];
         private int _head, _tail, _count;
-        private readonly int _capacity = capacity;
-
-        private readonly float
-            _particleLife = particleLife,
-            _particleLifeDecay = particleLifeDecay,
-            _velocityMultiplier = velocityMultiplier,
-            _sizeDecayFactor = 0.95f;
+        private readonly float _sizeDecayFactor = 0.95f;
 
         private readonly object _bufferLock = new();
 
@@ -50,7 +89,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         {
             lock (_bufferLock)
             {
-                if (_count >= _capacity)
+                if (_count >= capacity)
                 {
                     ReplaceOldestParticle(particle);
                 }
@@ -64,14 +103,14 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         private void ReplaceOldestParticle(Particle particle)
         {
             _buffer[_tail] = particle;
-            _tail = (_tail + 1) % _capacity;
-            _head = (_head + 1) % _capacity;
+            _tail = (_tail + 1) % capacity;
+            _head = (_head + 1) % capacity;
         }
 
         private void AddNewParticle(Particle particle)
         {
             _buffer[_head] = particle;
-            _head = (_head + 1) % _capacity;
+            _head = (_head + 1) % capacity;
             _count++;
         }
 
@@ -90,68 +129,75 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
             for (int i = 0; i < _count; i++)
             {
-                int index = (currentTail + i) % _capacity;
-                ref Particle particle = ref _buffer[index];
+                int index = (currentTail + i) % capacity;
+                var particle = _buffer[index];
 
                 if (!particle.IsActive) continue;
 
-                UpdateParticlePosition(ref particle, upperBound);
-
-                if (!particle.IsActive) continue;
-
-                UpdateParticleLifetime(ref particle);
-
-                if (!particle.IsActive) continue;
-
-                UpdateParticleSize(ref particle);
-
-                if (!particle.IsActive) continue;
-
-                UpdateParticleAlpha(ref particle, alphaCurve);
+                var updatedParticle = UpdateParticle(particle, upperBound, alphaCurve);
+                _buffer[index] = updatedParticle;
             }
         }
 
-        private void UpdateParticlePosition(ref Particle particle, float upperBound)
+        private Particle UpdateParticle(
+            Particle particle,
+            float upperBound,
+            float[] alphaCurve)
         {
-            particle.Y -= particle.Velocity * _velocityMultiplier;
+            float newY = particle.Y - particle.Velocity * velocityMultiplier;
 
-            if (particle.Y <= upperBound)
-            {
-                particle.IsActive = false;
-            }
-        }
+            if (newY <= upperBound)
+                return new Particle(
+                    particle.X,
+                    newY,
+                    particle.Velocity,
+                    particle.Size,
+                    particle.Life,
+                    particle.Alpha,
+                    false);
 
-        private void UpdateParticleLifetime(ref Particle particle)
-        {
-            particle.Life -= _particleLifeDecay;
-            if (particle.Life <= 0)
-            {
-                particle.IsActive = false;
-            }
-        }
+            float newLife = particle.Life - particleLifeDecay;
+            if (newLife <= 0)
+                return new Particle(
+                    particle.X,
+                    newY,
+                    particle.Velocity,
+                    particle.Size,
+                    newLife,
+                    particle.Alpha,
+                    false);
 
-        private void UpdateParticleSize(ref Particle particle)
-        {
-            particle.Size *= _sizeDecayFactor;
-            if (particle.Size < 0.5f)
-            {
-                particle.IsActive = false;
-            }
-        }
+            float newSize = particle.Size * _sizeDecayFactor;
+            if (newSize < 0.5f)
+                return new Particle(
+                    particle.X,
+                    newY,
+                    particle.Velocity,
+                    newSize,
+                    newLife,
+                    particle.Alpha,
+                    false);
 
-        private void UpdateParticleAlpha(ref Particle particle, float[] alphaCurve)
-        {
-            float lifeRatio = particle.Life / _particleLife;
+            float lifeRatio = newLife / particleLife;
             int alphaIndex = (int)(lifeRatio * (alphaCurve.Length - 1));
             alphaIndex = Clamp(alphaIndex, 0, alphaCurve.Length - 1);
-            particle.Alpha = alphaCurve[alphaIndex];
+            float newAlpha = alphaCurve[alphaIndex];
+
+            return new Particle(
+                particle.X,
+                newY,
+                particle.Velocity,
+                newSize,
+                newLife,
+                newAlpha,
+                true);
         }
 
         private void RemoveInactiveParticles()
         {
             while (_count > 0 && !_buffer[_tail].IsActive)
             {
-                _tail = (_tail + 1) % _capacity;
+                _tail = (_tail + 1) % capacity;
                 _count--;
             }
         }
@@ -174,7 +220,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
             for (int i = 0; i < _count; i++)
             {
-                int index = (currentTail + i) % _capacity;
+                int index = (currentTail + i) % capacity;
                 if (_buffer[index].IsActive)
                 {
                     activeParticles[activeCount++] = _buffer[index];
@@ -234,64 +280,13 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
     private SKPicture? _cachedPicture;
 
-    private volatile bool _isConfiguring;
-
-    private ParticlesRenderer() { }
-
-    public static ParticlesRenderer GetInstance() => _instance.Value;
-
-    public record Constants
-    {
-        public const string LOG_PREFIX = "ParticlesRenderer";
-
-        public const float
-            DEFAULT_LINE_WIDTH = 3f,
-            GLOW_INTENSITY = 0.3f,
-            HIGH_MAGNITUDE_THRESHOLD = 0.7f,
-            OFFSET = 10f,
-            BASELINE_OFFSET = 2f;
-
-        public const float
-            SMOOTHING_FACTOR_NORMAL = 0.3f,
-            SMOOTHING_FACTOR_OVERLAY = 0.5f;
-
-        public const int
-            MAX_SAMPLE_POINTS = 256,
-            VELOCITY_LOOKUP_SIZE = 1024;
-
-        public static class Quality
-        {
-            public const bool
-                LOW_USE_ADVANCED_EFFECTS = false,
-                MEDIUM_USE_ADVANCED_EFFECTS = true,
-                HIGH_USE_ADVANCED_EFFECTS = true;
-
-            public const bool
-                LOW_USE_ANTIALIASING = false,
-                MEDIUM_USE_ANTIALIASING = true,
-                HIGH_USE_ANTIALIASING = true;
-
-            public const int
-                LOW_SAMPLE_COUNT = 1,
-                MEDIUM_SAMPLE_COUNT = 2,
-                HIGH_SAMPLE_COUNT = 4;
-        }
-    }
-
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeResources();
-                InitializeQualityParams();
-                StartProcessingThread();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed during renderer initialization"
-        );
+        base.OnInitialize();
+        InitializeResources();
+        InitializeQualityParams();
+        StartProcessingThread();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     private void InitializeResources()
@@ -305,13 +300,9 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     private void InitializeQualityParams()
     {
         ExecuteSafely(
-            () =>
-            {
-                ApplyQualitySettingsInternal();
-            },
+            () => ApplyQualitySettings(),
             nameof(InitializeQualityParams),
-            "Failed to initialize quality parameters"
-        );
+            "Failed to initialize quality parameters");
     }
 
     private void InitializeParticleBuffer()
@@ -341,81 +332,19 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         _processingThread.Start();
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ?
-                        SMOOTHING_FACTOR_OVERLAY :
-                        SMOOTHING_FACTOR_NORMAL;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
+        _smoothingFactor = _isOverlayActive ?
+            SMOOTHING_FACTOR_OVERLAY :
+            SMOOTHING_FACTOR_NORMAL;
+
+        InvalidateCachedPicture();
+
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
     }
 
-    protected override void ApplyQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
+    protected override void OnQualitySettingsApplied()
     {
         switch (Quality)
         {
@@ -442,25 +371,25 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
     private void LowQualitySettings()
     {
-        base._useAntiAlias = LOW_USE_ANTIALIASING;
-        base._samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
-        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = LOW_USE_ANTIALIASING;
+        _samplingOptions = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
         _sampleCount = LOW_SAMPLE_COUNT;
     }
 
     private void MediumQualitySettings()
     {
-        base._useAntiAlias = MEDIUM_USE_ANTIALIASING;
-        base._samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
+        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
         _sampleCount = MEDIUM_SAMPLE_COUNT;
     }
 
     private void HighQualitySettings()
     {
-        base._useAntiAlias = HIGH_USE_ANTIALIASING;
-        base._samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
-        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = HIGH_USE_ANTIALIASING;
+        _samplingOptions = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
         _sampleCount = HIGH_SAMPLE_COUNT;
     }
 
@@ -479,7 +408,8 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
+        if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+            return;
 
         ExecuteSafely(
             () =>
@@ -490,8 +420,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
                 RenderParticles(canvas, paint, _renderCache.UpperBound, _renderCache.LowerBound);
             },
             nameof(RenderEffect),
-            "Error during rendering"
-        );
+            "Error during rendering");
     }
 
     private void UpdateRenderCache(SKImageInfo info, int barCount, float barWidth)
@@ -501,55 +430,6 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         UpdateRenderCacheBounds(info.Height);
         _renderCache.StepSize = barCount > 0 ? info.Width / barCount : 0f;
         _barWidth = barWidth;
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 1) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or too small");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
     }
 
     private void ProcessSpectrumData(float[] spectrum) =>
@@ -635,20 +515,27 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         float[] spectrum,
         int spectrumLength,
         float spawnY,
-        int _, // canvasWidth
+        int _,
         float barWidth)
     {
         if (_particleBuffer == null) return;
 
-        float threshold = _isOverlayActive ? Settings.SpawnThresholdOverlay : Settings.SpawnThresholdNormal;
-        float baseSize = _isOverlayActive ? Settings.ParticleSizeOverlay : Settings.ParticleSizeNormal;
+        float threshold = _isOverlayActive ?
+            Settings.SpawnThresholdOverlay :
+            Settings.SpawnThresholdNormal;
+
+        float baseSize = _isOverlayActive ?
+            Settings.ParticleSizeOverlay :
+            Settings.ParticleSizeNormal;
 
         int safeLength = Min(spectrumLength, 2048);
         PrepareSpectrumBuffer(safeLength);
 
         if (_spectrumBuffer == null) return;
 
-        ScaleSpectrum(spectrum.AsSpan(0, safeLength), _spectrumBuffer.AsSpan(0, safeLength));
+        ScaleSpectrum(
+            spectrum.AsSpan(0, safeLength),
+            _spectrumBuffer.AsSpan(0, safeLength));
 
         float xStep = _renderCache.StepSize;
         var rnd = GetThreadLocalRandom();
@@ -728,72 +615,13 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
             size: baseSize * densityFactor,
             life: Settings.ParticleLife,
             alpha: 1f,
-            isActive: true
-        ));
-    }
-
-    private void PrecomputeAlphaCurve()
-    {
-        _alphaCurve ??= ArrayPool<float>.Shared.Rent(101);
-
-        float step = 1f / (_alphaCurve.Length - 1);
-        for (int i = 0; i < _alphaCurve.Length; i++)
-            _alphaCurve[i] = (float)Pow(i * step, Settings.AlphaDecayExponent);
-    }
-
-    private void InitializeVelocityLookup(float minVelocity)
-    {
-        _velocityLookup ??= ArrayPool<float>.Shared.Rent(VELOCITY_LOOKUP_SIZE);
-
-        float velocityRange = Settings.ParticleVelocityMax - Settings.ParticleVelocityMin;
-        for (int i = 0; i < VELOCITY_LOOKUP_SIZE; i++)
-            _velocityLookup[i] = minVelocity + velocityRange * i / VELOCITY_LOOKUP_SIZE;
+            isActive: true));
     }
 
     private void UpdateParticles(float upperBound)
     {
         if (_particleBuffer == null || _alphaCurve == null) return;
         _particleBuffer.Update(upperBound, _alphaCurve);
-    }
-
-    private void UpdateRenderCacheBounds(float height)
-    {
-        float overlayHeight = height * Settings.OverlayHeightMultiplier;
-
-        if (_isOverlayActive)
-        {
-            _renderCache.UpperBound = height - overlayHeight;
-            _renderCache.LowerBound = height;
-            _renderCache.OverlayHeight = overlayHeight;
-        }
-        else
-        {
-            _renderCache.UpperBound = 0f;
-            _renderCache.LowerBound = height;
-            _renderCache.OverlayHeight = 0f;
-        }
-    }
-
-    private float GetRandomVelocity()
-    {
-        if (_velocityLookup == null)
-            throw new InvalidOperationException("Velocity lookup not initialized");
-
-        var rnd = GetThreadLocalRandom();
-        return _velocityLookup[rnd.Next(VELOCITY_LOOKUP_SIZE)] * Settings.VelocityMultiplier;
-    }
-
-    private static Random GetThreadLocalRandom() =>
-        _threadLocalRandom ??= new Random();
-
-    private static void ScaleSpectrum(ReadOnlySpan<float> source, Span<float> dest)
-    {
-        int srcLen = source.Length, destLen = dest.Length;
-        if (srcLen == 0 || destLen == 0) return;
-
-        float scale = srcLen / (float)destLen;
-        for (int i = 0; i < destLen; i++)
-            dest[i] = source[(int)(i * scale)];
     }
 
     private void RenderParticles(
@@ -848,34 +676,75 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         canvas.DrawCircle(particle.X, particle.Y, particle.Size / 2, paint);
     }
 
-    public override void Dispose()
+    private void PrecomputeAlphaCurve()
     {
-        if (_disposed) return;
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _alphaCurve ??= ArrayPool<float>.Shared.Rent(101);
+
+        float step = 1f / (_alphaCurve.Length - 1);
+        for (int i = 0; i < _alphaCurve.Length; i++)
+            _alphaCurve[i] = (float)Pow(i * step, Settings.AlphaDecayExponent);
+    }
+
+    private void InitializeVelocityLookup(float minVelocity)
+    {
+        _velocityLookup ??= ArrayPool<float>.Shared.Rent(VELOCITY_LOOKUP_SIZE);
+
+        float velocityRange = Settings.ParticleVelocityMax - Settings.ParticleVelocityMin;
+        for (int i = 0; i < VELOCITY_LOOKUP_SIZE; i++)
+            _velocityLookup[i] = minVelocity + velocityRange * i / VELOCITY_LOOKUP_SIZE;
+    }
+
+    private void UpdateRenderCacheBounds(float height)
+    {
+        float overlayHeight = height * Settings.OverlayHeightMultiplier;
+
+        if (_isOverlayActive)
+        {
+            _renderCache.UpperBound = height - overlayHeight;
+            _renderCache.LowerBound = height;
+            _renderCache.OverlayHeight = overlayHeight;
+        }
+        else
+        {
+            _renderCache.UpperBound = 0f;
+            _renderCache.LowerBound = height;
+            _renderCache.OverlayHeight = 0f;
+        }
+    }
+
+    private float GetRandomVelocity()
+    {
+        if (_velocityLookup == null)
+            throw new InvalidOperationException("Velocity lookup not initialized");
+
+        var rnd = GetThreadLocalRandom();
+        return _velocityLookup[rnd.Next(VELOCITY_LOOKUP_SIZE)] * Settings.VelocityMultiplier;
+    }
+
+    private static Random GetThreadLocalRandom() =>
+        _threadLocalRandom ??= new Random();
+
+    private static void ScaleSpectrum(ReadOnlySpan<float> source, Span<float> dest)
+    {
+        int srcLen = source.Length, destLen = dest.Length;
+        if (srcLen == 0 || destLen == 0) return;
+
+        float scale = srcLen / (float)destLen;
+        for (int i = 0; i < destLen; i++)
+            dest[i] = source[(int)(i * scale)];
+    }
+
+    protected override void OnInvalidateCachedResources()
+    {
+        InvalidateCachedPicture();
+        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                StopProcessingThread();
-                DisposeResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
+        StopProcessingThread();
+        DisposeResources();
+        base.OnDispose();
     }
 
     private void StopProcessingThread()

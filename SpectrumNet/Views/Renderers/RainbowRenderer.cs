@@ -8,6 +8,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class RainbowRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<RainbowRenderer> _instance = new(() => new RainbowRenderer());
+    private const string LOG_PREFIX = "RainbowRenderer";
 
     private RainbowRenderer() { }
 
@@ -84,49 +85,24 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         }
     }
 
-    // Cached data for rendering
     private SKColor[]? _colorCache;
-
-    // Render resources
     private SKPaint? _glowPaint;
     private readonly SKPath _path = new();
     private readonly SKPaint _barPaint = new() { Style = SKPaintStyle.Fill };
     private readonly SKPaint _highlightPaint = new() { Style = SKPaintStyle.Fill, Color = SKColors.White };
     private readonly SKPaint _reflectionPaint = new() { Style = SKPaintStyle.Fill, BlendMode = SKBlendMode.SrcOver };
 
-    private volatile bool _isConfiguring;
-
     protected override void OnInitialize()
     {
-        ExecuteSafely(
-            () =>
-            {
-                base.OnInitialize();
-                InitializeResources();
-                InitializeQualityParams();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-            },
-            nameof(OnInitialize),
-            "Failed during renderer initialization"
-        );
+        base.OnInitialize();
+        InitializeResources();
+        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     private void InitializeResources()
     {
         InitializeGlowPaint();
         CreateColorCache();
-    }
-
-    private void InitializeQualityParams()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                ApplyQualitySettingsInternal();
-            },
-            nameof(InitializeQualityParams),
-            "Failed to initialize quality parameters"
-        );
     }
 
     private void InitializeGlowPaint()
@@ -149,80 +125,20 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         }
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-                    _smoothingFactor = isOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE;
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
-            () =>
-            {
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
-            },
-            nameof(OnConfigurationChanged),
-            "Failed to handle configuration change"
-        );
+        base.OnConfigurationChanged();
+
+        _smoothingFactor = _isOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE;
+
+        Log(LogLevel.Information, LOG_PREFIX,
+            $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
     }
 
-    protected override void ApplyQualitySettings()
+    protected override void OnQualitySettingsApplied()
     {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
+        base.OnQualitySettingsApplied();
 
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(ApplyQualitySettings),
-            "Failed to apply quality settings"
-        );
-    }
-
-    private void ApplyQualitySettingsInternal()
-    {
         switch (Quality)
         {
             case RenderQuality.Low:
@@ -247,23 +163,23 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
     private void LowQualitySettings()
     {
-        base._useAntiAlias = LOW_USE_ANTI_ALIAS;
-        base._samplingOptions = new SKSamplingOptions(LOW_FILTER_MODE, LOW_MIPMAP_MODE);
-        base._useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = LOW_USE_ANTI_ALIAS;
+        _samplingOptions = new SKSamplingOptions(LOW_FILTER_MODE, LOW_MIPMAP_MODE);
+        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
     }
 
     private void MediumQualitySettings()
     {
-        base._useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
-        base._samplingOptions = new SKSamplingOptions(MEDIUM_FILTER_MODE, MEDIUM_MIPMAP_MODE);
-        base._useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
+        _samplingOptions = new SKSamplingOptions(MEDIUM_FILTER_MODE, MEDIUM_MIPMAP_MODE);
+        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
     }
 
     private void HighQualitySettings()
     {
-        base._useAntiAlias = HIGH_USE_ANTI_ALIAS;
-        base._samplingOptions = new SKSamplingOptions(HIGH_FILTER_MODE, HIGH_MIPMAP_MODE);
-        base._useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
+        _samplingOptions = new SKSamplingOptions(HIGH_FILTER_MODE, HIGH_MIPMAP_MODE);
+        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
     }
 
     private void UpdatePaintProperties()
@@ -297,65 +213,9 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         SKPaint paint)
     {
         ExecuteSafely(
-            () =>
-            {
-                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-                    return;
-
-                RenderBars(canvas, spectrum, info, barWidth, barSpacing, paint);
-            },
+            () => RenderBars(canvas, spectrum, info, barWidth, barSpacing, paint),
             nameof(RenderEffect),
-            "Error during rendering"
-        );
-    }
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        if (IsDisposed()) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 1) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or too small");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
-    }
-
-    private bool IsDisposed()
-    {
-        if (!_disposed) return false;
-        Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-        return true;
+            "Error during rendering");
     }
 
     private void RenderBars(
@@ -366,30 +226,23 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float barSpacing,
         SKPaint _)
     {
-        ExecuteSafely(
-            () =>
-            {
-                float totalBarWidth = barWidth + barSpacing;
-                float canvasHeight = info.Height;
-                float startX = CalculateStartingX(info.Width, spectrum.Length, totalBarWidth, barSpacing);
-                float loudness = CalculateLoudness(spectrum);
-                float reflectionHeight = canvasHeight * REFLECTION_HEIGHT;
+        float totalBarWidth = barWidth + barSpacing;
+        float canvasHeight = info.Height;
+        float startX = CalculateStartingX(info.Width, spectrum.Length, totalBarWidth, barSpacing);
+        float loudness = CalculateLoudness(spectrum);
+        float reflectionHeight = canvasHeight * REFLECTION_HEIGHT;
 
-                RenderBarElements(
-                    canvas,
-                    spectrum,
-                    canvasHeight,
-                    startX,
-                    barWidth,
-                    totalBarWidth,
-                    loudness,
-                    reflectionHeight);
+        RenderBarElements(
+            canvas,
+            spectrum,
+            canvasHeight,
+            startX,
+            barWidth,
+            totalBarWidth,
+            loudness,
+            reflectionHeight);
 
-                _barPaint.Shader = null;
-            },
-            nameof(RenderBars),
-            "Error rendering bars"
-        );
+        _barPaint.Shader = null;
     }
 
     private static float CalculateStartingX(
@@ -409,22 +262,15 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float loudness,
         float reflectionHeight)
     {
-        ExecuteSafely(
-            () =>
-            {
-                for (int i = 0; i < spectrum.Length; i++)
-                {
-                    float magnitude = Clamp(spectrum[i], 0f, 1f);
-                    if (magnitude < MIN_MAGNITUDE_THRESHOLD)
-                        continue;
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            float magnitude = Clamp(spectrum[i], 0f, 1f);
+            if (magnitude < MIN_MAGNITUDE_THRESHOLD)
+                continue;
 
-                    RenderSingleBar(canvas, canvasHeight, startX, i, totalBarWidth, barWidth, magnitude,
-                        loudness, reflectionHeight);
-                }
-            },
-            nameof(RenderBarElements),
-            "Error rendering bar elements"
-        );
+            RenderSingleBar(canvas, canvasHeight, startX, i, totalBarWidth, barWidth, magnitude,
+                loudness, reflectionHeight);
+        }
     }
 
     private void RenderSingleBar(
@@ -438,24 +284,17 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float loudness,
         float reflectionHeight)
     {
-        ExecuteSafely(
-            () =>
-            {
-                float barHeight = magnitude * canvasHeight;
-                float x = startX + index * totalBarWidth;
-                float y = canvasHeight - barHeight;
-                var barRect = new SKRect(x, y, x + barWidth, canvasHeight);
+        float barHeight = magnitude * canvasHeight;
+        float x = startX + index * totalBarWidth;
+        float y = canvasHeight - barHeight;
+        var barRect = new SKRect(x, y, x + barWidth, canvasHeight);
 
-                if (canvas.QuickReject(barRect))
-                    return;
+        if (canvas.QuickReject(barRect))
+            return;
 
-                SKColor barColor = GetBarColor(magnitude);
-                DrawBar(canvas, barRect, barColor, magnitude, loudness, x, y, barWidth, barHeight,
-                    canvasHeight, reflectionHeight);
-            },
-            nameof(RenderSingleBar),
-            "Error rendering single bar"
-        );
+        SKColor barColor = GetBarColor(magnitude);
+        DrawBar(canvas, barRect, barColor, magnitude, loudness, x, y, barWidth, barHeight,
+            canvasHeight, reflectionHeight);
     }
 
     private void DrawBar(
@@ -471,22 +310,15 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float canvasHeight,
         float reflectionHeight)
     {
-        ExecuteSafely(
-            () =>
-            {
-                DrawGlowIfNeeded(canvas, barRect, barColor, magnitude, loudness);
-                DrawMainBar(canvas, barRect, barColor, magnitude, x, y, barWidth);
+        DrawGlowIfNeeded(canvas, barRect, barColor, magnitude, loudness);
+        DrawMainBar(canvas, barRect, barColor, magnitude, x, y, barWidth);
 
-                if (barHeight <= CORNER_RADIUS * 2)
-                    return;
+        if (barHeight <= CORNER_RADIUS * 2)
+            return;
 
-                DrawHighlight(canvas, x, y, barWidth, barHeight, magnitude);
-                DrawReflectionIfNeeded(canvas, x, canvasHeight, barWidth, barHeight, barColor,
-                    magnitude, reflectionHeight);
-            },
-            nameof(DrawBar),
-            "Error drawing bar"
-        );
+        DrawHighlight(canvas, x, y, barWidth, barHeight, magnitude);
+        DrawReflectionIfNeeded(canvas, x, canvasHeight, barWidth, barHeight, barColor,
+            magnitude, reflectionHeight);
     }
 
     private void DrawGlowIfNeeded(
@@ -658,35 +490,11 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         return HIGH_WEIGHT;
     }
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
-
     protected override void OnDispose()
     {
-        ExecuteSafely(
-            () =>
-            {
-                DisposeManagedResources();
-                base.OnDispose();
-            },
-            nameof(OnDispose),
-            "Error during specific disposal"
-        );
+        DisposeManagedResources();
+        base.OnDispose();
+        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     private void DisposeManagedResources()
@@ -706,7 +514,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
     private void ClearReferences()
     {
-        base._previousSpectrum = null;
+        _previousSpectrum = null;
         _colorCache = null;
     }
 }
