@@ -48,26 +48,10 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     private int _bufferHead;
     private bool _needsBufferResize;
     private SKBitmap? _waterfallBitmap;
-    private volatile bool _isConfiguring;
 
     private float _lastBarWidth;
     private int _lastBarCount;
     private float _lastBarSpacing;
-
-    private new bool _useAntiAlias;
-    private new bool _useAdvancedEffects;
-
-    private WaterfallRenderer() { }
-
-    public override void SetOverlayTransparency(float level)
-    {
-        if (Math.Abs(_overlayAlphaFactor - level) < float.Epsilon)
-            return;
-
-        _overlayAlphaFactor = level;
-        _overlayStateChangeRequested = true;
-        _overlayStateChanged = true;
-    }
 
     protected override void OnInitialize() =>
         ExecuteSafely(
@@ -85,68 +69,25 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             DEFAULT_BUFFER_HEIGHT;
 
         InitializeSpectrogramBuffer(bufferHeight, DEFAULT_SPECTRUM_WIDTH);
-        ApplyQualitySettings();
 
         Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality) =>
+    protected override void OnConfigurationChanged() =>
         ExecuteSafely(
             () =>
             {
-                if (_isConfiguring) return;
-
-                try
+                if (_spectrogramBuffer != null)
                 {
-                    _isConfiguring = true;
-                    bool overlayChanged = _isOverlayActive != isOverlayActive;
-                    bool qualityChanged = Quality != quality;
-
-                    _isOverlayActive = isOverlayActive;
-                    Quality = quality;
-
-                    _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
-
-                    if (overlayChanged)
-                    {
-                        _overlayStateChangeRequested = true;
-                        _overlayStateChanged = true;
-                        _overlayAlphaFactor = isOverlayActive ? 0.75f : 1.0f;
-
-                        Log(LogLevel.Information, LOG_PREFIX,
-                            $"Overlay state changed from {!isOverlayActive} to {isOverlayActive}");
-                    }
-
-                    if (Quality != quality)
-                    {
-                        ApplyQualitySettings();
-                    }
-
-                    if ((overlayChanged || qualityChanged) && _spectrogramBuffer != null)
-                    {
-                        ResizeBufferForOverlayMode(isOverlayActive);
-                    }
+                    ResizeBufferForOverlayMode(_isOverlayActive);
                 }
-                finally
-                {
-                    _isConfiguring = false;
-                }
+
+                Log(LogLevel.Information, LOG_PREFIX,
+                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            nameof(Configure),
-            "Failed to configure renderer"
+            nameof(OnConfigurationChanged),
+            "Failed to handle configuration change"
         );
-
-    protected override void ApplyQualitySettings()
-    {
-        base.ApplyQualitySettings();
-
-        _useAntiAlias = UseAntiAlias;
-        _useAdvancedEffects = UseAdvancedEffects;
-
-        Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
-    }
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -159,22 +100,11 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                if (_overlayStateChangeRequested)
-                {
-                    _overlayStateChangeRequested = false;
-                    _overlayStateChanged = true;
-                }
-
                 bool parametersChanged = CheckParametersChanged(barWidth, barSpacing, barCount);
 
                 UpdateState(spectrum, parametersChanged, barCount, barWidth);
 
                 RenderWithOverlay(canvas, () => RenderFrame(canvas, info, barWidth, barSpacing, barCount));
-
-                if (_overlayStateChanged)
-                {
-                    _overlayStateChanged = false;
-                }
             },
             nameof(RenderEffect),
             "Error during rendering"
@@ -271,7 +201,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
         DrawBitmapToCanvas(canvas, info, barWidth, barSpacing, barCount);
 
-        if (barWidth > ZOOM_THRESHOLD && _useAdvancedEffects)
+        if (barWidth > ZOOM_THRESHOLD && UseAdvancedEffects)
         {
             SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
             ApplyZoomEnhancement(canvas, destRect, barWidth, barCount, barSpacing);
@@ -832,7 +762,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
                 using var renderPaint = new SKPaint
                 {
-                    IsAntialias = _useAntiAlias && barCount > HIGH_BAR_COUNT_THRESHOLD
+                    IsAntialias = UseAntiAlias && barCount > HIGH_BAR_COUNT_THRESHOLD
                 };
 
                 canvas.Clear(SKColors.Black);
@@ -891,7 +821,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 {
                     Color = new SKColor(255, 255, 255, 40),
                     StrokeWidth = 1,
-                    IsAntialias = _useAntiAlias,
+                    IsAntialias = UseAntiAlias,
                     Style = SKPaintStyle.Stroke
                 };
 
@@ -934,7 +864,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 using var textPaint = new SKPaint
                 {
                     Color = SKColors.White,
-                    IsAntialias = _useAntiAlias
+                    IsAntialias = UseAntiAlias
                 };
 
                 int gridStep = (int)Max(1, barCount / 10);
@@ -1073,6 +1003,22 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                _isOverlayActive;
     }
 
+    protected override void OnInvalidateCachedResources()
+    {
+        ExecuteSafely(
+            () =>
+            {
+                base.OnInvalidateCachedResources();
+                _waterfallBitmap?.Dispose();
+                _waterfallBitmap = null;
+                _needsBufferResize = true;
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+            },
+            nameof(OnInvalidateCachedResources),
+            "Failed to invalidate cached resources"
+        );
+    }
+
     protected override void OnDispose() =>
         ExecuteSafely(
             () =>
@@ -1085,23 +1031,9 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 _spectrumPool.Dispose();
 
                 base.OnDispose();
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
             nameof(OnDispose),
             "Failed to dispose resources"
         );
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            OnDispose,
-            nameof(Dispose),
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
 }

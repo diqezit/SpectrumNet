@@ -59,10 +59,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
     private readonly SKPath _fillPath = new();
 
     private float _glowRadius;
-    private new bool _useAntiAlias;
-    private new bool _useAdvancedEffects;
     private int _smoothingPasses;
-    private volatile bool _isConfiguring;
 
     private WaveformRenderer() { }
 
@@ -71,61 +68,21 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             () =>
             {
                 base.OnInitialize();
-                InitializeResources();
-                ApplyQualitySettings();
+                _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
             "Failed to initialize renderer"
         );
 
-    private void InitializeResources()
-    {
-        _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
-    }
-
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality) =>
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = _isOverlayActive != isOverlayActive
-                                         || Quality != quality;
-                    base.Configure(isOverlayActive, quality);
-
-                    UpdateConfiguration(isOverlayActive);
-
-                    if (configChanged)
-                    {
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-
-    private void UpdateConfiguration(bool isOverlayActive)
-    {
-        _smoothingFactor = isOverlayActive ?
-            SMOOTHING_FACTOR_OVERLAY :
-            SMOOTHING_FACTOR_NORMAL;
-    }
-
     protected override void OnConfigurationChanged() =>
         ExecuteSafely(
             () =>
             {
+                _smoothingFactor = _isOverlayActive ?
+                    SMOOTHING_FACTOR_OVERLAY :
+                    SMOOTHING_FACTOR_NORMAL;
+
                 Log(LogLevel.Debug,
                     LOG_PREFIX,
                     $"Configuration changed. New Quality: {Quality}");
@@ -134,47 +91,30 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             "Failed to handle configuration change"
         );
 
-    protected override void ApplyQualitySettings() =>
+    protected override void OnQualitySettingsApplied() =>
         ExecuteSafely(
             () =>
             {
-                if (_isConfiguring) return;
+                switch (Quality)
+                {
+                    case RenderQuality.Low:
+                        ApplyLowQualitySettings();
+                        break;
+                    case RenderQuality.Medium:
+                        ApplyMediumQualitySettings();
+                        break;
+                    case RenderQuality.High:
+                        ApplyHighQualitySettings();
+                        break;
+                }
 
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualityBasedSettings();
-                    Log(LogLevel.Debug,
-                        LOG_PREFIX,
-                        $"Quality changed to {Quality}");
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
+                Log(LogLevel.Debug,
+                    LOG_PREFIX,
+                    $"Quality changed to {Quality}");
             },
-            nameof(ApplyQualitySettings),
+            nameof(OnQualitySettingsApplied),
             "Failed to apply quality settings"
         );
-
-    private void ApplyQualityBasedSettings()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                ApplyLowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                ApplyHighQualitySettings();
-                break;
-        }
-    }
 
     private void ApplyLowQualitySettings()
     {
@@ -211,9 +151,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                if (!ValidateRenderParameters(canvas, spectrum, info, paint))
-                    return;
-
                 float midY = info.Height / 2;
                 float xStep = info.Width / (float)spectrum.Length;
 
@@ -223,45 +160,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             nameof(RenderEffect),
             "Error during rendering"
         );
-
-    private bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (canvas == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-            return false;
-        }
-
-        if (spectrum == null || spectrum.Length == 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Spectrum is null or empty");
-            return false;
-        }
-
-        if (paint == null)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-            return false;
-        }
-
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
-
-        if (_disposed)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, "Renderer is disposed");
-            return false;
-        }
-
-        return true;
-    }
 
     private void UpdateWavePaths(float[] spectrum, float midY, float xStep) =>
         ExecuteSafely(
@@ -358,7 +256,13 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
                     canvas.DrawPath(_bottomPath, glowPaint);
 
                     using var highlightPaint = CreateHighlightPaint(spectrum.Length);
-                    RenderHighlights(canvas, spectrum, info.Height / 2, info.Width / (float)spectrum.Length, highlightPaint);
+
+                    RenderHighlights(
+                        canvas,
+                        spectrum,
+                        info.Height / 2,
+                        info.Width / (float)spectrum.Length,
+                        highlightPaint);
                 }
             },
             nameof(RenderWaveform),
@@ -444,39 +348,29 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         }
     }
 
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
+    protected override void OnInvalidateCachedResources() =>
         ExecuteSafely(
             () =>
             {
-                OnDispose();
+                base.OnInvalidateCachedResources();
+                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
             },
-            nameof(Dispose),
-            "Error during disposal"
+            nameof(OnInvalidateCachedResources),
+            "Failed to invalidate cached resources"
         );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
-    }
 
     protected override void OnDispose() =>
         ExecuteSafely(
             () =>
             {
-                DisposeManagedResources();
+                _topPath?.Dispose();
+                _bottomPath?.Dispose();
+                _fillPath?.Dispose();
+
                 base.OnDispose();
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
             nameof(OnDispose),
             "Error during specific disposal"
         );
-
-    private void DisposeManagedResources()
-    {
-        _topPath?.Dispose();
-        _bottomPath?.Dispose();
-        _fillPath?.Dispose();
-    }
 }

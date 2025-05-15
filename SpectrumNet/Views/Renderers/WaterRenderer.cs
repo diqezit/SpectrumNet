@@ -134,7 +134,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     private float _timeFactor = 1.0f;
     private float _currentWaterAlpha = WATER_ALPHA_BASE;
     private float _currentBrightness = 0.5f;
-    private bool _isConfiguring;
 
     private readonly Random _random = new();
     private readonly object _syncRoot = new();
@@ -243,39 +242,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             BlendMode = SKBlendMode.SrcOver
         };
 
-    public override void Configure(
-        bool isOverlayActive,
-        RenderQuality quality)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_isConfiguring) return;
-
-                try
-                {
-                    _isConfiguring = true;
-                    bool configChanged = base.IsOverlayActive != isOverlayActive
-                                         || Quality != quality;
-
-                    base.Configure(isOverlayActive, quality);
-
-                    if (configChanged)
-                    {
-                        ApplyQualitySettingsInternal();
-                        OnConfigurationChanged();
-                    }
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer"
-        );
-    }
-
     protected override void OnConfigurationChanged()
     {
         ExecuteSafely(
@@ -285,7 +251,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                 Log(LogLevel.Information,
                     LOG_PREFIX,
                     $"Configuration changed. New Quality: {Quality}, " +
-                    $"AntiAlias: {base.UseAntiAlias}, AdvancedEffects: {base.UseAdvancedEffects}, " +
+                    $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
                     $"ShowConnections: {_showConnections}, TimeFactor: {_timeFactor}");
             },
             nameof(OnConfigurationChanged),
@@ -293,53 +259,35 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         );
     }
 
-    protected override void ApplyQualitySettings()
+    protected override void OnQualitySettingsApplied()
     {
         ExecuteSafely(
             () =>
             {
-                if (_isConfiguring) return;
+                switch (Quality)
+                {
+                    case RenderQuality.Low:
+                        LowQualitySettings();
+                        break;
+                    case RenderQuality.Medium:
+                        MediumQualitySettings();
+                        break;
+                    case RenderQuality.High:
+                        HighQualitySettings();
+                        break;
+                }
 
-                try
-                {
-                    _isConfiguring = true;
-                    base.ApplyQualitySettings();
-                    ApplyQualitySettingsInternal();
-                }
-                finally
-                {
-                    _isConfiguring = false;
-                }
+                UpdatePaintProperties();
+                _needsGridRebuild = true;
+
+                Log(LogLevel.Debug, LOG_PREFIX,
+                    $"Quality settings applied. Quality: {Quality}, " +
+                    $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
+                    $"ShowConnections: {_showConnections}, TimeFactor: {_timeFactor}");
             },
-            nameof(ApplyQualitySettings),
+            nameof(OnQualitySettingsApplied),
             "Failed to apply quality settings"
         );
-    }
-
-    private void ApplyQualitySettingsInternal()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                LowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                MediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                HighQualitySettings();
-                break;
-        }
-
-        UpdatePaintProperties();
-        _needsGridRebuild = true;
-
-        Log(LogLevel.Debug, LOG_PREFIX,
-            $"Quality settings applied. Quality: {Quality}, " +
-            $"AntiAlias: {base.UseAntiAlias}, AdvancedEffects: {base.UseAdvancedEffects}, " +
-            $"ShowConnections: {_showConnections}, TimeFactor: {_timeFactor}");
     }
 
     private void LowQualitySettings()
@@ -363,19 +311,19 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     private void UpdatePaintProperties()
     {
         if (_pointPaint != null)
-            _pointPaint.IsAntialias = base.UseAntiAlias;
+            _pointPaint.IsAntialias = UseAntiAlias;
 
         if (_linePaint != null)
-            _linePaint.IsAntialias = base.UseAntiAlias;
+            _linePaint.IsAntialias = UseAntiAlias;
 
         if (_fillPaint != null)
-            _fillPaint.IsAntialias = base.UseAntiAlias;
+            _fillPaint.IsAntialias = UseAntiAlias;
 
         if (_highlightPaint != null)
-            _highlightPaint.IsAntialias = base.UseAntiAlias;
+            _highlightPaint.IsAntialias = UseAntiAlias;
 
         if (_reflectionPaint != null)
-            _reflectionPaint.IsAntialias = base.UseAntiAlias;
+            _reflectionPaint.IsAntialias = UseAntiAlias;
     }
 
     protected override void RenderEffect(
@@ -387,8 +335,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, paint)) return;
-
         ExecuteSafely(
             () =>
             {
@@ -398,47 +344,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             nameof(RenderEffect),
             "Error during rendering"
         );
-    }
-
-    private static bool ValidateRenderParameters(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (!IsCanvasValid(canvas)) return false;
-        if (!IsSpectrumValid(spectrum)) return false;
-        if (!IsPaintValid(paint)) return false;
-        if (!AreDimensionsValid(info)) return false;
-        return true;
-    }
-
-    private static bool IsCanvasValid(SKCanvas? canvas)
-    {
-        if (canvas != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Canvas is null");
-        return false;
-    }
-
-    private static bool IsSpectrumValid(float[]? spectrum)
-    {
-        if (spectrum != null && spectrum.Length > 0) return true;
-        Log(LogLevel.Warning, LOG_PREFIX, "Spectrum is null or empty");
-        return false;
-    }
-
-    private static bool IsPaintValid(SKPaint? paint)
-    {
-        if (paint != null) return true;
-        Log(LogLevel.Error, LOG_PREFIX, "Paint is null");
-        return false;
-    }
-
-    private static bool AreDimensionsValid(SKImageInfo info)
-    {
-        if (info.Width > 0 && info.Height > 0) return true;
-        Log(LogLevel.Error, LOG_PREFIX, $"Invalid image dimensions: {info.Width}x{info.Height}");
-        return false;
     }
 
     private void UpdateState(
@@ -621,7 +526,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                 _currentBrightness = _currentBrightness * (1 - BRIGHTNESS_SMOOTHING) +
                                     targetBrightness * BRIGHTNESS_SMOOTHING;
 
-                if (base.UseAdvancedEffects && _currentFrame == 0)
+                if (UseAdvancedEffects && _currentFrame == 0)
                 {
                     UpdateWaterShader(info);
                 }
@@ -700,7 +605,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     {
         SKColor baseColor = externalPaint.Color;
 
-        if (base.UseAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             float hueShift = Sin(_animationTime * COLOR_SHIFT_SPEED) * 10;
             baseColor = ShiftHue(baseColor, hueShift);
@@ -733,7 +638,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
     {
         if (_fillPaint == null) return;
 
-        if (base.UseAdvancedEffects && _waterShader != null)
+        if (UseAdvancedEffects && _waterShader != null)
         {
             float phase = _animationTime * WAVE_SPEED;
             SKMatrix matrix = SKMatrix.CreateRotationDegrees(Sin(phase) * 2);
@@ -770,7 +675,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                if (base.UseAdvancedEffects && _fillPaint != null)
+                if (UseAdvancedEffects && _fillPaint != null)
                 {
                     DrawWaterSurface(canvas);
                 }
@@ -782,7 +687,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
                 RenderPoints(canvas);
 
-                if (base.UseAdvancedEffects)
+                if (UseAdvancedEffects)
                 {
                     RenderHighlightsAndReflections(canvas);
                 }
@@ -1081,7 +986,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         ConnectToCardinalNeighbors(x, y, point);
 
-        if (base.UseAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             ConnectToDiagonalNeighbors(x, y, point);
         }
@@ -1237,7 +1142,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             CalculateSpectrumForces(pointIndex, point, spectrum);
         }
 
-        if (base.UseAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             CalculateWaveForces(pointIndex);
         }
@@ -1337,7 +1242,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         CalculateVerticalSpectrumForce(pointIndex, amplitude);
 
-        if (base.UseAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             CalculateHorizontalSpectrumForce(pointIndex, amplitude);
         }
@@ -1422,51 +1327,30 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             () =>
             {
                 StopPhysicsTask();
-                DisposeManagedResources();
+                _fillPath?.Dispose();
+                _pointPaint?.Dispose();
+                _linePaint?.Dispose();
+                _fillPaint?.Dispose();
+                _highlightPaint?.Dispose();
+                _reflectionPaint?.Dispose();
+                _waterShader?.Dispose();
+
+                _pointPaint = null;
+                _linePaint = null;
+                _fillPaint = null;
+                _highlightPaint = null;
+                _reflectionPaint = null;
+                _waterShader = null;
+                _lastSpectrum = null;
+                _forces = [];
+                _points.Clear();
+
                 base.OnDispose();
+                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
             nameof(OnDispose),
             "Error during specific disposal"
         );
-    }
-
-    private void DisposeManagedResources()
-    {
-        _fillPath?.Dispose();
-        _pointPaint?.Dispose();
-        _linePaint?.Dispose();
-        _fillPaint?.Dispose();
-        _highlightPaint?.Dispose();
-        _reflectionPaint?.Dispose();
-        _waterShader?.Dispose();
-
-        _pointPaint = null;
-        _linePaint = null;
-        _fillPaint = null;
-        _highlightPaint = null;
-        _reflectionPaint = null;
-        _waterShader = null;
-        _lastSpectrum = null;
-        _forces = [];
-        _points.Clear();
-    }
-
-    public override void Dispose()
-    {
-        if (_disposed) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                OnDispose();
-            },
-            nameof(Dispose),
-            "Error during disposal"
-        );
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
 
     private class WaterPoint(float x, float y)
