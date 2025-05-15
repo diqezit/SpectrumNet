@@ -17,6 +17,8 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
     private readonly ThreadLocal<Complex[]> _threadLocalBuffer;
     private readonly ArrayPool<Complex> _complexArrayPool = ArrayPool<Complex>.Shared;
     private readonly ArrayPool<float> _floatArrayPool = ArrayPool<float>.Shared;
+    private readonly ConcurrentBag<Task> _pendingTasks = [];
+    private readonly SemaphoreSlim _pendingTasksSemaphore = new(1, 1);
 
     private float[] _window;
     private int _sampleCount;
@@ -88,12 +90,18 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
     protected override void DisposeManaged()
     {
         CleanupResources();
+        WaitForPendingTasksAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false)
+            .GetAwaiter()
+            .GetResult();
+        _pendingTasksSemaphore.Dispose();
     }
 
     protected override async ValueTask DisposeAsyncManagedResources()
     {
         CleanupResources();
-        await Task.CompletedTask;
+        await WaitForPendingTasksAsync(TimeSpan.FromSeconds(5));
+        _pendingTasksSemaphore.Dispose();
     }
 
     private void CleanupResources()
@@ -104,7 +112,7 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
         _cts.Dispose();
     }
 
-    private void ValidateFftSize(int fftSize)
+    private static void ValidateFftSize(int fftSize)
     {
         if (!BitOperations.IsPow2(fftSize) || fftSize <= 0)
             throw new ArgumentException("FFT size must be a positive power of 2", nameof(fftSize));
@@ -116,7 +124,7 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
             _windows[type] = GenerateWindow(fftSize, type);
     }
 
-    private Channel<(ReadOnlyMemory<float>, int, CancellationToken)> CreateProcessingChannel(int capacity)
+    private static Channel<(ReadOnlyMemory<float>, int, CancellationToken)> CreateProcessingChannel(int capacity)
     {
         var options = new BoundedChannelOptions(capacity)
         {
@@ -248,7 +256,6 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
             try
             {
                 Array.Copy(_buffer, fftBuffer, _fftSize);
-
                 ScheduleFftCalculation(fftBuffer, rate, cancellationToken);
             }
             catch (Exception ex)
@@ -266,15 +273,14 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
         int rate,
         CancellationToken cancellationToken)
     {
-        Task.Run(() =>
+        var task = Task.Run(() =>
         {
             try
             {
                 if (cancellationToken.IsCancellationRequested)
                     return;
 
-                FastFourierTransform.FFT(true, (int)Log2(_fftSize), fftBuffer);
-
+                PerformFftCalculation(fftBuffer);
                 NotifyFftResultIfNeeded(fftBuffer, rate, cancellationToken);
             }
             catch (Exception ex)
@@ -286,6 +292,86 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
                 _complexArrayPool.Return(fftBuffer);
             }
         }, cancellationToken);
+
+        TrackTask(task);
+    }
+
+    private void PerformFftCalculation(Complex[] fftBuffer) => 
+        FastFourierTransform.FFT(true, (int)Log2(_fftSize), fftBuffer);
+
+    private async void TrackTask(Task task)
+    {
+        await AddTaskToTracking(task);
+
+        try
+        {
+            await task;
+        }
+        catch
+        {
+            // Исключения обрабатываются внутри задачи
+        }
+        finally
+        {
+            await RemoveTaskFromTracking();
+        }
+    }
+
+    private async Task AddTaskToTracking(Task task)
+    {
+        try
+        {
+            await _pendingTasksSemaphore.WaitAsync();
+            _pendingTasks.Add(task);
+        }
+        finally
+        {
+            _pendingTasksSemaphore.Release();
+        }
+    }
+
+    private async Task RemoveTaskFromTracking()
+    {
+        try
+        {
+            await _pendingTasksSemaphore.WaitAsync();
+            _pendingTasks.TryTake(out _);
+        }
+        finally
+        {
+            _pendingTasksSemaphore.Release();
+        }
+    }
+
+    public async Task WaitForPendingTasksAsync(TimeSpan timeout)
+    {
+        Task[] tasks = await GetAllPendingTasks();
+
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(tasks).WaitAsync(timeout);
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Warning, LOG_SOURCE,
+                    $"Waiting for pending tasks interrupted: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task<Task[]> GetAllPendingTasks()
+    {
+        try
+        {
+            await _pendingTasksSemaphore.WaitAsync();
+            return [.. _pendingTasks];
+        }
+        finally
+        {
+            _pendingTasksSemaphore.Release();
+        }
     }
 
     private void NotifyFftResultIfNeeded(

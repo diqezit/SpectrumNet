@@ -14,6 +14,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private readonly CancellationTokenSource _cleanupCts = new();
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
+    private readonly object _disposeLock = new();
 
     private readonly Window _ownerWindow;
     private readonly SKElement _renderElement;
@@ -531,23 +532,32 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     {
         if (_isDisposed) return;
 
-        Log(LogLevel.Information, LOG_PREFIX, "Starting synchronous dispose");
+        Log(LogLevel.Information,
+            LOG_PREFIX,
+            "Starting synchronous dispose");
 
+        SafeExecuteDisposeAction(CleanupInitiation, "CleanupInitiation");
+        SafeExecuteDisposeAction(StopCaptureIfNeeded, "StopCaptureIfNeeded");
+        SafeExecuteDisposeAction(CloseUIElementsIfNeeded, "CloseUIElementsIfNeeded");
+        SafeExecuteDisposeAction(DisposeAllControllers, "DisposeAllControllers");
+        SafeExecuteDisposeAction(DisposeResourceObjects, "DisposeResourceObjects");
+
+        Log(LogLevel.Information,
+            LOG_PREFIX,
+            "Synchronous dispose completed");
+    }
+
+    private static void SafeExecuteDisposeAction(Action action, string actionName)
+    {
         try
         {
-            CleanupInitiation();
-            StopCaptureIfNeeded();
-            CloseUIElementsIfNeeded();
-            DisposeAllControllers();
-            DisposeResourceObjects();
+            action();
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LOG_PREFIX, $"Exception during synchronous dispose: {ex}");
-        }
-        finally
-        {
-            Log(LogLevel.Information, LOG_PREFIX, "Synchronous dispose completed");
+            Log(LogLevel.Error,
+                LOG_PREFIX,
+                $"Error during {actionName}: {ex.Message}");
         }
     }
 
@@ -585,11 +595,54 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private void DisposeAllControllers()
     {
-        DisposeControllerIfCreated(_viewController, typeof(ViewController).Name);
-        DisposeControllerIfCreated(_audioController, typeof(AudioController).Name);
-        DisposeControllerIfCreated(_uiController, typeof(UIController).Name);
+        var (viewController, audioController, uiController) = CaptureExistingControllers();
+
+        if (viewController != null)
+            DisposeController(viewController, "ViewController");
+
+        if (audioController != null)
+            DisposeController(audioController, "AudioController");
+
+        if (uiController != null)
+            DisposeController(uiController, "UIController");
 
         DisposeInputController();
+    }
+
+    private (ViewController? viewController,
+             AudioController? audioController,
+             UIController? uiController) CaptureExistingControllers()
+    {
+        lock (_disposeLock)
+        {
+            ViewController? viewController =
+                _viewController.IsValueCreated ? _viewController.Value : null;
+
+            AudioController? audioController =
+                _audioController.IsValueCreated ? _audioController.Value : null;
+
+            UIController? uiController =
+                _uiController.IsValueCreated ? _uiController.Value : null;
+
+            return (viewController, audioController, uiController);
+        }
+    }
+
+    private static void DisposeController<T>(
+        T controller,
+        string controllerName) where T : class
+    {
+        try
+        {
+            if (controller is IDisposable disposable)
+                disposable.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LOG_PREFIX,
+                $"Error disposing {controllerName}: {ex.Message}");
+        }
     }
 
     private void DisposeInputController()
@@ -676,22 +729,42 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private async Task DisposeControllersAsync(CancellationToken token)
     {
-        await DisposeControllerAsyncIfCreated(
-            _viewController,
-            typeof(ViewController).Name,
-            token);
+        var (viewController, audioController, uiController) = CaptureExistingControllers();
 
-        await DisposeControllerAsyncIfCreated(
-            _audioController,
-            typeof(AudioController).Name,
-            token);
+        if (viewController != null)
+            await DisposeControllerAsync(viewController, "ViewController", token);
 
-        await DisposeControllerAsyncIfCreated(
-            _uiController,
-            typeof(UIController).Name,
-            token);
+        if (audioController != null)
+            await DisposeControllerAsync(audioController, "AudioController", token);
+
+        if (uiController != null)
+            await DisposeControllerAsync(uiController, "UIController", token);
 
         await DisposeInputControllerAsync(token);
+    }
+
+    private static async Task DisposeControllerAsync<T>(
+        T controller,
+        string controllerName,
+        CancellationToken token) where T : class
+    {
+        try
+        {
+            if (controller is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().AsTask().WaitAsync(token);
+            }
+            else if (controller is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LOG_PREFIX,
+                $"Error disposing {controllerName}: {ex.Message}");
+        }
     }
 
     private async Task DisposeInputControllerAsync(CancellationToken token)
@@ -709,47 +782,6 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             Safe(() => disposable.Dispose(),
                 $"{LOG_PREFIX}.{nameof(DisposeInputControllerAsync)}",
                 "Error disposing InputController");
-        }
-    }
-
-    private static void DisposeControllerIfCreated<T>(
-        Lazy<T> controller,
-        string controllerName) where T : class
-    {
-        if (!controller.IsValueCreated) return;
-
-        var instance = controller.Value;
-
-        if (instance is IDisposable disposable)
-        {
-            Safe(() => disposable.Dispose(),
-                $"{LOG_PREFIX}.{nameof(DisposeControllerIfCreated)}",
-                $"Error disposing {controllerName}");
-        }
-    }
-
-    private static async Task DisposeControllerAsyncIfCreated<T>(
-        Lazy<T> controller,
-        string controllerName,
-        CancellationToken token) where T : class
-    {
-        if (!controller.IsValueCreated) return;
-
-        var instance = controller.Value;
-
-        if (instance is IAsyncDisposable asyncDisposable)
-        {
-            await SafeAsync(
-                async () => await asyncDisposable.DisposeAsync().AsTask().WaitAsync(token),
-                $"{LOG_PREFIX}.{nameof(DisposeControllerAsyncIfCreated)}",
-                $"Error async disposing {controllerName}",
-                ignoreExceptions: [typeof(OperationCanceledException)]);
-        }
-        else if (instance is IDisposable disposable)
-        {
-            Safe(() => disposable.Dispose(),
-                $"{LOG_PREFIX}.{nameof(DisposeControllerAsyncIfCreated)}",
-                $"Error disposing {controllerName}");
         }
     }
 }

@@ -28,68 +28,83 @@ public class FrameCache : IDisposable
 
     public void UpdateCache(SKSurface surface, SKImageInfo info)
     {
-        if (_isDisposed) return;
+        if (_isDisposed)
+            return;
+
+        SKBitmap? newCache = null;
+
+        try
+        {
+            newCache = CreateNewBitmapIfNeeded(info);
+            UpdateCacheWithSafety(surface, info, newCache);
+        }
+        catch
+        {
+            if (newCache != null && !ReferenceEquals(newCache, _cachedFrame))
+            {
+                newCache.Dispose();
+            }
+            throw;
+        }
+    }
+
+    private SKBitmap? CreateNewBitmapIfNeeded(SKImageInfo info)
+    {
+        bool needsNewCache = false;
 
         lock (_cacheLock)
         {
-            EnsureCacheSizeMatchesInfo(info);
-            CopyFromSurfaceToCache(surface, info);
+            if (_isDisposed)
+                return null;
+
+            needsNewCache = _cachedFrame == null ||
+                          _lastInfo.Width != info.Width ||
+                          _lastInfo.Height != info.Height;
+        }
+
+        if (needsNewCache)
+        {
+            return new SKBitmap(
+                info.Width,
+                info.Height,
+                info.ColorType,
+                info.AlphaType);
+        }
+
+        return null;
+    }
+
+    private void UpdateCacheWithSafety(
+        SKSurface surface,
+        SKImageInfo info,
+        SKBitmap? newCache)
+    {
+        lock (_cacheLock)
+        {
+            if (_isDisposed)
+                return;
+
+            if (newCache != null)
+            {
+                var oldCache = _cachedFrame;
+                _cachedFrame = newCache;
+                _lastInfo = info;
+                oldCache?.Dispose();
+            }
+
+            CopyContentFromSurface(surface, info);
             MarkDirty(false);
             _frameAge = 0;
         }
     }
 
-    private void EnsureCacheSizeMatchesInfo(SKImageInfo info)
+    private void CopyContentFromSurface(SKSurface surface, SKImageInfo info)
     {
-        if (_cachedFrame == null ||
-            _lastInfo.Width != info.Width ||
-            _lastInfo.Height != info.Height)
-        {
-            RecreateCache(info);
-        }
-    }
+        if (_cachedFrame == null)
+            return;
 
-    private void RecreateCache(SKImageInfo info)
-    {
-        var oldFrame = _cachedFrame;
-        SKBitmap? newFrame = null;
-
-        try
-        {
-            newFrame = new SKBitmap(
-                info.Width,
-                info.Height,
-                info.ColorType,
-                info.AlphaType);
-
-            _cachedFrame = newFrame;
-            _lastInfo = info;
-        }
-        catch
-        {
-            newFrame?.Dispose();
-            throw;
-        }
-        finally
-        {
-            oldFrame?.Dispose();
-        }
-    }
-
-    private void CopyFromSurfaceToCache(SKSurface surface, SKImageInfo info)
-    {
-        if (_cachedFrame == null) return;
-
-        SKImage? snapshot = null;
-        try
-        {
-            snapshot = surface.Snapshot();
-            snapshot.ReadPixels(info, _cachedFrame.GetPixels(), _cachedFrame.RowBytes);
-        }
-        finally
-        {
-            snapshot?.Dispose();
-        }
+        using var snapshot = surface.Snapshot();
+        snapshot.ReadPixels(info, _cachedFrame.GetPixels(), _cachedFrame.RowBytes);
     }
 
     public void DrawCachedFrame(SKCanvas canvas)

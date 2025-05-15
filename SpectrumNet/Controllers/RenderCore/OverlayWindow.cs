@@ -54,18 +54,21 @@ public sealed class OverlayWindow : Window, IDisposable
         }
     }
 
+    public void ForceRedraw()
+    {
+        if (_isDisposed || _renderContext is null)
+            return;
+
+        var element = _renderContext.Value.SkElement;
+        element?.InvalidateVisual();
+    }
+
     private void OnTransparencyChanged(float level)
     {
         Dispatcher.Invoke(() => {
             Opacity = level;
             ForceRedraw();
         });
-    }
-
-    public void ForceRedraw()
-    {
-        if (_isDisposed || _renderContext is null) return;
-        _renderContext.Value.SkElement.InvalidateVisual();
     }
 
     private void ConfigureRenderingOptions()
@@ -146,7 +149,6 @@ public sealed class OverlayWindow : Window, IDisposable
 
         OptimizeElementForRender(element);
 
-        // Важно: передаем события мыши в менеджер прозрачности
         element.MouseMove += (s, e) => _transparencyManager.OnMouseMove();
         element.MouseEnter += (s, e) => _transparencyManager.OnMouseEnter();
         element.MouseLeave += (s, e) => _transparencyManager.OnMouseLeave();
@@ -283,10 +285,7 @@ public sealed class OverlayWindow : Window, IDisposable
         InitializeWindowHandle();
         ApplyWindowOptimizations();
         StartRenderTimer();
-
-        // Активируем прозрачность при запуске
         _transparencyManager.ActivateTransparency();
-
         ForceRedraw();
     }
 
@@ -309,7 +308,6 @@ public sealed class OverlayWindow : Window, IDisposable
 
         var extendedStyle = NativeMethods.GetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE);
 
-        // Включаем WS_EX_TRANSPARENT для пропускания кликов мыши вместе с WS_EX_LAYERED
         _ = NativeMethods.SetWindowLong(
             _windowHandle,
             NativeMethods.GWL_EXSTYLE,

@@ -4,14 +4,17 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace SpectrumNet.Controllers.Input;
 
-public class InputController : IInputController, IDisposable
+public class InputController : IInputController, IDisposable, IAsyncDisposable
 {
     private const string LogPrefix = "InputController";
 
     private readonly IMainController _mainController;
     private readonly List<IInputHandler> _handlers;
     private readonly List<Window> _registeredWindows = [];
+    private readonly Dictionary<Window, List<EventSubscription>> _eventSubscriptions = [];
     private bool _isDisposed;
+
+    private record EventSubscription(string EventName, Delegate Handler);
 
     public InputController(IMainController mainController)
     {
@@ -25,7 +28,11 @@ public class InputController : IInputController, IDisposable
             return;
 
         _registeredWindows.Add(window);
-        window.Closed += OnWindowClosed;
+
+        var closedHandler = new EventHandler(OnWindowClosed);
+        window.Closed += closedHandler;
+
+        RegisterEventSubscription(window, "Closed", closedHandler);
     }
 
     public void UnregisterWindow(Window window)
@@ -33,7 +40,7 @@ public class InputController : IInputController, IDisposable
         if (!_registeredWindows.Contains(window))
             return;
 
-        window.Closed -= OnWindowClosed;
+        UnsubscribeAllEvents(window);
         _registeredWindows.Remove(window);
     }
 
@@ -70,7 +77,72 @@ public class InputController : IInputController, IDisposable
     public bool HandleButtonClick(object? sender, RoutedEventArgs e) =>
         ExecuteHandlerAction(_handlers, h => h.HandleButtonClick(sender, e));
 
-    private static bool ExecuteHandlerAction(List<IInputHandler> handlers, Func<IInputHandler, bool> action)
+    public void Dispose()
+    {
+        if (_isDisposed)
+            return;
+
+        UnregisterAllWindows();
+        _handlers.Clear();
+        _isDisposed = true;
+    }
+
+    private void RegisterEventSubscription(
+        Window window,
+        string eventName,
+        Delegate handler)
+    {
+        if (!_eventSubscriptions.TryGetValue(window, out var subscriptions))
+        {
+            subscriptions = [];
+            _eventSubscriptions[window] = subscriptions;
+        }
+
+        subscriptions.Add(new EventSubscription(eventName, handler));
+    }
+
+    private void UnsubscribeAllEvents(Window window)
+    {
+        if (_eventSubscriptions.TryGetValue(window, out var subscriptions))
+        {
+            foreach (var subscription in subscriptions)
+            {
+                UnsubscribeWindowEvent(window, subscription);
+            }
+
+            _eventSubscriptions.Remove(window);
+        }
+    }
+
+    private static void UnsubscribeWindowEvent(
+        Window window,
+        EventSubscription subscription)
+    {
+        try
+        {
+            switch (subscription.EventName)
+            {
+                case "Closed":
+                    window.Closed -= (EventHandler)subscription.Handler;
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, LogPrefix,
+                $"Error unsubscribing from {subscription.EventName}: {ex.Message}");
+        }
+    }
+
+    private void OnWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is Window window)
+            UnregisterWindow(window);
+    }
+
+    private static bool ExecuteHandlerAction(
+        List<IInputHandler> handlers,
+        Func<IInputHandler, bool> action)
     {
         foreach (var handler in handlers)
         {
@@ -87,23 +159,26 @@ public class InputController : IInputController, IDisposable
         new WindowInputHandler(_mainController)
     ];
 
-    private void OnWindowClosed(object? sender, EventArgs e)
+    private void UnregisterAllWindows()
     {
-        if (sender is Window window)
-            UnregisterWindow(window);
-    }
-
-    public void Dispose()
-    {
-        if (_isDisposed)
-            return;
-
         foreach (var window in _registeredWindows.ToList())
         {
             UnregisterWindow(window);
         }
 
         _registeredWindows.Clear();
+        _eventSubscriptions.Clear();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed)
+            return;
+
+        UnregisterAllWindows();
+        _handlers.Clear();
         _isDisposed = true;
+
+        await ValueTask.CompletedTask;
     }
 }

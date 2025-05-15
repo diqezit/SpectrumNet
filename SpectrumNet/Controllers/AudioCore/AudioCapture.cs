@@ -261,7 +261,10 @@ public sealed class AudioCapture : AsyncDisposableBase
 
         ThrowIfDisposed();
 
-        if (_isCaptureStopping || IsRecording || _isReinitializing || _controller.IsTransitioning)
+        if (_isCaptureStopping
+            || IsRecording
+            || _isReinitializing
+            || _controller.IsTransitioning)
         {
             Log(LogLevel.Warning,
                 LogPrefix,
@@ -279,7 +282,10 @@ public sealed class AudioCapture : AsyncDisposableBase
 
         try
         {
-            if (_isDisposed || IsRecording || _isReinitializing || _controller.IsTransitioning)
+            if (_isDisposed
+                || IsRecording
+                || _isReinitializing
+                || _controller.IsTransitioning)
             {
                 Log(LogLevel.Warning,
                     LogPrefix,
@@ -389,11 +395,11 @@ public sealed class AudioCapture : AsyncDisposableBase
 
         if (_isCaptureStopping)
         {
-            Log(LogLevel.Warning, LogPrefix, "Stop capture already in progress");
+            Log(LogLevel.Warning,
+                LogPrefix,
+                "Stop capture already in progress");
             return;
         }
-
-        CaptureState? stateToDispose = null;
 
         try
         {
@@ -401,72 +407,16 @@ public sealed class AudioCapture : AsyncDisposableBase
 
             if (!IsRecording && _state is null)
             {
-                Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
+                Log(LogLevel.Debug,
+                    LogPrefix,
+                    "Stop capture ignored: Not recording");
                 return;
             }
 
-            lock (_stateLock)
-            {
-                if (_state is null)
-                {
-                    Log(LogLevel.Warning, LogPrefix, "No capture state to dispose");
-                    return;
-                }
-
-                _state.CTS.Cancel();
-                stateToDispose = _state;
-                _state = null;
-            }
-
+            CaptureState? stateToDispose = AcquireCaptureStateForDisposal();
             if (stateToDispose is not null)
             {
-                bool stopSuccessful = false;
-
-                try
-                {
-                    using var timeoutCts = new CancellationTokenSource(STOP_OPERATION_TIMEOUT_MS);
-
-                    try
-                    {
-                        await Task.Run(() =>
-                        {
-                            try
-                            {
-                                stateToDispose.Capture.StopRecording();
-                                stopSuccessful = true;
-                            }
-                            catch (Exception ex)
-                            {
-                                Log(LogLevel.Error, LogPrefix, $"Error stopping recording: {ex.Message}");
-                            }
-                        }).WaitAsync(timeoutCts.Token);
-                    }
-                    catch (TimeoutException)
-                    {
-                        Log(LogLevel.Warning, LogPrefix, "Stop capture operation timed out");
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        Log(LogLevel.Warning, LogPrefix, "Stop capture operation was canceled");
-                    }
-
-                    if ((stopSuccessful || timeoutCts.IsCancellationRequested) &&
-                        !_controller.IsTransitioning)
-                    {
-                        try
-                        {
-                            stateToDispose.Analyzer.SafeReset();
-                        }
-                        catch (Exception ex)
-                        {
-                            Log(LogLevel.Error, LogPrefix, $"Error resetting analyzer: {ex.Message}");
-                        }
-                    }
-                }
-                finally
-                {
-                    DisposeCaptureState(stateToDispose);
-                }
+                await StopRecordingAndWait(stateToDispose);
             }
 
             if (updateUI)
@@ -477,6 +427,96 @@ public sealed class AudioCapture : AsyncDisposableBase
         finally
         {
             _isCaptureStopping = false;
+        }
+    }
+
+    private CaptureState? AcquireCaptureStateForDisposal()
+    {
+        lock (_stateLock)
+        {
+            if (_state is null)
+            {
+                Log(LogLevel.Warning,
+                    LogPrefix,
+                    "No capture state to dispose");
+                return null;
+            }
+
+            var stateToDispose = _state;
+            stateToDispose.CTS.Cancel();
+            _state = null;
+            return stateToDispose;
+        }
+    }
+
+    private async Task StopRecordingAndWait(CaptureState stateToDispose)
+    {
+        bool stopSuccessful = false;
+
+        try
+        {
+            using var timeoutCts = new CancellationTokenSource(STOP_OPERATION_TIMEOUT_MS);
+
+            try
+            {
+                await TryStopRecording(stateToDispose, timeoutCts.Token);
+                stopSuccessful = true;
+            }
+            catch (TimeoutException)
+            {
+                Log(LogLevel.Warning,
+                    LogPrefix,
+                    "Stop capture operation timed out");
+            }
+            catch (OperationCanceledException)
+            {
+                Log(LogLevel.Warning,
+                    LogPrefix,
+                    "Stop capture operation was canceled");
+            }
+
+            if ((stopSuccessful || timeoutCts.IsCancellationRequested) &&
+                !_controller.IsTransitioning)
+            {
+                TryResetAnalyzer(stateToDispose);
+            }
+        }
+        finally
+        {
+            DisposeCaptureState(stateToDispose);
+        }
+    }
+
+    private static async Task TryStopRecording(
+        CaptureState stateToDispose,
+        CancellationToken token)
+    {
+        await Task.Run(() =>
+        {
+            try
+            {
+                stateToDispose.Capture.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error,
+                    LogPrefix,
+                    $"Error stopping recording: {ex.Message}");
+            }
+        }, token).WaitAsync(token);
+    }
+
+    private static void TryResetAnalyzer(CaptureState stateToDispose)
+    {
+        try
+        {
+            stateToDispose.Analyzer.SafeReset();
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error resetting analyzer: {ex.Message}");
         }
     }
 
@@ -622,7 +662,9 @@ public sealed class AudioCapture : AsyncDisposableBase
                             token
                         );
 
-                        if (!IsRecording || _controller.IsTransitioning || _isCaptureStopping)
+                        if (!IsRecording
+                            || _controller.IsTransitioning
+                            || _isCaptureStopping)
                         {
                             continue;
                         }
