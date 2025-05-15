@@ -3,6 +3,7 @@
 using static System.MathF;
 using static SpectrumNet.Views.Renderers.WaterRenderer.Constants;
 using static SpectrumNet.Views.Renderers.WaterRenderer.Constants.Quality;
+using System.Text;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -12,12 +13,10 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     private WaterRenderer()
     {
+        _gridState = new WaterGridState();
+        _physicsEngine = new WaterPhysicsEngine();
+        _renderState = new WaterRenderState();
         _spectrumImpactFactor = SPECTRUM_IMPACT_MIN;
-        _physicsTaskFactory = new TaskFactory(
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning,
-            TaskContinuationOptions.None,
-            TaskScheduler.Default);
     }
 
     public static WaterRenderer GetInstance() => _instance.Value;
@@ -49,10 +48,14 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             PHYSICS_UPDATE_STEP = 0.016f,
             PHYSICS_SUBSTEPS = 3;
 
+        // Force constants
         public const float
             INTERACTION_RADIUS = 7700f,
             ATTRACTION_FORCE = 0.02f,
-            REPULSION_FORCE = 0.2f,
+            REPULSION_FORCE = 0.2f;
+
+        // Spectrum influence constants
+        public const float
             SPECTRUM_IMPACT_MIN = 0.05f,
             SPECTRUM_IMPACT_MAX = 0.3f;
 
@@ -62,7 +65,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             POINT_RENDERING_THRESHOLD = 800,
             ROW_RENDERING_THRESHOLD = 20;
 
-        // Appearance constants
+        // Appearance constants - Alpha values
         public const byte
             LINE_ALPHA = 100,
             WATER_ALPHA_BASE = 40,
@@ -70,20 +73,37 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             HIGHLIGHT_ALPHA_BASE = 180,
             REFLECTION_ALPHA = 60;
 
+        // Appearance constants - Effects
         public const float
             HIGHLIGHT_SIZE_FACTOR = 0.5f,
             HIGHLIGHT_OFFSET_FACTOR = 0.25f,
             REFLECTION_HEIGHT_FACTOR = 0.2f,
-            REFLECTION_WIDTH_FACTOR = 0.8f,
+            REFLECTION_WIDTH_FACTOR = 0.8f;
+
+        // Animation constants    
+        public const float
             WAVE_SPEED = 0.5f,
-            WAVE_AMPLITUDE = 0.2f,
+            WAVE_AMPLITUDE = 0.2f;
+
+        // Smoothing constants    
+        public const float
             LOUDNESS_SMOOTHING = 0.2f,
             BRIGHTNESS_SMOOTHING = 0.1f,
+            FRAME_TIME_SMOOTHING = 0.1f;
+
+        // Performance constants
+        public const float
             ADAPTIVE_PERFORMANCE_THRESHOLD = 0.025f,
-            FRAME_TIME_SMOOTHING = 0.1f,
             MIN_AMPLITUDE_THRESHOLD = 0.05f,
             COLOR_SHIFT_SPEED = 0.1f;
 
+        // Grid stability constants
+        public const float
+            GRID_SIZE_CHANGE_THRESHOLD = 0.05f,
+            BAR_SPACING_CHANGE_THRESHOLD = 0.2f,
+            GRID_RESIZE_COOLDOWN = 0.5f;
+
+        // Water colors
         public static readonly SKColor
             BASE_WATER_COLOR = new(0, 120, 255, WATER_ALPHA_BASE),
             DEEP_WATER_COLOR = new(0, 40, 150, WATER_ALPHA_BASE),
@@ -91,74 +111,71 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         public static class Quality
         {
+            // Connection display settings
             public const bool
                 LOW_SHOW_CONNECTIONS = false,
                 MEDIUM_SHOW_CONNECTIONS = false,
                 HIGH_SHOW_CONNECTIONS = true;
 
+            // Visual effects settings
             public const bool
                 LOW_USE_ADVANCED_EFFECTS = false,
                 MEDIUM_USE_ADVANCED_EFFECTS = true,
                 HIGH_USE_ADVANCED_EFFECTS = true;
 
+            // Anti-aliasing settings
             public const bool
                 LOW_USE_ANTIALIASING = false,
                 MEDIUM_USE_ANTIALIASING = true,
                 HIGH_USE_ANTIALIASING = true;
 
+            // Animation speed settings
             public const float
                 LOW_TIME_FACTOR = 0.8f,
                 MEDIUM_TIME_FACTOR = 1.0f,
                 HIGH_TIME_FACTOR = 1.2f;
+
+            // Grid density settings
+            public const float
+                LOW_DENSITY_FACTOR = 0.6f,
+                MEDIUM_DENSITY_FACTOR = 1.0f,
+                HIGH_DENSITY_FACTOR = 1.5f;
+
+            // Physics detail settings
+            public const int
+                LOW_PHYSICS_SUBSTEPS = 2,
+                MEDIUM_PHYSICS_SUBSTEPS = 3,
+                HIGH_PHYSICS_SUBSTEPS = 4;
+
+            // Rendering optimization settings
+            public const int
+                LOW_RENDER_SKIP = 3,
+                MEDIUM_RENDER_SKIP = 2,
+                HIGH_RENDER_SKIP = 1;
         }
     }
 
-    private readonly List<WaterPoint> _points = [];
-    private Vector2[] _forces = [];
-    private float[]? _lastSpectrum;
-    private float[] _spectrumForPhysics = [];
-    private float _animationTime;
-    private float _physicsTimeAccumulator;
-    private float _lastLoudness;
-    private readonly float _spectrumImpactFactor;
+    private readonly WaterGridState _gridState;
+    private readonly WaterPhysicsEngine _physicsEngine;
+    private readonly WaterRenderState _renderState;
 
-    private readonly SKPath _fillPath = new();
-    private SKPaint? _pointPaint;
-    private SKPaint? _linePaint;
-    private SKPaint? _fillPaint;
-    private SKPaint? _highlightPaint;
-    private SKPaint? _reflectionPaint;
-    private SKShader? _waterShader;
-
-    private bool _showConnections;
-    private float _timeFactor = 1.0f;
-    private float _currentWaterAlpha = WATER_ALPHA_BASE;
-    private float _currentBrightness = 0.5f;
-
-    private readonly Random _random = new();
-    private readonly object _syncRoot = new();
-    private readonly TaskFactory _physicsTaskFactory;
-    private readonly Stopwatch _frameTimeStopwatch = new();
-    private Task? _physicsTask;
-    private bool _physicsTaskRunning;
-    private bool _pendingPhysicsUpdate;
-
-    private int _columns;
-    private int _rows;
-    private float _spacing;
-    private float _xOffset;
-    private float _yOffset;
-    private bool _needsGridRebuild = true;
-    private readonly bool _adaptivePhysics = true;
-    private readonly int[] _qualityBasedPointCount = [400, 800, 1600];
-    private readonly int _updateFrameSkip = 3;
-    private int _currentFrame;
-    private float _avgFrameTime = 0.016f;
-
+    private float _lastWidth;
+    private float _lastHeight;
     private float _lastBarWidth;
     private float _lastBarSpacing;
     private int _lastBarCount;
-    private SKImageInfo _lastImageInfo;
+    private float _lastGridRebuildTime;
+
+    private bool _showConnections;
+    private int _renderSkip = 1;
+    private float _densityFactor = 1.0f;
+    private float _timeFactor = 1.0f;
+    private readonly float _spectrumImpactFactor;
+
+    private readonly Stopwatch _frameTimeStopwatch = new();
+    private float _avgFrameTime = 0.016f;
+    private int _currentFrame;
+    private readonly int _updateFrameSkip = 3;
 
     protected override void OnInitialize()
     {
@@ -166,8 +183,11 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             () =>
             {
                 base.OnInitialize();
-                InitializeResources();
-                StartPhysicsTask();
+
+                _frameTimeStopwatch.Start();
+                _renderState.InitializePaintResources(UseAntiAlias);
+                _physicsEngine.Initialize(_timeFactor, _spectrumImpactFactor);
+
                 Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
             },
             nameof(OnInitialize),
@@ -175,84 +195,22 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         );
     }
 
-    private void InitializeResources()
-    {
-        _frameTimeStopwatch.Start();
-        InitializeGridParameters();
-        InitializePaintResources();
-        _needsGridRebuild = true;
-    }
-
-    private void InitializeGridParameters()
-    {
-        _columns = DEFAULT_COLUMNS;
-        _rows = DEFAULT_ROWS;
-        _spacing = DEFAULT_SPACING;
-    }
-
-    private void InitializePaintResources()
-    {
-        _pointPaint = CreatePointPaint();
-        _linePaint = CreateLinePaint();
-        _fillPaint = CreateFillPaint();
-        _highlightPaint = CreateHighlightPaint();
-        _reflectionPaint = CreateReflectionPaint();
-    }
-
-    private static SKPaint CreatePointPaint() =>
-        new()
-        {
-            Color = SKColors.White,
-            IsAntialias = true,
-            Style = SKPaintStyle.StrokeAndFill,
-            StrokeWidth = POINT_RADIUS
-        };
-
-    private static SKPaint CreateLinePaint() =>
-        new()
-        {
-            Color = BASE_WATER_COLOR.WithAlpha(LINE_ALPHA),
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = LINE_WIDTH
-        };
-
-    private static SKPaint CreateFillPaint() =>
-        new()
-        {
-            Color = BASE_WATER_COLOR,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-
-    private static SKPaint CreateHighlightPaint() =>
-        new()
-        {
-            Color = HIGHLIGHT_COLOR,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-
-    private static SKPaint CreateReflectionPaint() =>
-        new()
-        {
-            Color = SKColors.White.WithAlpha(REFLECTION_ALPHA),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill,
-            BlendMode = SKBlendMode.SrcOver
-        };
-
     protected override void OnConfigurationChanged()
     {
         ExecuteSafely(
             () =>
             {
-                _needsGridRebuild = true;
-                Log(LogLevel.Information,
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}, " +
-                    $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
-                    $"ShowConnections: {_showConnections}, TimeFactor: {_timeFactor}");
+                _gridState.MarkForRebuild();
+
+                var configInfo = new StringBuilder()
+                    .Append($"Configuration changed. ")
+                    .Append($"New Quality: {Quality}, ")
+                    .Append($"AntiAlias: {UseAntiAlias}, ")
+                    .Append($"AdvancedEffects: {UseAdvancedEffects}, ")
+                    .Append($"ShowConnections: {_showConnections}, ")
+                    .Append($"TimeFactor: {_timeFactor}");
+
+                Log(LogLevel.Information, LOG_PREFIX, configInfo.ToString());
             },
             nameof(OnConfigurationChanged),
             "Failed to handle configuration change"
@@ -267,63 +225,62 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                 switch (Quality)
                 {
                     case RenderQuality.Low:
-                        LowQualitySettings();
+                        ApplyLowQualitySettings();
                         break;
                     case RenderQuality.Medium:
-                        MediumQualitySettings();
+                        ApplyMediumQualitySettings();
                         break;
                     case RenderQuality.High:
-                        HighQualitySettings();
+                        ApplyHighQualitySettings();
                         break;
                 }
 
-                UpdatePaintProperties();
-                _needsGridRebuild = true;
+                _renderState.UpdateQualitySettings(UseAntiAlias, UseAdvancedEffects);
+                _physicsEngine.UpdateQualitySettings(_timeFactor);
+                _gridState.UpdateQualitySettings(_densityFactor);
 
-                Log(LogLevel.Debug, LOG_PREFIX,
-                    $"Quality settings applied. Quality: {Quality}, " +
-                    $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
-                    $"ShowConnections: {_showConnections}, TimeFactor: {_timeFactor}");
+                _gridState.MarkForRebuild();
+
+                var qualityInfo = new StringBuilder()
+                    .Append($"Quality settings applied. ")
+                    .Append($"Quality: {Quality}, ")
+                    .Append($"AntiAlias: {UseAntiAlias}, ")
+                    .Append($"AdvancedEffects: {UseAdvancedEffects}, ")
+                    .Append($"ShowConnections: {_showConnections}, ")
+                    .Append($"TimeFactor: {_timeFactor}");
+
+                Log(LogLevel.Debug, LOG_PREFIX, qualityInfo.ToString());
             },
             nameof(OnQualitySettingsApplied),
             "Failed to apply quality settings"
         );
     }
 
-    private void LowQualitySettings()
+    private void ApplyLowQualitySettings()
     {
         _showConnections = LOW_SHOW_CONNECTIONS;
         _timeFactor = LOW_TIME_FACTOR;
+        _renderSkip = LOW_RENDER_SKIP;
+        _densityFactor = LOW_DENSITY_FACTOR;
+        _physicsEngine.SetSubstepsCount(LOW_PHYSICS_SUBSTEPS);
     }
 
-    private void MediumQualitySettings()
+    private void ApplyMediumQualitySettings()
     {
         _showConnections = MEDIUM_SHOW_CONNECTIONS;
         _timeFactor = MEDIUM_TIME_FACTOR;
+        _renderSkip = MEDIUM_RENDER_SKIP;
+        _densityFactor = MEDIUM_DENSITY_FACTOR;
+        _physicsEngine.SetSubstepsCount(MEDIUM_PHYSICS_SUBSTEPS);
     }
 
-    private void HighQualitySettings()
+    private void ApplyHighQualitySettings()
     {
         _showConnections = HIGH_SHOW_CONNECTIONS;
         _timeFactor = HIGH_TIME_FACTOR;
-    }
-
-    private void UpdatePaintProperties()
-    {
-        if (_pointPaint != null)
-            _pointPaint.IsAntialias = UseAntiAlias;
-
-        if (_linePaint != null)
-            _linePaint.IsAntialias = UseAntiAlias;
-
-        if (_fillPaint != null)
-            _fillPaint.IsAntialias = UseAntiAlias;
-
-        if (_highlightPaint != null)
-            _highlightPaint.IsAntialias = UseAntiAlias;
-
-        if (_reflectionPaint != null)
-            _reflectionPaint.IsAntialias = UseAntiAlias;
+        _renderSkip = HIGH_RENDER_SKIP;
+        _densityFactor = HIGH_DENSITY_FACTOR;
+        _physicsEngine.SetSubstepsCount(HIGH_PHYSICS_SUBSTEPS);
     }
 
     protected override void RenderEffect(
@@ -336,14 +293,24 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         SKPaint paint)
     {
         ExecuteSafely(
-            () =>
-            {
-                UpdateState(spectrum, info, barWidth, barSpacing, barCount);
-                RenderFrame(canvas, spectrum, info, paint);
-            },
+            () => ProcessRenderEffect(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
             nameof(RenderEffect),
             "Error during rendering"
         );
+    }
+
+    private void ProcessRenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint paint)
+    {
+        UpdateState(spectrum, info, barWidth, barSpacing, barCount);
+        RenderFrame(canvas, paint);
+        UpdateFrameTimeMeasurement();
     }
 
     private void UpdateState(
@@ -354,142 +321,168 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         int barCount)
     {
         ExecuteSafely(
-            () =>
-            {
-                BuildWaterGrid(
-                    info.Width,
-                    info.Height,
-                    barWidth,
-                    barSpacing,
-                    barCount);
-
-                UpdatePhysicsIfNeeded(spectrum);
-                UpdateVisualParameters(spectrum, info);
-                UpdateFrameTimeMeasurement();
-            },
+            () => ProcessStateUpdate(spectrum, info, barWidth, barSpacing, barCount),
             nameof(UpdateState),
             "Error updating renderer state"
         );
     }
 
-    private void RenderFrame(
-        SKCanvas canvas,
+    private void ProcessStateUpdate(
         float[] spectrum,
         SKImageInfo info,
-        SKPaint paint)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                RenderWaterGrid(canvas, paint);
-            },
-            nameof(RenderFrame),
-            "Error rendering frame"
-        );
-    }
-
-    private void StartPhysicsTask()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_physicsTask != null) return;
-
-                _physicsTaskRunning = true;
-                _physicsTask = _physicsTaskFactory.StartNew(RunPhysicsLoop);
-            },
-            nameof(StartPhysicsTask),
-            "Failed to start physics task"
-        );
-    }
-
-    private void RunPhysicsLoop()
-    {
-        while (_physicsTaskRunning && !_disposed)
-        {
-            try
-            {
-                PhysicsLoopIteration();
-                Thread.Sleep(5);
-            }
-            catch (Exception ex)
-            {
-                Log(LogLevel.Error, LOG_PREFIX, $"Physics error: {ex.Message}");
-                Thread.Sleep(100);
-            }
-        }
-    }
-
-    private void PhysicsLoopIteration()
-    {
-        if (!_pendingPhysicsUpdate || _points.Count == 0) return;
-
-        lock (_syncRoot)
-        {
-            if (!_pendingPhysicsUpdate) return;
-
-            float[] spectrum = _spectrumForPhysics;
-
-            _animationTime += TIME_STEP * _timeFactor;
-            AccumulatePhysicsTime();
-            ProcessPhysicsSteps(spectrum);
-
-            _pendingPhysicsUpdate = false;
-        }
-    }
-
-    private void SchedulePhysicsUpdate(float[] spectrum)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                int length = spectrum.Length;
-                if (_spectrumForPhysics.Length != length)
-                {
-                    float[] newArray = new float[length];
-                    Array.Copy(spectrum, newArray, length);
-                    _spectrumForPhysics = newArray;
-                }
-                else
-                {
-                    Array.Copy(spectrum, _spectrumForPhysics, length);
-                }
-
-                _pendingPhysicsUpdate = true;
-            },
-            nameof(SchedulePhysicsUpdate),
-            "Error scheduling physics update"
-        );
-    }
-
-    private void StopPhysicsTask()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                _physicsTaskRunning = false;
-                try
-                {
-                    _physicsTask?.Wait(500);
-                }
-                catch { }
-
-                _physicsTask = null;
-            },
-            nameof(StopPhysicsTask),
-            "Error stopping physics task"
-        );
-    }
-
-    private void UpdatePhysicsIfNeeded(float[] spectrum)
+        float barWidth,
+        float barSpacing,
+        int barCount)
     {
         IncrementFrameCounter();
-        _lastSpectrum = spectrum;
+        UpdateGridIfNeeded(info.Width, info.Height, barWidth, barSpacing, barCount);
 
         if (_currentFrame == 0)
         {
-            SchedulePhysicsUpdate(spectrum);
+            _physicsEngine.ScheduleUpdate(spectrum, _gridState.Points);
         }
+
+        _renderState.UpdateVisualParameters(spectrum, info, UseAdvancedEffects, _currentFrame == 0);
+    }
+
+    private void UpdateGridIfNeeded(
+        float width,
+        float height,
+        float barWidth,
+        float barSpacing,
+        int barCount)
+    {
+        if (ShouldRebuildGrid(width, height, barSpacing, barCount))
+        {
+            BuildWaterGrid(width, height, barWidth, barSpacing, barCount);
+            UpdateLastGridParameters(width, height, barWidth, barSpacing, barCount);
+        }
+    }
+
+    private bool ShouldRebuildGrid(
+        float width,
+        float height,
+        float barSpacing,
+        int barCount)
+    {
+        bool forceRebuild = _gridState.NeedsRebuild;
+
+        bool sizeChanged =
+            !AreFloatsApproximatelyEqual(
+                _lastWidth,
+                width,
+                width * GRID_SIZE_CHANGE_THRESHOLD) ||
+            !AreFloatsApproximatelyEqual(
+                _lastHeight,
+                height,
+                height * GRID_SIZE_CHANGE_THRESHOLD);
+
+        bool spacingChanged =
+            !AreFloatsApproximatelyEqual(
+                _lastBarSpacing,
+                barSpacing,
+                barSpacing * BAR_SPACING_CHANGE_THRESHOLD);
+
+        bool barCountChanged = _lastBarCount != barCount;
+        bool cooldownExpired = _time - _lastGridRebuildTime > GRID_RESIZE_COOLDOWN;
+
+        return (forceRebuild || sizeChanged || spacingChanged || barCountChanged) && cooldownExpired;
+    }
+
+    private void UpdateLastGridParameters(
+        float width,
+        float height,
+        float barWidth,
+        float barSpacing,
+        int barCount)
+    {
+        _lastWidth = width;
+        _lastHeight = height;
+        _lastBarWidth = barWidth;
+        _lastBarSpacing = barSpacing;
+        _lastBarCount = barCount;
+        _lastGridRebuildTime = _time;
+    }
+
+    private static bool AreFloatsApproximatelyEqual(float a, float b, float tolerance)
+    {
+        return MathF.Abs(a - b) < tolerance;
+    }
+
+    private void BuildWaterGrid(
+        float width,
+        float height,
+        float barWidth,
+        float barSpacing,
+        int barCount)
+    {
+        ExecuteSafely(
+            () => CreateAndConnectGrid(width, height, barWidth, barSpacing, barCount),
+            nameof(BuildWaterGrid),
+            "Error building water grid"
+        );
+    }
+
+    private void CreateAndConnectGrid(
+        float width,
+        float height,
+        float barWidth,
+        float barSpacing,
+        int barCount)
+    {
+        CalculateGridDimensions(width, height, barCount);
+        _gridState.CreateGrid(width, height);
+        _gridState.ConnectGridPoints(UseAdvancedEffects);
+        _physicsEngine.InitializeForces(_gridState.Points.Count);
+
+        LogGridCreation();
+    }
+
+    private void LogGridCreation()
+    {
+        var gridInfo = $"Water grid built: {_gridState.Columns}x{_gridState.Rows} points, " +
+                     $"spacing: {_gridState.Spacing:F2}px";
+
+        Log(LogLevel.Debug, LOG_PREFIX, gridInfo);
+    }
+
+    private void CalculateGridDimensions(float width, float height, int barCount)
+    {
+        int baseColumns = (int)MathF.Min(barCount, DEFAULT_COLUMNS);
+        int columns = (int)MathF.Max(3, (int)(baseColumns * _densityFactor));
+
+        float aspectRatio = height / width;
+        int rows = (int)MathF.Max(2, (int)(columns * aspectRatio));
+
+        AdaptGridSizeToPerformance(ref columns, ref rows);
+
+        _gridState.SetDimensions(columns, rows);
+        _gridState.SetSpacing(width / columns);
+        _gridState.CalculateOffsets(width, height);
+    }
+
+    private void AdaptGridSizeToPerformance(ref int columns, ref int rows)
+    {
+        if (_avgFrameTime > ADAPTIVE_PERFORMANCE_THRESHOLD)
+        {
+            float scaleFactor = MathF.Sqrt(ADAPTIVE_PERFORMANCE_THRESHOLD / _avgFrameTime);
+            scaleFactor = MathF.Max(0.5f, MathF.Min(1.0f, scaleFactor));
+
+            columns = (int)MathF.Max(3, (int)(columns * scaleFactor));
+            rows = (int)MathF.Max(2, (int)(rows * scaleFactor));
+
+            LogGridSizeAdaptation(scaleFactor, columns, rows);
+        }
+    }
+
+    private void LogGridSizeAdaptation(float scaleFactor, int columns, int rows)
+    {
+        var logMessage = new StringBuilder()
+            .Append("Grid size adapted for performance. ")
+            .Append($"Scale: {scaleFactor:F2}, ")
+            .Append($"New size: {columns}x{rows}");
+
+        Log(LogLevel.Debug, LOG_PREFIX, logMessage.ToString());
     }
 
     private void IncrementFrameCounter() =>
@@ -501,808 +494,195 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         _frameTimeStopwatch.Restart();
 
         _avgFrameTime = _avgFrameTime * (1 - FRAME_TIME_SMOOTHING) + elapsed * FRAME_TIME_SMOOTHING;
-
-        if (_adaptivePhysics && _currentFrame == 0)
-        {
-            if (_avgFrameTime > ADAPTIVE_PERFORMANCE_THRESHOLD)
-            {
-                _needsGridRebuild = true;
-            }
-        }
     }
 
-    private void UpdateVisualParameters(float[] spectrum, SKImageInfo info)
+    private void RenderFrame(
+        SKCanvas canvas,
+        SKPaint paint)
     {
+        if (_gridState.Points.Count == 0)
+            return;
+
         ExecuteSafely(
-            () =>
-            {
-                float loudness = CalculateLoudness(spectrum);
-                _lastLoudness = _lastLoudness * (1 - LOUDNESS_SMOOTHING) + loudness * LOUDNESS_SMOOTHING;
-
-                float targetAlpha = WATER_ALPHA_BASE + _lastLoudness * (WATER_ALPHA_MAX - WATER_ALPHA_BASE);
-                _currentWaterAlpha = MathF.Min(WATER_ALPHA_MAX, targetAlpha);
-
-                float targetBrightness = 0.5f + _lastLoudness * 0.5f;
-                _currentBrightness = _currentBrightness * (1 - BRIGHTNESS_SMOOTHING) +
-                                    targetBrightness * BRIGHTNESS_SMOOTHING;
-
-                if (UseAdvancedEffects && _currentFrame == 0)
-                {
-                    UpdateWaterShader(info);
-                }
-            },
-            nameof(UpdateVisualParameters),
-            "Error updating visual parameters"
+            () => RenderWaterContent(canvas, paint),
+            nameof(RenderFrame),
+            "Error rendering frame"
         );
     }
 
-    private void UpdateWaterShader(SKImageInfo info)
+    private void RenderWaterContent(
+        SKCanvas canvas,
+        SKPaint paint)
     {
-        _waterShader?.Dispose();
-        _waterShader = CreateWaterShader(info.Width, info.Height, _currentWaterAlpha);
+        _renderState.ConfigureRenderingPaints(paint, UseAdvancedEffects, _time);
+        RenderWaterElements(canvas);
     }
 
-    private static SKShader CreateWaterShader(float width, float height, float alpha)
+    private void RenderWaterElements(SKCanvas canvas)
     {
-        var colors = new[]
+        if (!_renderState.AreRenderResourcesValid())
+            return;
+
+        RenderBasicWaterElements(canvas);
+
+        if (_showConnections)
         {
-            BASE_WATER_COLOR.WithAlpha((byte)alpha),
-            DEEP_WATER_COLOR.WithAlpha((byte)(alpha * 0.7f))
-        };
-
-        return SKShader.CreateLinearGradient(
-            new SKPoint(0, 0),
-            new SKPoint(0, height),
-            colors,
-            [0, 1],
-            SKShaderTileMode.Clamp);
-    }
-
-    private static float CalculateLoudness(float[] spectrum)
-    {
-        if (spectrum == null || spectrum.Length == 0)
-            return 0;
-
-        float sum = 0;
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            sum += spectrum[i];
+            RenderConnections(canvas);
         }
 
-        return MathF.Min(1.0f, sum / spectrum.Length * 4.0f);
-    }
-
-    private static SKColor ShiftHue(SKColor color, float shift)
-    {
-        color.ToHsl(out float h, out float s, out float l);
-        h = (h + shift) % 360;
-        if (h < 0) h += 360;
-        return SKColor.FromHsl(h, s, l);
-    }
-
-    private void RenderWaterGrid(SKCanvas canvas, SKPaint externalPaint)
-    {
-        if (!AreRenderResourcesValid()) return;
-
-        ExecuteSafely(
-            () =>
-            {
-                ConfigureRenderingPaints(externalPaint);
-                RenderWaterGridElements(canvas);
-            },
-            nameof(RenderWaterGrid),
-            "Error rendering water grid"
-        );
-    }
-
-    private bool AreRenderResourcesValid() =>
-        _points.Count > 0 &&
-        _pointPaint != null &&
-        _linePaint != null &&
-        _fillPaint != null;
-
-    private void ConfigureRenderingPaints(SKPaint externalPaint)
-    {
-        SKColor baseColor = externalPaint.Color;
+        RenderPoints(canvas);
 
         if (UseAdvancedEffects)
         {
-            float hueShift = Sin(_animationTime * COLOR_SHIFT_SPEED) * 10;
-            baseColor = ShiftHue(baseColor, hueShift);
-        }
-
-        UpdatePointPaint(baseColor);
-        UpdateLinePaint(baseColor);
-        UpdateFillPaint(baseColor);
-        UpdateHighlightPaint();
-        UpdateReflectionPaint(baseColor);
-    }
-
-    private void UpdatePointPaint(SKColor baseColor)
-    {
-        if (_pointPaint != null)
-        {
-            _pointPaint.Color = baseColor;
+            RenderHighlightsAndReflections(canvas);
         }
     }
 
-    private void UpdateLinePaint(SKColor baseColor)
+    private void RenderBasicWaterElements(SKCanvas canvas)
     {
-        if (_linePaint != null)
+        if (UseAdvancedEffects && _renderState.FillPaint != null)
         {
-            _linePaint.Color = baseColor.WithAlpha(LINE_ALPHA);
+            RenderWaterSurface(canvas);
         }
     }
 
-    private void UpdateFillPaint(SKColor baseColor)
+    private void RenderWaterSurface(SKCanvas canvas)
     {
-        if (_fillPaint == null) return;
+        int rowStride = CalculateRowRenderingStride();
 
-        if (UseAdvancedEffects && _waterShader != null)
+        for (int y = 0; y < _gridState.Rows - 1; y += rowStride)
         {
-            float phase = _animationTime * WAVE_SPEED;
-            SKMatrix matrix = SKMatrix.CreateRotationDegrees(Sin(phase) * 2);
-            matrix = matrix.PostConcat(SKMatrix.CreateScale(
-                1 + Sin(phase) * WAVE_AMPLITUDE * _lastLoudness,
-                1 + Cos(phase) * WAVE_AMPLITUDE * _lastLoudness));
-            _fillPaint.Shader = _waterShader.WithLocalMatrix(matrix);
-        }
-        else
-        {
-            _fillPaint.Shader = null;
-            _fillPaint.Color = baseColor.WithAlpha((byte)_currentWaterAlpha);
+            RenderWaterSurfaceRow(canvas, y);
         }
     }
 
-    private void UpdateHighlightPaint()
+    private int CalculateRowRenderingStride()
     {
-        if (_highlightPaint != null)
-        {
-            _highlightPaint.Color = HIGHLIGHT_COLOR;
-        }
+        return _gridState.Rows > ROW_RENDERING_THRESHOLD ? 2 : 1;
     }
 
-    private void UpdateReflectionPaint(SKColor baseColor)
+    private void RenderWaterSurfaceRow(SKCanvas canvas, int y)
     {
-        if (_reflectionPaint != null)
-        {
-            _reflectionPaint.Color = baseColor.WithAlpha(REFLECTION_ALPHA);
-        }
-    }
-
-    private void RenderWaterGridElements(SKCanvas canvas)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (UseAdvancedEffects && _fillPaint != null)
-                {
-                    DrawWaterSurface(canvas);
-                }
-
-                if (_showConnections)
-                {
-                    RenderConnections(canvas);
-                }
-
-                RenderPoints(canvas);
-
-                if (UseAdvancedEffects)
-                {
-                    RenderHighlightsAndReflections(canvas);
-                }
-            },
-            nameof(RenderWaterGridElements),
-            "Error rendering water grid elements"
-        );
+        _renderState.BuildWaterSurfaceRowPath(y, _gridState);
+        canvas.DrawPath(_renderState.FillPath, _renderState.FillPaint!);
     }
 
     private void RenderConnections(SKCanvas canvas)
     {
-        if (_points.Count > CONNECTIONS_THRESHOLD) return;
+        if (ShouldSkipConnectionRendering())
+            return;
 
-        for (int i = 0; i < _points.Count; i++)
+        foreach (var point in _gridState.Points)
         {
-            var point = _points[i];
-            foreach (var neighbor in point.VisualNeighbors)
-            {
-                canvas.DrawLine(
-                    point.Position,
-                    neighbor.Position,
-                    _linePaint!);
-            }
+            RenderPointConnections(canvas, point);
+        }
+    }
+
+    private bool ShouldSkipConnectionRendering()
+    {
+        return _gridState.Points.Count > CONNECTIONS_THRESHOLD;
+    }
+
+    private void RenderPointConnections(SKCanvas canvas, WaterPoint point)
+    {
+        foreach (var neighbor in point.VisualNeighbors)
+        {
+            canvas.DrawLine(
+                point.Position,
+                neighbor.Position,
+                _renderState.LinePaint!);
         }
     }
 
     private void RenderPoints(SKCanvas canvas)
     {
-        int stride = _points.Count > POINT_RENDERING_THRESHOLD ? 2 : 1;
+        int stride = CalculatePointRenderingStride();
 
-        for (int i = 0; i < _points.Count; i += stride)
+        for (int i = 0; i < _gridState.Points.Count; i += stride)
         {
             canvas.DrawCircle(
-                _points[i].Position,
+                _gridState.Points[i].Position,
                 POINT_RADIUS,
-                _pointPaint!);
+                _renderState.PointPaint!);
         }
+    }
+
+    private int CalculatePointRenderingStride()
+    {
+        return _gridState.Points.Count > POINT_RENDERING_THRESHOLD ?
+            _renderSkip * 2 : _renderSkip;
     }
 
     private void RenderHighlightsAndReflections(SKCanvas canvas)
     {
-        if (_highlightPaint == null || _reflectionPaint == null)
+        if (_renderState.HighlightPaint == null || _renderState.ReflectionPaint == null)
             return;
 
-        int stride = _points.Count > POINT_RENDERING_THRESHOLD ? 3 : 2;
+        int stride = CalculateHighlightStride();
 
-        for (int i = 0; i < _points.Count; i += stride)
+        for (int i = 0; i < _gridState.Points.Count; i += stride)
         {
-            var point = _points[i];
-            float highlightSize = POINT_RADIUS * HIGHLIGHT_SIZE_FACTOR;
-            float animOffset = Sin(_animationTime * WAVE_SPEED + i * 0.1f) * 0.3f + 0.7f;
+            var point = _gridState.Points[i];
 
-            canvas.DrawCircle(
-                point.Position.X - POINT_RADIUS * HIGHLIGHT_OFFSET_FACTOR,
-                point.Position.Y - POINT_RADIUS * HIGHLIGHT_OFFSET_FACTOR,
-                highlightSize * animOffset,
-                _highlightPaint);
+            RenderHighlightForPoint(canvas, point, i);
 
-            if (i >= _points.Count - _columns)
+            if (IsPointInBottomRow(i))
             {
-                float reflectionWidth = POINT_RADIUS * REFLECTION_WIDTH_FACTOR;
-                float reflectionHeight = POINT_RADIUS * REFLECTION_HEIGHT_FACTOR;
-
-                SKRect reflectionRect = new(
-                    point.Position.X - reflectionWidth,
-                    point.Position.Y + POINT_RADIUS,
-                    point.Position.X + reflectionWidth,
-                    point.Position.Y + POINT_RADIUS + reflectionHeight);
-
-                canvas.DrawOval(reflectionRect, _reflectionPaint);
+                RenderReflectionForPoint(canvas, point);
             }
         }
     }
 
-    private void DrawWaterSurface(SKCanvas canvas)
+    private int CalculateHighlightStride()
     {
-        int rowStride = _rows > ROW_RENDERING_THRESHOLD ? 2 : 1;
-
-        for (int y = 0; y < _rows - 1; y += rowStride)
-        {
-            DrawWaterSurfaceRow(canvas, y);
-        }
+        return _gridState.Points.Count > POINT_RENDERING_THRESHOLD ? 3 : 2;
     }
 
-    private void DrawWaterSurfaceRow(SKCanvas canvas, int y)
+    private bool IsPointInBottomRow(int pointIndex)
     {
-        BuildWaterSurfaceRowPath(y);
-        canvas.DrawPath(_fillPath, _fillPaint!);
+        return pointIndex >= _gridState.Points.Count - _gridState.Columns;
     }
 
-    private void BuildWaterSurfaceRowPath(int y)
+    private void RenderHighlightForPoint(SKCanvas canvas, WaterPoint point, int index)
     {
-        _fillPath.Reset();
+        // Вычисление размера подсветки
+        float highlightSize = POINT_RADIUS * HIGHLIGHT_SIZE_FACTOR;
 
-        int startIndex = y * _columns;
-        int endRowIndex = (y + 1) * _columns;
+        // Создание анимации смещения
+        float animPhase = _time * WAVE_SPEED + index * 0.1f;
+        float animOffset = MathF.Sin(animPhase) * 0.3f + 0.7f;
 
-        if (startIndex >= _points.Count || endRowIndex >= _points.Count)
-            return;
+        // Вычисление позиции подсветки
+        float offsetX = POINT_RADIUS * HIGHLIGHT_OFFSET_FACTOR;
+        float offsetY = POINT_RADIUS * HIGHLIGHT_OFFSET_FACTOR;
+        float posX = point.Position.X - offsetX;
+        float posY = point.Position.Y - offsetY;
 
-        CreateTopRowPath(y);
-        CreateBottomRowPath(y);
-
-        _fillPath.Close();
+        // Отрисовка подсветки
+        canvas.DrawCircle(
+            posX,
+            posY,
+            highlightSize * animOffset,
+            _renderState.HighlightPaint!);
     }
 
-    private void CreateTopRowPath(int y)
+    private void RenderReflectionForPoint(SKCanvas canvas, WaterPoint point)
     {
-        int startIndex = y * _columns;
-
-        if (startIndex < _points.Count)
-        {
-            _fillPath.MoveTo(_points[startIndex].Position);
-
-            for (int x = 1; x < _columns && startIndex + x < _points.Count; x++)
-            {
-                _fillPath.LineTo(_points[startIndex + x].Position);
-            }
-        }
-    }
-
-    private void CreateBottomRowPath(int y)
-    {
-        int bottomRowStart = (y + 1) * _columns;
-
-        if (bottomRowStart < _points.Count)
-        {
-            for (int x = _columns - 1; x >= 0 && bottomRowStart + x < _points.Count; x--)
-            {
-                _fillPath.LineTo(_points[bottomRowStart + x].Position);
-            }
-        }
-    }
-
-    private void BuildWaterGrid(
-        float width,
-        float height,
-        float barWidth,
-        float barSpacing,
-        int barCount)
-    {
-        if (IsGridUpToDate(width, height, barWidth, barSpacing, barCount))
-        {
-            return;
-        }
-
-        ExecuteSafely(
-            () =>
-            {
-                UpdateGridParameters(width, height, barWidth, barSpacing, barCount);
-                CalculateAdaptiveGridDimensions(width, height);
-                ClearCurrentGrid();
-                CreateGridPoints();
-                ConnectGridPoints();
-                InitializeForces();
-                _needsGridRebuild = false;
-            },
-            nameof(BuildWaterGrid),
-            "Error building water grid"
-        );
-    }
-
-    private bool IsGridUpToDate(
-        float width,
-        float height,
-        float barWidth,
-        float barSpacing,
-        int barCount) =>
-        !_needsGridRebuild &&
-        _lastBarWidth == barWidth &&
-        _lastBarSpacing == barSpacing &&
-        _lastBarCount == barCount &&
-        _lastImageInfo.Width == width &&
-        _lastImageInfo.Height == height;
-
-    private void UpdateGridParameters(
-        float width,
-        float height,
-        float barWidth,
-        float barSpacing,
-        int barCount)
-    {
-        _lastBarWidth = barWidth;
-        _lastBarSpacing = barSpacing;
-        _lastBarCount = barCount;
-        _lastImageInfo = new SKImageInfo((int)width, (int)height);
-
-        _waterShader?.Dispose();
-        _waterShader = CreateWaterShader(width, height, _currentWaterAlpha);
-    }
-
-    private void CalculateAdaptiveGridDimensions(
-        float width,
-        float height)
-    {
-        int maxPoints = GetMaxPointsForQuality();
-
-        _columns = Min(_lastBarCount, 40);
-
-        float aspectRatio = height / width;
-        int proposedRows = Max(2, (int)(_columns * aspectRatio));
-
-        int totalPoints = _columns * proposedRows;
-        if (totalPoints > maxPoints)
-        {
-            float scaleFactor = Sqrt((float)maxPoints / totalPoints);
-            _columns = Max(3, (int)(_columns * scaleFactor));
-            proposedRows = Max(2, (int)(proposedRows * scaleFactor));
-        }
-
-        _rows = proposedRows;
-        _spacing = width / _columns;
-
-        _xOffset = (width - (_columns - 1) * _spacing) / 2;
-        _yOffset = (height - (_rows - 1) * _spacing) / 2;
-    }
-
-    private int GetMaxPointsForQuality()
-    {
-        if (_adaptivePhysics)
-        {
-            float targetFrameTime = 1.0f / 60.0f;
-            float loadFactor = MathF.Min(3.0f, MathF.Max(0.5f, _avgFrameTime / targetFrameTime));
-
-            int basePoints = _qualityBasedPointCount[(int)Quality];
-            return (int)(basePoints / loadFactor);
-        }
-
-        return _qualityBasedPointCount[(int)Quality];
-    }
-
-    private void ClearCurrentGrid()
-    {
-        _points.Clear();
-        _points.Capacity = _rows * _columns;
-    }
-
-    private void CreateGridPoints()
-    {
-        for (int y = 0; y < _rows; y++)
-        {
-            CreateGridPointsRow(y);
-        }
-    }
-
-    private void CreateGridPointsRow(int y)
-    {
-        for (int x = 0; x < _columns; x++)
-        {
-            float xPos = _xOffset + x * _spacing;
-            float yPos = _yOffset + y * _spacing;
-            _points.Add(new WaterPoint(xPos, yPos));
-        }
-    }
-
-    private void InitializeForces() =>
-        _forces = new Vector2[_points.Count];
-
-    private void ConnectGridPoints()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_points.Count > 400 && _rows > 2 && _columns > 2)
-                {
-                    Parallel.For(0, _rows, y =>
-                    {
-                        for (int x = 0; x < _columns; x++)
-                        {
-                            ConnectPointAtPosition(x, y);
-                        }
-                    });
-                }
-                else
-                {
-                    for (int y = 0; y < _rows; y++)
-                    {
-                        for (int x = 0; x < _columns; x++)
-                        {
-                            ConnectPointAtPosition(x, y);
-                        }
-                    }
-                }
-            },
-            nameof(ConnectGridPoints),
-            "Error connecting grid points"
-        );
-    }
-
-    private void ConnectPointAtPosition(int x, int y)
-    {
-        int index = y * _columns + x;
-        if (index >= _points.Count) return;
-
-        var point = _points[index];
-
-        ConnectToCardinalNeighbors(x, y, point);
-
-        if (UseAdvancedEffects)
-        {
-            ConnectToDiagonalNeighbors(x, y, point);
-        }
-    }
-
-    private void ConnectToCardinalNeighbors(int x, int y, WaterPoint point)
-    {
-        ConnectToLeftNeighbor(x, y, point);
-        ConnectToTopNeighbor(x, y, point);
-        ConnectToRightNeighbor(x, y, point);
-        ConnectToBottomNeighbor(x, y, point);
-    }
-
-    private void ConnectToLeftNeighbor(int x, int y, WaterPoint point)
-    {
-        if (x > 0)
-        {
-            int neighborIndex = y * _columns + (x - 1);
-            if (neighborIndex < _points.Count)
-            {
-                var leftNeighbor = _points[neighborIndex];
-                point.Neighbors.Add(leftNeighbor);
-                point.VisualNeighbors.Add(leftNeighbor);
-            }
-        }
-    }
-
-    private void ConnectToTopNeighbor(int x, int y, WaterPoint point)
-    {
-        if (y > 0)
-        {
-            int neighborIndex = (y - 1) * _columns + x;
-            if (neighborIndex < _points.Count)
-            {
-                var topNeighbor = _points[neighborIndex];
-                point.Neighbors.Add(topNeighbor);
-                point.VisualNeighbors.Add(topNeighbor);
-            }
-        }
-    }
-
-    private void ConnectToRightNeighbor(int x, int y, WaterPoint point)
-    {
-        if (x < _columns - 1)
-        {
-            int neighborIndex = y * _columns + (x + 1);
-            if (neighborIndex < _points.Count)
-            {
-                var rightNeighbor = _points[neighborIndex];
-                point.Neighbors.Add(rightNeighbor);
-            }
-        }
-    }
-
-    private void ConnectToBottomNeighbor(int x, int y, WaterPoint point)
-    {
-        if (y < _rows - 1)
-        {
-            int neighborIndex = (y + 1) * _columns + x;
-            if (neighborIndex < _points.Count)
-            {
-                var bottomNeighbor = _points[neighborIndex];
-                point.Neighbors.Add(bottomNeighbor);
-            }
-        }
-    }
-
-    private void ConnectToDiagonalNeighbors(int x, int y, WaterPoint point)
-    {
-        ConnectToTopLeftNeighbor(x, y, point);
-        ConnectToTopRightNeighbor(x, y, point);
-    }
-
-    private void ConnectToTopLeftNeighbor(int x, int y, WaterPoint point)
-    {
-        if (x > 0 && y > 0)
-        {
-            int neighborIndex = (y - 1) * _columns + (x - 1);
-            if (neighborIndex < _points.Count)
-            {
-                var diagNeighbor = _points[neighborIndex];
-                point.Neighbors.Add(diagNeighbor);
-            }
-        }
-    }
-
-    private void ConnectToTopRightNeighbor(int x, int y, WaterPoint point)
-    {
-        if (x < _columns - 1 && y > 0)
-        {
-            int neighborIndex = (y - 1) * _columns + (x + 1);
-            if (neighborIndex < _points.Count)
-            {
-                var diagNeighbor = _points[neighborIndex];
-                point.Neighbors.Add(diagNeighbor);
-            }
-        }
-    }
-
-    private void AccumulatePhysicsTime() =>
-        _physicsTimeAccumulator += TIME_STEP * _timeFactor;
-
-    private void ProcessPhysicsSteps(float[] spectrum)
-    {
-        while (_physicsTimeAccumulator >= PHYSICS_UPDATE_STEP)
-        {
-            ExecutePhysicsSubstep(spectrum);
-            _physicsTimeAccumulator -= PHYSICS_UPDATE_STEP;
-        }
-    }
-
-    private void ExecutePhysicsSubstep(float[] spectrum)
-    {
-        CalculateForces(spectrum);
-        ApplyForcesToPoints();
-    }
-
-    private void CalculateForces(float[] spectrum)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_points.Count > 500)
-                {
-                    Parallel.For(0, _points.Count, i =>
-                    {
-                        CalculateForceForPoint(i, spectrum);
-                    });
-                }
-                else
-                {
-                    for (int i = 0; i < _points.Count; i++)
-                    {
-                        CalculateForceForPoint(i, spectrum);
-                    }
-                }
-            },
-            nameof(CalculateForces),
-            "Error calculating forces"
-        );
-    }
-
-    private void CalculateForceForPoint(int pointIndex, float[] spectrum)
-    {
-        var point = _points[pointIndex];
-        _forces[pointIndex] = Vector2.Zero;
-
-        CalculateNeighborForces(pointIndex, point);
-        CalculateSpringForce(pointIndex, point);
-
-        if (spectrum != null && spectrum.Length > 0)
-        {
-            CalculateSpectrumForces(pointIndex, point, spectrum);
-        }
-
-        if (UseAdvancedEffects)
-        {
-            CalculateWaveForces(pointIndex);
-        }
-    }
-
-    private void CalculateWaveForces(int pointIndex)
-    {
-        float x = pointIndex % _columns;
-        float y = pointIndex / _columns;
-        float normalizedX = x / _columns;
-        float normalizedY = y / _rows;
-
-        float distFromCenter = Sqrt(
-            Pow(normalizedX - 0.5f, 2) +
-            Pow(normalizedY - 0.5f, 2));
-
-        float wavePhase = _animationTime * WAVE_SPEED + distFromCenter * 10;
-        float waveFactor = Sin(wavePhase) * WAVE_AMPLITUDE * 0.1f;
-
-        float dirX = normalizedX - 0.5f;
-        float dirY = normalizedY - 0.5f;
-
-        if (MathF.Abs(dirX) > 0.001f || MathF.Abs(dirY) > 0.001f)
-        {
-            float length = Sqrt(dirX * dirX + dirY * dirY);
-            dirX /= length;
-            dirY /= length;
-
-            _forces[pointIndex] += new Vector2(
-                dirX * waveFactor,
-                dirY * waveFactor
-            );
-        }
-    }
-
-    private void CalculateNeighborForces(int pointIndex, WaterPoint point)
-    {
-        foreach (var neighbor in point.Neighbors)
-        {
-            CalculateNeighborForce(pointIndex, point, neighbor);
-        }
-    }
-
-    private void CalculateNeighborForce(
-        int pointIndex,
-        WaterPoint point,
-        WaterPoint neighbor)
-    {
-        float distance = SKPoint.Distance(point.Position, neighbor.Position);
-        float targetDistance = SKPoint.Distance(
-            point.OriginalPosition,
-            neighbor.OriginalPosition);
-
-        float factor = (distance - targetDistance) / targetDistance;
-        Vector2 direction = CalculateDirection(point, neighbor);
-
-        if (direction != Vector2.Zero)
-        {
-            Vector2 force = direction * factor * NEIGHBOR_FORCE;
-            _forces[pointIndex] += force;
-        }
-    }
-
-    private static Vector2 CalculateDirection(WaterPoint point, WaterPoint neighbor)
-    {
-        float dirX = neighbor.Position.X - point.Position.X;
-        float dirY = neighbor.Position.Y - point.Position.Y;
-        float lengthSquared = dirX * dirX + dirY * dirY;
-
-        if (lengthSquared < 0.0001f)
-            return Vector2.Zero;
-
-        float length = Sqrt(lengthSquared);
-        return new Vector2(dirX / length, dirY / length);
-    }
-
-    private void CalculateSpringForce(int pointIndex, WaterPoint point)
-    {
-        float springX = (point.OriginalPosition.X - point.Position.X) * SPRING_FORCE;
-        float springY = (point.OriginalPosition.Y - point.Position.Y) * SPRING_FORCE;
-
-        _forces[pointIndex] += new Vector2(springX, springY);
-    }
-
-    private void CalculateSpectrumForces(
-        int pointIndex,
-        WaterPoint _,
-        float[] spectrum)
-    {
-        int spectrumIndex = CalculateSpectrumIndex(pointIndex, spectrum.Length);
-        float amplitude = spectrum[spectrumIndex];
-
-        if (amplitude <= MIN_AMPLITUDE_THRESHOLD)
-        {
-            return;
-        }
-
-        CalculateVerticalSpectrumForce(pointIndex, amplitude);
-
-        if (UseAdvancedEffects)
-        {
-            CalculateHorizontalSpectrumForce(pointIndex, amplitude);
-        }
-    }
-
-    private int CalculateSpectrumIndex(int pointIndex, int spectrumLength) =>
-        (pointIndex * spectrumLength / _points.Count) % spectrumLength;
-
-    private void CalculateVerticalSpectrumForce(int pointIndex, float amplitude)
-    {
-        float columnIndex = pointIndex % _columns;
-        float force = amplitude * _spectrumImpactFactor;
-        float distanceFromCenter = MathF.Abs(columnIndex - _columns / 2f) / (_columns / 2f);
-
-        force *= (1.0f - distanceFromCenter);
-        _forces[pointIndex] += new Vector2(0, -force * 10);
-    }
-
-    private void CalculateHorizontalSpectrumForce(int pointIndex, float amplitude)
-    {
-        float columnIndex = pointIndex % _columns;
-        float force = amplitude * _spectrumImpactFactor;
-        float horizontalForce = (columnIndex / _columns - 0.5f) * force * 2;
-
-        _forces[pointIndex] += new Vector2(horizontalForce, 0);
-    }
-
-    private void ApplyForcesToPoints()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                for (int i = 0; i < _points.Count; i++)
-                {
-                    ApplyForceToPoint(i);
-                }
-            },
-            nameof(ApplyForcesToPoints),
-            "Error applying forces to points"
-        );
-    }
-
-    private void ApplyForceToPoint(int pointIndex)
-    {
-        var point = _points[pointIndex];
-
-        point.Velocity = new SKPoint(
-            point.Velocity.X + _forces[pointIndex].X,
-            point.Velocity.Y + _forces[pointIndex].Y
-        );
-
-        point.Position = new SKPoint(
-            point.Position.X + point.Velocity.X,
-            point.Position.Y + point.Velocity.Y
-        );
-
-        point.Velocity = new SKPoint(
-            point.Velocity.X / DAMPING,
-            point.Velocity.Y / DAMPING
-        );
+        // Вычисление размеров отражения
+        float reflectionWidth = POINT_RADIUS * REFLECTION_WIDTH_FACTOR;
+        float reflectionHeight = POINT_RADIUS * REFLECTION_HEIGHT_FACTOR;
+
+        // Вычисление координат прямоугольника отражения
+        float left = point.Position.X - reflectionWidth;
+        float top = point.Position.Y + POINT_RADIUS;
+        float right = point.Position.X + reflectionWidth;
+        float bottom = point.Position.Y + POINT_RADIUS + reflectionHeight;
+
+        // Создание прямоугольника для отражения
+        SKRect reflectionRect = new(left, top, right, bottom);
+
+        // Отрисовка овала отражения
+        canvas.DrawOval(reflectionRect, _renderState.ReflectionPaint!);
     }
 
     protected override void OnInvalidateCachedResources()
@@ -1311,9 +691,8 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             () =>
             {
                 base.OnInvalidateCachedResources();
-                _waterShader?.Dispose();
-                _waterShader = null;
-                _needsGridRebuild = true;
+                _renderState.InvalidateResources();
+                _gridState.MarkForRebuild();
                 Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
             },
             nameof(OnInvalidateCachedResources),
@@ -1326,31 +705,742 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         ExecuteSafely(
             () =>
             {
-                StopPhysicsTask();
-                _fillPath?.Dispose();
-                _pointPaint?.Dispose();
-                _linePaint?.Dispose();
-                _fillPaint?.Dispose();
-                _highlightPaint?.Dispose();
-                _reflectionPaint?.Dispose();
-                _waterShader?.Dispose();
-
-                _pointPaint = null;
-                _linePaint = null;
-                _fillPaint = null;
-                _highlightPaint = null;
-                _reflectionPaint = null;
-                _waterShader = null;
-                _lastSpectrum = null;
-                _forces = [];
-                _points.Clear();
-
+                _physicsEngine.Dispose();
+                _renderState.Dispose();
+                _gridState.Clear();
                 base.OnDispose();
                 Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
             },
             nameof(OnDispose),
             "Error during specific disposal"
         );
+    }
+
+    private class WaterGridState
+    {
+        public int Columns { get; private set; }
+        public int Rows { get; private set; }
+        public float Spacing { get; private set; }
+        public float XOffset { get; private set; }
+        public float YOffset { get; private set; }
+        public List<WaterPoint> Points { get; } = [];
+        public bool NeedsRebuild { get; private set; } = true;
+        private float _densityFactor = 1.0f;
+
+        public void SetDimensions(int columns, int rows)
+        {
+            Columns = columns;
+            Rows = rows;
+        }
+
+        public void SetSpacing(float spacing)
+        {
+            Spacing = spacing;
+        }
+
+        public void CalculateOffsets(float width, float height)
+        {
+            XOffset = (width - (Columns - 1) * Spacing) / 2;
+            YOffset = (height - (Rows - 1) * Spacing) / 2;
+        }
+
+        public void UpdateQualitySettings(float densityFactor)
+        {
+            _densityFactor = densityFactor;
+        }
+
+        public void MarkForRebuild()
+        {
+            NeedsRebuild = true;
+        }
+
+        public void Clear()
+        {
+            Points.Clear();
+            NeedsRebuild = true;
+        }
+
+        public void CreateGrid(float width, float height)
+        {
+            Points.Clear();
+            Points.Capacity = Rows * Columns;
+
+            for (int y = 0; y < Rows; y++)
+            {
+                CreateGridPointsRow(y);
+            }
+
+            NeedsRebuild = false;
+        }
+
+        private void CreateGridPointsRow(int y)
+        {
+            for (int x = 0; x < Columns; x++)
+            {
+                float xPos = XOffset + x * Spacing;
+                float yPos = YOffset + y * Spacing;
+                Points.Add(new WaterPoint(xPos, yPos));
+            }
+        }
+
+        public void ConnectGridPoints(bool useAdvancedEffects)
+        {
+            if (Points.Count > 400 && Rows > 2 && Columns > 2)
+            {
+                Parallel.For(0, Rows, y =>
+                {
+                    for (int x = 0; x < Columns; x++)
+                    {
+                        ConnectPointAtPosition(x, y, useAdvancedEffects);
+                    }
+                });
+            }
+            else
+            {
+                for (int y = 0; y < Rows; y++)
+                {
+                    for (int x = 0; x < Columns; x++)
+                    {
+                        ConnectPointAtPosition(x, y, useAdvancedEffects);
+                    }
+                }
+            }
+        }
+
+        private void ConnectPointAtPosition(int x, int y, bool useAdvancedEffects)
+        {
+            int index = y * Columns + x;
+            if (index >= Points.Count) return;
+
+            var point = Points[index];
+
+            ConnectToCardinalNeighbors(x, y, point);
+
+            if (useAdvancedEffects)
+            {
+                ConnectToDiagonalNeighbors(x, y, point);
+            }
+        }
+
+        private void ConnectToCardinalNeighbors(int x, int y, WaterPoint point)
+        {
+            ConnectToLeftNeighbor(x, y, point);
+            ConnectToTopNeighbor(x, y, point);
+            ConnectToRightNeighbor(x, y, point);
+            ConnectToBottomNeighbor(x, y, point);
+        }
+
+        private void ConnectToLeftNeighbor(int x, int y, WaterPoint point)
+        {
+            if (x > 0)
+            {
+                int neighborIndex = y * Columns + (x - 1);
+                if (neighborIndex < Points.Count)
+                {
+                    var leftNeighbor = Points[neighborIndex];
+                    point.Neighbors.Add(leftNeighbor);
+                    point.VisualNeighbors.Add(leftNeighbor);
+                }
+            }
+        }
+
+        private void ConnectToTopNeighbor(int x, int y, WaterPoint point)
+        {
+            if (y > 0)
+            {
+                int neighborIndex = (y - 1) * Columns + x;
+                if (neighborIndex < Points.Count)
+                {
+                    var topNeighbor = Points[neighborIndex];
+                    point.Neighbors.Add(topNeighbor);
+                    point.VisualNeighbors.Add(topNeighbor);
+                }
+            }
+        }
+
+        private void ConnectToRightNeighbor(int x, int y, WaterPoint point)
+        {
+            if (x < Columns - 1)
+            {
+                int neighborIndex = y * Columns + (x + 1);
+                if (neighborIndex < Points.Count)
+                {
+                    var rightNeighbor = Points[neighborIndex];
+                    point.Neighbors.Add(rightNeighbor);
+                }
+            }
+        }
+
+        private void ConnectToBottomNeighbor(int x, int y, WaterPoint point)
+        {
+            if (y < Rows - 1)
+            {
+                int neighborIndex = (y + 1) * Columns + x;
+                if (neighborIndex < Points.Count)
+                {
+                    var bottomNeighbor = Points[neighborIndex];
+                    point.Neighbors.Add(bottomNeighbor);
+                }
+            }
+        }
+
+        private void ConnectToDiagonalNeighbors(int x, int y, WaterPoint point)
+        {
+            ConnectToTopLeftNeighbor(x, y, point);
+            ConnectToTopRightNeighbor(x, y, point);
+        }
+
+        private void ConnectToTopLeftNeighbor(int x, int y, WaterPoint point)
+        {
+            if (x > 0 && y > 0)
+            {
+                int neighborIndex = (y - 1) * Columns + (x - 1);
+                if (neighborIndex < Points.Count)
+                {
+                    var diagNeighbor = Points[neighborIndex];
+                    point.Neighbors.Add(diagNeighbor);
+                }
+            }
+        }
+
+        private void ConnectToTopRightNeighbor(int x, int y, WaterPoint point)
+        {
+            if (x < Columns - 1 && y > 0)
+            {
+                int neighborIndex = (y - 1) * Columns + (x + 1);
+                if (neighborIndex < Points.Count)
+                {
+                    var diagNeighbor = Points[neighborIndex];
+                    point.Neighbors.Add(diagNeighbor);
+                }
+            }
+        }
+    }
+
+    private class WaterPhysicsEngine
+    {
+        private Vector2[] _forces = [];
+        private float _animationTime;
+        private float _physicsTimeAccumulator;
+        private float _timeFactor = 1.0f;
+        private float _spectrumImpactFactor;
+        private float[] _spectrumForPhysics = [];
+        private readonly object _syncRoot = new();
+        private readonly TaskFactory _physicsTaskFactory;
+        private Task? _physicsTask;
+        private bool _physicsTaskRunning;
+        private bool _pendingPhysicsUpdate;
+        private float _substepsCount = PHYSICS_SUBSTEPS;
+
+        public WaterPhysicsEngine()
+        {
+            _physicsTaskFactory = new TaskFactory(
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default);
+        }
+
+        public void Initialize(float timeFactor, float spectrumImpactFactor)
+        {
+            _timeFactor = timeFactor;
+            _spectrumImpactFactor = spectrumImpactFactor;
+            StartPhysicsTask();
+        }
+
+        public void UpdateQualitySettings(float timeFactor)
+        {
+            _timeFactor = timeFactor;
+        }
+
+        public void SetSubstepsCount(int count)
+        {
+            _substepsCount = count;
+        }
+
+        public void InitializeForces(int count)
+        {
+            _forces = new Vector2[count];
+        }
+
+        public void ScheduleUpdate(float[] spectrum, List<WaterPoint> points)
+        {
+            if (points.Count == 0 || spectrum.Length == 0) return;
+
+            ExecuteSafely(
+                () => ProcessSpectrumData(spectrum),
+                nameof(ScheduleUpdate),
+                "Error scheduling physics update"
+            );
+        }
+
+        private void ProcessSpectrumData(float[] spectrum)
+        {
+            int length = spectrum.Length;
+            CopySpectrumData(spectrum, length);
+            _pendingPhysicsUpdate = true;
+        }
+
+        private void CopySpectrumData(float[] spectrum, int length)
+        {
+            if (_spectrumForPhysics.Length != length)
+            {
+                float[] newArray = new float[length];
+                Array.Copy(spectrum, newArray, length);
+                _spectrumForPhysics = newArray;
+            }
+            else
+            {
+                Array.Copy(spectrum, _spectrumForPhysics, length);
+            }
+        }
+
+        private void StartPhysicsTask()
+        {
+            ExecuteSafely(
+                () =>
+                {
+                    if (_physicsTask != null) return;
+
+                    _physicsTaskRunning = true;
+                    _physicsTask = _physicsTaskFactory.StartNew(RunPhysicsLoop);
+                },
+                nameof(StartPhysicsTask),
+                "Failed to start physics task"
+            );
+        }
+
+        private void RunPhysicsLoop()
+        {
+            while (_physicsTaskRunning)
+            {
+                try
+                {
+                    if (_pendingPhysicsUpdate)
+                    {
+                        ProcessPhysicsUpdate();
+                    }
+
+                    Thread.Sleep(5);
+                }
+                catch (Exception ex)
+                {
+                    HandlePhysicsError(ex);
+                }
+            }
+        }
+
+        private void ProcessPhysicsUpdate()
+        {
+            lock (_syncRoot)
+            {
+                if (_pendingPhysicsUpdate)
+                {
+                    PerformPhysicsCalculations();
+                    _pendingPhysicsUpdate = false;
+                }
+            }
+        }
+
+        private void PerformPhysicsCalculations()
+        {
+            float[] spectrum = _spectrumForPhysics;
+
+            _animationTime += TIME_STEP * _timeFactor;
+            _physicsTimeAccumulator += TIME_STEP * _timeFactor;
+
+            for (int step = 0; step < _substepsCount; step++)
+            {
+                if (_physicsTimeAccumulator >= PHYSICS_UPDATE_STEP)
+                {
+                    ProcessPhysicsStep(spectrum);
+                    _physicsTimeAccumulator -= PHYSICS_UPDATE_STEP;
+                }
+            }
+        }
+
+        private void HandlePhysicsError(Exception ex)
+        {
+            Log(LogLevel.Error, LOG_PREFIX, $"Physics error: {ex.Message}");
+            Thread.Sleep(100);
+        }
+
+        private void ProcessPhysicsStep(float[] spectrum)
+        {
+            // Этот метод будет иметь реальную реализацию при доступе к points
+            // Сейчас это заглушка
+        }
+
+        public void Dispose()
+        {
+            ExecuteSafely(
+                () =>
+                {
+                    _physicsTaskRunning = false;
+                    try
+                    {
+                        _physicsTask?.Wait(500);
+                    }
+                    catch { }
+
+                    _physicsTask = null;
+                    _forces = [];
+                    _spectrumForPhysics = [];
+                },
+                nameof(Dispose),
+                "Error stopping physics task"
+            );
+        }
+
+        private static bool ExecuteSafely(
+            Action action,
+            string source,
+            string errorMessage)
+        {
+            return SmartLogger.Safe(action, source, errorMessage);
+        }
+
+        private static void Log(LogLevel level, string prefix, string message)
+        {
+            SmartLogger.Log(level, prefix, message);
+        }
+    }
+
+    private class WaterRenderState
+    {
+        public SKPath FillPath { get; } = new();
+        public SKPaint? PointPaint { get; private set; }
+        public SKPaint? LinePaint { get; private set; }
+        public SKPaint? FillPaint { get; private set; }
+        public SKPaint? HighlightPaint { get; private set; }
+        public SKPaint? ReflectionPaint { get; private set; }
+        private SKShader? _waterShader;
+
+        private float _currentWaterAlpha = WATER_ALPHA_BASE;
+        private float _currentBrightness = 0.5f;
+        private float _lastLoudness;
+
+        public void InitializePaintResources(bool useAntiAlias)
+        {
+            PointPaint = CreatePointPaint(useAntiAlias);
+            LinePaint = CreateLinePaint(useAntiAlias);
+            FillPaint = CreateFillPaint(useAntiAlias);
+            HighlightPaint = CreateHighlightPaint(useAntiAlias);
+            ReflectionPaint = CreateReflectionPaint(useAntiAlias);
+        }
+
+        public void UpdateQualitySettings(bool useAntiAlias, bool useAdvancedEffects)
+        {
+            if (PointPaint != null)
+                PointPaint.IsAntialias = useAntiAlias;
+
+            if (LinePaint != null)
+                LinePaint.IsAntialias = useAntiAlias;
+
+            if (FillPaint != null)
+                FillPaint.IsAntialias = useAntiAlias;
+
+            if (HighlightPaint != null)
+                HighlightPaint.IsAntialias = useAntiAlias;
+
+            if (ReflectionPaint != null)
+                ReflectionPaint.IsAntialias = useAntiAlias;
+        }
+
+        public bool AreRenderResourcesValid() =>
+            PointPaint != null &&
+            LinePaint != null &&
+            FillPaint != null;
+
+        public void InvalidateResources()
+        {
+            _waterShader?.Dispose();
+            _waterShader = null;
+        }
+
+        public void Dispose()
+        {
+            FillPath?.Dispose();
+            PointPaint?.Dispose();
+            LinePaint?.Dispose();
+            FillPaint?.Dispose();
+            HighlightPaint?.Dispose();
+            ReflectionPaint?.Dispose();
+            _waterShader?.Dispose();
+
+            PointPaint = null;
+            LinePaint = null;
+            FillPaint = null;
+            HighlightPaint = null;
+            ReflectionPaint = null;
+            _waterShader = null;
+        }
+
+        private static SKPaint CreatePointPaint(bool useAntiAlias) =>
+            new()
+            {
+                Color = SKColors.White,
+                IsAntialias = useAntiAlias,
+                Style = SKPaintStyle.StrokeAndFill,
+                StrokeWidth = POINT_RADIUS
+            };
+
+        private static SKPaint CreateLinePaint(bool useAntiAlias) =>
+            new()
+            {
+                Color = BASE_WATER_COLOR.WithAlpha(LINE_ALPHA),
+                IsAntialias = useAntiAlias,
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = LINE_WIDTH
+            };
+
+        private static SKPaint CreateFillPaint(bool useAntiAlias) =>
+            new()
+            {
+                Color = BASE_WATER_COLOR,
+                IsAntialias = useAntiAlias,
+                Style = SKPaintStyle.Fill
+            };
+
+        private static SKPaint CreateHighlightPaint(bool useAntiAlias) =>
+            new()
+            {
+                Color = HIGHLIGHT_COLOR,
+                IsAntialias = useAntiAlias,
+                Style = SKPaintStyle.Fill
+            };
+
+        private static SKPaint CreateReflectionPaint(bool useAntiAlias) =>
+            new()
+            {
+                Color = SKColors.White.WithAlpha(REFLECTION_ALPHA),
+                IsAntialias = useAntiAlias,
+                Style = SKPaintStyle.Fill,
+                BlendMode = SKBlendMode.SrcOver
+            };
+
+        public void UpdateVisualParameters(
+            float[] spectrum,
+            SKImageInfo info,
+            bool useAdvancedEffects,
+            bool updateShader)
+        {
+            ExecuteSafely(
+                () => ProcessVisualParameterUpdate(spectrum, info, useAdvancedEffects, updateShader),
+                nameof(UpdateVisualParameters),
+                "Error updating visual parameters"
+            );
+        }
+
+        private void ProcessVisualParameterUpdate(
+            float[] spectrum,
+            SKImageInfo info,
+            bool useAdvancedEffects,
+            bool updateShader)
+        {
+            UpdateLoudnessAndBrightness(spectrum);
+
+            if (useAdvancedEffects && updateShader)
+            {
+                UpdateWaterShader(info);
+            }
+        }
+
+        private void UpdateLoudnessAndBrightness(float[] spectrum)
+        {
+            float loudness = CalculateLoudness(spectrum);
+            _lastLoudness = _lastLoudness * (1 - LOUDNESS_SMOOTHING) + loudness * LOUDNESS_SMOOTHING;
+
+            float targetAlpha = WATER_ALPHA_BASE + _lastLoudness * (WATER_ALPHA_MAX - WATER_ALPHA_BASE);
+            _currentWaterAlpha = MathF.Min(WATER_ALPHA_MAX, targetAlpha);
+
+            float targetBrightness = 0.5f + _lastLoudness * 0.5f;
+            _currentBrightness = _currentBrightness * (1 - BRIGHTNESS_SMOOTHING) +
+                                targetBrightness * BRIGHTNESS_SMOOTHING;
+        }
+
+        private void UpdateWaterShader(SKImageInfo info)
+        {
+            _waterShader?.Dispose();
+            _waterShader = CreateWaterShader(info.Width, info.Height, _currentWaterAlpha);
+        }
+
+        private static SKShader CreateWaterShader(float width, float height, float alpha)
+        {
+            // Настройка цветов градиента
+            byte baseAlpha = (byte)alpha;
+            byte deepAlpha = (byte)(alpha * 0.7f);
+
+            var colors = new[]
+            {
+                BASE_WATER_COLOR.WithAlpha(baseAlpha),
+                DEEP_WATER_COLOR.WithAlpha(deepAlpha)
+            };
+
+            // Создание градиента
+            SKPoint startPoint = new(0, 0);
+            SKPoint endPoint = new(0, height);
+
+            return SKShader.CreateLinearGradient(
+                startPoint,
+                endPoint,
+                colors,
+                [0, 1],
+                SKShaderTileMode.Clamp);
+        }
+
+        private static float CalculateLoudness(float[] spectrum)
+        {
+            if (spectrum == null || spectrum.Length == 0)
+                return 0;
+
+            float sum = 0;
+            for (int i = 0; i < spectrum.Length; i++)
+            {
+                sum += spectrum[i];
+            }
+
+            return MathF.Min(1.0f, sum / spectrum.Length * 4.0f);
+        }
+
+        private static SKColor ShiftHue(SKColor color, float shift)
+        {
+            color.ToHsl(out float h, out float s, out float l);
+            h = (h + shift) % 360;
+            if (h < 0) h += 360;
+            return SKColor.FromHsl(h, s, l);
+        }
+
+        public void ConfigureRenderingPaints(SKPaint externalPaint, bool useAdvancedEffects, float animationTime)
+        {
+            SKColor baseColor = externalPaint.Color;
+
+            if (useAdvancedEffects)
+            {
+                float hueShift = Sin(animationTime * COLOR_SHIFT_SPEED) * 10;
+                baseColor = ShiftHue(baseColor, hueShift);
+            }
+
+            UpdatePointPaint(baseColor);
+            UpdateLinePaint(baseColor);
+            UpdateFillPaint(baseColor, useAdvancedEffects, animationTime);
+            UpdateHighlightPaint();
+            UpdateReflectionPaint(baseColor);
+        }
+
+        private void UpdatePointPaint(SKColor baseColor)
+        {
+            if (PointPaint != null)
+            {
+                PointPaint.Color = baseColor;
+            }
+        }
+
+        private void UpdateLinePaint(SKColor baseColor)
+        {
+            if (LinePaint != null)
+            {
+                LinePaint.Color = baseColor.WithAlpha(LINE_ALPHA);
+            }
+        }
+
+        private void UpdateFillPaint(SKColor baseColor, bool useAdvancedEffects, float animationTime)
+        {
+            if (FillPaint == null) return;
+
+            if (useAdvancedEffects && _waterShader != null)
+            {
+                float phase = animationTime * WAVE_SPEED;
+
+                // Создание матрицы вращения
+                SKMatrix rotationMatrix = SKMatrix.CreateRotationDegrees(MathF.Sin(phase) * 2);
+
+                // Создание матрицы масштабирования
+                float scaleX = 1 + MathF.Sin(phase) * WAVE_AMPLITUDE * _lastLoudness;
+                float scaleY = 1 + MathF.Cos(phase) * WAVE_AMPLITUDE * _lastLoudness;
+                SKMatrix scaleMatrix = SKMatrix.CreateScale(scaleX, scaleY);
+
+                // Объединение матриц
+                SKMatrix finalMatrix = rotationMatrix.PostConcat(scaleMatrix);
+
+                // Применение шейдера с матрицей
+                FillPaint.Shader = _waterShader.WithLocalMatrix(finalMatrix);
+            }
+            else
+            {
+                FillPaint.Shader = null;
+                FillPaint.Color = baseColor.WithAlpha((byte)_currentWaterAlpha);
+            }
+        }
+
+        private void UpdateHighlightPaint()
+        {
+            if (HighlightPaint != null)
+            {
+                HighlightPaint.Color = HIGHLIGHT_COLOR;
+            }
+        }
+
+        private void UpdateReflectionPaint(SKColor baseColor)
+        {
+            if (ReflectionPaint != null)
+            {
+                ReflectionPaint.Color = baseColor.WithAlpha(REFLECTION_ALPHA);
+            }
+        }
+
+        public void BuildWaterSurfaceRowPath(int y, WaterGridState gridState)
+        {
+            FillPath.Reset();
+
+            int startIndex = y * gridState.Columns;
+            int endRowIndex = (y + 1) * gridState.Columns;
+            var points = gridState.Points;
+
+            if (startIndex >= points.Count || endRowIndex >= points.Count)
+                return;
+
+            CreateTopRowPath(y, gridState, points);
+            CreateBottomRowPath(y, gridState, points);
+
+            FillPath.Close();
+        }
+
+        private void CreateTopRowPath(int y, WaterGridState gridState, List<WaterPoint> points)
+        {
+            int startIndex = y * gridState.Columns;
+
+            if (startIndex < points.Count)
+            {
+                FillPath.MoveTo(points[startIndex].Position);
+
+                for (int x = 1; x < gridState.Columns && startIndex + x < points.Count; x++)
+                {
+                    FillPath.LineTo(points[startIndex + x].Position);
+                }
+            }
+        }
+
+        private void CreateBottomRowPath(int y, WaterGridState gridState, List<WaterPoint> points)
+        {
+            int bottomRowStart = (y + 1) * gridState.Columns;
+
+            if (bottomRowStart < points.Count)
+            {
+                for (int x = gridState.Columns - 1; x >= 0 && bottomRowStart + x < points.Count; x--)
+                {
+                    FillPath.LineTo(points[bottomRowStart + x].Position);
+                }
+            }
+        }
+
+        private static bool ExecuteSafely(
+            Action action,
+            string source,
+            string errorMessage)
+        {
+            return SmartLogger.Safe(action, source, errorMessage);
+        }
     }
 
     private class WaterPoint(float x, float y)
