@@ -50,7 +50,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
     {
-        if (_isClosing || _isDisposed)
+        if (_isClosing || _isDisposed || e == null)
             return;
 
         _controller.OnPaintSurface(sender, e);
@@ -342,11 +342,14 @@ public partial class MainWindow : Window, IAsyncDisposable
         Closed -= OnWindowClosed;
         LocationChanged -= OnWindowLocationChanged;
 
-        spectrumCanvas.MouseDown -= (s, e) => _controller.InputController.HandleMouseDown(s, e);
-        spectrumCanvas.MouseMove -= (s, e) => _controller.InputController.HandleMouseMove(s, e);
-        spectrumCanvas.MouseUp -= (s, e) => _controller.InputController.HandleMouseUp(s, e);
-        spectrumCanvas.MouseEnter -= (s, e) => _controller.InputController.HandleMouseEnter(s, e);
-        spectrumCanvas.MouseLeave -= (s, e) => _controller.InputController.HandleMouseLeave(s, e);
+        if (spectrumCanvas != null)
+        {
+            spectrumCanvas.MouseDown -= (s, e) => _controller.InputController.HandleMouseDown(s, e);
+            spectrumCanvas.MouseMove -= (s, e) => _controller.InputController.HandleMouseMove(s, e);
+            spectrumCanvas.MouseUp -= (s, e) => _controller.InputController.HandleMouseUp(s, e);
+            spectrumCanvas.MouseEnter -= (s, e) => _controller.InputController.HandleMouseEnter(s, e);
+            spectrumCanvas.MouseLeave -= (s, e) => _controller.InputController.HandleMouseLeave(s, e);
+        }
 
         if (ThemeManager.Instance != null && _themePropertyChangedHandler != null)
         {

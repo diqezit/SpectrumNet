@@ -17,18 +17,27 @@ public class FrameCache : IDisposable
 
     public void MarkDirty(bool dirty = true)
     {
-        _isDirty = dirty;
-        if (dirty)
+        lock (_cacheLock)
         {
-            _frameAge = 0;
+            _isDirty = dirty;
+            if (dirty)
+            {
+                _frameAge = 0;
+            }
         }
     }
 
-    public bool ShouldForceRefresh() => _frameAge >= MAX_FRAME_AGE;
+    public bool ShouldForceRefresh()
+    {
+        lock (_cacheLock)
+        {
+            return _frameAge >= MAX_FRAME_AGE;
+        }
+    }
 
     public void UpdateCache(SKSurface surface, SKImageInfo info)
     {
-        if (_isDisposed)
+        if (_isDisposed || surface == null)
             return;
 
         SKBitmap? newCache = null;
@@ -36,11 +45,15 @@ public class FrameCache : IDisposable
         try
         {
             newCache = CreateNewBitmapIfNeeded(info);
-            UpdateCacheWithSafety(surface, info, newCache);
+            if (newCache != null || _cachedFrame != null)
+            {
+                UpdateCacheWithSafety(surface, info, newCache);
+            }
         }
         catch
         {
-            if (newCache != null && !ReferenceEquals(newCache, _cachedFrame))
+            if (newCache != null && !_isDisposed &&
+                (_cachedFrame == null || !ReferenceEquals(newCache, _cachedFrame)))
             {
                 newCache.Dispose();
             }
@@ -64,11 +77,21 @@ public class FrameCache : IDisposable
 
         if (needsNewCache)
         {
-            return new SKBitmap(
-                info.Width,
-                info.Height,
-                info.ColorType,
-                info.AlphaType);
+            try
+            {
+                return new SKBitmap(
+                    info.Width,
+                    info.Height,
+                    info.ColorType,
+                    info.AlphaType);
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error,
+                    "FrameCache",
+                    $"Error creating bitmap: {ex.Message}");
+                return null;
+            }
         }
 
         return null;
@@ -83,16 +106,42 @@ public class FrameCache : IDisposable
         {
             if (_isDisposed)
                 return;
-
+             
             if (newCache != null)
             {
                 var oldCache = _cachedFrame;
                 _cachedFrame = newCache;
                 _lastInfo = info;
-                oldCache?.Dispose();
+
+                if (oldCache != null)
+                {
+                    try
+                    {
+                        oldCache.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log(LogLevel.Error,
+                            "FrameCache",
+                            $"Error disposing old cache: {ex.Message}");
+                    }
+                }
             }
 
-            CopyContentFromSurface(surface, info);
+            if (_cachedFrame != null)
+            {
+                try
+                {
+                    CopyContentFromSurface(surface, info);
+                }
+                catch (Exception ex)
+                {
+                    Log(LogLevel.Error,
+                        "FrameCache",
+                        $"Error copying content: {ex.Message}");
+                }
+            }
+
             MarkDirty(false);
             _frameAge = 0;
         }
@@ -100,7 +149,7 @@ public class FrameCache : IDisposable
 
     private void CopyContentFromSurface(SKSurface surface, SKImageInfo info)
     {
-        if (_cachedFrame == null)
+        if (_cachedFrame == null || _isDisposed)
             return;
 
         using var snapshot = surface.Snapshot();
@@ -109,11 +158,13 @@ public class FrameCache : IDisposable
 
     public void DrawCachedFrame(SKCanvas canvas)
     {
-        if (_isDisposed) return;
+        if (_isDisposed || canvas == null)
+            return;
 
         lock (_cacheLock)
         {
-            if (_cachedFrame == null) return;
+            if (_cachedFrame == null)
+                return;
 
             canvas.Clear(SKColors.Transparent);
             canvas.DrawBitmap(_cachedFrame, 0, 0);
@@ -124,12 +175,26 @@ public class FrameCache : IDisposable
 
     public void Dispose()
     {
-        if (_isDisposed) return;
+        if (_isDisposed)
+            return;
 
         lock (_cacheLock)
         {
-            _cachedFrame?.Dispose();
-            _cachedFrame = null;
+            if (_cachedFrame != null)
+            {
+                try
+                {
+                    _cachedFrame.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Log(LogLevel.Error,
+                        "FrameCache",
+                        $"Error disposing frame cache: {ex.Message}");
+                }
+                _cachedFrame = null;
+            }
+
             _isDisposed = true;
         }
     }
