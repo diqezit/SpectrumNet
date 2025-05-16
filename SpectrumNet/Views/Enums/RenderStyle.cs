@@ -32,5 +32,6 @@ public enum RenderStyle
     Voronoi,
     Waterfall,
     WaterRenderer,
-    Waveform
+    Waveform,
+    HackerTextRenderer
 }

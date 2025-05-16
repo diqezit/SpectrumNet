@@ -219,6 +219,7 @@ public sealed class RendererFactory : IRendererFactory
         RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
         RenderStyle.Waveform => WaveformRenderer.GetInstance(),
         RenderStyle.WaterRenderer => WaterRenderer.GetInstance(),
+        RenderStyle.HackerTextRenderer => HackerTextRenderer.GetInstance(),
         _ => throw new ArgumentException($"Unknown render style: {style}")
     };
 
