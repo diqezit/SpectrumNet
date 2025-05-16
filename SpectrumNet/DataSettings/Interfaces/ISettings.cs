@@ -56,38 +56,6 @@ public interface ISettings
     bool IsDarkTheme { get; set; }
     bool LimitFpsTo60 { get; set; }
 
-    // Настройки для AsciiDonutRenderer
-    int DonutSegments { get; set; }
-    float DonutRadius { get; set; }
-    float DonutTubeRadius { get; set; }
-    float DonutScale { get; set; }
-    float DonutDepthOffset { get; set; }
-    float DonutDepthScaleFactor { get; set; }
-    float DonutCharOffsetX { get; set; }
-    float DonutCharOffsetY { get; set; }
-    float DonutFontSize { get; set; }
-    float DonutBaseRotationIntensity { get; set; }
-    float DonutSpectrumIntensityScale { get; set; }
-    float DonutSmoothingFactorSpectrum { get; set; }
-    float DonutSmoothingFactorRotation { get; set; }
-    float DonutMaxRotationAngleChange { get; set; }
-    float DonutRotationSpeedX { get; set; }
-    float DonutRotationSpeedY { get; set; }
-    float DonutRotationSpeedZ { get; set; }
-    float DonutBarCountScaleFactorDonutScale { get; set; }
-    float DonutBarCountScaleFactorAlpha { get; set; }
-    float DonutBaseAlphaIntensity { get; set; }
-    float DonutMaxSpectrumAlphaScale { get; set; }
-    float DonutMinAlphaValue { get; set; }
-    float DonutAlphaRange { get; set; }
-    float DonutRotationIntensityMin { get; set; }
-    float DonutRotationIntensityMax { get; set; }
-    float DonutRotationIntensitySmoothingFactor { get; set; }
-    int DonutLowQualitySkipFactor { get; set; }
-    int DonutMediumQualitySkipFactor { get; set; }
-    int DonutHighQualitySkipFactor { get; set; }
-    string DonutAsciiChars { get; set; }
-
     void ResetToDefaults();
     event PropertyChangedEventHandler? PropertyChanged;
 }
