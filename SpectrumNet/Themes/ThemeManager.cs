@@ -2,41 +2,16 @@
 
 namespace SpectrumNet.Themes;
 
-public partial class CommonResources
+public sealed class ThemeManager : IThemes
 {
-    public static void InitialiseResources() => Safe(
-        () =>
-        {
-            ThemeManager.Instance.ApplyThemeToWindow(Application.Current.MainWindow);
-        },
-        nameof(InitialiseResources),
-        "Failed to initialize application resources");
-
-    public void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e) => Safe(
-        () =>
-        {
-            if (sender is Slider slider)
-            {
-                var change = slider.SmallChange > 0 ? slider.SmallChange : 1;
-                slider.Value = Clamp(
-                    slider.Value + (e.Delta > 0 ? change : -change),
-                    slider.Minimum,
-                    slider.Maximum);
-                e.Handled = true;
-            }
-        },
-        nameof(Slider_MouseWheelScroll),
-        "Error handling mouse wheel scroll for slider");
-}
-
-public class ThemeManager : INotifyPropertyChanged
-{
-    private static ThemeManager? _instance;
-    private bool _isDarkTheme = true;
-    private readonly Dictionary<bool, ResourceDictionary> _themeDictionaries;
+    private static readonly Lazy<ThemeManager> _instance = new(() => new ThemeManager());
     private readonly List<WeakReference<Window>> _registeredWindows = [];
+    private bool _isDarkTheme = DefaultSettings.IsDarkTheme;
 
-    public static ThemeManager Instance => _instance ??= new();
+    public static ThemeManager Instance => _instance.Value;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public event EventHandler<bool>? ThemeChanged;
 
     public bool IsDarkTheme
     {
@@ -44,189 +19,117 @@ public class ThemeManager : INotifyPropertyChanged
         private set
         {
             if (_isDarkTheme == value) return;
-
             _isDarkTheme = value;
-            OnPropertyChanged(nameof(IsDarkTheme));
-            OnThemeChanged(value);
+            OnPropertyChanged();
+            ThemeChanged?.Invoke(this, value);
         }
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-    public event EventHandler<ThemeChangedEventArgs>? ThemeChanged;
+    private ThemeManager() { }
 
-    private ThemeManager()
+    public void RegisterWindow(Window window)
     {
-        _themeDictionaries = new Dictionary<bool, ResourceDictionary>
-        {
-            { true, LoadThemeResource("/Themes/DarkTheme.xaml") },
-            { false, LoadThemeResource("/Themes/LightTheme.xaml") }
-        };
+        if (window == null) return;
+
+        CleanupWeakReferences();
+
+        if (_registeredWindows.Any(wr => wr.TryGetTarget(out var existingWindow) && existingWindow == window))
+            return;
+
+        _registeredWindows.Add(new WeakReference<Window>(window));
+        ApplyThemeToWindow(window);
     }
 
-    public void RegisterWindow(Window window) => Safe(
-        () =>
+    public void UnregisterWindow(Window window)
+    {
+        if (window == null) return;
+
+        for (int i = _registeredWindows.Count - 1; i >= 0; i--)
         {
-            if (window == null) return;
-
-            CleanupUnusedReferences();
-
-            if (!_registeredWindows.Any(wr => wr.TryGetTarget(out var w) && w == window))
+            if (_registeredWindows[i].TryGetTarget(out var registeredWindow) && registeredWindow == window)
             {
-                _registeredWindows.Add(new WeakReference<Window>(window));
-                window.Closed += OnWindowClosed;
+                _registeredWindows.RemoveAt(i);
+                break;
+            }
+        }
+    }
+
+    public void ToggleTheme()
+    {
+        SetTheme(!_isDarkTheme);
+    }
+
+    public void SetTheme(bool isDark)
+    {
+        if (_isDarkTheme == isDark) return;
+
+        IsDarkTheme = isDark;
+        ApplyThemeToAllWindows();
+
+        Settings.Instance.IsDarkTheme = isDark;
+    }
+
+    public void ApplyThemeToCurrentWindow()
+    {
+        if (Application.Current?.MainWindow != null)
+        {
+            ApplyThemeToWindow(Application.Current.MainWindow);
+        }
+    }
+
+    private void CleanupWeakReferences()
+    {
+        for (int i = _registeredWindows.Count - 1; i >= 0; i--)
+        {
+            if (!_registeredWindows[i].TryGetTarget(out _))
+            {
+                _registeredWindows.RemoveAt(i);
+            }
+        }
+    }
+
+    private void ApplyThemeToAllWindows()
+    {
+        CleanupWeakReferences();
+
+        foreach (var windowRef in _registeredWindows)
+        {
+            if (windowRef.TryGetTarget(out var window))
+            {
                 ApplyThemeToWindow(window);
             }
-        },
-        nameof(RegisterWindow),
-        "Failed to register window with ThemeManager");
-
-    public void SetTheme(bool isDarkTheme) => Safe(
-        () => IsDarkTheme = isDarkTheme,
-        nameof(SetTheme),
-        "Failed to set theme");
-
-    public void UnregisterWindow(Window window) => Safe(
-        () =>
-        {
-            if (window == null) return;
-
-            CleanupUnusedReferences();
-            _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
-            window.Closed -= OnWindowClosed;
-        },
-        nameof(UnregisterWindow),
-        "Failed to unregister window from ThemeManager");
-
-    public void ToggleTheme() => Safe(
-        () =>
-        {
-            IsDarkTheme = !IsDarkTheme;
-            UpdateAllWindows();
-        },
-        nameof(ToggleTheme),
-        "Failed to toggle theme");
-
-    public static bool ShouldProcessKeyInContext(
-        Window window,
-        KeyEventArgs e,
-        bool checkInputElements = true)
-    {
-        if (window == null || !window.IsActive)
-            return false;
-
-        if (checkInputElements && (e.Key == Space || e.Key == Enter))
-        {
-            if (Keyboard.FocusedElement is TextBox ||
-                Keyboard.FocusedElement is PasswordBox ||
-                Keyboard.FocusedElement is ComboBox ||
-                Keyboard.FocusedElement is RichTextBox)
-            {
-                return false;
-            }
         }
-
-        return true;
     }
 
-    private static ResourceDictionary LoadThemeResource(string path)
+    private void ApplyThemeToWindow(Window window)
     {
-        ResourceDictionary result = [];
+        if (window == null) return;
 
-        Safe(
-            () =>
+        var resources = window.Resources.MergedDictionaries;
+
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            var oldThemeDict = resources.FirstOrDefault(d =>
+                d.Source?.ToString().Contains("LightTheme.xaml") == true ||
+                d.Source?.ToString().Contains("DarkTheme.xaml") == true);
+
+            if (oldThemeDict != null)
+                resources.Remove(oldThemeDict);
+
+            var newThemeDict = new ResourceDictionary
             {
-                result.Source = new Uri(
-                    $"pack://application:,,,/SpectrumNet;component/{path}",
-                    UriKind.Absolute);
-            },
-            nameof(LoadThemeResource),
-            $"Failed to load theme resource from {path}");
+                Source = new Uri(_isDarkTheme ?
+                    "/Themes/DarkTheme.xaml" :
+                    "/Themes/LightTheme.xaml",
+                    UriKind.RelativeOrAbsolute)
+            };
 
-        return result;
+            resources.Add(newThemeDict);
+        });
     }
 
-    private void CleanupUnusedReferences() => Safe(
-        () => _registeredWindows.RemoveAll(wr => !wr.TryGetTarget(out _)),
-        nameof(CleanupUnusedReferences),
-        "Error cleaning up unused window references");
-
-    private void OnWindowClosed(object? sender, EventArgs e) => Safe(
-        () =>
-        {
-            if (sender is Window window)
-            {
-                _registeredWindows.RemoveAll(wr => wr.TryGetTarget(out var w) && w == window);
-                window.Closed -= OnWindowClosed;
-            }
-        },
-        nameof(OnWindowClosed),
-        "Error handling window closed event");
-
-    private void UpdateAllWindows() => Safe(
-        () =>
-        {
-            foreach (var windowRef in _registeredWindows.ToList())
-            {
-                if (windowRef.TryGetTarget(out var window))
-                {
-                    ApplyThemeToWindow(window);
-                }
-            }
-        },
-        nameof(UpdateAllWindows),
-        "Failed to update all windows with new theme");
-
-    public async Task ApplyThemeToWindowAsync(
-        Window window,
-        CancellationToken cancellationToken = default) =>
-        await SafeAsync(
-            async () =>
-            {
-                if (window == null) return;
-
-                var themeDict = _themeDictionaries[IsDarkTheme];
-                await Application.Current.Dispatcher.InvokeAsync(
-                    () =>
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        foreach (var key in themeDict.Keys)
-                        {
-                            Application.Current.Resources[key] = themeDict[key];
-                        }
-                    },
-                    DispatcherPriority.Normal,
-                    cancellationToken);
-            },
-            nameof(ApplyThemeToWindowAsync),
-            "Failed to apply theme to window");
-
-    public void ApplyThemeToWindow(
-        Window window,
-        CancellationToken cancellationToken = default)
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
-        var task = ApplyThemeToWindowAsync(window, cancellationToken);
-        task.ContinueWith(
-            t =>
-            {
-                if (t.Exception != null)
-                {
-                    Error(
-                        nameof(ApplyThemeToWindow),
-                        $"Error in ApplyThemeToWindow: {t.Exception.InnerException?.Message}");
-                }
-            },
-            TaskContinuationOptions.OnlyOnFaulted);
-    }
-
-    protected virtual void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-
-    protected virtual void OnThemeChanged(bool isDarkTheme) =>
-        ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(isDarkTheme));
-}
-
-public class ThemeChangedEventArgs(bool isDarkTheme)
-    : EventArgs
-{
-    public bool IsDarkTheme { get; } = isDarkTheme;
+    }
 }

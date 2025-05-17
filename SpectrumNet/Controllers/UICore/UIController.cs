@@ -4,16 +4,18 @@ namespace SpectrumNet.Controllers.UICore;
 
 public class UIController(
     IMainController mainController,
-    ITransparencyManager transparencyManager)
+    ITransparencyManager transparencyManager) 
     : AsyncDisposableBase, IUIController
 {
     private const string LogPrefix = nameof(UIController);
 
     private readonly IMainController _mainController = mainController ??
-        throw new ArgumentNullException(nameof(mainController));
+            throw new ArgumentNullException(nameof(mainController));
 
     private readonly ITransparencyManager _transparencyManager = transparencyManager ??
-        throw new ArgumentNullException(nameof(transparencyManager));
+            throw new ArgumentNullException(nameof(transparencyManager));
+
+    private readonly IThemes _themeManager = ThemeManager.Instance;
 
     private OverlayWindow? _overlayWindow;
     private ControlPanelWindow? _controlPanelWindow;
@@ -57,7 +59,7 @@ public class UIController(
     public bool IsControlPanelOpen => _controlPanelWindow is { IsVisible: true };
 
     public void ToggleTheme() =>
-        Safe(() => ThemeManager.Instance?.ToggleTheme(),
+        Safe(() => _themeManager.ToggleTheme(),
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error toggling theme" });
 
     public void OpenControlPanel() =>

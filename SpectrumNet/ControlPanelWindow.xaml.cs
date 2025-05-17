@@ -7,6 +7,7 @@ public partial class ControlPanelWindow : Window, IDisposable
     private const string LogPrefix = "ControlPanelWindow";
 
     private readonly IMainController _controller;
+    private readonly IThemes _themeManager;
     private readonly Dictionary<string, Action> _buttonActions;
     private readonly Dictionary<string, Action<double>> _sliderActions;
     private readonly Dictionary<(string Name, Type ItemType), Action<object>> _comboBoxActions;
@@ -18,6 +19,7 @@ public partial class ControlPanelWindow : Window, IDisposable
     {
         ArgumentNullException.ThrowIfNull(controller);
         _controller = controller;
+        _themeManager = ThemeManager.Instance;
         InitializeComponent();
 
         _buttonActions = CreateButtonActionsMap();
@@ -35,6 +37,7 @@ public partial class ControlPanelWindow : Window, IDisposable
         _isInitializingControls = false;
 
         _controller.InputController.RegisterWindow(this);
+        _themeManager.RegisterWindow(this);
     }
 
     private void SetInitialComboBoxSelections()
@@ -228,6 +231,7 @@ public partial class ControlPanelWindow : Window, IDisposable
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
+        _themeManager.UnregisterWindow(this);
         Dispose();
     }
 

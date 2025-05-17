@@ -2,7 +2,7 @@
 
 namespace SpectrumNet.DataSettings;
 
-public class Settings : ISettings, INotifyPropertyChanged
+public class Settings : ISettings
 {
     private const string LogPrefix = "Settings";
 
@@ -37,13 +37,13 @@ public class Settings : ISettings, INotifyPropertyChanged
     private static readonly Lazy<Settings> _instance = new(() => new());
     public static Settings Instance => _instance.Value;
 
-    public Settings() { }
-
     public event PropertyChangedEventHandler? PropertyChanged
     {
         add => _propertyChanged += value;
         remove => _propertyChanged -= value;
     }
+
+    public event EventHandler<string>? SettingsChanged;
 
     protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
     {
@@ -88,7 +88,6 @@ public class Settings : ISettings, INotifyPropertyChanged
     public float MaxTimeStep { get => _maxTimeStep; set => SetProperty(ref _maxTimeStep, value); }
     public float MinTimeStep { get => _minTimeStep; set => SetProperty(ref _minTimeStep, value); }
 
-
     public double WindowLeft { get => _windowLeft; set => SetProperty(ref _windowLeft, value); }
     public double WindowTop { get => _windowTop; set => SetProperty(ref _windowTop, value); }
     public double WindowWidth { get => _windowWidth; set => SetProperty(ref _windowWidth, value); }
@@ -110,8 +109,78 @@ public class Settings : ISettings, INotifyPropertyChanged
     public bool IsDarkTheme { get => _isDarkTheme; set => SetProperty(ref _isDarkTheme, value); }
     public bool LimitFpsTo60 { get => _limitFpsTo60; set => SetProperty(ref _limitFpsTo60, value); }
 
-    public void ResetToDefaults() => Safe(
-        () =>
+    public void LoadSettings(string? filePath = null)
+    {
+        Safe(() =>
+        {
+            string settingsPath = filePath ?? GetSettingsFilePath();
+
+            if (!File.Exists(settingsPath))
+            {
+                Log(LogLevel.Information, LogPrefix, "Settings file not found, using defaults");
+                return;
+            }
+
+            try
+            {
+                var content = File.ReadAllText(settingsPath);
+                var loadedSettings = JsonConvert.DeserializeObject<Settings>(content);
+
+                if (loadedSettings == null)
+                {
+                    Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings. Using defaults.");
+                    return;
+                }
+
+                ApplySettings(loadedSettings);
+                Log(LogLevel.Information, LogPrefix, $"Settings loaded from {settingsPath}");
+                SettingsChanged?.Invoke(this, "LoadSettings");
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}. Using defaults.");
+            }
+        },
+        new ErrorHandlingOptions
+        {
+            Source = nameof(LoadSettings),
+            ErrorMessage = "Error loading settings"
+        });
+    }
+
+    public void SaveSettings(string? filePath = null)
+    {
+        Safe(() =>
+        {
+            string settingsPath = filePath ?? EnsureSettingsDirectory();
+
+            var json = JsonConvert.SerializeObject(
+                this,
+                new JsonSerializerSettings
+                {
+                    Formatting = Formatting.Indented,
+                    ContractResolver = new DefaultContractResolver
+                    {
+                        NamingStrategy = new CamelCaseNamingStrategy()
+                    }
+                });
+
+            File.WriteAllText(settingsPath, json);
+            File.WriteAllText("settings.json", json);
+
+            Log(LogLevel.Information, LogPrefix, $"Settings saved to {settingsPath}");
+            SettingsChanged?.Invoke(this, "SaveSettings");
+        },
+        new ErrorHandlingOptions
+        {
+            Source = nameof(SaveSettings),
+            ErrorMessage = "Error saving settings"
+        });
+    }
+
+    public void ResetToDefaults()
+    {
+        Safe(() =>
         {
             MaxParticles = DefaultSettings.MaxParticles;
             SpawnThresholdOverlay = DefaultSettings.SpawnThresholdOverlay;
@@ -162,11 +231,53 @@ public class Settings : ISettings, INotifyPropertyChanged
             IsDarkTheme = DefaultSettings.IsDarkTheme;
             LimitFpsTo60 = DefaultSettings.LimitFpsTo60;
 
-            Log(
-                LogLevel.Information,
-                LogPrefix,
-                "Settings have been reset to defaults");
+            Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
+            SettingsChanged?.Invoke(this, "ResetToDefaults");
         },
-        nameof(ResetToDefaults),
-        "Ошибка сброса настроек к значениям по умолчанию");
+        new ErrorHandlingOptions
+        {
+            Source = nameof(ResetToDefaults),
+            ErrorMessage = "Error resetting settings to defaults"
+        });
+    }
+
+    private void ApplySettings(Settings source)
+    {
+        var properties = source.GetType()
+            .GetProperties()
+            .Where(p => p.CanRead &&
+                  p.GetCustomAttributes(typeof(JsonIgnoreAttribute), true).Length == 0);
+
+        foreach (var prop in properties)
+        {
+            var targetProp = GetType().GetProperty(prop.Name);
+            if (targetProp?.CanWrite == true)
+                targetProp.SetValue(this, prop.GetValue(source));
+        }
+    }
+
+    private static string GetSettingsFilePath()
+    {
+        string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        string settingsPath = Path.Combine(
+            appDataPath,
+            DefaultSettings.APP_FOLDER,
+            DefaultSettings.SETTINGS_FILE);
+
+        if (!File.Exists(settingsPath) && File.Exists("settings.json"))
+            settingsPath = "settings.json";
+
+        return settingsPath;
+    }
+
+    private static string EnsureSettingsDirectory()
+    {
+        string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        string appFolder = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER);
+
+        if (!Directory.Exists(appFolder))
+            Directory.CreateDirectory(appFolder);
+
+        return Path.Combine(appFolder, DefaultSettings.SETTINGS_FILE);
+    }
 }

@@ -1,8 +1,6 @@
 ﻿#nullable enable
 
-using SpectrumNet.Themes;
 using System.Windows.Navigation;
-using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace SpectrumNet;
 
@@ -14,6 +12,8 @@ public partial class MainWindow : Window, IAsyncDisposable
     private readonly Dictionary<string, Action> _windowButtonActions;
     private readonly SemaphoreSlim _disposeLock = new(1, 1);
     private readonly ManualResetEventSlim _disposeCompleted = new(false);
+    private readonly ISettings _settings;
+    private readonly IThemes _themeManager;
 
     private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
@@ -25,6 +25,8 @@ public partial class MainWindow : Window, IAsyncDisposable
         InitializeComponent();
 
         _controller = new ControllerFactory(this, spectrumCanvas);
+        _settings = Settings.Instance;
+        _themeManager = ThemeManager.Instance;
         DataContext = _controller;
 
         _windowButtonActions = new Dictionary<string, Action>
@@ -506,12 +508,11 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private void ConfigureTheme()
     {
-        var tm = ThemeManager.Instance;
-        if (tm is null) return;
+        if (_themeManager is null) return;
 
-        tm.RegisterWindow(this);
+        _themeManager.RegisterWindow(this);
         _themePropertyChangedHandler = OnThemePropertyChanged;
-        tm.PropertyChanged += _themePropertyChangedHandler;
+        _themeManager.PropertyChanged += _themePropertyChangedHandler;
         UpdateThemeToggleButtonState();
     }
 
@@ -524,11 +525,10 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private void HandleThemePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (_isDisposed || _isClosing || e.PropertyName != nameof(ThemeManager.IsDarkTheme) ||
-            sender is not ThemeManager tm)
+        if (_isDisposed || _isClosing || e.PropertyName != nameof(IThemes.IsDarkTheme))
             return;
 
-        Settings.Instance.IsDarkTheme = tm.IsDarkTheme;
+        _settings.IsDarkTheme = _themeManager.IsDarkTheme;
         UpdateThemeToggleButtonState();
     }
 
@@ -539,7 +539,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         ThemeToggleButton.Checked -= OnThemeToggleButtonChanged;
         ThemeToggleButton.Unchecked -= OnThemeToggleButtonChanged;
 
-        ThemeToggleButton.IsChecked = ThemeManager.Instance?.IsDarkTheme ?? false;
+        ThemeToggleButton.IsChecked = _themeManager.IsDarkTheme;
 
         ThemeToggleButton.Checked += OnThemeToggleButtonChanged;
         ThemeToggleButton.Unchecked += OnThemeToggleButtonChanged;

@@ -8,7 +8,8 @@ public partial class SettingsWindow : Window
     private static readonly Lazy<SettingsWindow> _instance = new(() => new SettingsWindow());
     public static SettingsWindow Instance => _instance.Value;
 
-    private readonly Settings _settings = Settings.Instance;
+    private readonly ISettings _settings = Settings.Instance;
+    private readonly IThemes _themeManager = ThemeManager.Instance;
     private Dictionary<string, object?>? _originalValues;
     private readonly IRendererFactory _rendererFactory = RendererFactory.Instance;
 
@@ -18,9 +19,20 @@ public partial class SettingsWindow : Window
     {
         CommonResources.InitialiseResources();
         InitializeComponent();
-        ThemeManager.Instance.RegisterWindow(this);
+        _themeManager.RegisterWindow(this);
         BackupCurrentSettings();
         DataContext = _settings;
+
+        _settings.SettingsChanged += OnSettingsChanged;
+    }
+
+    private void OnSettingsChanged(object? sender, string action)
+    {
+        if (action is "LoadSettings" or "ResetToDefaults")
+        {
+            _themeManager.SetTheme(_settings.IsDarkTheme);
+            UpdateAllRenderers();
+        }
     }
 
     public void EnsureWindowVisible() => Safe(
@@ -29,72 +41,14 @@ public partial class SettingsWindow : Window
             if (!IsWindowOnScreen())
                 ResetWindowPosition();
         },
-        new()
+        new ErrorHandlingOptions
         {
             Source = LogPrefix,
             ErrorMessage = "Error ensuring window visibility"
         });
 
-    public void LoadSettings() => Safe(
-        () =>
-        {
-            var settingsPath = GetSettingsFilePath();
-
-            if (!File.Exists(settingsPath))
-            {
-                Log(
-                    LogLevel.Information,
-                    LogPrefix,
-                    "Settings file not found, using defaults");
-                return;
-            }
-
-            try
-            {
-                var loadedSettings = DeserializeSettings(settingsPath);
-                if (loadedSettings == null)
-                    return;
-
-                ApplyLoadedSettings(loadedSettings);
-                Log(
-                    LogLevel.Information,
-                    LogPrefix,
-                    $"Settings loaded from {settingsPath}");
-            }
-            catch (Exception ex)
-            {
-                Log(
-                    LogLevel.Error,
-                    LogPrefix,
-                    $"Error loading settings: {ex.Message}. Using defaults.");
-            }
-        },
-        new()
-        {
-            Source = nameof(LoadSettings),
-            ErrorMessage = "Error loading settings"
-        });
-
-    public void SaveSettings() => Safe(
-        () =>
-        {
-            UpdateRenderersWithCurrentSettings();
-
-            var settingsPath = EnsureSettingsDirectory();
-            var json = SerializeSettings();
-
-            WriteSettingsToFiles(settingsPath, json);
-
-            Log(
-                LogLevel.Information,
-                LogPrefix,
-                $"Settings saved to {settingsPath}");
-        },
-        new()
-        {
-            Source = nameof(SaveSettings),
-            ErrorMessage = "Error saving settings"
-        });
+    public void LoadSettings() => _settings.LoadSettings();
+    public void SaveSettings() => _settings.SaveSettings();
 
     public void ResetToDefaults() => Safe(
         () =>
@@ -103,12 +57,10 @@ public partial class SettingsWindow : Window
                 return;
 
             _settings.ResetToDefaults();
-            ApplyAndSaveSettings();
             _changesApplied = true;
-
             ShowSettingsResetConfirmation();
         },
-        new()
+        new ErrorHandlingOptions
         {
             Source = nameof(ResetToDefaults),
             ErrorMessage = "Error resetting settings",
@@ -126,10 +78,13 @@ public partial class SettingsWindow : Window
             () =>
             {
                 CleanupOnClosing();
-                ThemeManager.Instance.UnregisterWindow(this);
+                _themeManager.UnregisterWindow(this);
             },
-            nameof(Window_Closing),
-            "Error closing window");
+            new ErrorHandlingOptions
+            {
+                Source = nameof(Window_Closing),
+                ErrorMessage = "Error closing window"
+            });
 
     private void OnCloseButton_Click(object sender, RoutedEventArgs e)
     {
@@ -144,7 +99,7 @@ public partial class SettingsWindow : Window
             _changesApplied = true;
             ShowSettingsAppliedConfirmation();
         },
-        new()
+        new ErrorHandlingOptions
         {
             Source = nameof(OnApplyButton_Click),
             ErrorMessage = "Error applying settings",
@@ -167,40 +122,9 @@ public partial class SettingsWindow : Window
         foreach (var (key, value) in _originalValues)
             _settings.GetType().GetProperty(key)?.SetValue(_settings, value);
 
-        ThemeManager.Instance.SetTheme(_settings.IsDarkTheme);
+        _themeManager.SetTheme(_settings.IsDarkTheme);
         UpdateAllRenderers();
     }
-
-    private void ApplyLoadedSettings(Settings loadedSettings)
-    {
-        CopyPropertiesFrom(loadedSettings);
-        BackupCurrentSettings();
-        ThemeManager.Instance.SetTheme(_settings.IsDarkTheme);
-        UpdateAllRenderers();
-    }
-
-    private static void CopyPropertiesFrom(object source, object target) => Safe(
-        () =>
-        {
-            var properties = source.GetType()
-                .GetProperties()
-                .Where(p => p.CanRead &&
-                       p.GetCustomAttributes(typeof(JsonIgnoreAttribute), true).Length == 0);
-
-            foreach (var prop in properties)
-            {
-                var targetProp = target.GetType().GetProperty(prop.Name);
-                if (targetProp?.CanWrite == true)
-                    targetProp.SetValue(target, prop.GetValue(source));
-            }
-        },
-        new()
-        {
-            Source = LogPrefix,
-            ErrorMessage = "Error copying properties"
-        });
-
-    private void CopyPropertiesFrom(object source) => CopyPropertiesFrom(source, _settings);
 
     private void ApplyAndSaveSettings()
     {
@@ -216,96 +140,20 @@ public partial class SettingsWindow : Window
             RestoreBackupSettings();
     }
 
-    private void UpdateRenderersWithCurrentSettings() => Safe(
-        () =>
-        {
-            foreach (var renderer in GetRenderers())
-            {
-                var isOverlayActive = renderer.IsOverlayActive;
-                renderer.Configure(isOverlayActive);
-            }
-        },
-        new()
-        {
-            Source = nameof(UpdateRenderersWithCurrentSettings),
-            ErrorMessage = "Error updating renderer"
-        });
-
     private void UpdateAllRenderers() => Safe(
         () =>
         {
-            foreach (var renderer in GetRenderers())
+            foreach (var renderer in _rendererFactory.GetAllRenderers())
             {
                 var isOverlayActive = renderer.IsOverlayActive;
                 renderer.Configure(isOverlayActive, _settings.SelectedRenderQuality);
             }
         },
-        new()
+        new ErrorHandlingOptions
         {
             Source = nameof(UpdateAllRenderers),
             ErrorMessage = "Error updating renderers"
         });
-
-    private IEnumerable<ISpectrumRenderer> GetRenderers() => _rendererFactory.GetAllRenderers();
-
-    private static string GetSettingsFilePath()
-    {
-        string appDataPath = GetFolderPath(SpecialFolder.ApplicationData);
-        string settingsPath = Path.Combine(
-            appDataPath,
-            DefaultSettings.APP_FOLDER,
-            DefaultSettings.SETTINGS_FILE);
-
-        if (!File.Exists(settingsPath) && File.Exists("settings.json"))
-            settingsPath = "settings.json";
-
-        return settingsPath;
-    }
-
-    private static string EnsureSettingsDirectory()
-    {
-        string appDataPath = GetFolderPath(SpecialFolder.ApplicationData);
-        string appFolder = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER);
-
-        if (!Directory.Exists(appFolder))
-            Directory.CreateDirectory(appFolder);
-
-        return Path.Combine(appFolder, DefaultSettings.SETTINGS_FILE);
-    }
-
-    private static Settings? DeserializeSettings(string filePath)
-    {
-        var content = File.ReadAllText(filePath);
-        var loadedSettings = JsonConvert.DeserializeObject<Settings>(content);
-
-        if (loadedSettings == null)
-            Log(
-                LogLevel.Warning,
-                LogPrefix,
-                "Failed to deserialize settings. Using defaults.");
-
-        return loadedSettings;
-    }
-
-    private string SerializeSettings()
-    {
-        return JsonConvert.SerializeObject(
-            _settings,
-            new JsonSerializerSettings
-            {
-                Formatting = Formatting.Indented,
-                ContractResolver = new DefaultContractResolver
-                {
-                    NamingStrategy = new CamelCaseNamingStrategy()
-                }
-            });
-    }
-
-    private static void WriteSettingsToFiles(string settingsPath, string json)
-    {
-        File.WriteAllText(settingsPath, json);
-        File.WriteAllText("settings.json", json);
-    }
 
     private bool IsWindowOnScreen()
     {
@@ -321,45 +169,34 @@ public partial class SettingsWindow : Window
     private void ResetWindowPosition()
     {
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Log(
-            LogLevel.Warning,
-            LogPrefix,
-            "Window position reset to center");
+        Log(LogLevel.Warning, LogPrefix, "Window position reset to center");
     }
 
-    private static bool ConfirmSettingsReset()
-    {
-        return MessageBox.Show(
+    private static bool ConfirmSettingsReset() =>
+        MessageBox.Show(
             "Are you sure you want to reset all settings to defaults?",
             "Reset Settings",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question) == MessageBoxResult.Yes;
-    }
 
-    private static void ShowSettingsResetConfirmation()
-    {
+    private static void ShowSettingsResetConfirmation() =>
         MessageBox.Show(
             "Settings have been reset to defaults.",
             "Settings Reset",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
-    }
 
-    private static void ShowSettingsAppliedConfirmation()
-    {
+    private static void ShowSettingsAppliedConfirmation() =>
         MessageBox.Show(
             "Settings applied successfully!",
             "Settings",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
-    }
 
-    private static void ShowErrorMessage(Exception ex)
-    {
+    private static void ShowErrorMessage(Exception ex) =>
         MessageBox.Show(
             $"Error: {ex.Message}",
             "Error",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
-    }
 }

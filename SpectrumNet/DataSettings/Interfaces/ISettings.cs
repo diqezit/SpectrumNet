@@ -2,10 +2,9 @@
 
 namespace SpectrumNet.DataSettings.Interfaces;
 
-public interface ISettings
+public interface ISettings : INotifyPropertyChanged
 {
-    // Существующие настройки рендереров
-    public int MaxParticles { get; set; }
+    int MaxParticles { get; set; }
     float SpawnThresholdOverlay { get; set; }
     float SpawnThresholdNormal { get; set; }
     float ParticleVelocityMin { get; set; }
@@ -22,7 +21,6 @@ public interface ISettings
     float MaxZDepth { get; set; }
     float MinZDepth { get; set; }
 
-    // Настройки для RaindropsRenderer
     int MaxRaindrops { get; set; }
     float BaseFallSpeed { get; set; }
     float RaindropSize { get; set; }
@@ -34,7 +32,6 @@ public interface ISettings
     float MaxTimeStep { get; set; }
     float MinTimeStep { get; set; }
 
-    // UI настройки
     double WindowLeft { get; set; }
     double WindowTop { get; set; }
     double WindowWidth { get; set; }
@@ -55,7 +52,11 @@ public interface ISettings
     float UIAmplificationFactor { get; set; }
     bool IsDarkTheme { get; set; }
     bool LimitFpsTo60 { get; set; }
+    ObservableCollection<RenderStyle> FavoriteRenderers { get; set; }
 
+    void LoadSettings(string? filePath = null);
+    void SaveSettings(string? filePath = null);
     void ResetToDefaults();
-    event PropertyChangedEventHandler? PropertyChanged;
+
+    event EventHandler<string> SettingsChanged;
 }
