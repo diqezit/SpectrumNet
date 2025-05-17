@@ -10,7 +10,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     private readonly Lazy<AudioController> _audioController;
     private readonly Lazy<ViewController> _viewController;
     private readonly Lazy<InputController> _inputController;
+    private readonly Lazy<IOverlayManager> _overlayManager;
     private readonly IRendererFactory _rendererFactory;
+    private readonly ITransparencyManager _transparencyManager;
 
     private readonly CancellationTokenSource _cleanupCts = new();
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
@@ -40,11 +42,13 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
 
         _rendererFactory = RendererFactory.Instance;
+        _transparencyManager = RendererTransparencyManager.Instance;
 
         _uiController = new Lazy<UIController>(() => CreateUIController());
         _audioController = new Lazy<AudioController>(() => CreateAudioController());
         _viewController = new Lazy<ViewController>(() => CreateViewController());
         _inputController = new Lazy<InputController>(() => new InputController(this));
+        _overlayManager = new Lazy<IOverlayManager>(() => new OverlayManager(this, _transparencyManager));
 
         ownerWindow.Closed += (_, _) => DisposeResources();
         ownerWindow.KeyDown += OnWindowKeyDown;
@@ -105,7 +109,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         RequestRender();
     }
 
-    private UIController CreateUIController() => new(this, RendererTransparencyManager.Instance);
+    private UIController CreateUIController() => new(this, _transparencyManager);
     private AudioController CreateAudioController() => new(this, SynchronizationContext.Current!);
     private ViewController CreateViewController() => new(this, _renderElement, _rendererFactory);
 
@@ -113,6 +117,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public IAudioController AudioController => _audioController.Value;
     public IViewController ViewController => _viewController.Value;
     public IInputController InputController => _inputController.Value;
+    public IOverlayManager OverlayManager => _overlayManager.Value;
 
     public Dispatcher Dispatcher => Application.Current?.Dispatcher ??
         throw new InvalidOperationException("Application.Current is null");
@@ -131,25 +136,30 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     public bool IsOverlayActive
     {
-        get => _uiController.IsValueCreated && UIController.IsOverlayActive;
+        get => _overlayManager.IsValueCreated && OverlayManager.IsActive;
         set
         {
             if (_isDisposed) return;
 
-            if (_uiController.IsValueCreated)
-                UIController.IsOverlayActive = value;
+            if (value != IsOverlayActive)
+            {
+                if (value)
+                    _ = OverlayManager.OpenAsync();
+                else
+                    _ = OverlayManager.CloseAsync();
+            }
         }
     }
 
     public bool IsOverlayTopmost
     {
-        get => !_uiController.IsValueCreated || UIController.IsOverlayTopmost;
+        get => !_overlayManager.IsValueCreated || OverlayManager.IsTopmost;
         set
         {
             if (_isDisposed) return;
 
-            if (_uiController.IsValueCreated)
-                UIController.IsOverlayTopmost = value;
+            if (_overlayManager.IsValueCreated)
+                OverlayManager.IsTopmost = value;
         }
     }
 
@@ -165,7 +175,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
     }
 
-    public bool IsControlPanelOpen => 
+    public bool IsControlPanelOpen =>
         !_isDisposed
         && _uiController.IsValueCreated
         && UIController.IsControlPanelOpen;
@@ -197,13 +207,13 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public void OpenOverlay()
     {
         if (_isDisposed) return;
-        UIController.OpenOverlay();
+        _ = OverlayManager.OpenAsync();
     }
 
     public void CloseOverlay()
     {
         if (_isDisposed) return;
-        UIController.CloseOverlay();
+        _ = OverlayManager.CloseAsync();
     }
 
     public bool LimitFpsTo60
@@ -764,19 +774,19 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private void CloseUIElementsIfNeeded()
     {
-        if (_uiController.IsValueCreated)
-        {
-            if (IsOverlayActive)
-                UIController.CloseOverlay();
+        if (_overlayManager.IsValueCreated && OverlayManager.IsActive)
+            _ = OverlayManager.CloseAsync();
 
-            if (IsControlPanelOpen)
-                UIController.CloseControlPanel();
-        }
+        if (_uiController.IsValueCreated && IsControlPanelOpen)
+            UIController.CloseControlPanel();
     }
 
     private void DisposeAllControllers()
     {
-        var (viewController, audioController, uiController, inputController) = CaptureExistingControllers();
+        var (viewController, audioController, uiController, inputController, overlayManager) = CaptureExistingControllers();
+
+        if (overlayManager != null)
+            DisposeController(overlayManager, "OverlayManager");
 
         if (viewController != null)
             DisposeController(viewController, "ViewController");
@@ -794,7 +804,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     private (ViewController? viewController,
              AudioController? audioController,
              UIController? uiController,
-             InputController? inputController) CaptureExistingControllers()
+             InputController? inputController,
+             IOverlayManager? overlayManager) CaptureExistingControllers()
     {
         lock (_disposeLock)
         {
@@ -810,7 +821,10 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             InputController? inputController =
                 _inputController.IsValueCreated ? _inputController.Value : null;
 
-            return (viewController, audioController, uiController, inputController);
+            IOverlayManager? overlayManager =
+                _overlayManager.IsValueCreated ? _overlayManager.Value : null;
+
+            return (viewController, audioController, uiController, inputController, overlayManager);
         }
     }
 
@@ -920,16 +934,14 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private async Task CloseUIElementsAsync(CancellationToken token)
     {
-        if (!_uiController.IsValueCreated) return;
-
         await Dispatcher.InvokeAsync(() =>
         {
             try
             {
-                if (IsOverlayActive)
-                    UIController.CloseOverlay();
+                if (_overlayManager.IsValueCreated && OverlayManager.IsActive)
+                    _ = OverlayManager.CloseAsync();
 
-                if (IsControlPanelOpen)
+                if (_uiController.IsValueCreated && IsControlPanelOpen)
                     UIController.CloseControlPanel();
             }
             catch (Exception ex)
@@ -941,7 +953,10 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private async Task DisposeControllersAsync(CancellationToken token)
     {
-        var (viewController, audioController, uiController, inputController) = CaptureExistingControllers();
+        var (viewController, audioController, uiController, inputController, overlayManager) = CaptureExistingControllers();
+
+        if (overlayManager != null)
+            await DisposeControllerAsync(overlayManager, "OverlayManager", token);
 
         if (viewController != null)
             await DisposeControllerAsync(viewController, "ViewController", token);

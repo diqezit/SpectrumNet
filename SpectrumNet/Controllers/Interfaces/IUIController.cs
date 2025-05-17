@@ -24,4 +24,6 @@ public interface IUIController
 
     // Уведомления об изменениях
     void OnPropertyChanged(params string[] propertyNames);
+
+
 }

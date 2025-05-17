@@ -2,50 +2,55 @@
 
 namespace SpectrumNet.Controllers.UICore;
 
-public class UIController(
-    IMainController mainController,
-    ITransparencyManager transparencyManager) 
-    : AsyncDisposableBase, IUIController
+public class UIController : AsyncDisposableBase, IUIController
 {
     private const string LogPrefix = nameof(UIController);
 
-    private readonly IMainController _mainController = mainController ??
-            throw new ArgumentNullException(nameof(mainController));
-
-    private readonly ITransparencyManager _transparencyManager = transparencyManager ??
-            throw new ArgumentNullException(nameof(transparencyManager));
-
+    private readonly IMainController _mainController;
+    private readonly ITransparencyManager _transparencyManager;
+    private readonly IOverlayManager _overlayManager;
     private readonly IThemes _themeManager = ThemeManager.Instance;
 
-    private OverlayWindow? _overlayWindow;
     private ControlPanelWindow? _controlPanelWindow;
+    private bool _isPopupOpen;
 
-    private bool
-        _isOverlayActive,
-        _isPopupOpen,
-        _isOverlayTopmost = true;
+    public UIController(
+        IMainController mainController,
+        ITransparencyManager transparencyManager)
+    {
+        _mainController = mainController ??
+            throw new ArgumentNullException(nameof(mainController));
+
+        _transparencyManager = transparencyManager ??
+            throw new ArgumentNullException(nameof(transparencyManager));
+
+        _overlayManager = new OverlayManager(mainController, transparencyManager);
+
+        _overlayManager.StateChanged += OnOverlayStateChanged;
+    }
 
     public bool IsOverlayActive
     {
-        get => _isOverlayActive;
+        get => _overlayManager.IsActive;
         set
         {
-            if (_isOverlayActive == value) return;
-            _isOverlayActive = value;
-            _mainController.OnPropertyChanged(nameof(IsOverlayActive));
+            if (value != _overlayManager.IsActive)
+            {
+                if (value)
+                    OpenOverlay();
+                else
+                    CloseOverlay();
+            }
         }
     }
 
     public bool IsOverlayTopmost
     {
-        get => _isOverlayTopmost;
+        get => _overlayManager.IsTopmost;
         set
         {
-            if (_isOverlayTopmost == value) return;
-
-            _isOverlayTopmost = value;
-            Settings.Instance.IsOverlayTopmost = value;
-            UpdateOverlayTopmostState();
+            if (_overlayManager.IsTopmost == value) return;
+            _overlayManager.IsTopmost = value;
             _mainController.OnPropertyChanged(nameof(IsOverlayTopmost));
         }
     }
@@ -93,20 +98,11 @@ public class UIController(
     }
 
     public void OpenOverlay() =>
-        Safe(() =>
-        {
-            if (IsExistingOverlayValid())
-            {
-                ShowExistingOverlay();
-                return;
-            }
-
-            InitializeOverlayWindow();
-        },
-        new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error opening overlay" });
+        Safe(() => _ = _overlayManager.OpenAsync(),
+            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error opening overlay" });
 
     public void CloseOverlay() =>
-        Safe(() => _overlayWindow?.Close(),
+        Safe(() => _ = _overlayManager.CloseAsync(),
             new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error closing overlay" });
 
     public void OnPropertyChanged(params string[] propertyNames) =>
@@ -117,90 +113,10 @@ public class UIController(
         },
         new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error propagating property changes" });
 
-    private bool IsExistingOverlayValid() =>
-        _overlayWindow is { IsInitialized: true };
-
-    private void ShowExistingOverlay()
+    private void OnOverlayStateChanged(object? sender, bool isActive)
     {
-        if (_overlayWindow is null) return;
-
-        _overlayWindow.Show();
-        _overlayWindow.Topmost = IsOverlayTopmost;
+        _mainController.OnPropertyChanged(nameof(IsOverlayActive));
     }
-
-    private void InitializeOverlayWindow()
-    {
-        var config = CreateOverlayConfiguration();
-        CreateOverlayWindow(config);
-        RegisterOverlayEvents();
-        ShowOverlayWindow();
-        _transparencyManager.EnableGlobalMouseTracking();
-        ActivateOverlay();
-        UpdateOverlayDimensions();
-    }
-
-    private OverlayConfiguration CreateOverlayConfiguration() =>
-        new(
-            RenderInterval: 16,
-            IsTopmost: IsOverlayTopmost,
-            ShowInTaskbar: false,
-            EnableHardwareAcceleration: true
-        );
-
-    private void CreateOverlayWindow(OverlayConfiguration config)
-    {
-        _overlayWindow = new OverlayWindow(_mainController, config)
-            ?? throw new InvalidOperationException("Failed to create overlay window");
-    }
-
-    private void RegisterOverlayEvents()
-    {
-        if (_overlayWindow is null) return;
-        _overlayWindow.Closed += (_, _) => OnOverlayClosed();
-    }
-
-    private void ShowOverlayWindow() => _overlayWindow?.Show();
-
-    private void ActivateOverlay()
-    {
-        IsOverlayActive = true;
-        _mainController.SpectrumCanvas.InvalidateVisual();
-    }
-
-    private void UpdateOverlayDimensions() =>
-        _mainController.Renderer?.UpdateRenderDimensions(
-            (int)SystemParameters.PrimaryScreenWidth,
-            (int)SystemParameters.PrimaryScreenHeight);
-
-    private void OnOverlayClosed() =>
-        Safe(() =>
-        {
-            _transparencyManager.DisableGlobalMouseTracking();
-            DisposeOverlayWindow();
-            ClearOverlayState();
-            ActivateOwnerWindow();
-        },
-        new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling overlay closed" });
-
-    private void DisposeOverlayWindow()
-    {
-        if (_overlayWindow is IDisposable disposable)
-            disposable.Dispose();
-    }
-
-    private void ClearOverlayState()
-    {
-        _overlayWindow = null;
-        IsOverlayActive = false;
-    }
-
-    private void UpdateOverlayTopmostState() =>
-        Safe(() =>
-        {
-            if (_overlayWindow is { IsInitialized: true } overlay)
-                overlay.Topmost = IsOverlayTopmost;
-        },
-        new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating overlay topmost state" });
 
     private bool TryActivateExistingControlPanel()
     {
@@ -314,29 +230,27 @@ public class UIController(
     {
         try
         {
-            if (IsOverlayActive)
-                _overlayWindow?.Close();
+            _overlayManager.StateChanged -= OnOverlayStateChanged;
+
+            if (_overlayManager is IDisposable disposableOverlay)
+                disposableOverlay.Dispose();
 
             if (IsControlPanelOpen)
                 _controlPanelWindow?.Close();
         }
         finally
         {
-            if (_overlayWindow is IDisposable disposableOverlay)
-                disposableOverlay.Dispose();
-
             if (_controlPanelWindow is IDisposable disposableControlPanel)
                 disposableControlPanel.Dispose();
 
-            _overlayWindow = null;
             _controlPanelWindow = null;
         }
     }
 
-    protected override ValueTask DisposeAsyncManagedResources()
+    protected override async ValueTask DisposeAsyncManagedResources()
     {
-        CloseOverlay();
+        _overlayManager.StateChanged -= OnOverlayStateChanged;
+        await _overlayManager.DisposeAsync();
         CloseControlPanel();
-        return ValueTask.CompletedTask;
     }
 }

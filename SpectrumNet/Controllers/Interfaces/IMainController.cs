@@ -16,9 +16,9 @@ public interface IMainController :
     IAudioController AudioController { get; }
     IViewController ViewController { get; }
     IInputController InputController { get; }
+    IOverlayManager OverlayManager { get; }
 
     bool LimitFpsTo60 { get; set; }
 
-    void OnPropertyChanged(params string[] propertyNames);
     void DisposeResources();
 }
