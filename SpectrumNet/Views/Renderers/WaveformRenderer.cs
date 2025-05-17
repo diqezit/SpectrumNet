@@ -59,7 +59,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
     private readonly SKPath _fillPath = new();
 
     private float _glowRadius;
-    private int _smoothingPasses;
 
     private WaveformRenderer() { }
 
@@ -121,7 +120,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         _useAntiAlias = LOW_USE_ANTI_ALIAS;
         _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
         _glowRadius = LOW_GLOW_RADIUS;
-        _smoothingPasses = LOW_SMOOTHING_PASSES;
     }
 
     private void ApplyMediumQualitySettings()
@@ -129,7 +127,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
         _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
         _glowRadius = MEDIUM_GLOW_RADIUS;
-        _smoothingPasses = MEDIUM_SMOOTHING_PASSES;
     }
 
     private void ApplyHighQualitySettings()
@@ -137,7 +134,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         _useAntiAlias = HIGH_USE_ANTI_ALIAS;
         _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
         _glowRadius = HIGH_GLOW_RADIUS;
-        _smoothingPasses = HIGH_SMOOTHING_PASSES;
     }
 
     protected override void RenderEffect(

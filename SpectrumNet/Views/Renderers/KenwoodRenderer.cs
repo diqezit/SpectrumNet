@@ -129,18 +129,17 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         _useGlow,
         _useBarBlur;
 
-    private float
+    private float 
         _glowRadius,
         _glowIntensity,
         _shadowBlur,
         _shadowOpacity,
-        _barBlur,
         _rendererSmoothingFactor,
-        _transitionSmoothness;
-
-    private float
+        _transitionSmoothness,
         _lastCanvasHeight,
         _pendingCanvasHeight;
+
+    private readonly float _barBlur;
 
     private readonly float
         _animationSpeed = ANIMATION_SPEED,
@@ -209,7 +208,6 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     private volatile bool
         _buffersInitialized,
-        _isConfiguring,
         _pathsNeedRebuild = true;
 
     protected override void OnInitialize()
@@ -441,7 +439,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     }
 
     private void UpdateState(
-        SKCanvas canvas,
+        SKCanvas _,
         float[] spectrum,
         SKImageInfo info,
         int barCount)
@@ -552,7 +550,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         float barWidth,
         float barSpacing,
-        float totalBarWidth,
+        float _,
         int renderCount)
     {
         ExecuteSafely(() => {
