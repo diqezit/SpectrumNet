@@ -4,13 +4,16 @@ namespace SpectrumNet.Controllers.SpectrumCore;
 
 public static class TrigonometricTables
 {
-    private const string LOG_PREFIX = "[TrigonometricTables]";
+    private const string LOG_PREFIX = nameof(TrigonometricTables);
     private static readonly ConcurrentDictionary<int, (float[] Cos, float[] Sin)> _tables = new();
 
-    public static (float[] Cos, float[] Sin) Get(int size) =>
-        size <= 0
-            ? throw new ArgumentException("Size must be positive", nameof(size))
-            : _tables.GetOrAdd(size, CreateTrigTables);
+    public static (float[] Cos, float[] Sin) Get(int size)
+    {
+        if (size <= 0)
+            throw new ArgumentException("Size must be positive", nameof(size));
+
+        return _tables.GetOrAdd(size, CreateTrigTables);
+    }
 
     private static (float[] Cos, float[] Sin) CreateTrigTables(int size) =>
         SafeResult(() =>
@@ -27,7 +30,7 @@ public static class TrigonometricTables
 
             return (cos, sin);
         },
-        defaultValue: (Array.Empty<float>(), Array.Empty<float>()),
+        defaultValue: ([], []),
         options: new ErrorHandlingOptions
         {
             Source = LOG_PREFIX,

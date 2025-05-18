@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// Controllers/AudioCore/CaptureService.cs
+#nullable enable
 
 namespace SpectrumNet.Controllers.AudioCore;
 
@@ -226,7 +227,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         {
             if (ShouldAbortStartCapture())
                 return;
-            
+
             InitializeAndStartCapture();
         }
         finally

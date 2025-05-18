@@ -1,17 +1,20 @@
 ﻿#nullable enable
 
+using static SpectrumNet.Controllers.SpectrumCore.FastFourierTransformHelper;
+using static SpectrumNet.Controllers.SpectrumCore.FrequencyConverter;
+
 namespace SpectrumNet.Controllers.SpectrumCore;
 
-public sealed class SpectrumConverter(IGainParametersProvider? parameters) 
+public sealed class SpectrumConverter
+    (IGainParametersProvider parameters)
     : ISpectrumConverter
 {
     private const string LOG_SOURCE = nameof(SpectrumConverter);
 
-    private readonly IGainParametersProvider _params = parameters ?? 
+    private readonly IGainParametersProvider _params = parameters ??
         throw new ArgumentNullException(nameof(parameters));
 
     private readonly ParallelOptions _parallelOpts = new() { MaxDegreeOfParallelism = ProcessorCount };
-    private readonly ArrayPool<float> _floatArrayPool = ArrayPool<float>.Shared;
 
     public float[] ConvertToSpectrum(
         Complex[] fft,
@@ -22,21 +25,12 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
         ValidateInputParameters(fft, sampleRate);
 
         int nBins = fft.Length / 2 + 1;
-        float[] spectrum = _floatArrayPool.Rent(nBins);
-        Array.Clear(spectrum, 0, nBins);
+        float[] spectrum = new float[nBins];
 
         SpectrumParameters spectrumParams = SpectrumParameters.FromProvider(_params);
         _parallelOpts.CancellationToken = cancellationToken;
 
-        try
-        {
-            return ProcessSpectrum(fft, spectrum, nBins, sampleRate, scale, spectrumParams);
-        }
-        catch
-        {
-            _floatArrayPool.Return(spectrum);
-            throw;
-        }
+        return ProcessSpectrum(fft, spectrum, nBins, sampleRate, scale, spectrumParams);
     }
 
     private static void ValidateInputParameters(Complex[] fft, int sampleRate)
@@ -64,13 +58,22 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
                 ProcessLogarithmic(fft, spectrum, nBins, sampleRate, spectrumParams),
 
             SpectrumScale.Mel =>
-                ProcessMel(fft, spectrum, nBins, sampleRate, spectrumParams),
+                ProcessScaleWithFrequencyConverter(
+                    fft, spectrum, nBins, sampleRate,
+                    FreqToMel, MelToFreq,
+                    spectrumParams),
 
             SpectrumScale.Bark =>
-                ProcessBark(fft, spectrum, nBins, sampleRate, spectrumParams),
+                ProcessScaleWithFrequencyConverter(
+                    fft, spectrum, nBins, sampleRate,
+                    FreqToBark, BarkToFreq,
+                    spectrumParams),
 
             SpectrumScale.ERB =>
-                ProcessERB(fft, spectrum, nBins, sampleRate, spectrumParams),
+                ProcessScaleWithFrequencyConverter(
+                    fft, spectrum, nBins, sampleRate,
+                    FreqToERB, ERBToFreq,
+                    spectrumParams),
 
             _ => ProcessLinear(fft, spectrum, nBins, spectrumParams)
         };
@@ -84,7 +87,7 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
         SafeResult(() =>
         {
             ComputeLinearSpectrum(fft, spectrum, nBins, spectrumParams);
-            return FinalizeSpectrumResult(spectrum, nBins);
+            return spectrum;
         },
         defaultValue: [],
         options: new ErrorHandlingOptions
@@ -101,13 +104,9 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
         SpectrumParameters spectrumParams)
     {
         if (nBins < MIN_PARALLEL_SIZE)
-        {
             ComputeSerially(fft, spectrum, nBins, spectrumParams);
-        }
         else
-        {
             ComputeInParallel(fft, spectrum, nBins, spectrumParams);
-        }
     }
 
     private void ComputeSerially(
@@ -146,38 +145,18 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
             MathF.Log10(1f), MathF.Log10(sampleRate / 2f),
             x => MathF.Pow(10, x), spectrumParams);
 
-    private float[] ProcessMel(
+    private float[] ProcessScaleWithFrequencyConverter(
         Complex[] fft,
         float[] spectrum,
         int nBins,
         int sampleRate,
+        Func<float, float> freqToScale,
+        Func<float, float> scaleToFreq,
         SpectrumParameters spectrumParams) =>
         ProcessScale(
             fft, spectrum, nBins, sampleRate,
-            FreqToMel(1f), FreqToMel(sampleRate / 2f),
-            MelToFreq, spectrumParams);
-
-    private float[] ProcessBark(
-        Complex[] fft,
-        float[] spectrum,
-        int nBins,
-        int sampleRate,
-        SpectrumParameters spectrumParams) =>
-        ProcessScale(
-            fft, spectrum, nBins, sampleRate,
-            FreqToBark(1f), FreqToBark(sampleRate / 2f),
-            BarkToFreq, spectrumParams);
-
-    private float[] ProcessERB(
-        Complex[] fft,
-        float[] spectrum,
-        int nBins,
-        int sampleRate,
-        SpectrumParameters spectrumParams) =>
-        ProcessScale(
-            fft, spectrum, nBins, sampleRate,
-            FreqToERB(1f), FreqToERB(sampleRate / 2f),
-            ERBToFreq, spectrumParams);
+            freqToScale(1f), freqToScale(sampleRate / 2f),
+            scaleToFreq, spectrumParams);
 
     private float[] ProcessScale(
         Complex[] fft,
@@ -194,7 +173,7 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
                 fft, spectrum, nBins, sampleRate,
                 minDomain, maxDomain, domainToFreq, spectrumParams);
 
-            return FinalizeSpectrumResult(spectrum, nBins);
+            return spectrum;
         },
         defaultValue: [],
         options: new ErrorHandlingOptions
@@ -225,19 +204,11 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
             float domainValue = minDomain + i * step;
             float freq = domainToFreq(domainValue);
             int bin = Clamp(
-                (int)MathF.Round(freq / halfSampleRate * (nBins - 1)),
+                (int)Round(freq / halfSampleRate * (nBins - 1)),
                 0, nBins - 1);
 
             spectrum[i] = CalcValue(Magnitude(fft[bin]), spectrumParams);
         });
-    }
-
-    private float[] FinalizeSpectrumResult(float[] spectrum, int nBins)
-    {
-        float[] result = new float[nBins];
-        Array.Copy(spectrum, result, nBins);
-        _floatArrayPool.Return(spectrum);
-        return result;
     }
 
     private static float InterpolateSpectrumValue(
@@ -267,26 +238,4 @@ public sealed class SpectrumConverter(IGainParametersProvider? parameters)
 
         return norm < 1e-6f ? 0f : MathF.Pow(norm, spectrumParams.AmplificationFactor);
     }
-
-    private static float Magnitude(Complex c) => c.X * c.X + c.Y * c.Y;
-
-    // Frequency transformation functions
-    private static float FreqToMel(float freq) =>
-        2595f * MathF.Log10(1 + freq / 700f);
-
-    private static float MelToFreq(float mel) =>
-        700f * (MathF.Pow(10, mel / 2595f) - 1);
-
-    private static float FreqToBark(float freq) =>
-        13f * MathF.Atan(0.00076f * freq) +
-        3.5f * MathF.Atan(MathF.Pow(freq / 7500f, 2));
-
-    private static float BarkToFreq(float bark) =>
-        1960f * (bark + 0.53f) / (26.28f - bark);
-
-    private static float FreqToERB(float freq) =>
-        21.4f * MathF.Log10(0.00437f * freq + 1);
-
-    private static float ERBToFreq(float erb) =>
-        (MathF.Pow(10, erb / 21.4f) - 1) / 0.00437f;
 }

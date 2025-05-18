@@ -31,7 +31,7 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
     public float AmplificationFactor
     {
         get => _amplificationFactor;
-        set => UpdateProperty(ref _amplificationFactor, Max(0.1f, value));
+        set => UpdateProperty(ref _amplificationFactor, Math.Max(0.1f, value));
     }
 
     public float MaxDbValue
@@ -55,6 +55,11 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
             return;
 
         field = value;
+        NotifyPropertyChanged(propertyName);
+    }
+
+    private void NotifyPropertyChanged(string? propertyName)
+    {
         Safe(() =>
         {
             if (_context != null)
@@ -64,7 +69,6 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         },
          LOG_SOURCE,
-         $"Error notifying property change: {propertyName}"
-        );
+         $"Error notifying property change: {propertyName}");
     }
 }

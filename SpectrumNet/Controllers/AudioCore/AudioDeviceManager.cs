@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// Controllers/AudioCore/AudioDeviceManager.cs
+#nullable enable
 
 namespace SpectrumNet.Controllers.AudioCore;
 

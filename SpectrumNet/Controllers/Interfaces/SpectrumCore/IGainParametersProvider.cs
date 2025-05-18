@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.Controllers.Interfaces;
+namespace SpectrumNet.Controllers.Interfaces.SpectrumCore;
 
 public interface IGainParametersProvider
 {

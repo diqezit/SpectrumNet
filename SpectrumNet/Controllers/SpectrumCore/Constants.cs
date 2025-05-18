@@ -4,7 +4,7 @@ namespace SpectrumNet.Controllers.SpectrumCore;
 
 public static class Constants
 {
-    // Общие константы
+    // Общие константы для обработки аудио
     public const float
         DEFAULT_AMPLIFICATION_FACTOR = 0.5f,
         DEFAULT_MAX_DB_VALUE = 0f,

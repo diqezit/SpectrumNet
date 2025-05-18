@@ -687,7 +687,8 @@ public sealed class Renderer : AsyncDisposableBase
 
             case nameof(IMainController.WindowType):
             case nameof(IMainController.ScaleType):
-                UpdateAnalyzerSettings();
+                _frameCache.MarkDirty();
+                RequestRender();
                 break;
 
             case nameof(IMainController.BarSpacing):

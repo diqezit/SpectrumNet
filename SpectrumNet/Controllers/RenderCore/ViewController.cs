@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// Controllers/RenderCore/ViewController.cs
+#nullable enable
 
 namespace SpectrumNet.Controllers.RenderCore;
 
@@ -150,7 +151,7 @@ public class ViewController : IViewController, IDisposable
             _selectedScaleType = value;
             Settings.Instance.SelectedScaleType = value;
             _mainController.OnPropertyChanged(nameof(ScaleType));
-            _analyzer?.UpdateSettings(_mainController.WindowType, value);
+            UpdateAnalyzerSettings(value);
         }
     }
 
@@ -226,9 +227,7 @@ public class ViewController : IViewController, IDisposable
     public void UpdateRenderDimensions(int width, int height) =>
         _renderer?.UpdateRenderDimensions(width, height);
 
-
     public void SynchronizeVisualization() => _renderer?.SynchronizeWithController();
-
 
     public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
     {
@@ -282,6 +281,24 @@ public class ViewController : IViewController, IDisposable
 
         if (_renderer != null && typeof(T) == typeof(RenderStyle))
             _renderer.UpdateRenderStyle((RenderStyle)(object)value);
+    }
+
+    private void UpdateAnalyzerSettings(SpectrumScale scale)
+    {
+        if (_analyzer == null) return;
+
+        try
+        {
+            _analyzer.UpdateSettings(_mainController.WindowType, scale);
+            _analyzer.ReprocessLastData();
+            RequestRender();
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error,
+                LogPrefix,
+                $"Error updating analyzer settings: {ex.Message}");
+        }
     }
 
     #endregion

@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// Controllers/AudioCore/AudioCapture.cs
+#nullable enable
 
 namespace SpectrumNet.Controllers.AudioCore;
 
@@ -29,29 +30,27 @@ public sealed class AudioCapture : AsyncDisposableBase
     public Task ReinitializeCaptureAsync() => _captureService.ReinitializeCaptureAsync();
 
     protected override void DisposeManaged() =>
-        DisposeCaptureService(synchronous: true);
+        DisposeCaptureServiceSync();
 
     protected override async ValueTask DisposeAsyncManagedResources() =>
         await DisposeCaptureServiceAsync();
 
-    private void DisposeCaptureService(bool synchronous)
+    private void DisposeCaptureServiceSync()
     {
-        Log(LogLevel.Information, LogPrefix,
-            synchronous ? "AudioCapture disposing" : "AudioCapture async disposing");
+        Log(LogLevel.Information, LogPrefix, "AudioCapture disposing");
+        TryStopAndDisposeCaptureServiceSync();
+        Log(LogLevel.Information, LogPrefix, "AudioCapture disposed successfully");
+    }
 
+    private void TryStopAndDisposeCaptureServiceSync()
+    {
         try
         {
-            if (synchronous)
+            if (_captureService is IDisposable disposable)
             {
-                if (_captureService is IDisposable disposable)
-                {
-                    _captureService.StopCaptureAsync().GetAwaiter().GetResult();
-                    disposable.Dispose();
-                }
+                _captureService.StopCaptureAsync().GetAwaiter().GetResult();
+                disposable.Dispose();
             }
-
-            Log(LogLevel.Information, LogPrefix,
-                synchronous ? "AudioCapture disposed successfully" : "AudioCapture async disposed successfully");
         }
         catch (Exception ex)
         {
@@ -62,13 +61,16 @@ public sealed class AudioCapture : AsyncDisposableBase
     private async Task DisposeCaptureServiceAsync()
     {
         Log(LogLevel.Information, LogPrefix, "AudioCapture async disposing");
+        await TryStopAndDisposeCaptureServiceAsync();
+        Log(LogLevel.Information, LogPrefix, "AudioCapture async disposed successfully");
+    }
 
+    private async Task TryStopAndDisposeCaptureServiceAsync()
+    {
         try
         {
             await _captureService.StopCaptureAsync();
             await _captureService.DisposeAsync();
-
-            Log(LogLevel.Information, LogPrefix, "AudioCapture async disposed successfully");
         }
         catch (Exception ex)
         {

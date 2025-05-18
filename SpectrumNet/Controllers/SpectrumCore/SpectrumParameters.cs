@@ -7,11 +7,13 @@ public record SpectrumParameters(
     float DbRange,
     float AmplificationFactor)
 {
-    public static SpectrumParameters FromProvider(IGainParametersProvider? provider) =>
-        provider is null
-            ? throw new ArgumentNullException(nameof(provider))
-            : new(
-                provider.MinDbValue,
-                Max(provider.MaxDbValue - provider.MinDbValue, Constants.EPSILON),
-                provider.AmplificationFactor);
+    public static SpectrumParameters FromProvider(IGainParametersProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        return new(
+            provider.MinDbValue,
+            Math.Max(provider.MaxDbValue - provider.MinDbValue, Constants.EPSILON),
+            provider.AmplificationFactor);
+    }
 }
