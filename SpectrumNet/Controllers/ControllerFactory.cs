@@ -1,16 +1,18 @@
 ﻿#nullable enable
 
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+
 namespace SpectrumNet.Controllers;
 
-public sealed class ControllerFactory : AsyncDisposableBase, IMainController
+public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory, IMainController
 {
     private const string LOG_PREFIX = "ControllerFactory";
 
-    private readonly Lazy<UIController> _uiController;
-    private readonly Lazy<AudioController> _audioController;
-    private readonly Lazy<ViewController> _viewController;
-    private readonly Lazy<InputController> _inputController;
-    private readonly Lazy<IOverlayManager> _overlayManager;
+    private readonly IUIController _uiController;
+    private readonly IAudioController _audioController;
+    private readonly IViewController _viewController;
+    private readonly IInputController _inputController;
+    private readonly IOverlayManager _overlayManager;
     private readonly IRendererFactory _rendererFactory;
     private readonly ITransparencyManager _transparencyManager;
 
@@ -44,20 +46,21 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         _rendererFactory = RendererFactory.Instance;
         _transparencyManager = RendererTransparencyManager.Instance;
 
-        _uiController = new Lazy<UIController>(() => CreateUIController());
-        _audioController = new Lazy<AudioController>(() => CreateAudioController());
-        _viewController = new Lazy<ViewController>(() => CreateViewController());
-        _inputController = new Lazy<InputController>(() => new InputController(this));
-        _overlayManager = new Lazy<IOverlayManager>(() => new OverlayManager(this, _transparencyManager));
+        // Прямая инициализация контроллеров с передачей this как IMainController
+        _viewController = new ViewController(this, _renderElement, _rendererFactory);
+        _audioController = new AudioController(this, SynchronizationContext.Current!);
+        _uiController = new UIController(this, _transparencyManager);
+        _inputController = new InputController(this);
+        _overlayManager = new OverlayManager(this, _transparencyManager);
 
         ownerWindow.Closed += (_, _) => DisposeResources();
         ownerWindow.KeyDown += OnWindowKeyDown;
 
-        BatchUpdate();
-        InitializeRenderingState();
+        StartBatchUpdate();
+        Initialize();
     }
 
-    private void BatchUpdate()
+    private void StartBatchUpdate()
     {
         _batchUpdateTimer = new DispatcherTimer(DispatcherPriority.Render)
         {
@@ -65,6 +68,35 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         };
         _batchUpdateTimer.Tick += ProcessBatchedUIOperations;
         _batchUpdateTimer.Start();
+    }
+
+    private void ProcessBatchedUIOperations(object? sender, EventArgs e)
+    {
+        if (_isDisposed) return;
+
+        int processedCount = 0;
+        const int MAX_OPERATIONS_PER_FRAME = 10;
+
+        while (processedCount < MAX_OPERATIONS_PER_FRAME &&
+               _pendingUIOperations.TryDequeue(out var operation))
+        {
+            try
+            {
+                operation();
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error,
+                    LOG_PREFIX,
+                    $"Error in UI operation: {ex.Message}");
+            }
+            processedCount++;
+        }
+    }
+
+    public void Initialize()
+    {
+        InitializeRenderingState();
     }
 
     private void OnWindowKeyDown(object sender, KeyEventArgs e)
@@ -94,7 +126,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             syncContext
         );
 
-        Analyzer = analyzer;
+        // Устанавливаем analyzer в ViewController
+        _viewController.Analyzer = analyzer;
 
         var renderer = new Renderer(
             SpectrumStyles,
@@ -104,117 +137,22 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             _rendererFactory
         );
 
-        Renderer = renderer;
+        // Устанавливаем renderer в ViewController
+        _viewController.Renderer = renderer;
 
         RequestRender();
     }
 
-    private UIController CreateUIController() => new(this, _transparencyManager);
-    private AudioController CreateAudioController() => new(this, SynchronizationContext.Current!);
-    private ViewController CreateViewController() => new(this, _renderElement, _rendererFactory);
+    // Реализация IControllerFactory
+    public IUIController UIController => _uiController;
+    public IAudioController AudioController => _audioController;
+    public IViewController ViewController => _viewController;
+    public IInputController InputController => _inputController;
+    public IOverlayManager OverlayManager => _overlayManager;
 
-    public IUIController UIController => _uiController.Value;
-    public IAudioController AudioController => _audioController.Value;
-    public IViewController ViewController => _viewController.Value;
-    public IInputController InputController => _inputController.Value;
-    public IOverlayManager OverlayManager => _overlayManager.Value;
-
+    // Реализация IMainController
     public Dispatcher Dispatcher => Application.Current?.Dispatcher ??
         throw new InvalidOperationException("Application.Current is null");
-
-    public SpectrumAnalyzer Analyzer
-    {
-        get => ViewController.Analyzer;
-        set => ViewController.Analyzer = value;
-    }
-
-    public Renderer? Renderer
-    {
-        get => ViewController.Renderer;
-        set => ViewController.Renderer = value;
-    }
-
-    public bool IsOverlayActive
-    {
-        get => _overlayManager.IsValueCreated && OverlayManager.IsActive;
-        set
-        {
-            if (_isDisposed) return;
-
-            if (value != IsOverlayActive)
-            {
-                if (value)
-                    _ = OverlayManager.OpenAsync();
-                else
-                    _ = OverlayManager.CloseAsync();
-            }
-        }
-    }
-
-    public bool IsOverlayTopmost
-    {
-        get => !_overlayManager.IsValueCreated || OverlayManager.IsTopmost;
-        set
-        {
-            if (_isDisposed) return;
-
-            if (_overlayManager.IsValueCreated)
-                OverlayManager.IsTopmost = value;
-        }
-    }
-
-    public bool IsPopupOpen
-    {
-        get => _uiController.IsValueCreated && UIController.IsPopupOpen;
-        set
-        {
-            if (_isDisposed) return;
-
-            if (_uiController.IsValueCreated)
-                UIController.IsPopupOpen = value;
-        }
-    }
-
-    public bool IsControlPanelOpen =>
-        !_isDisposed
-        && _uiController.IsValueCreated
-        && UIController.IsControlPanelOpen;
-
-    public void ToggleTheme()
-    {
-        if (_isDisposed) return;
-        UIController.ToggleTheme();
-    }
-
-    public void OpenControlPanel()
-    {
-        if (_isDisposed) return;
-        UIController.OpenControlPanel();
-    }
-
-    public void CloseControlPanel()
-    {
-        if (_isDisposed) return;
-        UIController.CloseControlPanel();
-    }
-
-    public void ToggleControlPanel()
-    {
-        if (_isDisposed) return;
-        UIController.ToggleControlPanel();
-    }
-
-    public void OpenOverlay()
-    {
-        if (_isDisposed) return;
-        _ = OverlayManager.OpenAsync();
-    }
-
-    public void CloseOverlay()
-    {
-        if (_isDisposed) return;
-        _ = OverlayManager.CloseAsync();
-    }
 
     public bool LimitFpsTo60
     {
@@ -255,10 +193,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         }
     }
 
-    public GainParameters GainParameters =>
-        _audioController.IsValueCreated ?
-            AudioController.GainParameters :
-            new GainParameters(SynchronizationContext.Current);
+    public GainParameters GainParameters => _audioController.GainParameters;
 
     public bool IsRecording
     {
@@ -268,18 +203,16 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             if (_isDisposed || _isRecording == value) return;
             _isRecording = value;
 
-            if (_audioController.IsValueCreated && !_isDisposed)
-                AudioController.IsRecording = value;
+            _audioController.IsRecording = value;
 
             OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
 
-            if (Renderer != null && !_isDisposed)
+            if (_viewController.Renderer != null && !_isDisposed)
                 RequestRender();
         }
     }
 
-    public bool CanStartCapture => !_isDisposed && !IsRecording
-        && (!_audioController.IsValueCreated || AudioController.CanStartCapture);
+    public bool CanStartCapture => !_isDisposed && !IsRecording && _audioController.CanStartCapture;
 
     public bool IsTransitioning
     {
@@ -288,9 +221,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         {
             if (_isDisposed || _isTransitioning == value) return;
             _isTransitioning = value;
-
-            if (_audioController.IsValueCreated && !_isDisposed)
-                AudioController.IsTransitioning = value;
+            _audioController.IsTransitioning = value;
         }
     }
 
@@ -298,59 +229,42 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     public FftWindowType WindowType
     {
-        get => _audioController.IsValueCreated ?
-            AudioController.WindowType :
-            Settings.Instance.SelectedFftWindowType;
+        get => _audioController.WindowType;
         set
         {
             if (_isDisposed) return;
-
-            if (_audioController.IsValueCreated)
-                AudioController.WindowType = value;
-
+            _audioController.WindowType = value;
             OnPropertyChanged(nameof(WindowType));
         }
     }
 
     public float MinDbLevel
     {
-        get => _audioController.IsValueCreated ?
-            AudioController.MinDbLevel :
-            Settings.Instance.UIMinDbLevel;
+        get => _audioController.MinDbLevel;
         set
         {
             if (_isDisposed) return;
-
-            if (_audioController.IsValueCreated)
-                AudioController.MinDbLevel = value;
+            _audioController.MinDbLevel = value;
         }
     }
 
     public float MaxDbLevel
     {
-        get => _audioController.IsValueCreated ?
-            AudioController.MaxDbLevel :
-            Settings.Instance.UIMaxDbLevel;
+        get => _audioController.MaxDbLevel;
         set
         {
             if (_isDisposed) return;
-
-            if (_audioController.IsValueCreated)
-                AudioController.MaxDbLevel = value;
+            _audioController.MaxDbLevel = value;
         }
     }
 
     public float AmplificationFactor
     {
-        get => _audioController.IsValueCreated ?
-            AudioController.AmplificationFactor :
-            Settings.Instance.UIAmplificationFactor;
+        get => _audioController.AmplificationFactor;
         set
         {
             if (_isDisposed) return;
-
-            if (_audioController.IsValueCreated)
-                AudioController.AmplificationFactor = value;
+            _audioController.AmplificationFactor = value;
         }
     }
 
@@ -361,37 +275,23 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public async Task StartCaptureAsync()
     {
         if (_isDisposed) return;
-        await AudioController.StartCaptureAsync();
+        await _audioController.StartCaptureAsync();
     }
 
     public async Task StopCaptureAsync()
     {
         if (_isDisposed) return;
-
-        if (_audioController.IsValueCreated)
-            await AudioController.StopCaptureAsync();
+        await _audioController.StopCaptureAsync();
     }
 
     public async Task ToggleCaptureAsync()
     {
         if (_isDisposed) return;
-
-        if (!_audioController.IsValueCreated)
-        {
-            IsRecording = true;
-            await AudioController.StartCaptureAsync();
-        }
-        else
-        {
-            await AudioController.ToggleCaptureAsync();
-        }
+        await _audioController.ToggleCaptureAsync();
     }
 
     public SpectrumAnalyzer? GetCurrentAnalyzer() =>
-        _isDisposed ? null :
-        _audioController.IsValueCreated ?
-            AudioController.GetCurrentAnalyzer() :
-            null;
+        _isDisposed ? null : _audioController.GetCurrentAnalyzer();
 
     #endregion
 
@@ -403,143 +303,102 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     public int BarCount
     {
-        get => _viewController.IsValueCreated ?
-            ViewController.BarCount :
-            Settings.Instance.UIBarCount;
+        get => _viewController.BarCount;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.BarCount = value;
+            _viewController.BarCount = value;
         }
     }
 
     public double BarSpacing
     {
-        get => _viewController.IsValueCreated ?
-            ViewController.BarSpacing :
-            Settings.Instance.UIBarSpacing;
+        get => _viewController.BarSpacing;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.BarSpacing = value;
+            _viewController.BarSpacing = value;
         }
     }
 
     public RenderQuality RenderQuality
     {
-        get => _viewController.IsValueCreated ?
-            ViewController.RenderQuality :
-            Settings.Instance.SelectedRenderQuality;
+        get => _viewController.RenderQuality;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.RenderQuality = value;
+            _viewController.RenderQuality = value;
         }
     }
 
     public RenderStyle SelectedDrawingType
     {
-        get => _viewController.IsValueCreated ?
-            ViewController.SelectedDrawingType :
-            Settings.Instance.SelectedRenderStyle;
+        get => _viewController.SelectedDrawingType;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.SelectedDrawingType = value;
+            _viewController.SelectedDrawingType = value;
         }
     }
 
     public SpectrumScale ScaleType
     {
-        get => _viewController.IsValueCreated ?
-            ViewController.ScaleType :
-            Settings.Instance.SelectedScaleType;
+        get => _viewController.ScaleType;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.ScaleType = value;
+            _viewController.ScaleType = value;
         }
     }
 
     public string SelectedStyle
     {
-        get => _viewController.IsValueCreated ?
-            ViewController.SelectedStyle :
-            Settings.Instance.SelectedPalette;
+        get => _viewController.SelectedStyle;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.SelectedStyle = value;
+            _viewController.SelectedStyle = value;
         }
     }
 
     public Palette? SelectedPalette
     {
-        get => _viewController.IsValueCreated ? ViewController.SelectedPalette : null;
+        get => _viewController.SelectedPalette;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.SelectedPalette = value;
+            _viewController.SelectedPalette = value;
         }
     }
 
     public bool ShowPerformanceInfo
     {
-        get => _viewController.IsValueCreated ?
-            ViewController.ShowPerformanceInfo :
-            Settings.Instance.ShowPerformanceInfo;
+        get => _viewController.ShowPerformanceInfo;
         set
         {
             if (_isDisposed) return;
-
-            if (_viewController.IsValueCreated)
-                ViewController.ShowPerformanceInfo = value;
+            _viewController.ShowPerformanceInfo = value;
         }
     }
 
-    public IReadOnlyDictionary<string, Palette> AvailablePalettes =>
-        _viewController.IsValueCreated ?
-            ViewController.AvailablePalettes :
-            SpectrumBrushes.Instance.RegisteredPalettes;
+    public IReadOnlyDictionary<string, Palette> AvailablePalettes => _viewController.AvailablePalettes;
+    public IEnumerable<RenderStyle> AvailableDrawingTypes => _viewController.AvailableDrawingTypes;
+    public IEnumerable<FftWindowType> AvailableFftWindowTypes => _viewController.AvailableFftWindowTypes;
+    public IEnumerable<SpectrumScale> AvailableScaleTypes => _viewController.AvailableScaleTypes;
+    public IEnumerable<RenderQuality> AvailableRenderQualities => _viewController.AvailableRenderQualities;
+    public IEnumerable<RenderStyle> OrderedDrawingTypes => _viewController.OrderedDrawingTypes;
 
-    public IEnumerable<RenderStyle> AvailableDrawingTypes =>
-        _viewController.IsValueCreated ?
-            ViewController.AvailableDrawingTypes :
-            Enum.GetValues<RenderStyle>();
+    public Renderer? Renderer
+    {
+        get => _viewController.Renderer;
+        set => _viewController.Renderer = value;
+    }
 
-    public IEnumerable<FftWindowType> AvailableFftWindowTypes =>
-        _viewController.IsValueCreated ?
-            ViewController.AvailableFftWindowTypes :
-            Enum.GetValues<FftWindowType>();
-
-    public IEnumerable<SpectrumScale> AvailableScaleTypes =>
-        _viewController.IsValueCreated ?
-            ViewController.AvailableScaleTypes :
-            Enum.GetValues<SpectrumScale>();
-
-    public IEnumerable<RenderQuality> AvailableRenderQualities =>
-        _viewController.IsValueCreated ?
-            ViewController.AvailableRenderQualities :
-            Enum.GetValues<RenderQuality>();
-
-    public IEnumerable<RenderStyle> OrderedDrawingTypes =>
-        _viewController.IsValueCreated ?
-            ViewController.OrderedDrawingTypes :
-            Enum.GetValues<RenderStyle>();
+    public SpectrumAnalyzer Analyzer
+    {
+        get => _viewController.Analyzer;
+        set => _viewController.Analyzer = value;
+    }
 
     #endregion
 
@@ -548,101 +407,174 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
     public void RequestRender()
     {
         if (_isDisposed) return;
-        Renderer?.RequestRender();
+        _viewController.RequestRender();
     }
 
     public void UpdateRenderDimensions(int width, int height)
     {
         if (_isDisposed) return;
-        Renderer?.UpdateRenderDimensions(width, height);
+        _viewController.UpdateRenderDimensions(width, height);
     }
 
     public void SynchronizeVisualization()
     {
         if (_isDisposed) return;
-        Renderer?.SynchronizeWithController();
+        _viewController.SynchronizeVisualization();
     }
 
     public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
     {
         if (_isDisposed || e == null) return;
-
-        if (_viewController.IsValueCreated)
-            ViewController.OnPaintSurface(sender, e);
-        else
-            Renderer?.RenderFrame(sender, e);
+        _viewController.OnPaintSurface(sender, e);
     }
 
     #endregion
 
-    #region IInputController Implementation
+    #region UI Controller Methods
+
+    public bool IsOverlayActive
+    {
+        get => _overlayManager.IsActive;
+        set
+        {
+            if (_isDisposed) return;
+
+            if (value != IsOverlayActive)
+            {
+                if (value)
+                    _ = _overlayManager.OpenAsync();
+                else
+                    _ = _overlayManager.CloseAsync();
+            }
+        }
+    }
+
+    public bool IsOverlayTopmost
+    {
+        get => _overlayManager.IsTopmost;
+        set
+        {
+            if (_isDisposed) return;
+            _overlayManager.IsTopmost = value;
+        }
+    }
+
+    public bool IsPopupOpen
+    {
+        get => _uiController.IsPopupOpen;
+        set
+        {
+            if (_isDisposed) return;
+            _uiController.IsPopupOpen = value;
+        }
+    }
+
+    public bool IsControlPanelOpen => !_isDisposed && _uiController.IsControlPanelOpen;
+
+    public void ToggleTheme()
+    {
+        if (_isDisposed) return;
+        _uiController.ToggleTheme();
+    }
+
+    public void OpenControlPanel()
+    {
+        if (_isDisposed) return;
+        _uiController.OpenControlPanel();
+    }
+
+    public void CloseControlPanel()
+    {
+        if (_isDisposed) return;
+        _uiController.CloseControlPanel();
+    }
+
+    public void ToggleControlPanel()
+    {
+        if (_isDisposed) return;
+        _uiController.ToggleControlPanel();
+    }
+
+    public void OpenOverlay()
+    {
+        if (_isDisposed) return;
+        _ = _overlayManager.OpenAsync();
+    }
+
+    public void CloseOverlay()
+    {
+        if (_isDisposed) return;
+        _ = _overlayManager.CloseAsync();
+    }
+
+    #endregion
+
+    #region Input Controller Methods
 
     public void RegisterWindow(Window window)
     {
         if (_isDisposed) return;
-        InputController.RegisterWindow(window);
+        _inputController.RegisterWindow(window);
     }
 
     public void UnregisterWindow(Window window)
     {
         if (_isDisposed) return;
-
-        if (_inputController.IsValueCreated)
-            InputController.UnregisterWindow(window);
+        _inputController.UnregisterWindow(window);
     }
 
     public bool HandleKeyDown(KeyEventArgs e, IInputElement? focusedElement)
     {
         if (_isDisposed) return false;
-        return InputController.HandleKeyDown(e, focusedElement);
+        return _inputController.HandleKeyDown(e, focusedElement);
     }
 
     public bool HandleMouseDown(object? sender, MouseButtonEventArgs e)
     {
         if (_isDisposed) return false;
-        return InputController.HandleMouseDown(sender, e);
+        return _inputController.HandleMouseDown(sender, e);
     }
 
-    public bool HandleMouseMove(object? sender, System.Windows.Input.MouseEventArgs e)
+    public bool HandleMouseMove(object? sender, MouseEventArgs e)
     {
         if (_isDisposed) return false;
-        return InputController.HandleMouseMove(sender, e);
+        return _inputController.HandleMouseMove(sender, e);
     }
 
     public bool HandleMouseUp(object? sender, MouseButtonEventArgs e)
     {
         if (_isDisposed) return false;
-        return InputController.HandleMouseUp(sender, e);
+        return _inputController.HandleMouseUp(sender, e);
     }
 
     public bool HandleMouseDoubleClick(object? sender, MouseButtonEventArgs e)
     {
         if (_isDisposed) return false;
-        return InputController.HandleMouseDoubleClick(sender, e);
+        return _inputController.HandleMouseDoubleClick(sender, e);
     }
 
     public bool HandleWindowDrag(object? sender, MouseButtonEventArgs e)
     {
         if (_isDisposed) return false;
-        return InputController.HandleWindowDrag(sender, e);
+        return _inputController.HandleWindowDrag(sender, e);
     }
 
-    public void HandleMouseEnter(object? sender, System.Windows.Input.MouseEventArgs e)
+    public void HandleMouseEnter(object? sender, MouseEventArgs e)
     {
         if (_isDisposed) return;
-        InputController.HandleMouseEnter(sender, e);
+        _inputController.HandleMouseEnter(sender, e);
     }
 
-    public void HandleMouseLeave(object? sender, System.Windows.Input.MouseEventArgs e)
+    public void HandleMouseLeave(object? sender, MouseEventArgs e)
     {
         if (_isDisposed) return;
-        InputController.HandleMouseLeave(sender, e);
+        _inputController.HandleMouseLeave(sender, e);
     }
 
     public bool HandleButtonClick(object? sender, RoutedEventArgs e)
     {
         if (_isDisposed) return false;
-        return InputController.HandleButtonClick(sender, e);
+        return _inputController.HandleButtonClick(sender, e);
     }
 
     #endregion
@@ -660,31 +592,10 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         });
     }
 
-    private void ProcessBatchedUIOperations(object? sender, EventArgs e)
+    public void DisposeResources()
     {
-        if (_isDisposed) return;
-
-        int processedCount = 0;
-        const int MAX_OPERATIONS_PER_FRAME = 10;
-
-        while (processedCount < MAX_OPERATIONS_PER_FRAME &&
-               _pendingUIOperations.TryDequeue(out var operation))
-        {
-            try
-            {
-                operation();
-            }
-            catch (Exception ex)
-            {
-                Log(LogLevel.Error,
-                    LOG_PREFIX,
-                    $"Error in UI operation: {ex.Message}");
-            }
-            processedCount++;
-        }
+        Dispose();
     }
-
-    public void DisposeResources() => Dispose();
 
     protected override void DisposeManaged()
     {
@@ -749,13 +660,13 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private void StopCaptureIfNeeded()
     {
-        if (!IsRecording || !_audioController.IsValueCreated)
+        if (!IsRecording)
             return;
 
         try
         {
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var stopTask = _audioController.Value.StopCaptureAsync();
+            var stopTask = _audioController.StopCaptureAsync();
 
             if (!stopTask.Wait(5000))
             {
@@ -774,58 +685,29 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private void CloseUIElementsIfNeeded()
     {
-        if (_overlayManager.IsValueCreated && OverlayManager.IsActive)
-            _ = OverlayManager.CloseAsync();
+        if (_overlayManager.IsActive)
+            _ = _overlayManager.CloseAsync();
 
-        if (_uiController.IsValueCreated && IsControlPanelOpen)
-            UIController.CloseControlPanel();
+        if (IsControlPanelOpen)
+            _uiController.CloseControlPanel();
     }
 
     private void DisposeAllControllers()
     {
-        var (viewController, audioController, uiController, inputController, overlayManager) = CaptureExistingControllers();
-
-        if (overlayManager != null)
+        if (_overlayManager is IDisposable overlayManager)
             DisposeController(overlayManager, "OverlayManager");
 
-        if (viewController != null)
+        if (_viewController is IDisposable viewController)
             DisposeController(viewController, "ViewController");
 
-        if (audioController != null)
+        if (_audioController is IDisposable audioController)
             DisposeController(audioController, "AudioController");
 
-        if (uiController != null)
+        if (_uiController is IDisposable uiController)
             DisposeController(uiController, "UIController");
 
-        if (inputController != null)
+        if (_inputController is IDisposable inputController)
             DisposeController(inputController, "InputController");
-    }
-
-    private (ViewController? viewController,
-             AudioController? audioController,
-             UIController? uiController,
-             InputController? inputController,
-             IOverlayManager? overlayManager) CaptureExistingControllers()
-    {
-        lock (_disposeLock)
-        {
-            ViewController? viewController =
-                _viewController.IsValueCreated ? _viewController.Value : null;
-
-            AudioController? audioController =
-                _audioController.IsValueCreated ? _audioController.Value : null;
-
-            UIController? uiController =
-                _uiController.IsValueCreated ? _uiController.Value : null;
-
-            InputController? inputController =
-                _inputController.IsValueCreated ? _inputController.Value : null;
-
-            IOverlayManager? overlayManager =
-                _overlayManager.IsValueCreated ? _overlayManager.Value : null;
-
-            return (viewController, audioController, uiController, inputController, overlayManager);
-        }
     }
 
     private static void DisposeController<T>(
@@ -915,11 +797,11 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private async Task StopCaptureAsync(CancellationToken token)
     {
-        if (IsRecording && _audioController.IsValueCreated)
+        if (IsRecording)
         {
             try
             {
-                await _audioController.Value.StopCaptureAsync().WaitAsync(TimeSpan.FromSeconds(3), token);
+                await _audioController.StopCaptureAsync().WaitAsync(TimeSpan.FromSeconds(3), token);
             }
             catch (OperationCanceledException)
             {
@@ -938,11 +820,11 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
         {
             try
             {
-                if (_overlayManager.IsValueCreated && OverlayManager.IsActive)
-                    _ = OverlayManager.CloseAsync();
+                if (_overlayManager.IsActive)
+                    _ = _overlayManager.CloseAsync();
 
-                if (_uiController.IsValueCreated && IsControlPanelOpen)
-                    UIController.CloseControlPanel();
+                if (IsControlPanelOpen)
+                    _uiController.CloseControlPanel();
             }
             catch (Exception ex)
             {
@@ -953,22 +835,30 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
 
     private async Task DisposeControllersAsync(CancellationToken token)
     {
-        var (viewController, audioController, uiController, inputController, overlayManager) = CaptureExistingControllers();
+        if (_overlayManager is IAsyncDisposable asyncOverlayManager)
+            await DisposeControllerAsync(asyncOverlayManager, "OverlayManager", token);
+        else if (_overlayManager is IDisposable disposableOverlayManager)
+            DisposeController(disposableOverlayManager, "OverlayManager");
 
-        if (overlayManager != null)
-            await DisposeControllerAsync(overlayManager, "OverlayManager", token);
+        if (_viewController is IAsyncDisposable asyncViewController)
+            await DisposeControllerAsync(asyncViewController, "ViewController", token);
+        else if (_viewController is IDisposable disposableViewController)
+            DisposeController(disposableViewController, "ViewController");
 
-        if (viewController != null)
-            await DisposeControllerAsync(viewController, "ViewController", token);
+        if (_audioController is IAsyncDisposable asyncAudioController)
+            await DisposeControllerAsync(asyncAudioController, "AudioController", token);
+        else if (_audioController is IDisposable disposableAudioController)
+            DisposeController(disposableAudioController, "AudioController");
 
-        if (audioController != null)
-            await DisposeControllerAsync(audioController, "AudioController", token);
+        if (_uiController is IAsyncDisposable asyncUiController)
+            await DisposeControllerAsync(asyncUiController, "UIController", token);
+        else if (_uiController is IDisposable disposableUiController)
+            DisposeController(disposableUiController, "UIController");
 
-        if (uiController != null)
-            await DisposeControllerAsync(uiController, "UIController", token);
-
-        if (inputController != null)
-            await DisposeControllerAsync(inputController, "InputController", token);
+        if (_inputController is IAsyncDisposable asyncInputController)
+            await DisposeControllerAsync(asyncInputController, "InputController", token);
+        else if (_inputController is IDisposable disposableInputController)
+            DisposeController(disposableInputController, "InputController");
     }
 
     private static async Task DisposeControllerAsync<T>(
@@ -981,10 +871,6 @@ public sealed class ControllerFactory : AsyncDisposableBase, IMainController
             if (controller is IAsyncDisposable asyncDisposable)
             {
                 await asyncDisposable.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3), token);
-            }
-            else if (controller is IDisposable disposable)
-            {
-                disposable.Dispose();
             }
         }
         catch (OperationCanceledException)
