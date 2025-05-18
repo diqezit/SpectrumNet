@@ -1,695 +1,645 @@
 ﻿#nullable enable
 
 using static SpectrumNet.Views.Renderers.ConstellationRenderer.Constants;
-using static SpectrumNet.Views.Renderers.ConstellationRenderer.Constants.Quality;
+using static SpectrumNet.Views.Renderers.ConstellationRenderer.Constants.QualityConfig;
 using static System.MathF;
 
-namespace SpectrumNet.Views.Renderers;
-
-public sealed class ConstellationRenderer : EffectSpectrumRenderer
+namespace SpectrumNet.Views.Renderers
 {
-    private static readonly Lazy<ConstellationRenderer> _instance =
-        new(() => new ConstellationRenderer());
-    private const string LOG_PREFIX = "ConstellationRenderer";
-
-    private ConstellationRenderer() { }
-
-    public static ConstellationRenderer GetInstance() => _instance.Value;
-
-    public record Constants
+    public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
-        public const string LOG_PREFIX = "ConstellationRenderer";
+        private static readonly Lazy<ConstellationRenderer> _instance =
+          new(() => new ConstellationRenderer());
+        private const string LOG_TAG = "ConstellationRenderer";
 
-        public const float
-            TIME_STEP = 0.016f,
-            BASE_STAR_SIZE = 1.5f,
-            MAX_STAR_SIZE = 12.0f,
-            STAR_SIZE_RANGE = MAX_STAR_SIZE - BASE_STAR_SIZE,
-            MIN_BRIGHTNESS = 0.2f,
-            DEFAULT_BRIGHTNESS = 0.8f,
-            BRIGHTNESS_VARIATION = 0.4f,
-            TWINKLE_SPEED = 3.0f,
-            FADE_IN_SPEED = 4.0f,
-            FADE_OUT_SPEED = 2.5f,
-            MIN_LIFETIME = 3.0f,
-            MAX_LIFETIME = 12.0f,
-            MOVEMENT_FACTOR = 25.0f,
-            SPAWN_THRESHOLD = 0.05f,
-            GLOW_THRESHOLD = 0.3f,
-            SPECTRUM_SENSITIVITY = 18.0f;
+        public static ConstellationRenderer GetInstance() => _instance.Value;
 
-        public const int
-            DEFAULT_STAR_COUNT = 180,
-            OVERLAY_STAR_COUNT = 120,
-            SPAWN_RATE_PER_SECOND = 30,
-            RENDERER_BATCH_SIZE = 96;
-
-        public const byte
-            MIN_STAR_COLOR = 140,
-            MAX_STAR_COLOR = 255;
-
-        public const float SMOOTHING_FACTOR = 0.1f;
-
-        public static class Quality
+        public record Constants
         {
-            public const bool
-                LOW_USE_GLOW_EFFECT = true,
-                MEDIUM_USE_GLOW_EFFECT = true,
-                HIGH_USE_GLOW_EFFECT = true,
-                LOW_USE_ANTI_ALIAS = true,
-                MEDIUM_USE_ANTI_ALIAS = true,
-                HIGH_USE_ANTI_ALIAS = true;
-
             public const float
-                LOW_GLOW_RADIUS = 2.0f,
-                MEDIUM_GLOW_RADIUS = 4.0f,
-                HIGH_GLOW_RADIUS = 6.0f;
-        }
-    }
+              TIME_STEP = 0.016f,
+              BASE_STAR_SIZE = 1.5f,
+              MAX_STAR_SIZE = 12.0f,
+              STAR_SIZE_RANGE = MAX_STAR_SIZE - BASE_STAR_SIZE,
+              MIN_BRIGHTNESS = 0.2f,
+              DEFAULT_BRIGHTNESS = 0.8f,
+              BRIGHTNESS_VARIATION = 0.3f,
+              TWINKLE_SPEED = 2.0f,
+              FADE_IN_SPEED = 4.0f,
+              MIN_LIFETIME = 3.0f,
+              MAX_LIFETIME = 12.0f,
+              MOVEMENT_FACTOR = 25.0f,
+              SPAWN_THRESHOLD = 0.05f,
+              SPECTRUM_SENSITIVITY = 18.0f,
+              SMOOTHING_FACTOR = 0.1f,
+              BRIGHTNESS_SPECTRUM_BOOST = 0.5f,
+              ENERGY_FACTOR_BOOST = 0.8f,
+              ADVANCED_EFFECTS_SIZE_MULTIPLIER = 1.5f,
+              ADVANCED_EFFECTS_SPECTRUM_THRESHOLD = 0.5f,
+              MIN_TOTAL_MAGNITUDE_THRESHOLD = 0.01f,
+              MID_ANGLE_MULTIPLIER = 1.3f,
+              HIGH_ANGLE_MULTIPLIER = 1.8f,
+              ANGLE_PHASE_SHIFT_PI_OVER_2 = MathF.PI / 2f,
+              MID_SPECTRUM_VELOCITY_WEIGHT = 0.8f,
+              HIGH_SPECTRUM_VELOCITY_WEIGHT = 0.5f,
+              DENSITY_ANGLE_MULTIPLIER_X = 1.2f,
+              DENSITY_ANGLE_MULTIPLIER_Y = 1.5f,
+              DENSITY_VELOCITY_WEIGHT = 0.6f,
+              DIRECTION_VARIANCE_MULTIPLIER = 5f,
+              OPACITY_LIFETIME_PHASE_END = 0.2f,
+              OPACITY_SPECTRUM_BASE = 0.8f,
+              OPACITY_SPECTRUM_BOOST = 0.4f,
+              BRIGHTNESS_SPECTRUM_BASE = 1.0f,
+              BRIGHTNESS_CREATE_STAR_BASE = 0.7f,
+              BRIGHTNESS_CLAMP_MAX = 1.5f,
+              STAR_SIZE_ENERGY_MULTIPLIER = 0.9f,
+              STAR_SIZE_CLAMP_MIN = 0.7f,
+              STAR_SIZE_CLAMP_MAX = 1.4f,
+              TWINKLE_SPEED_BASE_RAND = 0.8f,
+              TWINKLE_SPEED_RAND_RANGE = 0.4f,
+              SPEED_VARIATION_BASE = 0.5f,
+              SPEED_VARIATION_RAND_RANGE = 1.5f,
+              SPECTRAL_SPEED_CLAMP_MIN = 0.2f,
+              SPECTRAL_SPEED_CLAMP_MAX = 2.5f,
+              CHAOS_FREQUENCY_BASE = 1.0f,
+              CHAOS_FREQUENCY_RAND_RANGE = 3.0f;
 
-    private static readonly SKColor[] _gradientColors =
-        [SKColors.White, SKColors.Transparent];
-    private static readonly float[] _gradientPositions =
-        [0.0f, 1.0f];
+            public const int
+              DEFAULT_STAR_COUNT = 360,
+              OVERLAY_STAR_COUNT = 120,
+              SPAWN_RATE_PER_SECOND = 20,
+              ALPHA_MIN_RENDER_THRESHOLD = 10,
+              ADVANCED_EFFECTS_ALPHA_THRESHOLD = 180,
+              ADVANCED_EFFECTS_ALPHA_DIVISOR = 5,
+              SPAWN_MAX_PER_FRAME = 5;
 
-    private Star[]? _stars;
-
-    private float
-        _lowSpectrum,
-        _midSpectrum,
-        _highSpectrum,
-        _spectrumEnergy,
-        _spawnAccumulator;
-
-    private int _starCount;
-    private bool _useGlowEffect;
-    private float _glowRadius;
-    private readonly Random _random = new();
-
-    protected override void OnInitialize()
-    {
-        base.OnInitialize();
-        InitializeStars();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-    }
-
-    protected override void OnConfigurationChanged()
-    {
-        _starCount = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
-        InitializeStars();
-
-        Log(LogLevel.Debug, LOG_PREFIX,
-            $"Configuration changed. Quality: {Quality}, Stars: {_starCount}");
-    }
-
-    protected override void OnQualitySettingsApplied()
-    {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                ApplyLowQualitySettings();
-                break;
-            case RenderQuality.Medium:
-                ApplyMediumQualitySettings();
-                break;
-            case RenderQuality.High:
-                ApplyHighQualitySettings();
-                break;
-        }
-
-        Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
-    }
-
-    private void ApplyLowQualitySettings()
-    {
-        _useAntiAlias = LOW_USE_ANTI_ALIAS;
-        _useAdvancedEffects = false;
-        _useGlowEffect = LOW_USE_GLOW_EFFECT;
-        _glowRadius = LOW_GLOW_RADIUS;
-    }
-
-    private void ApplyMediumQualitySettings()
-    {
-        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
-        _useAdvancedEffects = true;
-        _useGlowEffect = MEDIUM_USE_GLOW_EFFECT;
-        _glowRadius = MEDIUM_GLOW_RADIUS;
-    }
-
-    private void ApplyHighQualitySettings()
-    {
-        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
-        _useAdvancedEffects = true;
-        _useGlowEffect = HIGH_USE_GLOW_EFFECT;
-        _glowRadius = HIGH_GLOW_RADIUS;
-    }
-
-    protected override void RenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint paint)
-    {
-        ExecuteSafely(
-            () =>
+            public static class QualityConfig
             {
-                UpdateRenderer(spectrum, info);
-                RenderStars(canvas, info, paint);
-            },
+                public const bool
+                  LOW_USE_ANTI_ALIAS = true, MEDIUM_USE_ANTI_ALIAS = true, HIGH_USE_ANTI_ALIAS = true;
+            }
+        }
+
+        private float[]? _cachedSin;
+        private float[]? _cachedCos;
+        private const int CACHE_SIZE = 360;
+
+        private Star[]? _stars;
+        private float _lowSpectrum, _midSpectrum, _highSpectrum, _spectrumEnergy, _spawnAccumulator;
+        private int _starCount;
+        private readonly Random _random = new();
+
+        private ConstellationRenderer()
+        {
+            InitializeTrigonometricCache();
+        }
+
+        private void InitializeTrigonometricCache()
+        {
+            _cachedSin = new float[CACHE_SIZE];
+            _cachedCos = new float[CACHE_SIZE];
+            for (int i = 0; i < CACHE_SIZE; i++)
+            {
+                float angle = i * (2 * MathF.PI / CACHE_SIZE);
+                _cachedSin[i] = Sin(angle);
+                _cachedCos[i] = Cos(angle);
+            }
+        }
+
+        private static int GetCachedTrigonometricIndex(float angle) =>
+            (int)(angle * CACHE_SIZE / (2 * MathF.PI)) % CACHE_SIZE switch
+            {
+                var index when index < 0 => index + CACHE_SIZE,
+                var index => index
+            };
+
+        private float FastSin(float angle) => _cachedSin![GetCachedTrigonometricIndex(angle)];
+        private float FastCos(float angle) => _cachedCos![GetCachedTrigonometricIndex(angle)];
+
+        protected override void OnInitialize()
+        {
+            base.OnInitialize();
+            ResetAndInitializeStars();
+            Log(LogLevel.Debug, LOG_TAG, "Initialized");
+        }
+
+        protected override void OnConfigurationChanged()
+        {
+            _starCount = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
+            ResetAndInitializeStars();
+            Log(LogLevel.Debug, LOG_TAG, $"Configuration changed. Quality: {Quality}, Stars: {_starCount}");
+        }
+
+        private void ApplyQualityPreset(
+          bool useAA,
+          bool useAdvFx)
+        {
+            _useAntiAlias = useAA;
+            _useAdvancedEffects = useAdvFx;
+        }
+
+        protected override void OnQualitySettingsApplied()
+        {
+            switch (Quality)
+            {
+                case RenderQuality.Low: ApplyQualityPreset(LOW_USE_ANTI_ALIAS, false); break;
+                case RenderQuality.Medium: ApplyQualityPreset(MEDIUM_USE_ANTI_ALIAS, true); break;
+                case RenderQuality.High: ApplyQualityPreset(HIGH_USE_ANTI_ALIAS, true); break;
+            }
+            Log(LogLevel.Debug, LOG_TAG, $"Quality settings applied: {Quality}");
+        }
+
+        protected override void RenderEffect(
+          SKCanvas canvas,
+          float[] spectrum,
+          SKImageInfo info,
+          float barWidth,
+          float barSpacing,
+          int barCount,
+          SKPaint paint) =>
+          ExecuteSafely(() =>
+          {
+              UpdateSimulationState(spectrum, info, TIME_STEP);
+              RenderStarfield(canvas, info);
+          },
             nameof(RenderEffect),
-            "Error during rendering"
-        );
-    }
+            "Error during rendering constellatiion effect");
 
-    private void UpdateRenderer(
-        float[] spectrum,
-        SKImageInfo info)
-    {
-        UpdateState(spectrum);
-        UpdateStars(TIME_STEP, info.Width, info.Height);
-    }
-
-    private void UpdateState(float[] spectrum)
-    {
-        bool semaphoreAcquired = false;
-        try
+        private void UpdateSimulationState(
+          float[] spectrum,
+          SKImageInfo info,
+          float deltaTime)
         {
-            semaphoreAcquired = _spectrumSemaphore.Wait(0);
-            if (semaphoreAcquired)
-            {
-                ProcessSpectrum(spectrum);
-            }
+            UpdateSpectrumAnalysis(spectrum);
+            UpdateAllStarsState(deltaTime, info);
+            TrySpawnNewStars(info);
         }
-        finally
+
+        private void UpdateSpectrumAnalysis(float[] spectrum)
         {
-            if (semaphoreAcquired)
+            if (!_spectrumSemaphore.Wait(0)) return;
+            try
+            {
+                if (spectrum.Length == 0)
+                {
+                    ResetSpectrumValues();
+                    return;
+                }
+                if (spectrum.Length < 3)
+                {
+                    CalculateSimpleAverageSpectrum(spectrum);
+                    return;
+                }
+                CalculateDetailedSpectrumValues(spectrum);
+            }
+            finally
+            {
                 _spectrumSemaphore.Release();
-        }
-    }
-
-    private void ProcessSpectrum(float[] spectrum)
-    {
-        if (spectrum.Length < 3) return;
-
-        int bandLength = spectrum.Length / 3;
-
-        (float lowAvg, float midAvg, float highAvg) =
-            CalculateSpectralAverages(spectrum, bandLength);
-
-        float smoothingSpeed = SMOOTHING_FACTOR;
-        _lowSpectrum = _lowSpectrum * (1f - smoothingSpeed) +
-            lowAvg * smoothingSpeed;
-        _midSpectrum = _midSpectrum * (1f - smoothingSpeed) +
-            midAvg * smoothingSpeed;
-        _highSpectrum = _highSpectrum * (1f - smoothingSpeed) +
-            highAvg * smoothingSpeed;
-
-        _spectrumEnergy = (_lowSpectrum + _midSpectrum + _highSpectrum) * 0.333f;
-    }
-
-    private static (float low, float mid, float high) CalculateSpectralAverages(
-        float[] spectrum,
-        int bandLength)
-    {
-        float lowSum = 0f, midSum = 0f, highSum = 0f;
-
-        for (int i = 0; i < bandLength; i++)
-            lowSum += spectrum[i];
-
-        for (int i = bandLength; i < 2 * bandLength; i++)
-            midSum += spectrum[i];
-
-        for (int i = 2 * bandLength; i < spectrum.Length; i++)
-            highSum += spectrum[i];
-
-        float lowAvg = lowSum / bandLength;
-        float midAvg = midSum / bandLength;
-        float highAvg = highSum / (spectrum.Length - 2 * bandLength);
-
-        return (lowAvg, midAvg, highAvg);
-    }
-
-    private void UpdateStars(
-        float deltaTime,
-        float canvasWidth,
-        float canvasHeight)
-    {
-        if (_stars == null) return;
-
-        UpdateSpawnAccumulator();
-        ProcessStarsInBatches(deltaTime, canvasWidth, canvasHeight);
-        SpawnNewStars(canvasWidth, canvasHeight);
-    }
-
-    private void UpdateSpawnAccumulator() =>
-        _spawnAccumulator += _spectrumEnergy * SPAWN_RATE_PER_SECOND * TIME_STEP;
-
-    private void ProcessStarsInBatches(
-        float deltaTime,
-        float canvasWidth,
-        float canvasHeight)
-    {
-        if (_stars == null) return;
-
-        int batchCount = (_stars.Length + RENDERER_BATCH_SIZE - 1) /
-            RENDERER_BATCH_SIZE;
-
-        for (int batch = 0; batch < batchCount; batch++)
-        {
-            int start = batch * RENDERER_BATCH_SIZE;
-            int end = Min(start + RENDERER_BATCH_SIZE, _stars.Length);
-            UpdateStarsBatch(start, end, deltaTime, canvasWidth, canvasHeight);
-        }
-    }
-
-    private void UpdateStarsBatch(
-        int start,
-        int end,
-        float deltaTime,
-        float canvasWidth,
-        float canvasHeight)
-    {
-        if (_stars == null) return;
-
-        for (int i = start; i < end; i++)
-        {
-            if (!_stars[i].IsActive) continue;
-
-            UpdateSingleStar(i, deltaTime, canvasWidth, canvasHeight);
-        }
-    }
-
-    private void UpdateSingleStar(
-        int index,
-        float deltaTime,
-        float canvasWidth,
-        float canvasHeight)
-    {
-        if (_stars == null) return;
-
-        UpdateStarLifetime(index, deltaTime);
-        if (!_stars[index].IsActive) return;
-
-        UpdateStarPosition(index, deltaTime);
-        ConstrainStarPosition(index, canvasWidth, canvasHeight);
-        UpdateStarOpacity(index);
-        UpdateStarBrightness(index);
-    }
-
-    private void UpdateStarLifetime(int index, float deltaTime)
-    {
-        if (_stars == null) return;
-
-        _stars[index].Lifetime -= deltaTime;
-
-        if (_stars[index].Lifetime <= 0)
-        {
-            _stars[index].IsActive = false;
-        }
-    }
-
-    private void UpdateStarPosition(int index, float deltaTime)
-    {
-        if (_stars == null) return;
-
-        float totalMagnitude = _lowSpectrum + _midSpectrum + _highSpectrum;
-        if (totalMagnitude < 0.01f) return;
-
-        float spectralDensity = totalMagnitude * SPECTRUM_SENSITIVITY;
-
-        float bassAngle = _time * _stars[index].ChaosFrequencyX;
-        float midAngle = _time * _stars[index].ChaosFrequencyY * 1.3f;
-        float highAngle = _time * _stars[index].TwinkleFactor * 1.8f;
-
-        float bassX = _lowSpectrum * Sin(bassAngle);
-        float bassY = _lowSpectrum * Cos(bassAngle);
-
-        float midX = _midSpectrum * Sin(midAngle) * 0.8f;
-        float midY = _midSpectrum * Cos(midAngle) * 0.8f;
-
-        float highX = _highSpectrum * Sin(highAngle) * 0.5f;
-        float highY = _highSpectrum * Cos(highAngle + 1.57f) * 0.5f;
-
-        float densityX = Sin(_time * 1.2f + _stars[index].TwinkleFactor) *
-            spectralDensity * 0.6f;
-        float densityY = Cos(_time * 1.5f + _stars[index].TwinkleFactor) *
-            spectralDensity * 0.6f;
-
-        float directionVariance = (_highSpectrum - _lowSpectrum) * 5f;
-        float directionX = Sin(_time + _stars[index].ChaosFrequencyX) * directionVariance;
-        float directionY = Cos(_time + _stars[index].ChaosFrequencyY) * directionVariance;
-
-        float velocityX = (bassX + midX + highX + densityX + directionX) *
-            MOVEMENT_FACTOR * _stars[index].SpeedFactor * deltaTime;
-        float velocityY = (bassY + midY + highY + densityY + directionY) *
-            MOVEMENT_FACTOR * _stars[index].SpeedFactor * deltaTime;
-
-        _stars[index].X += velocityX;
-        _stars[index].Y += velocityY;
-    }
-
-    private void ConstrainStarPosition(
-        int index,
-        float canvasWidth,
-        float canvasHeight)
-    {
-        if (_stars == null) return;
-
-        _stars[index].X = Clamp(_stars[index].X, 0, canvasWidth);
-        _stars[index].Y = Clamp(_stars[index].Y, 0, canvasHeight);
-    }
-
-    private void UpdateStarOpacity(int index)
-    {
-        if (_stars == null) return;
-
-        float lifetimeRatio = _stars[index].Lifetime / _stars[index].MaxLifetime;
-
-        if (lifetimeRatio < 0.2f)
-        {
-            _stars[index].Opacity = lifetimeRatio / 0.2f;
-        }
-        else if (_stars[index].Opacity < 1.0f)
-        {
-            _stars[index].Opacity = MathF.Min(1.0f,
-                _stars[index].Opacity + FADE_IN_SPEED * TIME_STEP);
-        }
-
-        _stars[index].Opacity *= (0.8f + _spectrumEnergy * 0.4f);
-    }
-
-    private void UpdateStarBrightness(int index)
-    {
-        if (_stars == null) return;
-
-        float energyContribution = _spectrumEnergy * 0.8f;
-        float bassContribution = _lowSpectrum * 0.4f;
-        float midContribution = _midSpectrum * 0.6f;
-        float highContribution = _highSpectrum * 0.5f;
-
-        float twinklePhase = _time * TWINKLE_SPEED * _stars[index].TwinkleSpeed +
-            _stars[index].TwinkleFactor;
-        float twinkleFactor = Sin(twinklePhase) * BRIGHTNESS_VARIATION;
-
-        float totalContribution = energyContribution + bassContribution +
-            midContribution + highContribution;
-        float baseBrightness = DEFAULT_BRIGHTNESS;
-
-        _stars[index].Brightness = Clamp(
-            baseBrightness * (1f + totalContribution) + twinkleFactor,
-            MIN_BRIGHTNESS,
-            1.5f
-        );
-    }
-
-    private void SpawnNewStars(float canvasWidth, float canvasHeight)
-    {
-        if (!ShouldSpawnStars()) return;
-
-        int starsToSpawn = CalculateStarsToSpawn();
-        CreateNewStars(starsToSpawn, canvasWidth, canvasHeight);
-    }
-
-    private bool ShouldSpawnStars() =>
-        _stars != null &&
-        _spawnAccumulator >= 1.0f &&
-        _spectrumEnergy >= SPAWN_THRESHOLD;
-
-    private int CalculateStarsToSpawn()
-    {
-        int starsToSpawn = (int)_spawnAccumulator;
-        _spawnAccumulator -= starsToSpawn;
-        return starsToSpawn;
-    }
-
-    private void CreateNewStars(
-        int count,
-        float canvasWidth,
-        float canvasHeight)
-    {
-        if (_stars == null) return;
-
-        for (int i = 0; i < count && i < _stars.Length; i++)
-        {
-            int freeIndex = FindFreeStarSlot();
-            if (freeIndex < 0) break;
-
-            _stars[freeIndex] = CreateNewStar(canvasWidth, canvasHeight);
-        }
-    }
-
-    private int FindFreeStarSlot()
-    {
-        if (_stars == null) return -1;
-
-        for (int i = 0; i < _stars.Length; i++)
-        {
-            if (!_stars[i].IsActive) return i;
-        }
-        return -1;
-    }
-
-    private Star CreateNewStar(float canvasWidth, float canvasHeight)
-    {
-        float energyFactor = 1f + _spectrumEnergy * 0.8f;
-
-        float lifetime = (MIN_LIFETIME + (MAX_LIFETIME - MIN_LIFETIME) *
-            (float)_random.NextDouble()) * energyFactor;
-        float size = (BASE_STAR_SIZE + STAR_SIZE_RANGE *
-            (float)_random.NextDouble()) *
-            Math.Clamp(energyFactor * 0.9f, 0.7f, 1.4f);
-
-        SKColor color = GenerateSpectralStarColor(_random);
-        (float x, float y) = GenerateStarPosition(_random, canvasWidth, canvasHeight);
-        (float twinkleFactor, float twinkleSpeed) = GenerateStarTwinkle(_random);
-
-        float speedVariation = 0.5f + (float)_random.NextDouble() * 1.5f;
-        float spectralSpeedFactor = Math.Clamp(energyFactor * speedVariation,
-            0.2f, 2.5f);
-
-        float chaosFreqX = 1.0f + (float)_random.NextDouble() * 3.0f;
-        float chaosFreqY = 1.0f + (float)_random.NextDouble() * 3.0f;
-
-        return new Star
-        {
-            X = x,
-            Y = y,
-            Size = size,
-            Brightness = DEFAULT_BRIGHTNESS * (0.7f + _spectrumEnergy * 0.5f),
-            TwinkleFactor = twinkleFactor,
-            TwinkleSpeed = twinkleSpeed * energyFactor,
-            Color = color,
-            IsActive = true,
-            Lifetime = lifetime,
-            MaxLifetime = lifetime,
-            Opacity = 0.01f,
-            SpeedFactor = spectralSpeedFactor,
-            ChaosFrequencyX = chaosFreqX,
-            ChaosFrequencyY = chaosFreqY
-        };
-    }
-
-    private static (float x, float y) GenerateStarPosition(
-        Random random,
-        float width,
-        float height)
-    {
-        float x = (float)random.NextDouble() * width;
-        float y = (float)random.NextDouble() * height;
-
-        return (x, y);
-    }
-
-    private static (float factor, float speed) GenerateStarTwinkle(Random random)
-    {
-        float factor = (float)random.NextDouble() * MathF.PI * 2f;
-        float speed = 0.8f + (float)random.NextDouble() * 0.4f;
-
-        return (factor, speed);
-    }
-
-    private SKColor GenerateSpectralStarColor(Random random)
-    {
-        float energy = _spectrumEnergy;
-        float bassWeight = _lowSpectrum;
-        float midWeight = _midSpectrum;
-        float highWeight = _highSpectrum;
-
-        byte r, g, b;
-
-        if (energy > 0.8f && (float)random.NextDouble() < 0.4f)
-        {
-            r = 255;
-            g = (byte)(170 + random.Next(60));
-            b = (byte)(90 + random.Next(120));
-        }
-        else if (bassWeight > 0.6f && (float)random.NextDouble() < 0.35f)
-        {
-            r = (byte)(140 + random.Next(90));
-            g = (byte)(80 + random.Next(70));
-            b = (byte)(190 + random.Next(65));
-        }
-        else if (highWeight > 0.5f && (float)random.NextDouble() < 0.35f)
-        {
-            r = (byte)(80 + random.Next(120));
-            g = (byte)(170 + random.Next(85));
-            b = 255;
-        }
-        else
-        {
-            r = (byte)random.Next(MIN_STAR_COLOR, MAX_STAR_COLOR + 1);
-            g = (byte)random.Next(MIN_STAR_COLOR, MAX_STAR_COLOR + 1);
-            b = (byte)random.Next(MIN_STAR_COLOR, MAX_STAR_COLOR + 1);
-        }
-
-        return new SKColor(r, g, b);
-    }
-
-    private void RenderStars(SKCanvas canvas, SKImageInfo info, SKPaint basePaint)
-    {
-        if (_stars == null) return;
-
-        using var starPaint = CreateStarPaint();
-        using var glowPaint = CreateGlowPaint();
-
-        RenderAllStars(canvas, starPaint, glowPaint);
-    }
-
-    private SKPaint CreateStarPaint()
-    {
-        var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
-        return paint;
-    }
-
-    private SKPaint? CreateGlowPaint()
-    {
-        if (!ShouldUseGlowEffect()) return null;
-
-        var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
-        paint.BlendMode = SKBlendMode.Plus;
-        paint.Shader = SKShader.CreateRadialGradient(
-            new SKPoint(0, 0),
-            1.0f,
-            _gradientColors,
-            _gradientPositions,
-            SKShaderTileMode.Clamp);
-        paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _glowRadius);
-        return paint;
-    }
-
-    private bool ShouldUseGlowEffect() =>
-        _useGlowEffect && _useAdvancedEffects;
-
-    private void RenderAllStars(SKCanvas canvas, SKPaint starPaint, SKPaint? glowPaint)
-    {
-        if (_stars == null) return;
-
-        for (int i = 0; i < _stars.Length; i++)
-        {
-            if (ShouldRenderStar(_stars[i]))
-            {
-                RenderSingleStar(canvas, _stars[i], starPaint, glowPaint);
             }
         }
-    }
 
-    private static bool ShouldRenderStar(in Star star) =>
-        star.IsActive && star.Opacity > 0.01f;
+        private void ResetSpectrumValues() =>
+            _lowSpectrum = _midSpectrum = _highSpectrum = _spectrumEnergy = 0f;
 
-    private void RenderSingleStar(
-        SKCanvas canvas,
-        in Star star,
-        SKPaint starPaint,
-        SKPaint? glowPaint)
-    {
-        float lifetimeRatio = star.Lifetime / star.MaxLifetime;
-        float sizeModifier = 0.8f + lifetimeRatio * 0.2f;
-        float spectralSizeBoost = _spectrumEnergy * 0.6f;
-        float size = star.Size * sizeModifier * (1f + spectralSizeBoost);
-
-        float brightnessModifier = 1f + (_spectrumEnergy * 0.4f);
-        float adjustedBrightness = star.Brightness * brightnessModifier;
-        int alpha = Math.Clamp((int)(255 * adjustedBrightness * star.Opacity), 0, 255);
-
-        if (alpha < 10) return;
-
-        SKColor baseColor = new(
-            star.Color.Red,
-            star.Color.Green,
-            star.Color.Blue,
-            (byte)alpha);
-
-        if (glowPaint != null && star.Brightness > GLOW_THRESHOLD &&
-            star.Opacity > 0.5f)
+        private void CalculateSimpleAverageSpectrum(float[] spectrum)
         {
-            canvas.Save();
-            canvas.Translate(star.X, star.Y);
-
-            float glowIntensity = adjustedBrightness;
-            int glowAlpha = Math.Clamp(
-                (int)(alpha * (0.1f + glowIntensity * 0.3f)), 0, 255);
-            glowPaint.Color = baseColor.WithAlpha((byte)glowAlpha);
-
-            float glowSize = size * (1.5f + glowIntensity * 0.5f);
-            canvas.Scale(glowSize, glowSize);
-            canvas.DrawOval(0, 0, 1, 1, glowPaint);
-
-            glowPaint.Color = baseColor.WithAlpha((byte)(glowAlpha / 4));
-            canvas.Scale(2.0f, 2.0f);
-            canvas.DrawOval(0, 0, 1, 1, glowPaint);
-
-            canvas.Restore();
+            float sum = 0f;
+            for (int k = 0; k < spectrum.Length; k++)
+            {
+                sum += spectrum[k];
+            }
+            float avg = sum / (spectrum.Length > 0 ? spectrum.Length : 1f);
+            _lowSpectrum = avg;
+            _midSpectrum = avg;
+            _highSpectrum = avg;
+            _spectrumEnergy = avg;
         }
 
-        starPaint.Color = baseColor;
-        canvas.DrawCircle(star.X, star.Y, size, starPaint);
-
-        if (_useAdvancedEffects && alpha > 180 && _spectrumEnergy > 0.5f)
+        private void CalculateDetailedSpectrumValues(float[] spectrum)
         {
-            starPaint.Color = star.Color.WithAlpha((byte)(alpha / 5));
-            canvas.DrawCircle(star.X, star.Y, size * 1.2f, starPaint);
+            var (lowAvg, midAvg, highAvg) = GetAverageBandValues(spectrum);
+            ApplySmoothingToSpectrum(lowAvg, midAvg, highAvg);
+            CalculateOverallSpectrumEnergy();
         }
-    }
 
-    private void InitializeStars()
-    {
-        _starCount = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
-        _stars = new Star[_starCount];
-        for (int i = 0; i < _starCount; i++)
+        private static (float low, float mid, float high) GetAverageBandValues(float[] spectrum)
         {
-            _stars[i] = new Star { IsActive = false };
+            int bandLength = spectrum.Length / 3;
+            if (bandLength == 0) return (0, 0, 0);
+
+            float lowSum = 0f, midSum = 0f, highSum = 0f;
+            int i = 0;
+            for (; i < bandLength; i++) lowSum += spectrum[i];
+            for (; i < 2 * bandLength; i++) midSum += spectrum[i];
+            int highBandActualLength = spectrum.Length - (2 * bandLength);
+            for (; i < spectrum.Length; i++) highSum += spectrum[i];
+
+            return (
+              lowSum / bandLength,
+              midSum / bandLength,
+              highBandActualLength > 0 ? highSum / highBandActualLength : 0f
+            );
         }
-    }
 
-    private struct Star
-    {
-        public float
-            X,
-            Y,
-            Size,
-            Brightness,
-            TwinkleFactor,
-            TwinkleSpeed,
-            Lifetime,
-            MaxLifetime,
-            Opacity,
-            SpeedFactor,
-            ChaosFrequencyX,
-            ChaosFrequencyY;
+        private void ApplySmoothingToSpectrum(
+          float lowAvg,
+          float midAvg,
+          float highAvg)
+        {
+            _lowSpectrum = Lerp(_lowSpectrum, lowAvg, SMOOTHING_FACTOR);
+            _midSpectrum = Lerp(_midSpectrum, midAvg, SMOOTHING_FACTOR);
+            _highSpectrum = Lerp(_highSpectrum, highAvg, SMOOTHING_FACTOR);
+        }
+        private static float Lerp(float current, float target, float amount) =>
+            current * (1f - amount) + target * amount;
 
-        public SKColor Color;
-        public bool IsActive;
-    }
+        private void CalculateOverallSpectrumEnergy() =>
+            _spectrumEnergy = (_lowSpectrum + _midSpectrum + _highSpectrum) / 3f;
 
-    protected override void OnDispose()
-    {
-        _stars = null;
-        base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        private void UpdateAllStarsState(
+          float deltaTime,
+          SKImageInfo info)
+        {
+            if (_stars == null) return;
+            AccumulateSpawnEnergy(deltaTime);
+            ProcessEachStar(deltaTime, info);
+        }
+
+        private void AccumulateSpawnEnergy(float deltaTime) =>
+          _spawnAccumulator += _spectrumEnergy * SPAWN_RATE_PER_SECOND * deltaTime;
+
+        private void ProcessEachStar(
+          float deltaTime,
+          SKImageInfo info)
+        {
+            if (_stars == null) return;
+            for (int i = 0; i < _stars.Length; i++)
+            {
+                UpdateSingleStar(ref _stars[i], deltaTime, info);
+            }
+        }
+
+        private void UpdateSingleStar(
+            ref Star star,
+            float deltaTime,
+            SKImageInfo info)
+        {
+            if (UpdateStarLifetime(ref star, deltaTime))
+            {
+                UpdateStarMovement(ref star, deltaTime, info);
+                UpdateStarVisuals(ref star);
+            }
+        }
+
+        private static bool UpdateStarLifetime(ref Star star, float deltaTime)
+        {
+            if (!star.IsActive) return false;
+            star.Lifetime -= deltaTime;
+            return star.Lifetime > 0;
+        }
+
+        private void UpdateStarMovement(
+          ref Star star,
+          float deltaTime,
+          SKImageInfo info)
+        {
+            float totalMagnitude = _lowSpectrum + _midSpectrum + _highSpectrum;
+            if (totalMagnitude >= MIN_TOTAL_MAGNITUDE_THRESHOLD)
+            {
+                var (velocityX, velocityY) = CalculateTotalStarVelocity(in star, deltaTime, totalMagnitude);
+                ApplyVelocityToStar(ref star, velocityX, velocityY);
+            }
+            ClampStarPosition(ref star, info.Width, info.Height);
+        }
+
+        private static void ApplyVelocityToStar(ref Star star, float velocityX, float velocityY)
+        {
+            star.X += velocityX;
+            star.Y += velocityY;
+        }
+
+        private (float velX, float velY) CalculateTotalStarVelocity(
+          in Star star,
+          float deltaTime,
+          float totalMagnitude)
+        {
+            float spectralDensity = totalMagnitude * SPECTRUM_SENSITIVITY;
+            float time = _time;
+
+            var bassVel = CalculateBassVelocity(time, star.ChaosFrequencyX);
+            var midVel = CalculateMidVelocity(time, star.ChaosFrequencyY);
+            var highVel = CalculateHighVelocity(time, star.TwinkleFactor);
+            var densityVel = CalculateDensityVelocity(time, star.TwinkleFactor, spectralDensity);
+            var directionVel = CalculateDirectionVelocity(
+                time,
+                star.ChaosFrequencyX,
+                star.ChaosFrequencyY);
+
+            float totalVelocityX = bassVel.velX
+                                 + midVel.velX
+                                 + highVel.velX
+                                 + densityVel.velX
+                                 + directionVel.velX;
+            float totalVelocityY = bassVel.velY
+                                 + midVel.velY
+                                 + highVel.velY
+                                 + densityVel.velY
+                                 + directionVel.velY;
+            float movementScale = MOVEMENT_FACTOR * star.SpeedFactor * deltaTime;
+
+            return (totalVelocityX * movementScale, totalVelocityY * movementScale);
+        }
+
+        private (float velX, float velY) CalculateBassVelocity(float time, float chaosFrequencyX)
+        {
+            float bassAngle = time * chaosFrequencyX;
+            float bassX = _lowSpectrum * FastSin(bassAngle);
+            float bassY = _lowSpectrum * FastCos(bassAngle);
+            return (bassX, bassY);
+        }
+
+        private (float velX, float velY) CalculateMidVelocity(float time, float chaosFrequencyY)
+        {
+            float midAngle = time * chaosFrequencyY * MID_ANGLE_MULTIPLIER;
+            float midX = _midSpectrum * FastSin(midAngle) * MID_SPECTRUM_VELOCITY_WEIGHT;
+            float midY = _midSpectrum * FastCos(midAngle) * MID_SPECTRUM_VELOCITY_WEIGHT;
+            return (midX, midY);
+        }
+
+        private (float velX, float velY) CalculateHighVelocity(float time, float twinkleFactor)
+        {
+            float highAngle = time * twinkleFactor * HIGH_ANGLE_MULTIPLIER;
+            float highX = _highSpectrum * FastSin(highAngle) * HIGH_SPECTRUM_VELOCITY_WEIGHT;
+            float highY = _highSpectrum * FastCos(highAngle + ANGLE_PHASE_SHIFT_PI_OVER_2)
+                                      * HIGH_SPECTRUM_VELOCITY_WEIGHT;
+            return (highX, highY);
+        }
+
+        private (float velX, float velY) CalculateDensityVelocity(float time, float twinkleFactor, float spectralDensity)
+        {
+            float densityX = FastSin(time * DENSITY_ANGLE_MULTIPLIER_X + twinkleFactor) * spectralDensity * DENSITY_VELOCITY_WEIGHT;
+            float densityY = FastCos(time * DENSITY_ANGLE_MULTIPLIER_Y + twinkleFactor) * spectralDensity * DENSITY_VELOCITY_WEIGHT;
+            return (densityX, densityY);
+        }
+
+        private (float velX, float velY) CalculateDirectionVelocity(
+            float time,
+            float chaosFrequencyX,
+            float chaosFrequencyY)
+        {
+            float directionVariance = (_highSpectrum - _lowSpectrum) * DIRECTION_VARIANCE_MULTIPLIER;
+            float directionX = FastSin(time + chaosFrequencyX) * directionVariance;
+            float directionY = FastCos(time + chaosFrequencyY) * directionVariance;
+            return (directionX, directionY);
+        }
+
+        private static void ClampStarPosition(
+          ref Star star,
+          float canvasWidth,
+          float canvasHeight)
+        {
+            star.X = Clamp(star.X, 0, canvasWidth);
+            star.Y = Clamp(star.Y, 0, canvasHeight);
+        }
+
+        private void UpdateStarVisuals(ref Star star)
+        {
+            UpdateStarOpacity(ref star);
+            UpdateStarBrightnessValue(ref star);
+        }
+
+        private void UpdateStarOpacity(ref Star star)
+        {
+            float baseOpacity = CalculateBaseOpacity(in star);
+            star.Opacity = Clamp(baseOpacity * (OPACITY_SPECTRUM_BASE + _spectrumEnergy * OPACITY_SPECTRUM_BOOST), 0f, 2f);
+        }
+
+        private static float CalculateBaseOpacity(in Star star) =>
+            star.Lifetime / star.MaxLifetime < OPACITY_LIFETIME_PHASE_END
+                ? star.Lifetime / OPACITY_LIFETIME_PHASE_END
+                : MathF.Min(1.0f, star.Opacity + FADE_IN_SPEED * TIME_STEP);
+
+        private void UpdateStarBrightnessValue(ref Star star)
+        {
+            float baseBrightness = DEFAULT_BRIGHTNESS
+                               * (_spectrumEnergy * BRIGHTNESS_SPECTRUM_BOOST
+                                + BRIGHTNESS_SPECTRUM_BASE);
+            float twinkleAdjustment = CalculateTwinkleAdjustment(in star);
+            star.Brightness = Clamp(baseBrightness + twinkleAdjustment, MIN_BRIGHTNESS, BRIGHTNESS_CLAMP_MAX);
+        }
+
+        private float CalculateTwinkleAdjustment(in Star star)
+        {
+            float twinklePhase = _time * TWINKLE_SPEED * star.TwinkleSpeed;
+            return FastSin(twinklePhase + star.TwinkleFactor) * BRIGHTNESS_VARIATION;
+        }
+
+        private void TrySpawnNewStars(
+          SKImageInfo info)
+        {
+            if (_stars == null) return;
+            if (_spawnAccumulator >= 1.0f && _spectrumEnergy >= SPAWN_THRESHOLD)
+            {
+                int starsToSpawn = DetermineStarsToSpawn();
+                if (starsToSpawn > 0)
+                {
+                    _spawnAccumulator -= starsToSpawn;
+                    SpawnStars(starsToSpawn, info);
+                }
+            }
+        }
+
+        private int DetermineStarsToSpawn() =>
+            Min((int)_spawnAccumulator, SPAWN_MAX_PER_FRAME);
+
+        private void SpawnStars(
+          int count,
+          SKImageInfo info)
+        {
+            if (_stars == null) return;
+            for (int i = 0; i < count; i++)
+            {
+                int freeIndex = FindNextAvailableStarSlot();
+                if (freeIndex == -1) break;
+                InitializeNewStar(ref _stars[freeIndex], info);
+            }
+        }
+
+        private int FindNextAvailableStarSlot()
+        {
+            if (_stars == null) return -1;
+            for (int i = 0; i < _stars.Length; i++)
+            {
+                if (!_stars[i].IsActive) return i;
+            }
+            return -1;
+        }
+
+        private float GetRandomFloat() => (float)_random.NextDouble();
+
+        private static float GetRandomFloatInRange(float min, float max) =>
+            min + (float)new Random().NextDouble() * (max - min);
+
+        private void InitializeNewStar(
+            ref Star star,
+            SKImageInfo info)
+        {
+            float energyFactor = 1f + _spectrumEnergy * ENERGY_FACTOR_BOOST;
+
+            star.X = GetRandomFloat() * info.Width;
+            star.Y = GetRandomFloat() * info.Height;
+            star.Lifetime = CalculateStarLifetime(energyFactor);
+            star.MaxLifetime = star.Lifetime;
+            star.Size = CalculateStarSize(energyFactor);
+            star.Brightness = CalculateInitialStarBrightness();
+            star.TwinkleFactor = GetRandomFloat() * MathF.PI * 2f;
+            star.TwinkleSpeed = CalculateStarTwinkleSpeed(energyFactor);
+            star.Color = GenerateRandomStarColor();
+            star.IsActive = true;
+            star.Opacity = 0.01f;
+            star.SpeedFactor = CalculateStarSpeedFactor(energyFactor);
+            star.ChaosFrequencyX = GetRandomFloatInRange(CHAOS_FREQUENCY_BASE, CHAOS_FREQUENCY_BASE + CHAOS_FREQUENCY_RAND_RANGE);
+            star.ChaosFrequencyY = GetRandomFloatInRange(CHAOS_FREQUENCY_BASE, CHAOS_FREQUENCY_BASE + CHAOS_FREQUENCY_RAND_RANGE);
+        }
+
+        private static float CalculateStarLifetime(float energyFactor) =>
+            GetRandomFloatInRange(MIN_LIFETIME, MAX_LIFETIME) * energyFactor;
+
+        private float CalculateStarSize(float energyFactor)
+        {
+            float sizeEnergyMultiplier = Clamp(energyFactor * STAR_SIZE_ENERGY_MULTIPLIER, STAR_SIZE_CLAMP_MIN, STAR_SIZE_CLAMP_MAX);
+            return (BASE_STAR_SIZE + GetRandomFloat() * STAR_SIZE_RANGE) * sizeEnergyMultiplier;
+        }
+
+        private float CalculateInitialStarBrightness() =>
+            DEFAULT_BRIGHTNESS * (_spectrumEnergy * BRIGHTNESS_SPECTRUM_BOOST + BRIGHTNESS_SPECTRUM_BASE);
+
+        private float CalculateStarTwinkleSpeed(float energyFactor) =>
+            (TWINKLE_SPEED_BASE_RAND + GetRandomFloat() * TWINKLE_SPEED_RAND_RANGE) * energyFactor;
+
+        private static float CalculateStarSpeedFactor(float energyFactor) =>
+            Clamp(energyFactor * GetRandomFloatInRange(
+                SPEED_VARIATION_BASE,
+                SPEED_VARIATION_BASE + SPEED_VARIATION_RAND_RANGE),
+                    SPECTRAL_SPEED_CLAMP_MIN,
+                    SPECTRAL_SPEED_CLAMP_MAX);
+
+        private SKColor GenerateRandomStarColor()
+        {
+            byte RndByte(int baseVal, int range) => (byte)(baseVal + _random.Next(range));
+            if (_lowSpectrum > _midSpectrum && _lowSpectrum > _highSpectrum)
+                return new SKColor(RndByte(200, 55), RndByte(100, 100), RndByte(100, 100));
+            if (_highSpectrum > _lowSpectrum && _highSpectrum > _midSpectrum)
+                return new SKColor(RndByte(100, 100), RndByte(100, 100), RndByte(200, 55));
+            return new SKColor(RndByte(150, 105), RndByte(150, 105), RndByte(150, 105));
+        }
+
+        private void RenderStarfield(
+          SKCanvas canvas,
+          SKImageInfo _)
+        {
+            if (_stars == null) return;
+            using var starPaint = _paintPool.Get();
+            starPaint.IsAntialias = _useAntiAlias;
+
+            foreach (var star in _stars)
+            {
+                if (ShouldRenderStar(in star))
+                {
+                    RenderSingleStar(canvas, in star, starPaint);
+                }
+            }
+        }
+
+        private static bool ShouldRenderStar(in Star star) => star.IsActive && CalculateFinalRenderAlpha(in star) >= ALPHA_MIN_RENDER_THRESHOLD;
+
+        private void RenderSingleStar(
+          SKCanvas canvas,
+          in Star star,
+          SKPaint starPaint)
+        {
+            if (Quality == RenderQuality.Low)
+            {
+                DrawSimpleStar(canvas, in star, starPaint);
+            }
+            else
+            {
+                DrawDetailedStar(canvas, in star, starPaint);
+            }
+        }
+
+        private static void DrawSimpleStar(
+          SKCanvas canvas,
+          in Star star,
+          SKPaint paint)
+        {
+            int finalAlpha = CalculateFinalRenderAlpha(in star);
+            paint.Color = star.Color.WithAlpha((byte)finalAlpha);
+            canvas.DrawCircle(star.X, star.Y, star.Size, paint);
+        }
+
+        private static int CalculateFinalRenderAlpha(in Star star) => Clamp((int)(255 * star.Brightness * star.Opacity), 0, 255);
+        private float CalculateDynamicRenderSize(in Star star) => star.Size * (1f + _spectrumEnergy * OPACITY_SPECTRUM_BOOST);
+
+        private void DrawDetailedStar(
+          SKCanvas canvas,
+          in Star star,
+          SKPaint starPaint)
+        {
+            float dynamicSize = CalculateDynamicRenderSize(in star);
+            int finalAlpha = CalculateFinalRenderAlpha(in star);
+            SKColor baseColor = star.Color.WithAlpha((byte)finalAlpha);
+
+            RenderStarCore(canvas, star.X, star.Y, dynamicSize, baseColor, starPaint);
+            MaybeRenderAdvancedEffects(canvas, in star, dynamicSize, finalAlpha, starPaint);
+        }
+
+        private static void RenderStarCore(
+          SKCanvas canvas,
+          float x,
+          float y,
+          float size,
+          SKColor color,
+          SKPaint paint)
+        {
+            paint.Color = color;
+            canvas.DrawCircle(x, y, size, paint);
+        }
+
+        private void MaybeRenderAdvancedEffects(
+          SKCanvas canvas,
+          in Star star,
+          float dynamicSize,
+          int finalAlpha,
+          SKPaint starPaint)
+        {
+            if (_useAdvancedEffects && finalAlpha > ADVANCED_EFFECTS_ALPHA_THRESHOLD && _spectrumEnergy > ADVANCED_EFFECTS_SPECTRUM_THRESHOLD)
+            {
+                starPaint.Color = star.Color.WithAlpha(
+                  (byte)Clamp(finalAlpha / ADVANCED_EFFECTS_ALPHA_DIVISOR, 0, 255));
+                canvas.DrawCircle(star.X, star.Y, dynamicSize * ADVANCED_EFFECTS_SIZE_MULTIPLIER, starPaint);
+            }
+        }
+
+        private void ResetAndInitializeStars()
+        {
+            _stars = new Star[_starCount];
+            for (int i = 0; i < _starCount; i++)
+                _stars[i] = new Star { IsActive = false };
+        }
+
+        private struct Star
+        {
+            public float X, Y, Size, Brightness, TwinkleFactor, TwinkleSpeed, Lifetime, MaxLifetime, Opacity, SpeedFactor, ChaosFrequencyX, ChaosFrequencyY;
+            public SKColor Color;
+            public bool IsActive;
+        }
+
+        protected override void OnDispose()
+        {
+            _stars = null;
+            base.OnDispose();
+            Log(LogLevel.Debug, LOG_TAG, "Disposed");
+        }
     }
 }
