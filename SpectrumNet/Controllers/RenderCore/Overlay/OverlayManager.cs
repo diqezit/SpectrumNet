@@ -40,6 +40,13 @@ public sealed class OverlayManager(
 
             if (_overlayWindow is { IsInitialized: true })
                 _overlayWindow.Topmost = value;
+
+            _mainController.OnPropertyChanged(nameof(IMainController.IsOverlayTopmost));
+            StateChanged?.Invoke(this, _isActive);
+
+            Log(LogLevel.Information,
+                LogPrefix,
+                $"Overlay topmost changed to: {value}");
         }
     }
 

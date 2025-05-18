@@ -29,6 +29,20 @@ public sealed class OverlayWindow : Window, IDisposable
 
     public new bool IsInitialized => _renderContext != null && !_isDisposed;
 
+    public new bool Topmost
+    {
+        get => base.Topmost;
+        set
+        {
+            if (base.Topmost == value) return;
+            base.Topmost = value;
+
+            ForceRedraw();
+
+            Log(LogLevel.Debug, LogSource, $"Overlay topmost state changed to: {value}");
+        }
+    }
+
     public OverlayWindow(
         IMainController controller,
         OverlayConfiguration? configuration = null)
@@ -264,6 +278,11 @@ public sealed class OverlayWindow : Window, IDisposable
 
         if (_transparencyManager.IsActive)
             return true;
+
+        if (_renderContext?.Controller is IMainController controller)
+        {
+            return !controller.LimitFpsTo60 || _fpsLimiter.ShouldRenderFrame();
+        }
 
         return !_fpsLimiter.IsEnabled || _fpsLimiter.ShouldRenderFrame();
     }

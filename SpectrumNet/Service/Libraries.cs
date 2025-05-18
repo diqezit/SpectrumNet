@@ -16,6 +16,7 @@ global using SpectrumNet.Controllers.Enums;
 global using SpectrumNet.Controllers.Input;
 global using SpectrumNet.Controllers.Interfaces;
 global using SpectrumNet.Controllers.Interfaces.AudioCore;
+global using SpectrumNet.Controllers.Interfaces.RenderCore;
 global using SpectrumNet.Controllers.Interfaces.SpectrumCore;
 global using SpectrumNet.Controllers.RenderCore;
 global using SpectrumNet.Controllers.RenderCore.Overlay;
@@ -77,5 +78,7 @@ global using LogLevel = SpectrumNet.Service.Enums.LogLevel;
 global using MessageBox = System.Windows.MessageBox;
 global using Parallel = System.Threading.Tasks.Parallel;
 global using TextBox = System.Windows.Controls.TextBox;
+
+
 
 

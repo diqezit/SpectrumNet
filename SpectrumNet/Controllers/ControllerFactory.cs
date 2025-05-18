@@ -4,7 +4,7 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace SpectrumNet.Controllers;
 
-public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory, IMainController
+public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory, IMainController
 {
     private const string LOG_PREFIX = "ControllerFactory";
 
@@ -15,6 +15,7 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
     private readonly IOverlayManager _overlayManager;
     private readonly IRendererFactory _rendererFactory;
     private readonly ITransparencyManager _transparencyManager;
+    private readonly IFpsLimiter _fpsLimiter;
 
     private readonly CancellationTokenSource _cleanupCts = new();
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
@@ -43,10 +44,12 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
                 ("No synchronization context. Controller must be created in UI thread.");
         }
 
+        _fpsLimiter = new FpsLimiterManager(Settings.Instance);
+        _fpsLimiter.LimitChanged += OnFpsLimitChanged;
+
         _rendererFactory = RendererFactory.Instance;
         _transparencyManager = RendererTransparencyManager.Instance;
 
-        // Прямая инициализация контроллеров с передачей this как IMainController
         _viewController = new ViewController(this, _renderElement, _rendererFactory);
         _audioController = new AudioController(this, SynchronizationContext.Current!);
         _uiController = new UIController(this, _transparencyManager);
@@ -58,6 +61,14 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
 
         StartBatchUpdate();
         Initialize();
+    }
+
+    private void OnFpsLimitChanged(object? sender, bool isLimited)
+    {
+        OnPropertyChanged(nameof(LimitFpsTo60));
+
+        if (_viewController.Renderer != null)
+            RequestRender();
     }
 
     private void StartBatchUpdate()
@@ -126,7 +137,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
             syncContext
         );
 
-        // Устанавливаем analyzer в ViewController
         _viewController.Analyzer = analyzer;
 
         var renderer = new Renderer(
@@ -137,59 +147,32 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
             _rendererFactory
         );
 
-        // Устанавливаем renderer в ViewController
         _viewController.Renderer = renderer;
 
         RequestRender();
     }
 
-    // Реализация IControllerFactory
     public IUIController UIController => _uiController;
     public IAudioController AudioController => _audioController;
     public IViewController ViewController => _viewController;
     public IInputController InputController => _inputController;
     public IOverlayManager OverlayManager => _overlayManager;
 
-    // Реализация IMainController
     public Dispatcher Dispatcher => Application.Current?.Dispatcher ??
         throw new InvalidOperationException("Application.Current is null");
 
     public bool LimitFpsTo60
     {
-        get => Settings.Instance.LimitFpsTo60;
+        get => _fpsLimiter.IsLimited;
         set
         {
-            if (_isDisposed || Settings.Instance.LimitFpsTo60 == value) return;
+            if (_isDisposed) return;
 
             Log(LogLevel.Information, LOG_PREFIX,
-                $"LimitFpsTo60 changing from {Settings.Instance.LimitFpsTo60} to {value}",
+                $"LimitFpsTo60 changing from {_fpsLimiter.IsLimited} to {value}",
                 forceLog: true);
 
-            var originalStyle = Settings.Instance.SelectedRenderStyle;
-
-            Safe(() => Settings.Instance.LimitFpsTo60 = value,
-                new ErrorHandlingOptions
-                {
-                    Source = LOG_PREFIX,
-                    ErrorMessage = "Error updating LimitFpsTo60 setting"
-                });
-
-            OnPropertyChanged(nameof(LimitFpsTo60));
-
-            if (originalStyle != Settings.Instance.SelectedRenderStyle)
-            {
-                Log(LogLevel.Warning,
-                    LOG_PREFIX,
-                    $"Render style changed after updating LimitFpsTo60: {originalStyle} -> {Settings.Instance.SelectedRenderStyle}",
-                    forceLog: true);
-
-                Safe(() => Settings.Instance.SelectedRenderStyle = originalStyle,
-                    new ErrorHandlingOptions
-                    {
-                        Source = LOG_PREFIX,
-                        ErrorMessage = "Error restoring original render style"
-                    });
-            }
+            _fpsLimiter.SetLimit(value);
         }
     }
 
@@ -224,8 +207,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
             _audioController.IsTransitioning = value;
         }
     }
-
-    #region Audio Properties
 
     public FftWindowType WindowType
     {
@@ -268,10 +249,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
         }
     }
 
-    #endregion
-
-    #region Audio Methods
-
     public async Task StartCaptureAsync()
     {
         if (_isDisposed) return;
@@ -292,10 +269,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
 
     public SpectrumAnalyzer? GetCurrentAnalyzer() =>
         _isDisposed ? null : _audioController.GetCurrentAnalyzer();
-
-    #endregion
-
-    #region View Properties
 
     public SKElement SpectrumCanvas => _renderElement;
 
@@ -400,10 +373,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
         set => _viewController.Analyzer = value;
     }
 
-    #endregion
-
-    #region View Methods
-
     public void RequestRender()
     {
         if (_isDisposed) return;
@@ -427,10 +396,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
         if (_isDisposed || e == null) return;
         _viewController.OnPaintSurface(sender, e);
     }
-
-    #endregion
-
-    #region UI Controller Methods
 
     public bool IsOverlayActive
     {
@@ -507,10 +472,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
         _ = _overlayManager.CloseAsync();
     }
 
-    #endregion
-
-    #region Input Controller Methods
-
     public void RegisterWindow(Window window)
     {
         if (_isDisposed) return;
@@ -577,8 +538,6 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
         return _inputController.HandleButtonClick(sender, e);
     }
 
-    #endregion
-
     public void OnPropertyChanged(params string[] propertyNames)
     {
         if (_isDisposed) return;
@@ -600,6 +559,8 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
     protected override void DisposeManaged()
     {
         if (_isDisposed) return;
+
+        _fpsLimiter.LimitChanged -= OnFpsLimitChanged;
 
         Log(LogLevel.Information,
             LOG_PREFIX,
@@ -744,6 +705,8 @@ public sealed class ControllerFactory : AsyncDisposableBase,  IControllerFactory
     protected override async ValueTask DisposeAsyncManagedResources()
     {
         if (_isDisposed) return;
+
+        _fpsLimiter.LimitChanged -= OnFpsLimitChanged;
 
         Log(LogLevel.Information, LOG_PREFIX, "Starting asynchronous dispose");
 

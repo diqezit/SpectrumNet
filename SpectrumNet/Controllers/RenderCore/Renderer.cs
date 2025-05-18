@@ -567,14 +567,6 @@ public sealed class Renderer : AsyncDisposableBase
         UpdateSpectrumStyle(_controller.SelectedStyle, clr, br);
     }
 
-    private void UpdateAnalyzerSettings()
-    {
-        _analyzer.UpdateSettings(_controller.WindowType, _controller.ScaleType);
-        SynchronizeWithController();
-        _frameCache.MarkDirty();
-        RequestRender();
-    }
-
     private static bool ValidateAndSetDimensions(int width, int height)
     {
         if (!AreDimensionsValid(width, height))
@@ -701,8 +693,16 @@ public sealed class Renderer : AsyncDisposableBase
 
     private void HandleFpsLimitChange()
     {
-        FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
-        FpsLimiter.Instance.Reset();
+        if (_controller is IMainController controller)
+        {
+            FpsLimiter.Instance.IsEnabled = controller.LimitFpsTo60;
+            FpsLimiter.Instance.Reset();
+        }
+        else
+        {
+            FpsLimiter.Instance.IsEnabled = Settings.Instance.LimitFpsTo60;
+            FpsLimiter.Instance.Reset();
+        }
     }
 
     private void HandleParameterChange()
