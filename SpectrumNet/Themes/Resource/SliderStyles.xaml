@@ -3,171 +3,153 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:SpectrumNet">
 
+
     <!-- =================== -->
     <!-- СТИЛИ СЛАЙДЕРОВ    -->
     <!-- =================== -->
 
-    <!-- Шаблон для строки настроек со слайдером -->
-    <ControlTemplate x:Key="SliderSettingRowTemplate">
-        <Grid Margin="0,0,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="40"/>
-            </Grid.ColumnDefinitions>
-
-            <TextBlock 
-                Grid.Column="0"
-                Text="{TemplateBinding Tag}"
-                Foreground="{DynamicResource TextPrimaryBrush}"
-                Margin="0,0,10,0"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Center"/>
-
-            <Slider 
-                Grid.Column="1"
-                Style="{DynamicResource ModernSliderStyle}"
-                Height="20"
-                Minimum="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Minimum}"
-                Maximum="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Maximum}"
-                Value="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Value, Mode=TwoWay}"
-                VerticalAlignment="Center"/>
-
-            <TextBlock 
-                Grid.Column="2"
-                Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Value, StringFormat='{}{0:F1}'}"
-                Foreground="{DynamicResource TextPrimaryBrush}"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"/>
-        </Grid>
-    </ControlTemplate>
-
-    <!-- Стиль современного слайдера -->
     <Style x:Key="ModernSliderStyle" TargetType="Slider" BasedOn="{StaticResource InteractiveControlBaseStyle}">
-        <Setter Property="Height" Value="20"/>
+        <Setter Property="Height" Value="18"/>
         <Setter Property="Foreground" Value="{DynamicResource SliderForegroundBrush}"/>
         <Setter Property="Background" Value="{DynamicResource SliderBackgroundBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource SliderBorderBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
-        <Setter Property="TickPlacement" Value="BottomRight"/>
-        <Setter Property="Margin" Value="0,4,0,4"/>
+        <Setter Property="TickPlacement" Value="None"/>
+        <Setter Property="Margin" Value="0,2,0,2"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Slider">
-                    <Grid>
-                        <Border x:Name="TrackBackground"
-                            Background="{TemplateBinding Background}"
-                            Height="6" VerticalAlignment="Center"
-                            CornerRadius="3"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="1">
-                            <Border 
-                                Height="3" VerticalAlignment="Top"
-                                CornerRadius="2" Margin="0,0,0,0">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                        <GradientStop Color="#20FFFFFF" Offset="0"/>
-                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Border.Background>
-                            </Border>
-                        </Border>
+                    <Grid x:Name="SliderRoot" UseLayoutRounding="True" SnapsToDevicePixels="True">
+                        <Rectangle 
+                            Fill="Transparent" 
+                            Height="32" 
+                            VerticalAlignment="Center"/>
 
-                        <TickBar x:Name="TopTick" 
-                            Visibility="Collapsed"
-                            Fill="{DynamicResource TextSecondaryBrush}"
-                            Placement="Top"
-                            Height="4" Margin="0,-10,0,0"
-                            SnapsToDevicePixels="True"/>
+                        <Border x:Name="TrackBaseShadow"
+                            Height="4" 
+                            VerticalAlignment="Center"
+                            Background="{DynamicResource BorderBrush}"
+                            CornerRadius="4"
+                            Opacity="0.3"
+                            Margin="0,0,0,0"/>
 
-                        <TickBar x:Name="BottomTick"
-                            Visibility="Collapsed"
-                            Fill="{DynamicResource TextSecondaryBrush}"
-                            Placement="Bottom"
-                            Height="4" Margin="0,0,0,-10"
-                            SnapsToDevicePixels="True"/>
+                        <Border x:Name="TrackBase"
+                            Height="4" 
+                            VerticalAlignment="Center"
+                            Background="{DynamicResource SliderBackgroundBrush}"
+                            BorderBrush="{DynamicResource SliderBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="2"/>
+
+                        <Border x:Name="TrackInner"
+                            Height="4" 
+                            VerticalAlignment="Center"
+                            Background="{DynamicResource SliderBackgroundBrush}"
+                            CornerRadius="2"/>
+
+                        <Canvas x:Name="TickCanvas" 
+                            Visibility="Collapsed" 
+                            ClipToBounds="False"
+                            Height="14" 
+                            VerticalAlignment="Center">
+                        </Canvas>
 
                         <Track Name="PART_Track"
                             Minimum="{TemplateBinding Minimum}"
                             Maximum="{TemplateBinding Maximum}"
-                            Value="{TemplateBinding Value}"
-                            IsDirectionReversed="False">
+                            Value="{TemplateBinding Value}">
+
                             <Track.DecreaseRepeatButton>
-                                <RepeatButton x:Name="DecreaseButton"
+                                <RepeatButton 
                                     Style="{x:Null}"
-                                    Height="6" VerticalAlignment="Center"
-                                    Focusable="False"
-                                    Background="{TemplateBinding Foreground}">
+                                    Command="{x:Static Slider.DecreaseLarge}"
+                                    Focusable="False">
                                     <RepeatButton.Template>
                                         <ControlTemplate TargetType="RepeatButton">
-                                            <Border x:Name="DecreaseTrack"
-                                                Background="{TemplateBinding Background}"
-                                                CornerRadius="3"
-                                                Height="6">
-                                                <Border 
-                                                    Height="3" VerticalAlignment="Top"
-                                                    CornerRadius="2" Margin="0,0,0,0">
-                                                    <Border.Background>
-                                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                            <GradientStop Color="#40FFFFFF" Offset="0"/>
-                                                            <GradientStop Color="#00FFFFFF" Offset="1"/>
-                                                        </LinearGradientBrush>
-                                                    </Border.Background>
-                                                </Border>
-                                            </Border>
+                                            <Grid>
+                                                <Border x:Name="TrackFill"
+                                                    Height="4" 
+                                                    CornerRadius="2,0,0,2"
+                                                    Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
+                                            </Grid>
                                         </ControlTemplate>
                                     </RepeatButton.Template>
                                 </RepeatButton>
                             </Track.DecreaseRepeatButton>
+
                             <Track.IncreaseRepeatButton>
-                                <RepeatButton x:Name="IncreaseButton"
+                                <RepeatButton 
                                     Style="{x:Null}"
-                                    Height="6" VerticalAlignment="Center"
-                                    Focusable="False"
-                                    Background="Transparent">
+                                    Command="{x:Static Slider.IncreaseLarge}"
+                                    Focusable="False">
                                     <RepeatButton.Template>
                                         <ControlTemplate TargetType="RepeatButton">
-                                            <Border Background="Transparent" CornerRadius="3"/>
+                                            <!-- Видимая темная полоса из ресурсов темы -->
+                                            <Border x:Name="RemainingTrack"
+                                                    Height="4" 
+                                                    CornerRadius="0,2,2,0"
+                                                    Background="{DynamicResource BorderBrush}"
+                                                    BorderBrush="{DynamicResource SliderBorderBrush}"
+                                                    BorderThickness="0,1,0,1"
+                                                    Opacity="0.3"/>
                                         </ControlTemplate>
                                     </RepeatButton.Template>
                                 </RepeatButton>
                             </Track.IncreaseRepeatButton>
+
                             <Track.Thumb>
-                                <Thumb x:Name="SliderThumb" 
-                                    Width="16" Height="16" 
-                                    Cursor="Hand" Focusable="False">
+                                <Thumb 
+                                    x:Name="Thumb" 
+                                    Focusable="False" 
+                                    Width="12" 
+                                    Height="24"
+                                    Cursor="Hand">
                                     <Thumb.Template>
                                         <ControlTemplate TargetType="Thumb">
-                                            <Grid>
-                                                <Ellipse x:Name="ThumbBackground"
-                                                    Fill="{DynamicResource SliderForegroundBrush}" 
-                                                    Width="16" Height="16"/>
-                                                <Ellipse x:Name="ThumbHighlight"
-                                                    Fill="White" Opacity="0.3"
-                                                    Width="8" Height="8"/>
-                                                <Ellipse x:Name="FocusRing"
-                                                    Stroke="{DynamicResource FocusedBorderBrush}"
-                                                    StrokeThickness="1"
-                                                    Width="20" Height="20"
-                                                    Opacity="0"/>
+                                            <Grid x:Name="ThumbGrid">
+                                                <Border x:Name="ThumbRing"
+                                                    Width="12" Height="24"
+                                                    BorderThickness="1"
+                                                    BorderBrush="{DynamicResource SliderBorderBrush}"
+                                                    Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"
+                                                    Opacity="0.1"
+                                                    CornerRadius="6"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"/>
+
+                                                <Border x:Name="ThumbFill"
+                                                    Width="10" Height="22"
+                                                    Background="{DynamicResource SurfaceBrush}"
+                                                    CornerRadius="5"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"/>
+
+                                                <Border x:Name="ThumbAccent"
+                                                    Width="4" Height="10"
+                                                    Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"
+                                                    CornerRadius="2"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"/>
                                             </Grid>
+
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="18"/>
-                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="18"/>
-                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="9"/>
-                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="9"/>
+                                                    <Setter TargetName="ThumbFill" Property="Background" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
+                                                    <Setter TargetName="ThumbAccent" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+                                                    <Setter TargetName="ThumbRing" Property="Opacity" Value="0.2"/>
                                                 </Trigger>
+
                                                 <Trigger Property="IsMouseCaptured" Value="True">
-                                                    <Setter TargetName="ThumbBackground" Property="Width" Value="14"/>
-                                                    <Setter TargetName="ThumbBackground" Property="Height" Value="14"/>
-                                                    <Setter TargetName="ThumbHighlight" Property="Width" Value="7"/>
-                                                    <Setter TargetName="ThumbHighlight" Property="Height" Value="7"/>
-                                                </Trigger>
-                                                <Trigger Property="IsFocused" Value="True">
-                                                    <Setter TargetName="FocusRing" Property="Opacity" Value="1"/>
+                                                    <Setter TargetName="ThumbRing" Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
+                                                    <Setter TargetName="ThumbFill" Property="Background" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
+                                                    <Setter TargetName="ThumbAccent" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+                                                    <Setter TargetName="ThumbAccent" Property="Width" Value="4"/>
+                                                    <Setter TargetName="ThumbAccent" Property="Height" Value="14"/>
+                                                    <Setter TargetName="ThumbRing" Property="Width" Value="14"/>
+                                                    <Setter TargetName="ThumbRing" Property="Height" Value="26"/>
+                                                    <Setter TargetName="ThumbRing" Property="Opacity" Value="0.3"/>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -176,82 +158,103 @@
                             </Track.Thumb>
                         </Track>
 
-                        <Popup x:Name="ValuePopup" 
-                            PlacementTarget="{Binding ElementName=SliderThumb}"
-                            Placement="Top"
-                            AllowsTransparency="True"
-                            PopupAnimation="Fade"
-                            IsOpen="False">
-                            <Border 
-                                Background="{DynamicResource AccentBrush}"
-                                CornerRadius="4"
-                                Padding="6,2">
-                                <TextBlock x:Name="ValueText"
+                        <Border x:Name="ValuePopupBorder"
+                            Background="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                            CornerRadius="4"
+                            Padding="6,2"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Top"
+                            Margin="0,-30,0,0"
+                            Opacity="0">
+                            <Grid>
+                                <Path 
+                                    x:Name="PopupPointer"
+                                    Data="M0,0 L6,0 L3,4 Z"
+                                    Fill="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Bottom"
+                                    Margin="0,0,0,-4"/>
+
+                                <TextBlock 
+                                    x:Name="ValueText"
                                     Text="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, StringFormat='{}{0:F1}'}"
-                                    Foreground="White"
-                                    FontWeight="SemiBold" FontSize="12"
-                                    HorizontalAlignment="Center"/>
-                            </Border>
-                        </Popup>
+                                    Foreground="{DynamicResource SurfaceBrush}"
+                                    FontWeight="SemiBold"
+                                    FontSize="11"/>
+                            </Grid>
+                        </Border>
+
+                        <StackPanel 
+                            Orientation="Horizontal" 
+                            HorizontalAlignment="Stretch" 
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,0,-16">
+
+                            <TextBlock 
+                                x:Name="MinValueMarker"
+                                Text="{TemplateBinding Minimum}"
+                                FontSize="9"
+                                FontWeight="Medium"
+                                Foreground="{DynamicResource TextSecondaryBrush}"
+                                HorizontalAlignment="Left"
+                                Opacity="0"/>
+
+                            <TextBlock HorizontalAlignment="Stretch" Text=" " Margin="0"/>
+
+                            <TextBlock 
+                                x:Name="MaxValueMarker"
+                                Text="{TemplateBinding Maximum}"
+                                FontSize="9"
+                                FontWeight="Medium"
+                                Foreground="{DynamicResource TextSecondaryBrush}"
+                                HorizontalAlignment="Right"
+                                Opacity="0"/>
+                        </StackPanel>
                     </Grid>
+
                     <ControlTemplate.Triggers>
-                        <Trigger Property="TickPlacement" Value="TopLeft">
-                            <Setter TargetName="TopTick" Property="Visibility" Value="Visible"/>
-                        </Trigger>
-                        <Trigger Property="TickPlacement" Value="BottomRight">
-                            <Setter TargetName="BottomTick" Property="Visibility" Value="Visible"/>
-                        </Trigger>
-                        <Trigger Property="TickPlacement" Value="Both">
-                            <Setter TargetName="TopTick" Property="Visibility" Value="Visible"/>
-                            <Setter TargetName="BottomTick" Property="Visibility" Value="Visible"/>
-                        </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="TrackBackground" Property="BorderBrush" Value="{DynamicResource ComboBoxHoverBorderBrush}"/>
+                            <Setter TargetName="TrackBase" Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+                            <Setter TargetName="TrackInner" Property="Background" Value="{DynamicResource SliderBackgroundBrush}"/>
+                            <Setter TargetName="TrackInner" Property="Opacity" Value="0.95"/>
+                            <Setter TargetName="MinValueMarker" Property="Opacity" Value="0.9"/>
+                            <Setter TargetName="MaxValueMarker" Property="Opacity" Value="0.9"/>
                         </Trigger>
-                        <EventTrigger RoutedEvent="Thumb.DragStarted" SourceName="SliderThumb">
-                            <BeginStoryboard>
-                                <Storyboard>
-                                    <BooleanAnimationUsingKeyFrames 
-                                        Storyboard.TargetName="ValuePopup"
-                                        Storyboard.TargetProperty="IsOpen">
-                                        <DiscreteBooleanKeyFrame KeyTime="0:0:0" Value="True"/>
-                                    </BooleanAnimationUsingKeyFrames>
-                                </Storyboard>
-                            </BeginStoryboard>
-                        </EventTrigger>
-                        <EventTrigger RoutedEvent="Thumb.DragCompleted" SourceName="SliderThumb">
-                            <BeginStoryboard>
-                                <Storyboard>
-                                    <BooleanAnimationUsingKeyFrames 
-                                        Storyboard.TargetName="ValuePopup"
-                                        Storyboard.TargetProperty="IsOpen">
-                                        <DiscreteBooleanKeyFrame KeyTime="0:0:0.5" Value="False"/>
-                                    </BooleanAnimationUsingKeyFrames>
-                                </Storyboard>
-                            </BeginStoryboard>
-                        </EventTrigger>
+
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="Thumb" Property="Focusable" Value="True"/>
+                            <Setter TargetName="TrackBase" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+
+                        <Trigger Property="IsMouseCaptured" Value="True" SourceName="Thumb">
+                            <Setter TargetName="ValuePopupBorder" Property="Opacity" Value="1"/>
+                            <Setter TargetName="TrackInner" Property="Opacity" Value="1"/>
+                        </Trigger>
+
+                        <Trigger Property="TickPlacement" Value="TopLeft">
+                            <Setter TargetName="TickCanvas" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="TickCanvas" Property="Margin" Value="0,-16,0,0"/>
+                        </Trigger>
+
+                        <Trigger Property="TickPlacement" Value="BottomRight">
+                            <Setter TargetName="TickCanvas" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="TickCanvas" Property="Margin" Value="0,16,0,0"/>
+                        </Trigger>
+
+                        <Trigger Property="TickPlacement" Value="Both">
+                            <Setter TargetName="TickCanvas" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="TrackBackground" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="TrackBase" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="TrackInner" Property="Opacity" Value="0.5"/>
                             <Setter TargetName="PART_Track" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="SliderRoot" Property="Opacity" Value="0.7"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
-    </Style>
-
-    <!-- Вертикальный слайдер -->
-    <Style x:Key="VerticalSliderStyle" TargetType="Slider" BasedOn="{StaticResource ModernSliderStyle}">
-        <Setter Property="Orientation" Value="Vertical"/>
-        <Setter Property="Width" Value="20"/>
-        <Setter Property="Height" Value="120"/>
-    </Style>
-
-    <!-- Слайдер с делениями -->
-    <Style x:Key="TickedSliderStyle" TargetType="Slider" BasedOn="{StaticResource ModernSliderStyle}">
-        <Setter Property="TickPlacement" Value="BottomRight"/>
-        <Setter Property="TickFrequency" Value="10"/>
-        <Setter Property="IsSnapToTickEnabled" Value="True"/>
     </Style>
 
 </ResourceDictionary>
