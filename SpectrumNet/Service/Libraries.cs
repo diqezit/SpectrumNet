@@ -26,6 +26,7 @@ global using SpectrumNet.DataSettings;
 global using SpectrumNet.DataSettings.Interfaces;
 global using SpectrumNet.Service;
 global using SpectrumNet.Service.Colors;
+global using SpectrumNet.Service.Colors.Interfaces;
 global using SpectrumNet.Service.ErrorHandlers;
 global using SpectrumNet.Service.Utilities;
 global using SpectrumNet.Themes;
@@ -78,7 +79,5 @@ global using LogLevel = SpectrumNet.Service.Enums.LogLevel;
 global using MessageBox = System.Windows.MessageBox;
 global using Parallel = System.Threading.Tasks.Parallel;
 global using TextBox = System.Windows.Controls.TextBox;
-
-
 
 

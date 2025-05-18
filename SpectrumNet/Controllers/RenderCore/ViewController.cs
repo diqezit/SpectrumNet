@@ -1,5 +1,4 @@
-﻿// Controllers/RenderCore/ViewController.cs
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet.Controllers.RenderCore;
 
@@ -9,9 +8,9 @@ public class ViewController : IViewController, IDisposable
 
     private readonly IMainController _mainController;
     private readonly IRendererFactory _rendererFactory;
+    private readonly IBrushProvider _brushProvider;
 
     private Renderer? _renderer;
-    private SpectrumBrushes? _spectrumStyles;
     private SpectrumAnalyzer? _analyzer;
     private SKElement? _renderElement;
 
@@ -28,7 +27,8 @@ public class ViewController : IViewController, IDisposable
     public ViewController(
         IMainController mainController,
         SKElement renderElement,
-        IRendererFactory rendererFactory)
+        IRendererFactory rendererFactory,
+        IBrushProvider? brushProvider = null)
     {
         _mainController = mainController ??
             throw new ArgumentNullException(nameof(mainController));
@@ -38,6 +38,8 @@ public class ViewController : IViewController, IDisposable
 
         _rendererFactory = rendererFactory ??
             throw new ArgumentNullException(nameof(rendererFactory));
+
+        _brushProvider = brushProvider ?? SpectrumBrushes.Instance;
 
         // Инициализация доступных типов рендеринга
         AvailableDrawingTypes = [.. Enum.GetValues<RenderStyle>()
@@ -51,10 +53,6 @@ public class ViewController : IViewController, IDisposable
 
         AvailableRenderQualities = [.. Enum.GetValues<RenderQuality>()
                                            .OrderBy(q => (int)q)];
-
-        // Инициализация стилей спектра
-        _spectrumStyles = new SpectrumBrushes() ??
-            throw new InvalidOperationException("Failed to create SpectrumBrushes");
 
         // Загрузка настроек
         LoadAndApplySettings();
@@ -78,7 +76,7 @@ public class ViewController : IViewController, IDisposable
         _renderElement ?? throw new InvalidOperationException("Render element not initialized");
 
     public SpectrumBrushes SpectrumStyles =>
-        _spectrumStyles ?? throw new InvalidOperationException("Spectrum styles not initialized");
+        _brushProvider as SpectrumBrushes ?? SpectrumBrushes.Instance;
 
     public int BarCount
     {
@@ -172,9 +170,9 @@ public class ViewController : IViewController, IDisposable
             Settings.Instance.SelectedPalette = value;
             _mainController.OnPropertyChanged(nameof(SelectedStyle));
 
-            if (_renderer != null && _spectrumStyles != null)
+            if (_renderer != null)
             {
-                var (color, brush) = _spectrumStyles.GetColorAndBrush(value);
+                var (color, brush) = _brushProvider.GetColorAndBrush(value);
                 _renderer.UpdateSpectrumStyle(value, color, brush);
             }
 
@@ -207,8 +205,7 @@ public class ViewController : IViewController, IDisposable
     }
 
     public IReadOnlyDictionary<string, Palette> AvailablePalettes =>
-        _spectrumStyles?.RegisteredPalettes.OrderBy(kvp => kvp.Key)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value) ?? [];
+        _brushProvider.RegisteredPalettes;
 
     public IEnumerable<RenderStyle> AvailableDrawingTypes { get; }
 
@@ -316,11 +313,6 @@ public class ViewController : IViewController, IDisposable
             {
                 _renderer.Dispose();
                 _renderer = null;
-            }
-
-            if (_spectrumStyles != null)
-            {
-                _spectrumStyles = null;
             }
 
             _renderElement = null;
