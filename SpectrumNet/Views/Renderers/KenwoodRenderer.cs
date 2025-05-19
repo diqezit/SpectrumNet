@@ -11,14 +11,14 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
     private static readonly Lazy<KenwoodRenderer> _instance =
         new(() => new KenwoodRenderer());
 
+    private const string LogPrefix = nameof(KenwoodRenderer);
+
     private KenwoodRenderer() { }
 
     public static KenwoodRenderer GetInstance() => _instance.Value;
 
     public record Constants
     {
-        public const string LOG_PREFIX = "KenwoodRenderer";
-
         public const float
             ANIMATION_SPEED = 0.85f,
             PEAK_FALL_SPEED = 0.007f,
@@ -129,7 +129,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         _useGlow,
         _useBarBlur;
 
-    private float 
+    private float
         _glowRadius,
         _glowIntensity,
         _shadowBlur,
@@ -212,14 +212,14 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             base.OnInitialize();
             InitializeBufferPools();
             InitializePaths();
             InitializeBuffers(INITIAL_BUFFER_SIZE);
             ApplyQualitySettingsInternal();
             StartCalculationThread();
-        }, nameof(OnInitialize), "Failed to initialize renderer");
+        }, LogPrefix, "Failed to initialize renderer");
     }
 
     protected override void OnConfigurationChanged()
@@ -310,7 +310,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             spectrum == null || spectrum.Length == 0 || info.Width <= 0 || info.Height <= 0 || barCount <= 0)
             return;
 
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             int limitedBarCount = LimitBarCount(barCount);
             float widthAdjustment = CalculateBarWidthAdjustment(barCount, limitedBarCount);
             float adjustedBarWidth = barWidth * widthAdjustment;
@@ -319,7 +319,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
             UpdateState(canvas, spectrum, info, limitedBarCount);
             RenderFrame(canvas, info, adjustedBarWidth, adjustedBarSpacing, totalBarWidth);
-        }, nameof(RenderEffect), "Error during rendering");
+        }, LogPrefix, "Error during rendering");
     }
 
     public override void SetOverlayTransparency(float level)
@@ -330,7 +330,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     protected override void OnDispose()
     {
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             _calculationCts?.Cancel();
             _dataAvailableEvent.Set();
 
@@ -358,7 +358,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             _barGradient?.Dispose();
 
             base.OnDispose();
-        }, nameof(OnDispose), "Error during disposal");
+        }, LogPrefix, "Error during disposal");
     }
 
     private void InitializeBufferPools()
@@ -553,7 +553,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
         float _,
         int renderCount)
     {
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             _cachedBarPath?.Reset();
             _cachedPeakPath?.Reset();
             _cachedShadowPath?.Reset();
@@ -600,7 +600,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                         _peakHeight));
                 }
             }
-        }, nameof(UpdateRenderingPaths), "Failed to update rendering paths");
+        }, LogPrefix, "Failed to update rendering paths");
     }
 
     private void RenderBars(SKCanvas canvas)
@@ -627,7 +627,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
 
     private void CreateGradients(float height)
     {
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             _barGradient?.Dispose();
 
             _barGradient = SKShader.CreateLinearGradient(
@@ -636,7 +636,7 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
                 _barColors,
                 _barColorPositions,
                 SKShaderTileMode.Clamp);
-        }, nameof(CreateGradients), "Failed to create gradients");
+        }, LogPrefix, "Failed to create gradients");
     }
 
     private void CalculationThreadMain(CancellationToken ct)
@@ -678,8 +678,9 @@ public sealed class KenwoodRenderer : EffectSpectrumRenderer
             {
                 break;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.Error(LogPrefix, "Error in calculation thread", ex);
                 Thread.Sleep(100);
             }
         }

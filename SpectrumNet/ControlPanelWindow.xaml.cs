@@ -4,7 +4,7 @@ namespace SpectrumNet;
 
 public partial class ControlPanelWindow : Window, IDisposable
 {
-    private const string LogPrefix = "ControlPanelWindow";
+    private const string LogPrefix = nameof(ControlPanelWindow);
 
     private readonly IMainController _controller;
     private readonly IThemes _themeManager;
@@ -12,6 +12,7 @@ public partial class ControlPanelWindow : Window, IDisposable
     private readonly Dictionary<string, Action<double>> _sliderActions;
     private readonly Dictionary<(string Name, Type ItemType), Action<object>> _comboBoxActions;
     private readonly Dictionary<string, Action<bool>> _checkBoxActions;
+    private readonly ISmartLogger _logger = Instance;
     private bool _isDisposed;
     private readonly bool _isInitializingControls = true;
 
@@ -61,14 +62,16 @@ public partial class ControlPanelWindow : Window, IDisposable
     }
 
     private void SetupGainControlsPopup() =>
-        Safe(() =>
-        {
-            if (GainControlsPopup is null) return;
+        _logger.Safe(() => HandleSetupGainControlsPopup(), LogPrefix, "Error setting up gain controls popup");
 
-            GainControlsPopup.Opened += OnGainControlsPopupOpened;
-            GainControlsPopup.Closed += OnGainControlsPopupClosed;
-            GainControlsPopup.MouseDown += OnGainControlsPopupMouseDown;
-        }, GetLoggerOptions("Error setting up gain controls popup"));
+    private void HandleSetupGainControlsPopup()
+    {
+        if (GainControlsPopup is null) return;
+
+        GainControlsPopup.Opened += OnGainControlsPopupOpened;
+        GainControlsPopup.Closed += OnGainControlsPopupClosed;
+        GainControlsPopup.MouseDown += OnGainControlsPopupMouseDown;
+    }
 
     private void OnGainControlsPopupOpened(object? sender, EventArgs e) =>
         Mouse.Capture(GainControlsPopup, CaptureMode.SubTree);
@@ -77,92 +80,99 @@ public partial class ControlPanelWindow : Window, IDisposable
         Mouse.Capture(null);
 
     private void OnGainControlsPopupMouseDown(object sender, MouseButtonEventArgs e) =>
-        Safe(() =>
-        {
-            if (e.OriginalSource is FrameworkElement { Name: "GainControlsPopup" })
-            {
-                _controller.IsPopupOpen = false;
-                e.Handled = true;
-            }
-        }, GetLoggerOptions("Error handling gain controls popup mouse down"));
+        _logger.Safe(() => HandleGainControlsPopupMouseDown(sender, e), LogPrefix, "Error handling gain controls popup mouse down");
 
-    private void OnButtonClick(object sender, RoutedEventArgs e) =>
-        Safe(() =>
-        {
-            if (sender is Button { Name: var btnName } button && _buttonActions.TryGetValue(btnName, out var action))
-            {
-                action();
-            }
-        }, GetLoggerOptions("Error handling button click"));
-
-    private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
-        Safe(() =>
-        {
-            if (!IsLoaded || sender is not Slider slider) return;
-
-            if (_sliderActions.TryGetValue(slider.Name, out var action))
-            {
-                action(slider.Value);
-            }
-        }, GetLoggerOptions("Error handling slider change"));
-
-    private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e) =>
-        Safe(() =>
-        {
-            if (_isInitializingControls)
-                return;
-
-            if (sender is not ComboBox { SelectedItem: var selectedItem } comboBox || selectedItem is null)
-                return;
-
-            var key = (comboBox.Name, selectedItem.GetType());
-            if (_comboBoxActions.TryGetValue(key, out var action))
-            {
-                action(selectedItem);
-            }
-        }, GetLoggerOptions("Error handling selection change"));
-
-    private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
-        Safe(() =>
-        {
-            if (e.ChangedButton != MouseButton.Left) return;
-
-            var mousePos = e.GetPosition(TitleBar);
-            var closeButtonBounds = CloseButton.TransformToAncestor(TitleBar)
-                .TransformBounds(new Rect(0, 0, CloseButton.ActualWidth, CloseButton.ActualHeight));
-
-            if (!closeButtonBounds.Contains(mousePos))
-                DragMove();
-        }, GetLoggerOptions("Error handling window drag"));
-
-    private void OnFavoriteButtonClick(object sender, RoutedEventArgs e)
+    private void HandleGainControlsPopupMouseDown(object sender, MouseButtonEventArgs e)
     {
-        Safe(() =>
+        if (e.OriginalSource is FrameworkElement { Name: "GainControlsPopup" })
         {
-            if (sender is Button button && button.Tag is RenderStyle style)
-            {
-                var favorites = Settings.Instance.FavoriteRenderers;
-                bool isFavorite = favorites.Contains(style);
-
-                if (isFavorite)
-                    favorites.Remove(style);
-                else
-                    favorites.Add(style);
-
-                SettingsWindow.Instance.SaveSettings();
-                _controller.OnPropertyChanged(nameof(_controller.OrderedDrawingTypes));
-                var currentSelection = RenderStyleComboBox.SelectedItem;
-
-                RenderStyleComboBox.ItemsSource = null;
-                RenderStyleComboBox.ItemsSource = _controller.OrderedDrawingTypes;
-                RenderStyleComboBox.SelectedItem = currentSelection;
-                RenderStyleComboBox.UpdateLayout();
-            }
-        }, GetLoggerOptions("Error handling favorite button click"));
+            _controller.IsPopupOpen = false;
+            e.Handled = true;
+        }
     }
 
-    private ErrorHandlingOptions GetLoggerOptions(string errorMessage) =>
-        new() { Source = LogPrefix, ErrorMessage = errorMessage };
+    private void OnButtonClick(object sender, RoutedEventArgs e) =>
+        _logger.Safe(() => HandleButtonClick(sender, e), LogPrefix, "Error handling button click");
+
+    private void HandleButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Name: var btnName } button && _buttonActions.TryGetValue(btnName, out var action))
+        {
+            action();
+        }
+    }
+
+    private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
+        _logger.Safe(() => HandleSliderValueChanged(sender, e), LogPrefix, "Error handling slider change");
+
+    private void HandleSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!IsLoaded || sender is not Slider slider) return;
+
+        if (_sliderActions.TryGetValue(slider.Name, out var action))
+        {
+            action(slider.Value);
+        }
+    }
+
+    private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        _logger.Safe(() => HandleComboBoxSelectionChanged(sender, e), LogPrefix, "Error handling selection change");
+
+    private void HandleComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializingControls)
+            return;
+
+        if (sender is not ComboBox { SelectedItem: var selectedItem } comboBox || selectedItem is null)
+            return;
+
+        var key = (comboBox.Name, selectedItem.GetType());
+        if (_comboBoxActions.TryGetValue(key, out var action))
+        {
+            action(selectedItem);
+        }
+    }
+
+    private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+        _logger.Safe(() => HandleTitleBarMouseLeftButtonDown(sender, e), LogPrefix, "Error handling window drag");
+
+    private void HandleTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+
+        var mousePos = e.GetPosition(TitleBar);
+        var closeButtonBounds = CloseButton.TransformToAncestor(TitleBar)
+            .TransformBounds(new Rect(0, 0, CloseButton.ActualWidth, CloseButton.ActualHeight));
+
+        if (!closeButtonBounds.Contains(mousePos))
+            DragMove();
+    }
+
+    private void OnFavoriteButtonClick(object sender, RoutedEventArgs e) =>
+        _logger.Safe(() => HandleFavoriteButtonClick(sender, e), LogPrefix, "Error handling favorite button click");
+
+    private void HandleFavoriteButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is RenderStyle style)
+        {
+            var favorites = Settings.Instance.FavoriteRenderers;
+            bool isFavorite = favorites.Contains(style);
+
+            if (isFavorite)
+                favorites.Remove(style);
+            else
+                favorites.Add(style);
+
+            SettingsWindow.Instance.SaveSettings();
+            _controller.OnPropertyChanged(nameof(_controller.OrderedDrawingTypes));
+            var currentSelection = RenderStyleComboBox.SelectedItem;
+
+            RenderStyleComboBox.ItemsSource = null;
+            RenderStyleComboBox.ItemsSource = _controller.OrderedDrawingTypes;
+            RenderStyleComboBox.SelectedItem = currentSelection;
+            RenderStyleComboBox.UpdateLayout();
+        }
+    }
 
     private Dictionary<string, Action> CreateButtonActionsMap() => new()
     {
@@ -211,21 +221,22 @@ public partial class ControlPanelWindow : Window, IDisposable
     {
         if (_isDisposed) return;
 
-        Safe(() =>
-        {
-            _controller.InputController.UnregisterWindow(this);
-
-            if (GainControlsPopup is not null)
-            {
-                GainControlsPopup.Opened -= OnGainControlsPopupOpened;
-                GainControlsPopup.Closed -= OnGainControlsPopupClosed;
-                GainControlsPopup.MouseDown -= OnGainControlsPopupMouseDown;
-            }
-
-            _isDisposed = true;
-        }, GetLoggerOptions("Error during dispose"));
-
+        _logger.Safe(() => HandleDispose(), LogPrefix, "Error during dispose");
         GC.SuppressFinalize(this);
+    }
+
+    private void HandleDispose()
+    {
+        _controller.InputController.UnregisterWindow(this);
+
+        if (GainControlsPopup is not null)
+        {
+            GainControlsPopup.Opened -= OnGainControlsPopupOpened;
+            GainControlsPopup.Closed -= OnGainControlsPopupClosed;
+            GainControlsPopup.MouseDown -= OnGainControlsPopupMouseDown;
+        }
+
+        _isDisposed = true;
     }
 
     protected override void OnClosed(EventArgs e)

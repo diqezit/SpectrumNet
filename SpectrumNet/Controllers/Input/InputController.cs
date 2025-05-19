@@ -6,12 +6,13 @@ namespace SpectrumNet.Controllers.Input;
 
 public class InputController : IInputController, IDisposable, IAsyncDisposable
 {
-    private const string LogPrefix = "InputController";
+    private const string LogPrefix = nameof(InputController);
 
     private readonly IMainController _mainController;
     private readonly List<IInputHandler> _handlers;
     private readonly List<Window> _registeredWindows = [];
     private readonly Dictionary<Window, List<EventSubscription>> _eventSubscriptions = [];
+    private readonly ISmartLogger _logger = Instance;
     private bool _isDisposed;
 
     private record EventSubscription(string EventName, Delegate Handler);
@@ -22,7 +23,10 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
         _handlers = CreateHandlers();
     }
 
-    public void RegisterWindow(Window window)
+    public void RegisterWindow(Window window) =>
+        _logger.Safe(() => HandleRegisterWindow(window), LogPrefix, "Error registering window");
+
+    private void HandleRegisterWindow(Window window)
     {
         if (_registeredWindows.Contains(window) || _isDisposed)
             return;
@@ -35,7 +39,10 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
         RegisterEventSubscription(window, "Closed", closedHandler);
     }
 
-    public void UnregisterWindow(Window window)
+    public void UnregisterWindow(Window window) =>
+        _logger.Safe(() => HandleUnregisterWindow(window), LogPrefix, "Error unregistering window");
+
+    private void HandleUnregisterWindow(Window window)
     {
         if (!_registeredWindows.Contains(window))
             return;
@@ -77,7 +84,10 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
     public bool HandleButtonClick(object? sender, RoutedEventArgs e) =>
         ExecuteHandlerAction(_handlers, h => h.HandleButtonClick(sender, e));
 
-    public void Dispose()
+    public void Dispose() =>
+        _logger.Safe(() => HandleDispose(), LogPrefix, "Error disposing input controller");
+
+    private void HandleDispose()
     {
         if (_isDisposed)
             return;
@@ -101,7 +111,12 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
         subscriptions.Add(new EventSubscription(eventName, handler));
     }
 
-    private void UnsubscribeAllEvents(Window window)
+    private void UnsubscribeAllEvents(Window window) =>
+        _logger.Safe(() => HandleUnsubscribeAllEvents(window),
+            LogPrefix,
+            $"Error unsubscribing events for window {window.Name}");
+
+    private void HandleUnsubscribeAllEvents(Window window)
     {
         if (_eventSubscriptions.TryGetValue(window, out var subscriptions))
         {
@@ -114,31 +129,30 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
         }
     }
 
-    private static void UnsubscribeWindowEvent(
+    private void UnsubscribeWindowEvent(
+        Window window,
+        EventSubscription subscription) =>
+        _logger.Safe(() => HandleUnsubscribeWindowEvent(window, subscription),
+            LogPrefix,
+            $"Error unsubscribing from {subscription.EventName}");
+
+    private static void HandleUnsubscribeWindowEvent(
         Window window,
         EventSubscription subscription)
     {
-        try
+        switch (subscription.EventName)
         {
-            switch (subscription.EventName)
-            {
-                case "Closed":
-                    window.Closed -= (EventHandler)subscription.Handler;
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix,
-                $"Error unsubscribing from {subscription.EventName}: {ex.Message}");
+            case "Closed":
+                window.Closed -= (EventHandler)subscription.Handler;
+                break;
         }
     }
 
-    private void OnWindowClosed(object? sender, EventArgs e)
-    {
-        if (sender is Window window)
-            UnregisterWindow(window);
-    }
+    private void OnWindowClosed(object? sender, EventArgs e) =>
+        _logger.Safe(() => {
+            if (sender is Window window)
+                UnregisterWindow(window);
+        }, LogPrefix, "Error handling window closed event");
 
     private static bool ExecuteHandlerAction(
         List<IInputHandler> handlers,
@@ -159,18 +173,21 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
         new WindowInputHandler(_mainController)
     ];
 
-    private void UnregisterAllWindows()
-    {
-        foreach (var window in _registeredWindows.ToList())
-        {
-            UnregisterWindow(window);
-        }
+    private void UnregisterAllWindows() =>
+        _logger.Safe(() => {
+            foreach (var window in _registeredWindows.ToList())
+            {
+                UnregisterWindow(window);
+            }
 
-        _registeredWindows.Clear();
-        _eventSubscriptions.Clear();
-    }
+            _registeredWindows.Clear();
+            _eventSubscriptions.Clear();
+        }, LogPrefix, "Error unregistering all windows");
 
-    public async ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync() =>
+        await _logger.SafeAsync(async () => await HandleDisposeAsync(), LogPrefix, "Error during async disposal");
+
+    private async Task HandleDisposeAsync()
     {
         if (_isDisposed)
             return;

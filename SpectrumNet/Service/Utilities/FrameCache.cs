@@ -4,6 +4,9 @@ namespace SpectrumNet.Service.Utilities;
 
 public class FrameCache : IDisposable
 {
+    private const string LogPrefix = nameof(FrameCache);
+    private readonly ISmartLogger _logger = Instance;
+
     private SKBitmap? _cachedFrame;
     private bool _isDirty = true;
     private SKImageInfo _lastInfo;
@@ -77,21 +80,15 @@ public class FrameCache : IDisposable
 
         if (needsNewCache)
         {
-            try
-            {
-                return new SKBitmap(
+            return _logger.SafeResult(() =>
+                new SKBitmap(
                     info.Width,
                     info.Height,
                     info.ColorType,
-                    info.AlphaType);
-            }
-            catch (Exception ex)
-            {
-                Log(LogLevel.Error,
-                    "FrameCache",
-                    $"Error creating bitmap: {ex.Message}");
-                return null;
-            }
+                    info.AlphaType),
+                null,
+                LogPrefix,
+                "Error creating bitmap");
         }
 
         return null;
@@ -106,7 +103,7 @@ public class FrameCache : IDisposable
         {
             if (_isDisposed)
                 return;
-             
+
             if (newCache != null)
             {
                 var oldCache = _cachedFrame;
@@ -115,31 +112,17 @@ public class FrameCache : IDisposable
 
                 if (oldCache != null)
                 {
-                    try
-                    {
-                        oldCache.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        Log(LogLevel.Error,
-                            "FrameCache",
-                            $"Error disposing old cache: {ex.Message}");
-                    }
+                    _logger.Safe(() => oldCache.Dispose(),
+                        LogPrefix,
+                        "Error disposing old cache");
                 }
             }
 
             if (_cachedFrame != null)
             {
-                try
-                {
-                    CopyContentFromSurface(surface, info);
-                }
-                catch (Exception ex)
-                {
-                    Log(LogLevel.Error,
-                        "FrameCache",
-                        $"Error copying content: {ex.Message}");
-                }
+                _logger.Safe(() => CopyContentFromSurface(surface, info),
+                    LogPrefix,
+                    "Error copying content");
             }
 
             MarkDirty(false);
@@ -182,16 +165,9 @@ public class FrameCache : IDisposable
         {
             if (_cachedFrame != null)
             {
-                try
-                {
-                    _cachedFrame.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Log(LogLevel.Error,
-                        "FrameCache",
-                        $"Error disposing frame cache: {ex.Message}");
-                }
+                _logger.Safe(() => _cachedFrame.Dispose(),
+                    LogPrefix,
+                    "Error disposing frame cache");
                 _cachedFrame = null;
             }
 

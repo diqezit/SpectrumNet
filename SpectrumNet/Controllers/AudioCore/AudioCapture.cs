@@ -8,6 +8,7 @@ public sealed class AudioCapture : AsyncDisposableBase
     private const string LogPrefix = nameof(AudioCapture);
     private readonly IMainController _controller;
     private readonly ICaptureService _captureService;
+    private readonly ISmartLogger _logger = Instance;
 
     public bool IsRecording => _captureService.IsRecording;
 
@@ -30,16 +31,16 @@ public sealed class AudioCapture : AsyncDisposableBase
     public Task ReinitializeCaptureAsync() => _captureService.ReinitializeCaptureAsync();
 
     protected override void DisposeManaged() =>
-        DisposeCaptureServiceSync();
+        _logger.Safe(() => DisposeCaptureServiceSync(), LogPrefix, "Error disposing capture service synchronously");
 
     protected override async ValueTask DisposeAsyncManagedResources() =>
-        await DisposeCaptureServiceAsync();
+        await _logger.SafeAsync(async () => await DisposeCaptureServiceAsync(), LogPrefix, "Error disposing capture service asynchronously");
 
     private void DisposeCaptureServiceSync()
     {
-        Log(LogLevel.Information, LogPrefix, "AudioCapture disposing");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioCapture disposing");
         TryStopAndDisposeCaptureServiceSync();
-        Log(LogLevel.Information, LogPrefix, "AudioCapture disposed successfully");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioCapture disposed successfully");
     }
 
     private void TryStopAndDisposeCaptureServiceSync()
@@ -54,15 +55,15 @@ public sealed class AudioCapture : AsyncDisposableBase
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogPrefix, $"Error disposing capture service: {ex.Message}");
+            _logger.Error(LogPrefix, $"Error disposing capture service: {ex.Message}");
         }
     }
 
     private async Task DisposeCaptureServiceAsync()
     {
-        Log(LogLevel.Information, LogPrefix, "AudioCapture async disposing");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioCapture async disposing");
         await TryStopAndDisposeCaptureServiceAsync();
-        Log(LogLevel.Information, LogPrefix, "AudioCapture async disposed successfully");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioCapture async disposed successfully");
     }
 
     private async Task TryStopAndDisposeCaptureServiceAsync()
@@ -74,7 +75,7 @@ public sealed class AudioCapture : AsyncDisposableBase
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogPrefix, $"Error async disposing capture service: {ex.Message}");
+            _logger.Error(LogPrefix, $"Error async disposing capture service: {ex.Message}");
         }
     }
 }

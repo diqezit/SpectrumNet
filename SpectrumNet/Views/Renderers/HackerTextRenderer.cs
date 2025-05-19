@@ -4,6 +4,7 @@ using static SpectrumNet.Views.Renderers.HackerTextRenderer.Constants;
 using static SpectrumNet.Views.Renderers.HackerTextRenderer.Constants.Physics;
 using static SpectrumNet.Views.Renderers.HackerTextRenderer.Constants.QualitySettings;
 using static SpectrumNet.Views.Renderers.HackerTextRenderer.Constants.Style;
+using static System.MathF;
 
 namespace SpectrumNet.Views.Renderers;
 
@@ -11,6 +12,8 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<HackerTextRenderer> _instance =
         new(() => new HackerTextRenderer());
+
+    private const string LogPrefix = nameof(HackerTextRenderer);
 
     private HackerTextRenderer() { }
 
@@ -21,7 +24,6 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     public record Constants
     {
         public const string
-            LOG_PREFIX = "HackerTextRenderer",
             STATIC_TEXT = "Haker2550";
 
         public const float
@@ -31,7 +33,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
             DEFAULT_BAR_COUNT = 100f,
             TEXT_SIZE_BAR_COUNT_SCALE = 0.2f,
             MIN_TEXT_SIZE_RATIO = 0.5f,
-            MAX_TEXT_SIZE_RATIO = 3.0f, 
+            MAX_TEXT_SIZE_RATIO = 3.0f,
             BASE_EXTRUSION_SCALE_FACTOR = 0.5f;
 
         public static class Physics
@@ -123,10 +125,16 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeFont();
-        _lastFrameTimeForEffect = UtcNow;
+        _lastFrameTimeForEffect = DateTime.UtcNow;
+        _logger.Debug(LogPrefix, "Initialized");
     }
 
-    private void InitializeFont()
+    private void InitializeFont() =>
+        _logger.Safe(() => HandleInitializeFont(),
+                     LogPrefix,
+                     "Error initializing font");
+
+    private void HandleInitializeFont()
     {
         _font = new()
         {
@@ -135,12 +143,23 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         };
     }
 
-    protected override void OnQualitySettingsApplied()
+    protected override void OnQualitySettingsApplied() =>
+        _logger.Safe(() => HandleQualitySettingsApplied(),
+                     LogPrefix,
+                     "Error applying quality settings");
+
+    private void HandleQualitySettingsApplied()
     {
         base.OnQualitySettingsApplied();
         SetCurrentQualityParameters(Quality);
         InvalidateLetterPaths();
         _staticTextInitialized = false;
+
+        _logger.Debug(LogPrefix,
+            $"Quality settings applied. Quality: {Quality}, " +
+            $"JumpStrength: {_currentJumpStrengthMultiplier}, " +
+            $"Damping: {_currentDampingFactor}, " +
+            $"ExtrusionLayers: {_currentExtrusionLayers}");
     }
 
     private void SetCurrentQualityParameters(RenderQuality quality)
@@ -183,7 +202,12 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         _currentExtrusionScaleFactor = LOW_EXTRUSION_SCALE_FACTOR;
     }
 
-    private void InvalidateLetterPaths()
+    private void InvalidateLetterPaths() =>
+        _logger.Safe(() => HandleInvalidateLetterPaths(),
+                     LogPrefix,
+                     "Error invalidating letter paths");
+
+    private void HandleInvalidateLetterPaths()
     {
         for (int i = 0; i < _letters.Count; i++)
         {
@@ -194,11 +218,19 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         }
     }
 
-
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float CalculateTotalTextWidth(SKFont font, string text)
         => string.IsNullOrEmpty(text) ? 0f : font.MeasureText(text);
 
     private void PopulateHackerLetters(
+        SKFont font,
+        float startX,
+        float baseY) =>
+        _logger.Safe(() => HandlePopulateHackerLetters(font, startX, baseY),
+                     LogPrefix,
+                     "Error populating hacker letters");
+
+    private void HandlePopulateHackerLetters(
         SKFont font,
         float startX,
         float baseY)
@@ -228,7 +260,12 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void InitializeStaticTextLayout(SKImageInfo info)
+    private void InitializeStaticTextLayout(SKImageInfo info) =>
+        _logger.Safe(() => HandleInitializeStaticTextLayout(info),
+                     LogPrefix,
+                     "Error initializing static text layout");
+
+    private void HandleInitializeStaticTextLayout(SKImageInfo info)
     {
         if (_font == null) InitializeFont();
         SKFont currentFont = _font!;
@@ -248,8 +285,19 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
             int barCount,
             float barWidth,
             float barSpacing,
-            SKImageInfo __,
-            SKPaint _,
+            SKImageInfo info,
+            SKPaint paint,
+            float[] spectrum) =>
+        _logger.Safe(() => HandleApplyBarParameters(barCount, barWidth, barSpacing, info, paint, spectrum),
+                     LogPrefix,
+                     "Error applying bar parameters");
+
+    private void HandleApplyBarParameters(
+            int barCount,
+            float barWidth,
+            float barSpacing,
+            SKImageInfo info,
+            SKPaint paint,
             float[] spectrum)
     {
         if (_font == null) InitializeFont();
@@ -279,6 +327,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
             -2f, 2f);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float CalculateAverageMagnitude(float[] spectrum)
     {
         if (spectrum == null || spectrum.Length == 0) return 0f;
@@ -288,6 +337,18 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     }
 
     protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
+        SKPaint paint) =>
+        _logger.Safe(() => HandleRenderEffect(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
+                     LogPrefix,
+                     "Error rendering hacker text effect");
+
+    private void HandleRenderEffect(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
@@ -322,6 +383,8 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
             DrawLetters3D(canvas, paint.Color);
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void UpdateSingleLetterPhysics(
         ref HackerLetter letter,
         float[] spectrumData,
@@ -358,11 +421,20 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         float physicsScale = deltaTime * TARGET_FPS_FOR_PHYSICS_SCALING;
 
         letter.VelocityY -= displacement * _currentReturnForceFactor * physicsScale;
-        letter.VelocityY *= MathF.Pow(_currentDampingFactor, physicsScale);
+        letter.VelocityY *= Pow(_currentDampingFactor, physicsScale);
         letter.CurrentY += letter.VelocityY * physicsScale;
     }
 
     private void UpdateLetterPhysics(
+        float[] spectrumData,
+        SKImageInfo info,
+        int spectrumBarCount,
+        float deltaTime) =>
+        _logger.Safe(() => HandleUpdateLetterPhysics(spectrumData, info, spectrumBarCount, deltaTime),
+                     LogPrefix,
+                     "Error updating letter physics");
+
+    private void HandleUpdateLetterPhysics(
         float[] spectrumData,
         SKImageInfo info,
         int spectrumBarCount,
@@ -386,7 +458,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         }
     }
 
-    [MethodImpl(AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int MapLetterXToSpectrumIndex(
         float letterX,
         float canvasWidth,
@@ -399,13 +471,14 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         return Clamp(index, 0, spectrumBarCount - 1);
     }
 
-    [MethodImpl(AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float ApplySmoothing(
         float previousValue,
         float currentValue,
         float smoothingFactor) =>
         previousValue * (1f - smoothingFactor) + currentValue * smoothingFactor;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SKColor CalculateExtrusionRenderColor(SKColor baseColor)
     {
         return new SKColor(
@@ -416,6 +489,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         );
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void CalculateGradientColors(
         SKColor baseColor,
         out SKColor startColor,
@@ -437,6 +511,14 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     private void DrawLetterExtrusion(
         SKCanvas canvas,
         SKPath letterPath,
+        SKPaint extrusionPaint) =>
+        _logger.Safe(() => HandleDrawLetterExtrusion(canvas, letterPath, extrusionPaint),
+                     LogPrefix,
+                     "Error drawing letter extrusion");
+
+    private void HandleDrawLetterExtrusion(
+        SKCanvas canvas,
+        SKPath letterPath,
         SKPaint extrusionPaint)
     {
         if (canvas == null
@@ -444,7 +526,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
             || extrusionPaint == null)
             return;
 
-        int layers = Math.Max(0, _currentExtrusionLayers);
+        int layers = Max(0, _currentExtrusionLayers);
         if (layers == 0)
             return;
 
@@ -480,7 +562,12 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         facePaint.Shader = null;
     }
 
-    private void DrawLetters3D(SKCanvas canvas, SKColor baseColor)
+    private void DrawLetters3D(SKCanvas canvas, SKColor baseColor) =>
+        _logger.Safe(() => HandleDrawLetters3D(canvas, baseColor),
+                     LogPrefix,
+                     "Error drawing 3D letters");
+
+    private void HandleDrawLetters3D(SKCanvas canvas, SKColor baseColor)
     {
         if (_font == null || _letters.Count == 0) return;
 
@@ -523,7 +610,16 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 
     protected override void OnDispose()
     {
+        _logger.Safe(() => HandleDisposeResources(),
+                     LogPrefix,
+                     "Error disposing hacker text renderer resources");
+
         base.OnDispose();
+        _logger.Debug(LogPrefix, "Disposed");
+    }
+
+    private void HandleDisposeResources()
+    {
         InvalidateLetterPaths();
         _font?.Dispose();
         _font = null;

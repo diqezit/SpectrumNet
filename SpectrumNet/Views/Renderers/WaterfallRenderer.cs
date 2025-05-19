@@ -7,13 +7,12 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class WaterfallRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<WaterfallRenderer> _instance = new(() => new WaterfallRenderer());
+    private const string LogPrefix = nameof(WaterfallRenderer);
 
     public static WaterfallRenderer GetInstance() => _instance.Value;
 
     public record Constants
     {
-        public const string LOG_PREFIX = "WaterfallRenderer";
-
         public const float
             MIN_SIGNAL = 1e-6f,
             DETAIL_SCALE_FACTOR = 0.8f,
@@ -54,9 +53,9 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     private float _lastBarSpacing;
 
     protected override void OnInitialize() =>
-        ExecuteSafely(
+        _logger.Safe(
             PerformInitialization,
-            nameof(OnInitialize),
+            LogPrefix,
             "Failed to initialize renderer"
         );
 
@@ -70,11 +69,11 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
         InitializeSpectrogramBuffer(bufferHeight, DEFAULT_SPECTRUM_WIDTH);
 
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     protected override void OnConfigurationChanged() =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_spectrogramBuffer != null)
@@ -82,10 +81,10 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     ResizeBufferForOverlayMode(_isOverlayActive);
                 }
 
-                Log(LogLevel.Information, LOG_PREFIX,
+                _logger.Log(LogLevel.Information, LogPrefix,
                     $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            nameof(OnConfigurationChanged),
+            LogPrefix,
             "Failed to handle configuration change"
         );
 
@@ -97,7 +96,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float barSpacing,
         int barCount,
         SKPaint paint) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 bool parametersChanged = CheckParametersChanged(barWidth, barSpacing, barCount);
@@ -106,7 +105,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
                 RenderWithOverlay(canvas, () => RenderFrame(canvas, info, barWidth, barSpacing, barCount));
             },
-            nameof(RenderEffect),
+            LogPrefix,
             "Error during rendering"
         );
 
@@ -155,7 +154,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         bool parametersChanged,
         int barCount,
         float barWidth) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 float[]? adjustedSpectrum = spectrum;
@@ -173,7 +172,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     _needsBufferResize = false;
                 }
             },
-            nameof(ProcessSpectrumData),
+            LogPrefix,
             "Error processing spectrum data"
         );
 
@@ -186,7 +185,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     {
         if (_spectrogramBuffer == null)
         {
-            Log(LogLevel.Warning, LOG_PREFIX, "Spectrogram buffer is null");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Spectrogram buffer is null");
             return;
         }
 
@@ -249,7 +248,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         int barCount,
         float ratio,
         float detailLevel) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 Parallel.For(0, barCount, i =>
@@ -274,7 +273,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     result[i] = sum / count * (1 - detailLevel) + peak * detailLevel;
                 });
             },
-            nameof(ProcessSpectrumDownsampling),
+            LogPrefix,
             "Failed to process spectrum downsampling"
         );
 
@@ -334,7 +333,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     }
 
     private void UpdateSpectrogramBuffer(float[]? spectrum) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_spectrogramBuffer == null) return;
@@ -354,12 +353,12 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
                 _bufferHead = (_bufferHead + 1) % bufferHeight;
             },
-            nameof(UpdateSpectrogramBuffer),
+            LogPrefix,
             "Failed to update spectrogram buffer"
         );
 
     private void UpdateCurrentSpectrum(float[] spectrum) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_currentSpectrum == null || _currentSpectrum.Length != spectrum.Length)
@@ -367,7 +366,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
                 Array.Copy(spectrum, _currentSpectrum, spectrum.Length);
             },
-            nameof(UpdateCurrentSpectrum),
+            LogPrefix,
             "Failed to update current spectrum"
         );
 
@@ -388,7 +387,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     }
 
     private void ProcessSpectrumDownscaling(float[] spectrum, int spectrumWidth) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_spectrogramBuffer == null) return;
@@ -404,12 +403,12 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     DownscaleSpectrumSequential(spectrum, spectrumWidth, ratio);
                 }
             },
-            nameof(ProcessSpectrumDownscaling),
+            LogPrefix,
             "Failed to process spectrum downscaling"
         );
 
     private void DownscaleSpectrumParallel(float[] spectrum, int spectrumWidth, float ratio) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 Parallel.For(0, spectrumWidth, i =>
@@ -427,7 +426,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     }
                 });
             },
-            nameof(DownscaleSpectrumParallel),
+            LogPrefix,
             "Failed to downscale spectrum in parallel"
         );
 
@@ -474,7 +473,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     }
 
     private void ProcessSpectrumUpscaling(float[] spectrum, int spectrumWidth) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_spectrogramBuffer == null) return;
@@ -491,12 +490,12 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     _spectrogramBuffer[_bufferHead][i] = spectrum[idx1] * (1 - frac) + spectrum[idx2] * frac;
                 }
             },
-            nameof(ProcessSpectrumUpscaling),
+            LogPrefix,
             "Failed to process spectrum upscaling"
         );
 
     private void ResizeBufferForOverlayMode(bool isOverlayActive) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 int bufferHeight = isOverlayActive ?
@@ -506,12 +505,12 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 int currentWidth = _spectrogramBuffer![0].Length;
                 InitializeSpectrogramBuffer(bufferHeight, currentWidth);
             },
-            nameof(ResizeBufferForOverlayMode),
+            LogPrefix,
             "Failed to resize buffer for overlay mode"
         );
 
     private void ResizeBufferForBarParameters(int barCount) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_spectrogramBuffer == null) return;
@@ -524,12 +523,12 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     InitializeSpectrogramBuffer(bufferHeight, newWidth);
                 }
             },
-            nameof(ResizeBufferForBarParameters),
+            LogPrefix,
             "Failed to resize buffer for bar parameters"
         );
 
     private void InitializeSpectrogramBuffer(int bufferHeight, int spectrumWidth) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (bufferHeight <= 0 || spectrumWidth <= 0)
@@ -544,7 +543,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     _bufferHead = 0;
                 }
             },
-            nameof(InitializeSpectrogramBuffer),
+            LogPrefix,
             "Failed to initialize spectrogram buffer"
         );
 
@@ -558,7 +557,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     }
 
     private void AllocateNewBuffer(int bufferHeight, int spectrumWidth) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 _spectrogramBuffer = new float[bufferHeight][];
@@ -580,12 +579,12 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     }
                 }
             },
-            nameof(AllocateNewBuffer),
+            LogPrefix,
             "Failed to allocate new buffer"
         );
 
     private void UpdateWaterfallBitmap(int spectrumWidth, int bufferHeight) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_waterfallBitmap == null ||
@@ -596,7 +595,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     _waterfallBitmap = new SKBitmap(spectrumWidth, bufferHeight);
                 }
             },
-            nameof(UpdateWaterfallBitmap),
+            LogPrefix,
             "Failed to update waterfall bitmap"
         );
 
@@ -607,13 +606,13 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         int spectrumWidth,
         int bufferHeight,
         RenderQuality _) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 nint pixelsPtr = bitmap.GetPixels();
                 if (pixelsPtr == IntPtr.Zero)
                 {
-                    Log(LogLevel.Error, LOG_PREFIX, "Invalid bitmap pixels pointer");
+                    _logger.Log(LogLevel.Error, LogPrefix, "Invalid bitmap pixels pointer");
                     return;
                 }
 
@@ -628,7 +627,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     ArrayPool<int>.Shared.Return(pixels);
                 }
             },
-            nameof(UpdateBitmapPixels),
+            LogPrefix,
             "Failed to update bitmap pixels"
         );
 
@@ -752,7 +751,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
@@ -768,7 +767,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 canvas.Clear(SKColors.Black);
                 canvas.DrawBitmap(_waterfallBitmap!, destRect, renderPaint);
             },
-            nameof(DrawBitmapToCanvas),
+            LogPrefix,
             "Failed to draw bitmap to canvas"
         );
 
@@ -794,7 +793,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float barWidth,
         int barCount,
         float barSpacing) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 DrawGridLines(canvas, destRect, barWidth, barCount, barSpacing);
@@ -804,7 +803,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                     DrawGridMarkers(canvas, destRect, barWidth, barCount, barSpacing);
                 }
             },
-            nameof(ApplyZoomEnhancement),
+            LogPrefix,
             "Failed to apply zoom enhancement"
         );
 
@@ -814,7 +813,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float barWidth,
         int barCount,
         float barSpacing) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 using var paint = new SKPaint
@@ -831,7 +830,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 DrawGridLineSegments(path, destRect, barWidth, barSpacing, barCount, gridStep);
                 canvas.DrawPath(path, paint);
             },
-            nameof(DrawGridLines),
+            LogPrefix,
             "Failed to draw grid lines"
         );
 
@@ -857,7 +856,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float barWidth,
         int barCount,
         float barSpacing) =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 using var font = new SKFont { Size = 10 };
@@ -870,7 +869,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 int gridStep = (int)Max(1, barCount / 10);
                 DrawMarkerLabels(canvas, destRect, barWidth, barSpacing, barCount, gridStep, font, textPaint);
             },
-            nameof(DrawGridMarkers),
+            LogPrefix,
             "Failed to draw grid markers"
         );
 
@@ -1005,22 +1004,22 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 base.OnInvalidateCachedResources();
                 _waterfallBitmap?.Dispose();
                 _waterfallBitmap = null;
                 _needsBufferResize = true;
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+                _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
             },
-            nameof(OnInvalidateCachedResources),
+            LogPrefix,
             "Failed to invalidate cached resources"
         );
     }
 
     protected override void OnDispose() =>
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 _renderSemaphore.Dispose();
@@ -1031,9 +1030,9 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                 _spectrumPool.Dispose();
 
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+                _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
             },
-            nameof(OnDispose),
+            LogPrefix,
             "Failed to dispose resources"
         );
 }

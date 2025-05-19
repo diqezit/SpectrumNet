@@ -9,7 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class GaugeRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<GaugeRenderer> _instance = new(() => new GaugeRenderer());
-    private const string LOG_PREFIX = "GaugeRenderer";
+    private const string LogPrefix = nameof(GaugeRenderer);
 
     private GaugeRenderer() { }
 
@@ -17,8 +17,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "GaugeRenderer";
-
         public const float
             DB_MAX = 5f,
             DB_MIN = -30f,
@@ -174,10 +172,15 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         _state = new GaugeState();
         _config = GaugeConfig.Default;
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Debug(LogPrefix, "Initialized");
     }
 
-    public override void SetOverlayTransparency(float level)
+    public override void SetOverlayTransparency(float level) =>
+        _logger.Safe(() => HandleSetOverlayTransparency(level),
+                     LogPrefix,
+                     "Error setting overlay transparency");
+
+    private void HandleSetOverlayTransparency(float level)
     {
         if (Math.Abs(_overlayAlphaFactor - level) < float.Epsilon)
             return;
@@ -189,7 +192,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     protected override void OnConfigurationChanged()
     {
-        Log(LogLevel.Information, LOG_PREFIX,
+        _logger.Info(LogPrefix,
             $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
 
         _config = _config.WithOverlayMode(_isOverlayActive);
@@ -202,7 +205,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         }
     }
 
-    protected override void OnQualitySettingsApplied()
+    protected override void OnQualitySettingsApplied() =>
+        _logger.Safe(() => HandleQualitySettingsApplied(),
+                     LogPrefix,
+                     "Error applying quality settings");
+
+    private void HandleQualitySettingsApplied()
     {
         switch (Quality)
         {
@@ -217,7 +225,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 break;
         }
 
-        Log(LogLevel.Debug, LOG_PREFIX,
+        _logger.Debug(LogPrefix,
             $"Quality settings applied. Quality: {Quality}, " +
             $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}");
     }
@@ -247,31 +255,41 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
+        SKPaint paint) =>
+        _logger.Safe(() => HandleRenderEffect(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
+                    LogPrefix,
+                    "Error during rendering");
+
+    private void HandleRenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount,
         SKPaint paint)
     {
-        ExecuteSafely(
-            () =>
-            {
-                if (_overlayStateChangeRequested)
-                {
-                    _overlayStateChangeRequested = false;
-                    _overlayStateChanged = true;
-                }
+        if (_overlayStateChangeRequested)
+        {
+            _overlayStateChangeRequested = false;
+            _overlayStateChanged = true;
+        }
 
-                UpdateState(spectrum);
-                RenderWithOverlay(canvas, () => RenderFrame(canvas, info, paint));
+        UpdateState(spectrum);
+        RenderWithOverlay(canvas, () => RenderFrame(canvas, info, paint));
 
-                if (_overlayStateChanged)
-                {
-                    _overlayStateChanged = false;
-                }
-            },
-            nameof(RenderEffect),
-            "Error during rendering"
-        );
+        if (_overlayStateChanged)
+        {
+            _overlayStateChanged = false;
+        }
     }
 
-    private void UpdateState(float[] spectrum)
+    private void UpdateState(float[] spectrum) =>
+        _logger.Safe(() => HandleUpdateState(spectrum),
+                     LogPrefix,
+                     "Error updating gauge state");
+
+    private void HandleUpdateState(float[] spectrum)
     {
         bool semaphoreAcquired = false;
         try
@@ -289,7 +307,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint)
+    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint) =>
+        _logger.Safe(() => HandleRenderFrame(canvas, info, paint),
+                     LogPrefix,
+                     "Error rendering gauge frame");
+
+    private void HandleRenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint)
     {
         var gaugeRect = CalculateGaugeRect(info);
         bool isOverlayActive = _isOverlayActive;
@@ -300,7 +323,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         DrawPeakLamp(canvas, gaugeRect, isOverlayActive);
     }
 
-    private void DrawGaugeBackground(SKCanvas canvas, SKRect rect)
+    private void DrawGaugeBackground(SKCanvas canvas, SKRect rect) =>
+        _logger.Safe(() => HandleDrawGaugeBackground(canvas, rect),
+                     LogPrefix,
+                     "Error drawing gauge background");
+
+    private void HandleDrawGaugeBackground(SKCanvas canvas, SKRect rect)
     {
         using var outerFramePaint = _paintPool.Get();
         ConfigureOuterFramePaint(outerFramePaint);
@@ -331,6 +359,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         DrawVuText(canvas, backgroundRect, rect.Height);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureOuterFramePaint(SKPaint paint)
     {
         paint.Style = SKPaintStyle.Fill;
@@ -338,6 +367,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         paint.IsAntialias = UseAntiAlias;
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static SKRect GetInnerFrameRect(SKRect outerRect)
     {
         return new SKRect(
@@ -347,6 +377,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             outerRect.Bottom - BG_INNER_FRAME_PADDING);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureInnerFramePaint(SKPaint paint)
     {
         paint.Style = SKPaintStyle.Fill;
@@ -354,6 +385,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         paint.IsAntialias = UseAntiAlias;
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static SKRect GetBackgroundRect(SKRect innerFrameRect)
     {
         return new SKRect(
@@ -363,6 +395,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             innerFrameRect.Bottom - BG_BACKGROUND_PADDING);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureBackgroundPaint(SKPaint paint, SKRect backgroundRect)
     {
         paint.Style = SKPaintStyle.Fill;
@@ -375,7 +408,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             SKShaderTileMode.Clamp);
     }
 
-    private void DrawVuText(SKCanvas canvas, SKRect backgroundRect, float rectHeight)
+    private void DrawVuText(SKCanvas canvas, SKRect backgroundRect, float rectHeight) =>
+        _logger.Safe(() => HandleDrawVuText(canvas, backgroundRect, rectHeight),
+                     LogPrefix,
+                     "Error drawing VU text");
+
+    private void HandleDrawVuText(SKCanvas canvas, SKRect backgroundRect, float rectHeight)
     {
         using var textPaint = _paintPool.Get();
         ConfigureVuTextPaint(textPaint);
@@ -393,13 +431,19 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             textPaint);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureVuTextPaint(SKPaint paint)
     {
         paint.Color = SKColors.Black;
         paint.IsAntialias = UseAntiAlias;
     }
 
-    private void DrawScale(SKCanvas canvas, SKRect rect, bool isOverlayActive)
+    private void DrawScale(SKCanvas canvas, SKRect rect, bool isOverlayActive) =>
+        _logger.Safe(() => HandleDrawScale(canvas, rect, isOverlayActive),
+                     LogPrefix,
+                     "Error drawing scale");
+
+    private void HandleDrawScale(SKCanvas canvas, SKRect rect, bool isOverlayActive)
     {
         var scaleParams = GetScaleParameters(rect, isOverlayActive);
 
@@ -415,6 +459,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             DrawMark(canvas, scaleParams, value, null, isOverlayActive, tickPaint, null);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static (float centerX, float centerY, float radiusX, float radiusY) GetScaleParameters(
         SKRect rect, bool isOverlayActive)
     {
@@ -426,6 +471,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return (centerX, centerY, radiusX, radiusY);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureScalePaints(SKPaint tickPaint, SKPaint textPaint)
     {
         tickPaint.IsAntialias = UseAntiAlias;
@@ -439,6 +485,16 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     }
 
     private static void DrawMark(
+        SKCanvas canvas,
+        (float centerX, float centerY, float radiusX, float radiusY) scaleParams,
+        float value,
+        string? label,
+        bool isOverlayActive,
+        SKPaint tickPaint,
+        SKPaint? textPaint) =>
+        HandleDrawMark(canvas, scaleParams, value, label, isOverlayActive, tickPaint, textPaint);
+
+    private static void HandleDrawMark(
         SKCanvas canvas,
         (float centerX, float centerY, float radiusX, float radiusY) scaleParams,
         float value,
@@ -459,6 +515,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         }
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static (float angle, float radian) CalculateAngleForValue(float value)
     {
         float normalizedValue = (value - DB_MIN) / (DB_MAX - DB_MIN);
@@ -468,6 +525,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return (angle, radian);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static (float x1, float y1, float x2, float y2) CalculateTickPoints(
         float centerX,
         float centerY,
@@ -492,6 +550,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return (x1, y1, x2, y2);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static void DrawTick(
         SKCanvas canvas,
         (float x1, float y1, float x2, float y2) points,
@@ -522,6 +581,20 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     }
 
     private static void DrawTickLabel(
+        SKCanvas canvas,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float value,
+        string label,
+        float angle,
+        float radian,
+        bool isOverlayActive,
+        SKPaint textPaint) =>
+        HandleDrawTickLabel(canvas, centerX, centerY, radiusX, radiusY, value, label, angle, radian, isOverlayActive, textPaint);
+
+    private static void HandleDrawTickLabel(
         SKCanvas canvas,
         float centerX,
         float centerY,
@@ -568,6 +641,16 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         SKRect rect,
         float needlePosition,
         bool isOverlayActive,
+        SKPaint _) =>
+        _logger.Safe(() => HandleDrawNeedle(canvas, rect, needlePosition, isOverlayActive, _),
+                     LogPrefix,
+                     "Error drawing needle");
+
+    private void HandleDrawNeedle(
+        SKCanvas canvas,
+        SKRect rect,
+        float needlePosition,
+        bool isOverlayActive,
         SKPaint _)
     {
         var needleParams = GetNeedleParameters(rect, needlePosition, isOverlayActive);
@@ -576,6 +659,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         DrawNeedleCenter(canvas, needleParams, isOverlayActive);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private (float centerX, float centerY, float radiusX, float radiusY, float angle, float needleLength)
         GetNeedleParameters(SKRect rect, float needlePosition, bool isOverlayActive)
     {
@@ -590,6 +674,19 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     }
 
     private void DrawNeedleShape(
+        SKCanvas canvas,
+        (float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float angle,
+        float needleLength)
+        needleParams) =>
+        _logger.Safe(() => HandleDrawNeedleShape(canvas, needleParams),
+                     LogPrefix,
+                     "Error drawing needle shape");
+
+    private void HandleDrawNeedleShape(
         SKCanvas canvas,
         (float centerX,
         float centerY,
@@ -630,6 +727,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         canvas.DrawPath(needlePath, outlinePaint);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureNeedlePaint(
         SKPaint needlePaint,
         float centerX,
@@ -654,6 +752,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 2f, 2f, 1.5f, 1.5f, SKColors.Black.WithAlpha(100));
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureNeedleOutlinePaint(SKPaint outlinePaint)
     {
         outlinePaint.Style = SKPaintStyle.Stroke;
@@ -663,6 +762,14 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     }
 
     private void DrawNeedleCenter(
+        SKCanvas canvas,
+        (float centerX, float centerY, float radiusX, float radiusY, float angle, float needleLength) needleParams,
+        bool isOverlayActive) =>
+        _logger.Safe(() => HandleDrawNeedleCenter(canvas, needleParams, isOverlayActive),
+                     LogPrefix,
+                     "Error drawing needle center");
+
+    private void HandleDrawNeedleCenter(
         SKCanvas canvas,
         (float centerX, float centerY, float radiusX, float radiusY, float angle, float needleLength) needleParams,
         bool isOverlayActive)
@@ -685,6 +792,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             highlightPaint);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureCenterCirclePaint(SKPaint paint, float centerX, float centerY, float radius)
     {
         paint.Style = SKPaintStyle.Fill;
@@ -697,6 +805,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             SKShaderTileMode.Clamp);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureHighlightPaint(SKPaint paint)
     {
         paint.Color = SKColors.White.WithAlpha(150);
@@ -704,7 +813,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         paint.IsAntialias = UseAntiAlias;
     }
 
-    private void DrawPeakLamp(SKCanvas canvas, SKRect rect, bool isOverlayActive)
+    private void DrawPeakLamp(SKCanvas canvas, SKRect rect, bool isOverlayActive) =>
+        _logger.Safe(() => HandleDrawPeakLamp(canvas, rect, isOverlayActive),
+                     LogPrefix,
+                     "Error drawing peak lamp");
+
+    private void HandleDrawPeakLamp(SKCanvas canvas, SKRect rect, bool isOverlayActive)
     {
         var lampParams = GetPeakLampParameters(rect, isOverlayActive);
 
@@ -717,6 +831,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         DrawPeakLampLabel(canvas, lampParams, isOverlayActive);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static (float lampX, float lampY, float lampRadius) GetPeakLampParameters(SKRect rect,
                                                                                       bool isOverlayActive)
     {
@@ -742,6 +857,13 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
     private void DrawPeakLampGlow(
         SKCanvas canvas,
+        (float lampX, float lampY, float lampRadius) lampParams) =>
+        _logger.Safe(() => HandleDrawPeakLampGlow(canvas, lampParams),
+                     LogPrefix,
+                     "Error drawing peak lamp glow");
+
+    private void HandleDrawPeakLampGlow(
+        SKCanvas canvas,
         (float lampX, float lampY, float lampRadius) lampParams)
     {
         var (lampX, lampY, lampRadius) = lampParams;
@@ -755,6 +877,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             glowPaint);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureGlowPaint(SKPaint paint, float radius)
     {
         paint.Color = SKColors.Red.WithAlpha(80);
@@ -765,6 +888,13 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     }
 
     private void DrawPeakLampBody(
+        SKCanvas canvas,
+        (float lampX, float lampY, float lampRadius) lampParams) =>
+        _logger.Safe(() => HandleDrawPeakLampBody(canvas, lampParams),
+                     LogPrefix,
+                     "Error drawing peak lamp body");
+
+    private void HandleDrawPeakLampBody(
         SKCanvas canvas,
         (float lampX, float lampY, float lampRadius) lampParams)
     {
@@ -791,6 +921,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         canvas.DrawCircle(lampX, lampY, lampRadius, rimPaint);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureInnerLampPaint(SKPaint paint, float lampX, float lampY, float radius)
     {
         paint.Style = SKPaintStyle.Fill;
@@ -803,6 +934,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             SKShaderTileMode.Clamp);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureReflectionPaint(SKPaint paint)
     {
         paint.Color = SKColors.White.WithAlpha(180);
@@ -810,6 +942,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         paint.IsAntialias = UseAntiAlias;
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigureRimPaint(SKPaint paint)
     {
         paint.Color = new SKColor(40, 40, 40);
@@ -819,6 +952,14 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     }
 
     private void DrawPeakLampLabel(
+        SKCanvas canvas,
+        (float lampX, float lampY, float lampRadius) lampParams,
+        bool isOverlayActive) =>
+        _logger.Safe(() => HandleDrawPeakLampLabel(canvas, lampParams, isOverlayActive),
+                     LogPrefix,
+                     "Error drawing peak lamp label");
+
+    private void HandleDrawPeakLampLabel(
         SKCanvas canvas,
         (float lampX, float lampY, float lampRadius) lampParams,
         bool isOverlayActive)
@@ -845,6 +986,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             peakTextPaint);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private void ConfigurePeakTextPaint(SKPaint paint)
     {
         paint.Color = _state.PeakActive ? SKColors.Red : new SKColor(180, 0, 0);
@@ -855,7 +997,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 1, 1, 1, 1, SKColors.Black.WithAlpha(150));
     }
 
-    private void UpdateGaugeState(float[] spectrum)
+    private void UpdateGaugeState(float[] spectrum) =>
+        _logger.Safe(() => HandleUpdateGaugeState(spectrum),
+                     LogPrefix,
+                     "Error updating gauge state");
+
+    private void HandleUpdateGaugeState(float[] spectrum)
     {
         lock (_stateLock)
         {
@@ -874,7 +1021,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void UpdatePeakState()
+    private void UpdatePeakState() =>
+        _logger.Safe(() => HandleUpdatePeakState(),
+                     LogPrefix,
+                     "Error updating peak state");
+
+    private void HandleUpdatePeakState()
     {
         float thresholdPosition = CalculateNeedlePosition(DB_PEAK_THRESHOLD);
 
@@ -893,6 +1045,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         }
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static float CalculateLoudness(float[] spectrum)
     {
         if (spectrum.Length == 0) return DB_MIN;
@@ -913,6 +1066,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return Clamp(db, DB_MIN, DB_MAX);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static float CalculateSumOfSquaresVectorized(float[] spectrum)
     {
         float sumOfSquares = 0f;
@@ -931,6 +1085,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return sumOfSquares;
     }
 
+    [MethodImpl(AggressiveInlining)]
     private float SmoothValue(float newValue)
     {
         float smoothingFactor = newValue > _state.PreviousValue ?
@@ -938,6 +1093,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return _state.PreviousValue + smoothingFactor * (newValue - _state.PreviousValue);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static float CalculateNeedlePosition(float db)
     {
         float normalizedPosition = (Clamp(db, DB_MIN, DB_MAX) - DB_MIN) /
@@ -945,7 +1101,12 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return Clamp(normalizedPosition, RENDERING_MARGIN, 1f - RENDERING_MARGIN);
     }
 
-    private void UpdateNeedlePosition()
+    private void UpdateNeedlePosition() =>
+        _logger.Safe(() => HandleUpdateNeedlePosition(),
+                     LogPrefix,
+                     "Error updating needle position");
+
+    private void HandleUpdateNeedlePosition()
     {
         float difference = _state.TargetNeedlePosition - _state.CurrentNeedlePosition;
         float speed = difference * (difference > 0 ? _config.RiseSpeed : _config.FallSpeed);
@@ -957,7 +1118,10 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         };
     }
 
-    private static void InitializeMinorMarks()
+    private static void InitializeMinorMarks() =>
+        HandleInitializeMinorMarks();
+
+    private static void HandleInitializeMinorMarks()
     {
         _minorMarkValues.Clear();
         var majorValues = _majorMarks.Select(m => m.Value).OrderBy(v => v).ToList();
@@ -971,6 +1135,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         }
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static (float x, float y) CalculatePointOnEllipse(
         float centerX, float centerY, float radiusX, float radiusY, float angleDegrees)
     {
@@ -978,12 +1143,14 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         return (centerX + radiusX * Cos(radian), centerY + radiusY * Sin(radian));
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static (float unitX, float unitY, float length) NormalizeVector(float dx, float dy)
     {
         float length = Sqrt(dx * dx + dy * dy);
         return length > 0 ? (dx / length, dy / length, length) : (0f, 0f, 0f);
     }
 
+    [MethodImpl(AggressiveInlining)]
     private static SKRect CalculateGaugeRect(SKImageInfo info)
     {
         float aspectRatio = RENDERING_ASPECT_RATIO;
@@ -1000,6 +1167,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     {
         _renderSemaphore?.Dispose();
         base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _logger.Debug(LogPrefix, "Disposed");
     }
 }

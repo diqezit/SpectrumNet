@@ -8,6 +8,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class SphereRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<SphereRenderer> _instance = new(() => new SphereRenderer());
+    private const string LOG_PREFIX = nameof(SphereRenderer);
 
     private SphereRenderer() { }
 
@@ -15,8 +16,6 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "SphereRenderer";
-
         public const float
             MIN_MAGNITUDE = 0.01f,
             MAX_INTENSITY_MULTIPLIER = 3f,
@@ -74,38 +73,33 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
     private float[]? _sinValues;
     private float[]? _currentAlphas;
 
-    protected override void OnInitialize()
-    {
-        ExecuteSafely(
+    protected override void OnInitialize() =>
+        _logger.Safe(
             () =>
             {
                 base.OnInitialize();
                 UpdateConfiguration(DEFAULT_CONFIG);
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+                _logger.Debug(LOG_PREFIX, "Initialized");
             },
-            nameof(OnInitialize),
+            LOG_PREFIX,
             "Failed to initialize renderer"
         );
-    }
 
-    protected override void OnConfigurationChanged()
-    {
-        ExecuteSafely(
+    protected override void OnConfigurationChanged() =>
+        _logger.Safe(
             () =>
             {
                 UpdateConfiguration(_isOverlayActive ? OVERLAY_CONFIG : DEFAULT_CONFIG);
-                Log(LogLevel.Information,
+                _logger.Info(
                     LOG_PREFIX,
                     $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            nameof(OnConfigurationChanged),
+            LOG_PREFIX,
             "Failed to handle configuration change"
         );
-    }
 
-    protected override void OnQualitySettingsApplied()
-    {
-        ExecuteSafely(
+    protected override void OnQualitySettingsApplied() =>
+        _logger.Safe(
             () =>
             {
                 switch (Quality)
@@ -121,15 +115,14 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                         break;
                 }
 
-                Log(LogLevel.Debug, LOG_PREFIX,
+                _logger.Debug(LOG_PREFIX,
                     $"Quality settings applied. Quality: {Quality}, " +
                     $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
                     $"SphereSegments: {_sphereSegments}, AlphaSmoothingFactor: {_alphaSmoothingFactor}");
             },
-            nameof(OnQualitySettingsApplied),
+            LOG_PREFIX,
             "Failed to apply quality settings"
         );
-    }
 
     private void LowQualitySettings()
     {
@@ -155,48 +148,52 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         _sphereSegments = HIGH_SPHERE_SEGMENTS;
     }
 
-    private void UpdateConfiguration((float Radius, float Spacing, int Count) config)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                (_sphereRadius, _sphereSpacing, _sphereCount) = config;
-                _sphereRadius = Max(MIN_RADIUS, _sphereRadius);
-
-                EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
-                PrecomputeTrigValues();
-            },
-            nameof(UpdateConfiguration),
+    private void UpdateConfiguration((float Radius, float Spacing, int Count) config) =>
+        _logger.Safe(
+            () => HandleUpdateConfiguration(config),
+            LOG_PREFIX,
             "Failed to update configuration"
         );
+
+    private void HandleUpdateConfiguration((float Radius, float Spacing, int Count) config)
+    {
+        (_sphereRadius, _sphereSpacing, _sphereCount) = config;
+        _sphereRadius = Max(MIN_RADIUS, _sphereRadius);
+
+        EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
+        PrecomputeTrigValues();
     }
 
     private void AdjustConfiguration(
         int barCount,
         float barSpacing,
         int canvasWidth,
-        int canvasHeight)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                _sphereRadius = Max(5f, DEFAULT_RADIUS - barCount * 0.2f + barSpacing * 0.5f);
-                _sphereSpacing = Max(2f, DEFAULT_SPACING - barCount * 0.1f + barSpacing * 0.3f);
-                _sphereCount = Clamp(barCount / 2, 4, 64);
-
-                float maxRadius = Min(canvasWidth,
-                                      canvasHeight) / 2f - (_sphereRadius + _sphereSpacing);
-                if (_sphereRadius > maxRadius)
-                    _sphereRadius = maxRadius;
-
-                _sphereRadius = Max(MIN_RADIUS, _sphereRadius);
-
-                EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
-                PrecomputeTrigValues();
-            },
-            nameof(AdjustConfiguration),
+        int canvasHeight) =>
+        _logger.Safe(
+            () => HandleAdjustConfiguration(barCount, barSpacing, canvasWidth, canvasHeight),
+            LOG_PREFIX,
             "Failed to adjust configuration"
         );
+
+    private void HandleAdjustConfiguration(
+        int barCount,
+        float barSpacing,
+        int canvasWidth,
+        int canvasHeight)
+    {
+        _sphereRadius = Max(5f, DEFAULT_RADIUS - barCount * 0.2f + barSpacing * 0.5f);
+        _sphereSpacing = Max(2f, DEFAULT_SPACING - barCount * 0.1f + barSpacing * 0.3f);
+        _sphereCount = Clamp(barCount / 2, 4, 64);
+
+        float maxRadius = Min(canvasWidth,
+                              canvasHeight) / 2f - (_sphereRadius + _sphereSpacing);
+        if (_sphereRadius > maxRadius)
+            _sphereRadius = maxRadius;
+
+        _sphereRadius = Max(MIN_RADIUS, _sphereRadius);
+
+        EnsureArrayCapacity(ref _currentAlphas, _sphereCount);
+        PrecomputeTrigValues();
     }
 
     protected override void RenderEffect(
@@ -206,18 +203,16 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        ExecuteSafely(
+        SKPaint paint) =>
+        _logger.Safe(
             () =>
             {
                 UpdateState(spectrum, info, barWidth, barSpacing, barCount);
                 RenderFrame(canvas, spectrum, info, paint);
             },
-            nameof(RenderEffect),
+            LOG_PREFIX,
             "Error during rendering"
         );
-    }
 
     private void UpdateState(
         float[] spectrum,
@@ -277,42 +272,49 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         float centerX,
         float centerY,
         float maxRadius,
-        SKPaint paint)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (!AreArraysValid(sphereCount))
-                    return;
-
-                var alphaGroups = GetAlphaGroups(sphereCount, 5);
-
-                if (_sphereSegments > 0)
-                {
-                    RenderHighQualitySpheres(
-                        canvas,
-                        spectrum,
-                        alphaGroups,
-                        paint,
-                        centerX,
-                        centerY,
-                        maxRadius);
-                }
-                else
-                {
-                    RenderSimpleSpheres(
-                        canvas,
-                        spectrum,
-                        alphaGroups,
-                        paint,
-                        centerX,
-                        centerY,
-                        maxRadius);
-                }
-            },
-            nameof(RenderSpheres),
+        SKPaint paint) =>
+        _logger.Safe(
+            () => HandleRenderSpheres(canvas, spectrum, sphereCount, centerX, centerY, maxRadius, paint),
+            LOG_PREFIX,
             "Error during sphere rendering"
         );
+
+    private void HandleRenderSpheres(
+        SKCanvas canvas,
+        float[] spectrum,
+        int sphereCount,
+        float centerX,
+        float centerY,
+        float maxRadius,
+        SKPaint paint)
+    {
+        if (!AreArraysValid(sphereCount))
+            return;
+
+        var alphaGroups = GetAlphaGroups(sphereCount, 5);
+
+        if (_sphereSegments > 0)
+        {
+            RenderHighQualitySpheres(
+                canvas,
+                spectrum,
+                alphaGroups,
+                paint,
+                centerX,
+                centerY,
+                maxRadius);
+        }
+        else
+        {
+            RenderSimpleSpheres(
+                canvas,
+                spectrum,
+                alphaGroups,
+                paint,
+                centerX,
+                centerY,
+                maxRadius);
+        }
     }
 
     private void RenderHighQualitySpheres(
@@ -528,20 +530,20 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         groups.Add((currentStart, length, currentAlpha));
     }
 
-    private void ProcessSpectrum(float[] spectrum)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                int sphereCount = Min(spectrum.Length, _sphereCount);
-                EnsureProcessedSpectrumCapacity(sphereCount);
-
-                ScaleSpectrumData(spectrum, sphereCount);
-                UpdateAlphas(sphereCount);
-            },
-            nameof(ProcessSpectrum),
+    private void ProcessSpectrum(float[] spectrum) =>
+        _logger.Safe(
+            () => HandleProcessSpectrum(spectrum),
+            LOG_PREFIX,
             "Error processing spectrum data"
         );
+
+    private void HandleProcessSpectrum(float[] spectrum)
+    {
+        int sphereCount = Min(spectrum.Length, _sphereCount);
+        EnsureProcessedSpectrumCapacity(sphereCount);
+
+        ScaleSpectrumData(spectrum, sphereCount);
+        UpdateAlphas(sphereCount);
     }
 
     private void ScaleSpectrumData(float[] spectrum, int sphereCount)
@@ -635,22 +637,22 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void EnsureProcessedSpectrumCapacity(int requiredSize)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_processedSpectrum != null && _processedSpectrum.Length >= requiredSize)
-                    return;
-
-                if (_processedSpectrum != null)
-                    ArrayPool<float>.Shared.Return(_processedSpectrum);
-
-                _processedSpectrum = ArrayPool<float>.Shared.Rent(requiredSize);
-            },
-            nameof(EnsureProcessedSpectrumCapacity),
+    private void EnsureProcessedSpectrumCapacity(int requiredSize) =>
+        _logger.Safe(
+            () => HandleEnsureProcessedSpectrumCapacity(requiredSize),
+            LOG_PREFIX,
             "Failed to ensure spectrum capacity"
         );
+
+    private void HandleEnsureProcessedSpectrumCapacity(int requiredSize)
+    {
+        if (_processedSpectrum != null && _processedSpectrum.Length >= requiredSize)
+            return;
+
+        if (_processedSpectrum != null)
+            ArrayPool<float>.Shared.Return(_processedSpectrum);
+
+        _processedSpectrum = ArrayPool<float>.Shared.Rent(requiredSize);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -684,24 +686,24 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         return sum / (end - start);
     }
 
-    private void UpdateAlphas(int length)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_processedSpectrum == null
-                    || _currentAlphas == null
-                    || _currentAlphas.Length < length)
-                    return;
-
-                for (int i = 0; i < length; i++)
-                {
-                    UpdateSingleAlpha(i);
-                }
-            },
-            nameof(UpdateAlphas),
+    private void UpdateAlphas(int length) =>
+        _logger.Safe(
+            () => HandleUpdateAlphas(length),
+            LOG_PREFIX,
             "Failed to update alpha values"
         );
+
+    private void HandleUpdateAlphas(int length)
+    {
+        if (_processedSpectrum == null
+            || _currentAlphas == null
+            || _currentAlphas.Length < length)
+            return;
+
+        for (int i = 0; i < length; i++)
+        {
+            UpdateSingleAlpha(i);
+        }
     }
 
     private void UpdateSingleAlpha(int index)
@@ -714,26 +716,26 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                             (targetAlpha - _currentAlphas[index]) * _alphaSmoothingFactor;
     }
 
-    private void PrecomputeTrigValues()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                EnsureArrayCapacity(ref _cosValues, _sphereCount);
-                EnsureArrayCapacity(ref _sinValues, _sphereCount);
-
-                float angleStepRad = 360f / _sphereCount * PI_OVER_180;
-
-                for (int i = 0; i < _sphereCount; i++)
-                {
-                    float angle = i * angleStepRad;
-                    _cosValues![i] = (float)Cos(angle);
-                    _sinValues![i] = (float)Sin(angle);
-                }
-            },
-            nameof(PrecomputeTrigValues),
+    private void PrecomputeTrigValues() =>
+        _logger.Safe(
+            () => HandlePrecomputeTrigValues(),
+            LOG_PREFIX,
             "Failed to precompute trigonometric values"
         );
+
+    private void HandlePrecomputeTrigValues()
+    {
+        EnsureArrayCapacity(ref _cosValues, _sphereCount);
+        EnsureArrayCapacity(ref _sinValues, _sphereCount);
+
+        float angleStepRad = 360f / _sphereCount * PI_OVER_180;
+
+        for (int i = 0; i < _sphereCount; i++)
+        {
+            float angle = i * angleStepRad;
+            _cosValues![i] = (float)Cos(angle);
+            _sinValues![i] = (float)Sin(angle);
+        }
     }
 
     private bool AreArraysValid(int requiredLength) =>
@@ -748,22 +750,19 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
             array = new T[requiredSize];
     }
 
-    protected override void OnInvalidateCachedResources()
-    {
-        ExecuteSafely(
+    protected override void OnInvalidateCachedResources() =>
+        _logger.Safe(
             () =>
             {
                 base.OnInvalidateCachedResources();
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+                _logger.Debug(LOG_PREFIX, "Cached resources invalidated");
             },
-            nameof(OnInvalidateCachedResources),
+            LOG_PREFIX,
             "Error invalidating cached resources"
         );
-    }
 
-    protected override void OnDispose()
-    {
-        ExecuteSafely(
+    protected override void OnDispose() =>
+        _logger.Safe(
             () =>
             {
                 if (_processedSpectrum != null)
@@ -773,10 +772,9 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
                 _processedSpectrum = null;
 
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+                _logger.Debug(LOG_PREFIX, "Disposed");
             },
-            nameof(OnDispose),
+            LOG_PREFIX,
             "Error during specific disposal"
         );
-    }
 }

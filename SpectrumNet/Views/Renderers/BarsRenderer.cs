@@ -8,8 +8,9 @@ namespace SpectrumNet.Views.Renderers;
 
 public sealed class BarsRenderer : EffectSpectrumRenderer
 {
+    private const string LogPrefix = nameof(BarsRenderer);
+
     private static readonly Lazy<BarsRenderer> _instance = new(() => new BarsRenderer());
-    private const string LOG_PREFIX = "BarsRenderer";
 
     private BarsRenderer() { }
 
@@ -17,8 +18,6 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "BarsRenderer";
-
         public const float
             MAX_CORNER_RADIUS = 125f,
             DEFAULT_CORNER_RADIUS_FACTOR = 0.5f,
@@ -103,7 +102,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
@@ -121,7 +120,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
                 break;
         }
 
-        Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}");
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
     private void HighQualitySettings()
@@ -175,13 +174,13 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 UpdateState(canvas, spectrum, info, barCount);
                 RenderFrame(canvas, spectrum, info, barWidth, barSpacing, barCount, paint);
             },
-            nameof(RenderEffect),
+            LogPrefix,
             "Error during rendering"
         );
     }
@@ -449,6 +448,6 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

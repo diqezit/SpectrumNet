@@ -17,6 +17,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private readonly IAudioDeviceManager _deviceManager;
     private readonly IRendererFactory _rendererFactory;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
+    private readonly ISmartLogger _logger = Instance;
 
     private CaptureState? _state;
     private bool _isCaptureStopping;
@@ -52,14 +53,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     public SpectrumAnalyzer? GetAnalyzer() => _state?.Analyzer;
 
     private void OnDeviceChanged() =>
-        Safe(
-            HandleDeviceChanged,
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Unhandled exception in OnDeviceChanged"
-            }
-        );
+        _logger.Safe(HandleDeviceChanged, LogPrefix, "Unhandled exception in OnDeviceChanged");
 
     private void HandleDeviceChanged()
     {
@@ -69,7 +63,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         var device = _deviceManager.GetDefaultAudioDevice();
         if (device is null)
         {
-            Log(LogLevel.Warning, LogPrefix, "No default audio device available");
+            _logger.Log(LogLevel.Warning, LogPrefix, "No default audio device available");
             StopCaptureIfNeeded();
             return;
         }
@@ -81,26 +75,15 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private bool ShouldSkipDeviceChange() =>
         _isDisposed || _isReinitializing || _controller.IsTransitioning || _isCaptureStopping;
 
-    private void StopCaptureIfNeeded()
-    {
-        if (_state is not null && IsRecording)
-        {
-            Safe(
-                () => StopCaptureAsync(true).GetAwaiter().GetResult(),
-                new ErrorHandlingOptions
-                {
-                    Source = LogPrefix,
-                    ErrorMessage = "Error stopping capture during device change"
-                }
-            );
-        }
-    }
+    private void StopCaptureIfNeeded() =>
+        _logger.Safe(() => StopCaptureAsync(true).GetAwaiter().GetResult(),
+            LogPrefix, "Error stopping capture during device change");
 
     public async Task ReinitializeCaptureAsync()
     {
         if (_isReinitializing)
         {
-            Log(LogLevel.Warning, LogPrefix, "Reinitialization already in progress");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Reinitialization already in progress");
             return;
         }
 
@@ -216,7 +199,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
 
         if (IsCaptureInProgress())
         {
-            Log(LogLevel.Warning, LogPrefix, "Cannot start capture: operation in progress");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Cannot start capture: operation in progress");
             return;
         }
 
@@ -228,7 +211,8 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
             if (ShouldAbortStartCapture())
                 return;
 
-            InitializeAndStartCapture();
+            await _logger.SafeAsync(async () => await InitializeAndStartCaptureAsync(),
+                LogPrefix, "Error initializing and starting capture");
         }
         finally
         {
@@ -243,7 +227,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     {
         if (!await _operationLock.WaitAsync(STATE_LOCK_TIMEOUT_MS))
         {
-            Log(LogLevel.Warning, LogPrefix, "Could not acquire operation lock for starting capture");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Could not acquire operation lock for starting capture");
             return false;
         }
         return true;
@@ -252,12 +236,12 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private bool ShouldAbortStartCapture() =>
         _isDisposed || IsRecording || _isReinitializing || _controller.IsTransitioning;
 
-    private void InitializeAndStartCapture()
+    private async Task InitializeAndStartCaptureAsync()
     {
         var device = _deviceManager.GetDefaultAudioDevice();
         if (device is null)
         {
-            Log(LogLevel.Error, LogPrefix, "No audio device available");
+            _logger.Log(LogLevel.Error, LogPrefix, "No audio device available");
             return;
         }
 
@@ -267,12 +251,12 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
 
             if (_state is null)
             {
-                Log(LogLevel.Error, LogPrefix, "Failed to initialize capture state");
+                _logger.Log(LogLevel.Error, LogPrefix, "Failed to initialize capture state");
                 return;
             }
 
-            StartDeviceMonitoring(_state.CTS.Token);
-            Log(LogLevel.Debug, LogPrefix, "Audio capture started successfully");
+            await StartDeviceMonitoringAsync(_state.CTS.Token);
+            _logger.Log(LogLevel.Debug, LogPrefix, "Audio capture started successfully");
         }
         catch (Exception ex)
         {
@@ -281,12 +265,12 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         }
     }
 
-    private void StartDeviceMonitoring(CancellationToken token) =>
-        Task.Run(() => MonitorCaptureAsync(token), token);
+    private async Task StartDeviceMonitoringAsync(CancellationToken token) =>
+        await Task.Run(() => MonitorCaptureAsync(token), token);
 
     private void HandleCaptureInitializationError(Exception ex)
     {
-        Log(LogLevel.Error, LogPrefix, $"Error initializing capture: {ex.Message}");
+        _logger.Log(LogLevel.Error, LogPrefix, $"Error initializing capture: {ex.Message}");
 
         if (_state != null)
         {
@@ -311,7 +295,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         UpdateStatus(true);
         newState.Capture.StartRecording();
 
-        Log(LogLevel.Information, LogPrefix, $"Audio capture started on device: {device.FriendlyName}");
+        _logger.Log(LogLevel.Information, LogPrefix, $"Audio capture started on device: {device.FriendlyName}");
     }
 
     private void ClearExistingCaptureState()
@@ -347,7 +331,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
 
         if (_isCaptureStopping)
         {
-            Log(LogLevel.Warning, LogPrefix, "Stop capture already in progress");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Stop capture already in progress");
             return;
         }
 
@@ -357,11 +341,12 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
 
             if (!IsRecording && _state is null)
             {
-                Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
+                _logger.Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
                 return;
             }
 
-            await StopCaptureCore(force);
+            await _logger.SafeAsync(async () => await StopCaptureCore(force),
+                LogPrefix, "Error in stop capture core operation");
         }
         finally
         {
@@ -385,7 +370,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         {
             if (_state is null)
             {
-                Log(LogLevel.Warning, LogPrefix, "No capture state to dispose");
+                _logger.Log(LogLevel.Warning, LogPrefix, "No capture state to dispose");
                 return null;
             }
 
@@ -423,12 +408,12 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         }
         catch (TimeoutException)
         {
-            Log(LogLevel.Warning, LogPrefix, "Stop capture operation timed out");
+            SmartLogger.Instance.Log(LogLevel.Warning, LogPrefix, "Stop capture operation timed out");
             return false;
         }
         catch (OperationCanceledException)
         {
-            Log(LogLevel.Warning, LogPrefix, "Stop capture operation was canceled");
+            Instance.Log(LogLevel.Warning, LogPrefix, "Stop capture operation was canceled");
             return false;
         }
     }
@@ -442,31 +427,16 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error, LogPrefix, $"Error stopping recording: {ex.Message}");
+                Instance.Log(LogLevel.Error, LogPrefix, $"Error stopping recording: {ex.Message}");
             }
         }, token).WaitAsync(token);
 
-    private static void TryResetAnalyzer(CaptureState stateToDispose)
-    {
-        try
-        {
-            stateToDispose.Analyzer.SafeReset();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix, $"Error resetting analyzer: {ex.Message}");
-        }
-    }
+    private void TryResetAnalyzer(CaptureState stateToDispose) =>
+        _logger.Safe(() => stateToDispose.Analyzer.SafeReset(),
+            LogPrefix, "Error resetting analyzer");
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e) =>
-        Safe(
-            () => ProcessDataAvailable(e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error processing audio data"
-            }
-        );
+        _logger.Safe(() => ProcessDataAvailable(e), LogPrefix, "Error processing audio data");
 
     private void ProcessDataAvailable(WaveInEventArgs e)
     {
@@ -519,7 +489,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogPrefix, $"Error adding samples to analyzer: {ex.Message}");
+            SmartLogger.Instance.Log(LogLevel.Error, LogPrefix, $"Error adding samples to analyzer: {ex.Message}");
         }
     }
 
@@ -549,7 +519,10 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         }
     }
 
-    private void OnRecordingStopped(object? sender, StoppedEventArgs e)
+    private void OnRecordingStopped(object? sender, StoppedEventArgs e) =>
+        _logger.Safe(() => HandleRecordingStopped(e), LogPrefix, "Error handling recording stopped event");
+
+    private void HandleRecordingStopped(StoppedEventArgs e)
     {
         if (e.Exception is not null)
         {
@@ -557,12 +530,12 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
             return;
         }
 
-        Log(LogLevel.Information, LogPrefix, "Recording stopped normally");
+        _logger.Log(LogLevel.Information, LogPrefix, "Recording stopped normally");
     }
 
     private void HandleRecordingStoppedWithError(Exception ex)
     {
-        Log(LogLevel.Error, LogPrefix, $"Recording stopped with error: {ex.Message}");
+        _logger.Log(LogLevel.Error, LogPrefix, $"Recording stopped with error: {ex.Message}");
 
         if (!_isDisposed && IsRecording && !_isReinitializing &&
             !_controller.IsTransitioning && !_isCaptureStopping)
@@ -572,19 +545,8 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     }
 
     private Task MonitorCaptureAsync(CancellationToken token) =>
-        SafeAsync(
-            async () => await MonitorDevicesLoop(token),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error in device monitoring",
-                IgnoreExceptions =
-                [
-                    typeof(TaskCanceledException),
-                    typeof(OperationCanceledException)
-                ]
-            }
-        );
+        _logger.SafeAsync(async () => await MonitorDevicesLoop(token),
+            LogPrefix, "Error in device monitoring");
 
     private async Task MonitorDevicesLoop(CancellationToken token)
     {
@@ -602,11 +564,11 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         }
         catch (TaskCanceledException)
         {
-            Log(LogLevel.Information, LogPrefix, "Device monitoring task cancelled normally");
+            _logger.Log(LogLevel.Information, LogPrefix, "Device monitoring task cancelled normally");
         }
         catch (OperationCanceledException)
         {
-            Log(LogLevel.Information, LogPrefix, "Device monitoring operation cancelled normally");
+            _logger.Log(LogLevel.Information, LogPrefix, "Device monitoring operation cancelled normally");
         }
     }
 
@@ -640,66 +602,50 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     }
 
     private void UnsubscribeFromEvents(CaptureState state) =>
-        Safe(() =>
-        {
+        _logger.Safe(() => {
             if (state.Capture != null)
             {
                 state.Capture.DataAvailable -= OnDataAvailable;
                 state.Capture.RecordingStopped -= OnRecordingStopped;
             }
-        },
-        new ErrorHandlingOptions
-        {
-            Source = LogPrefix,
-            ErrorMessage = "Error unsubscribing events"
-        });
+        }, LogPrefix, "Error unsubscribing events");
 
-    private static void DisposeStateComponents(CaptureState state)
+    private void DisposeStateComponents(CaptureState state)
     {
         DisposeCapture(state);
         DisposeCts(state);
         DisposeAnalyzer(state);
     }
 
-    private static void DisposeCapture(CaptureState state) =>
-        SafeDispose(
-            state.Capture,
-            nameof(state.Capture),
-            new ErrorHandlingOptions { Source = LogPrefix }
-        );
+    private void DisposeCapture(CaptureState state) =>
+        _logger.Safe(() => {
+            state.Capture?.Dispose();
+        }, LogPrefix, "Error disposing capture");
 
-    private static void DisposeCts(CaptureState state) =>
-        SafeDispose(
-            state.CTS,
-            nameof(state.CTS),
-            new ErrorHandlingOptions { Source = LogPrefix }
-        );
+    private void DisposeCts(CaptureState state) =>
+        _logger.Safe(() => {
+            state.CTS?.Dispose();
+        }, LogPrefix, "Error disposing CTS");
 
-    private static void DisposeAnalyzer(CaptureState state) =>
-        Safe(() =>
-        {
+    private void DisposeAnalyzer(CaptureState state) =>
+        _logger.Safe(async () => {
             if (state.Analyzer is IAsyncDisposable asyncDisposable)
             {
                 var task = asyncDisposable.DisposeAsync();
-                _ = task.ConfigureAwait(false);
+                await task.ConfigureAwait(false);
             }
             else if (state.Analyzer is IDisposable disposable)
             {
                 disposable.Dispose();
             }
-        },
-        new ErrorHandlingOptions
-        {
-            Source = LogPrefix,
-            ErrorMessage = "Error disposing analyzer"
-        });
+        }, LogPrefix, "Error disposing analyzer");
 
-    protected override void DisposeManaged()
-    {
-        UnsubscribeDeviceManager();
-        StopCapture();
-        CleanupResources();
-    }
+    protected override void DisposeManaged() =>
+        _logger.Safe(() => {
+            UnsubscribeDeviceManager();
+            StopCapture();
+            CleanupResources();
+        }, LogPrefix, "Error during managed disposal");
 
     private void UnsubscribeDeviceManager() =>
         _deviceManager.DeviceChanged -= OnDeviceChanged;
@@ -710,61 +656,41 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private void CleanupResources() =>
         _operationLock.Dispose();
 
-    private void TryStopCaptureOnDispose()
-    {
-        try
-        {
+    private void TryStopCaptureOnDispose() =>
+        _logger.Safe(() => {
             if (IsRecording)
             {
                 using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 var task = StopCaptureAsync(true);
 
                 if (!task.Wait(5000))
-                    Log(LogLevel.Warning, LogPrefix, "Timeout waiting for StopCaptureAsync during dispose");
+                    _logger.Log(LogLevel.Warning, LogPrefix, "Timeout waiting for StopCaptureAsync during dispose");
             }
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix, $"Error stopping capture during dispose: {ex.Message}");
-        }
-    }
+        }, LogPrefix, "Error stopping capture during dispose");
 
-    protected override async ValueTask DisposeAsyncManagedResources()
-    {
-        UnsubscribeDeviceManager();
-        await TryStopCaptureAsyncOnDispose();
-        CleanupResources();
-    }
+    protected override async ValueTask DisposeAsyncManagedResources() =>
+        await _logger.SafeAsync(async () => {
+            UnsubscribeDeviceManager();
+            await TryStopCaptureAsyncOnDispose();
+            CleanupResources();
+        }, LogPrefix, "Error during async managed disposal");
 
-    private async Task TryStopCaptureAsyncOnDispose()
-    {
-        try
-        {
+    private async Task TryStopCaptureAsyncOnDispose() =>
+        await _logger.SafeAsync(async () => {
             if (IsRecording)
             {
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
                 try
                 {
-                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-
                     await StopCaptureAsync(true)
                         .WaitAsync(TimeSpan.FromSeconds(5), timeoutCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
-                    Log(LogLevel.Warning, LogPrefix,
+                    _logger.Log(LogLevel.Warning, LogPrefix,
                         "Timeout waiting for StopCaptureAsync during async dispose");
                 }
-                catch (Exception ex)
-                {
-                    Log(LogLevel.Error, LogPrefix,
-                        $"Error stopping capture during async dispose: {ex.Message}");
-                }
             }
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix,
-                $"Error stopping capture during async dispose: {ex.Message}");
-        }
-    }
+        }, LogPrefix, "Error stopping capture during async dispose");
 }

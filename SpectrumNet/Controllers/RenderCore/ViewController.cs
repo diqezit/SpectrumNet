@@ -4,11 +4,12 @@ namespace SpectrumNet.Controllers.RenderCore;
 
 public class ViewController : IViewController, IDisposable
 {
-    private const string LogPrefix = "ViewController";
+    private const string LogPrefix = nameof(ViewController);
 
     private readonly IMainController _mainController;
     private readonly IRendererFactory _rendererFactory;
     private readonly IBrushProvider _brushProvider;
+    private readonly ISmartLogger _logger = Instance;
 
     private Renderer? _renderer;
     private SpectrumAnalyzer? _analyzer;
@@ -121,7 +122,7 @@ public class ViewController : IViewController, IDisposable
                 _rendererFactory.GlobalQuality = value;
                 _renderer?.UpdateRenderQuality(value);
 
-                Log(LogLevel.Information,
+                _logger.Log(LogLevel.Information,
                     LogPrefix,
                     $"Render quality set to {value}");
             }
@@ -142,42 +143,46 @@ public class ViewController : IViewController, IDisposable
     public SpectrumScale ScaleType
     {
         get => _selectedScaleType;
-        set
-        {
-            if (_selectedScaleType == value) return;
+        set => _logger.Safe(() => HandleScaleTypeChange(value), LogPrefix, "Error changing scale type");
+    }
 
-            _selectedScaleType = value;
-            Settings.Instance.SelectedScaleType = value;
-            _mainController.OnPropertyChanged(nameof(ScaleType));
-            UpdateAnalyzerSettings(value);
-        }
+    private void HandleScaleTypeChange(SpectrumScale value)
+    {
+        if (_selectedScaleType == value) return;
+
+        _selectedScaleType = value;
+        Settings.Instance.SelectedScaleType = value;
+        _mainController.OnPropertyChanged(nameof(ScaleType));
+        UpdateAnalyzerSettings(value);
     }
 
     public string SelectedStyle
     {
         get => _selectedStyle;
-        set
+        set => _logger.Safe(() => HandleSelectedStyleChange(value), LogPrefix, "Error changing style");
+    }
+
+    private void HandleSelectedStyleChange(string value)
+    {
+        if (string.IsNullOrEmpty(value))
         {
-            if (string.IsNullOrEmpty(value))
-            {
-                Log(LogLevel.Warning, LogPrefix, "Attempt to set empty style name");
-                value = DefaultSettings.SelectedPalette;
-            }
-
-            if (_selectedStyle == value) return;
-
-            _selectedStyle = value;
-            Settings.Instance.SelectedPalette = value;
-            _mainController.OnPropertyChanged(nameof(SelectedStyle));
-
-            if (_renderer != null)
-            {
-                var (color, brush) = _brushProvider.GetColorAndBrush(value);
-                _renderer.UpdateSpectrumStyle(value, color, brush);
-            }
-
-            Log(LogLevel.Information, LogPrefix, $"Selected style changed to {value}");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Attempt to set empty style name");
+            value = DefaultSettings.SelectedPalette;
         }
+
+        if (_selectedStyle == value) return;
+
+        _selectedStyle = value;
+        Settings.Instance.SelectedPalette = value;
+        _mainController.OnPropertyChanged(nameof(SelectedStyle));
+
+        if (_renderer != null)
+        {
+            var (color, brush) = _brushProvider.GetColorAndBrush(value);
+            _renderer.UpdateSpectrumStyle(value, color, brush);
+        }
+
+        _logger.Log(LogLevel.Information, LogPrefix, $"Selected style changed to {value}");
     }
 
     public Palette? SelectedPalette
@@ -230,7 +235,7 @@ public class ViewController : IViewController, IDisposable
     {
         if (e is null || _renderer is null)
         {
-            Log(LogLevel.Error, LogPrefix, "PaintSurface called with null arguments");
+            _logger.Log(LogLevel.Error, LogPrefix, "PaintSurface called with null arguments");
             return;
         }
 
@@ -242,23 +247,25 @@ public class ViewController : IViewController, IDisposable
     #region Helper Methods
 
     private void LoadAndApplySettings() =>
-        Safe(() =>
-        {
-            ShowPerformanceInfo = Settings.Instance.ShowPerformanceInfo;
-            SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
-            ScaleType = Settings.Instance.SelectedScaleType;
-            RenderQuality = Settings.Instance.SelectedRenderQuality;
-            SelectedStyle = Settings.Instance.SelectedPalette;
+        _logger.Safe(() => HandleLoadAndApplySettings(), LogPrefix, "Error loading and applying settings");
 
-            Log(LogLevel.Information, LogPrefix, "View settings loaded and applied successfully");
-        }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error loading and applying settings" });
+    private void HandleLoadAndApplySettings()
+    {
+        ShowPerformanceInfo = Settings.Instance.ShowPerformanceInfo;
+        SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
+        ScaleType = Settings.Instance.SelectedScaleType;
+        RenderQuality = Settings.Instance.SelectedRenderQuality;
+        SelectedStyle = Settings.Instance.SelectedPalette;
+
+        _logger.Log(LogLevel.Information, LogPrefix, "View settings loaded and applied successfully");
+    }
 
     private void UpdateSetting<T>(T value, Action<T> setter, string propertyName,
                                 Func<T, bool> validator, T defaultValue, string errorMessage)
     {
         if (!validator(value))
         {
-            Log(LogLevel.Warning, LogPrefix, $"Attempt to set {errorMessage}: {value}");
+            _logger.Log(LogLevel.Warning, LogPrefix, $"Attempt to set {errorMessage}: {value}");
             value = defaultValue;
         }
 
@@ -292,7 +299,7 @@ public class ViewController : IViewController, IDisposable
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error,
+            _logger.Log(LogLevel.Error,
                 LogPrefix,
                 $"Error updating analyzer settings: {ex.Message}");
         }
@@ -307,16 +314,18 @@ public class ViewController : IViewController, IDisposable
         if (_isDisposed) return;
         _isDisposed = true;
 
-        Safe(() =>
-        {
-            if (_renderer != null)
-            {
-                _renderer.Dispose();
-                _renderer = null;
-            }
+        _logger.Safe(() => HandleDispose(), LogPrefix, "Error during view controller disposal");
+    }
 
-            _renderElement = null;
-        }, new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error during view controller disposal" });
+    private void HandleDispose()
+    {
+        if (_renderer != null)
+        {
+            _renderer.Dispose();
+            _renderer = null;
+        }
+
+        _renderElement = null;
     }
 
     #endregion

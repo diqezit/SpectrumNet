@@ -6,7 +6,7 @@ namespace SpectrumNet.Views.Abstract;
 
 public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 {
-    private const string LOG_PREFIX = nameof(BaseSpectrumRenderer);
+    private const string LogPrefix = nameof(BaseSpectrumRenderer);
 
     private const float
         DEFAULT_SMOOTHING_FACTOR = 0.3f,
@@ -16,6 +16,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 
     protected const float MIN_MAGNITUDE_THRESHOLD = 0.01f;
 
+    protected readonly ISmartLogger _logger = Instance;
     protected bool
         _isInitialized,
         _disposed;
@@ -66,50 +67,54 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected SKSamplingOptions SamplingOptions => _samplingOptions;
 
     public virtual void Initialize() =>
-        ExecuteSafely(
-            () =>
-            {
-                if (!_isInitialized)
-                {
-                    _isInitialized = true;
-                    OnInitialize();
-                    Log(LogLevel.Debug, GetType().Name, "Initialized");
-                }
-            },
-            nameof(Initialize),
-            "Failed to initialize renderer");
+        _logger.Safe(() => HandleInitialize(),
+                  GetType().Name,
+                  "Failed to initialize renderer");
+
+    protected virtual void HandleInitialize()
+    {
+        if (!_isInitialized)
+        {
+            _isInitialized = true;
+            OnInitialize();
+            _logger.Log(LogLevel.Debug, GetType().Name, "Initialized");
+        }
+    }
 
     protected virtual void OnInitialize() { }
 
     public virtual void Configure(
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium) =>
-        ExecuteSafely(
-            () =>
-            {
-                bool overlayChanged = _isOverlayActive != isOverlayActive;
-                bool qualityChanged = _quality != quality;
+        _logger.Safe(() => HandleConfigure(isOverlayActive, quality),
+                  GetType().Name,
+                  "Failed to configure renderer");
 
-                _isOverlayActive = isOverlayActive;
-                Quality = quality;
+    protected virtual void HandleConfigure(
+        bool isOverlayActive,
+        RenderQuality quality = RenderQuality.Medium)
+    {
+        bool overlayChanged = _isOverlayActive != isOverlayActive;
+        bool qualityChanged = _quality != quality;
 
-                _smoothingFactor = isOverlayActive
-                    ? OVERLAY_SMOOTHING_FACTOR
-                    : DEFAULT_SMOOTHING_FACTOR;
+        _isOverlayActive = isOverlayActive;
+        Quality = quality;
 
-                if (overlayChanged || qualityChanged)
-                {
-                    Log(LogLevel.Debug, GetType().Name, $"Configuration changed. New Quality: {Quality}");
+        _smoothingFactor = isOverlayActive
+            ? OVERLAY_SMOOTHING_FACTOR
+            : DEFAULT_SMOOTHING_FACTOR;
 
-                    ApplyQualitySettings();
-                    _overlayStateChanged = overlayChanged;
-                    _needsRedraw = true;
+        if (overlayChanged || qualityChanged)
+        {
+            _logger.Log(LogLevel.Debug, GetType().Name, $"Configuration changed. New Quality: {Quality}");
 
-                    OnConfigurationChanged();
-                }
-            },
-            nameof(Configure),
-            "Failed to configure renderer");
+            ApplyQualitySettings();
+            _overlayStateChanged = overlayChanged;
+            _needsRedraw = true;
+
+            OnConfigurationChanged();
+        }
+    }
 
     protected virtual void OnConfigurationChanged() { }
 
@@ -125,28 +130,30 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
 
     public virtual bool RequiresRedraw() => _needsRedraw || _overlayStateChanged || _isOverlayActive;
 
-    protected virtual void ApplyQualitySettings() => ExecuteSafely(
-        () =>
+    protected virtual void ApplyQualitySettings() =>
+        _logger.Safe(() => HandleApplyQualitySettings(),
+                  GetType().Name,
+                  "Failed to apply base quality settings");
+
+    protected virtual void HandleApplyQualitySettings()
+    {
+        if (_isApplyingQuality)
+            return;
+
+        try
         {
-            if (_isApplyingQuality)
-                return;
+            _isApplyingQuality = true;
 
-            try
-            {
-                _isApplyingQuality = true;
+            (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
+            _samplingOptions = QualityBasedSamplingOptions();
 
-                (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
-                _samplingOptions = QualityBasedSamplingOptions();
-
-                OnQualitySettingsApplied();
-            }
-            finally
-            {
-                _isApplyingQuality = false;
-            }
-        },
-        nameof(ApplyQualitySettings),
-        "Failed to apply base quality settings");
+            OnQualitySettingsApplied();
+        }
+        finally
+        {
+            _isApplyingQuality = false;
+        }
+    }
 
     protected virtual void OnQualitySettingsApplied() { }
 
@@ -192,43 +199,43 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     {
         if (!_isInitialized)
         {
-            Log(LogLevel.Error, GetType().Name, "Renderer is not initialized");
+            _logger.Log(LogLevel.Error, GetType().Name, "Renderer is not initialized");
             return false;
         }
 
         if (canvas == null)
         {
-            Log(LogLevel.Error, GetType().Name, "Canvas is null");
+            _logger.Log(LogLevel.Error, GetType().Name, "Canvas is null");
             return false;
         }
 
         if (spectrum == null || spectrum.Length == 0)
         {
-            Log(LogLevel.Error, GetType().Name, "Spectrum is null or empty");
+            _logger.Log(LogLevel.Error, GetType().Name, "Spectrum is null or empty");
             return false;
         }
 
         if (paint == null)
         {
-            Log(LogLevel.Error, GetType().Name, "Paint is null");
+            _logger.Log(LogLevel.Error, GetType().Name, "Paint is null");
             return false;
         }
 
         if (info.Width <= 0 || info.Height <= 0)
         {
-            Log(LogLevel.Error, GetType().Name, $"Invalid image dimensions: {info.Width}x{info.Height}");
+            _logger.Log(LogLevel.Error, GetType().Name, $"Invalid image dimensions: {info.Width}x{info.Height}");
             return false;
         }
 
         if (barCount <= 0)
         {
-            Log(LogLevel.Error, GetType().Name, "Bar count must be greater than zero");
+            _logger.Log(LogLevel.Error, GetType().Name, "Bar count must be greater than zero");
             return false;
         }
 
         if (_disposed)
         {
-            Log(LogLevel.Error, GetType().Name, "Renderer is disposed");
+            _logger.Log(LogLevel.Error, GetType().Name, "Renderer is disposed");
             return false;
         }
 
@@ -449,35 +456,23 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     }
 
     public virtual void Dispose() =>
-        ExecuteSafely(
-            () =>
-            {
-                if (!_disposed)
-                {
-                    OnDispose();
-                    _spectrumSemaphore.Dispose();
-                    _previousSpectrum = null;
-                    _processedSpectrum = null;
-                    Log(LogLevel.Debug, GetType().Name, "Disposed");
-                    _disposed = true;
-                    GC.SuppressFinalize(this);
-                }
-            },
-            nameof(Dispose),
-            "Error during base disposal");
+        _logger.Safe(() => HandleDispose(),
+                  GetType().Name,
+                  "Error during base disposal");
+
+    protected virtual void HandleDispose()
+    {
+        if (!_disposed)
+        {
+            OnDispose();
+            _spectrumSemaphore.Dispose();
+            _previousSpectrum = null;
+            _processedSpectrum = null;
+            _logger.Log(LogLevel.Debug, GetType().Name, "Disposed");
+            _disposed = true;
+            GC.SuppressFinalize(this);
+        }
+    }
 
     protected virtual void OnDispose() { }
-
-    protected static void Log(LogLevel level, string prefix, string message)
-    {
-        SmartLogger.Log(level, prefix, message);
-    }
-
-    protected static bool ExecuteSafely(
-        Action action,
-        string source,
-        string errorMessage)
-    {
-        return SmartLogger.Safe(action, source, errorMessage);
-    }
 }

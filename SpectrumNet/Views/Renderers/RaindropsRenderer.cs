@@ -9,6 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class RaindropsRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<RaindropsRenderer> _instance = new(() => new RaindropsRenderer());
+    private const string LOG_PREFIX = nameof(RaindropsRenderer);
 
     private RaindropsRenderer() { }
 
@@ -16,8 +17,6 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "RaindropsRenderer";
-
         public const float
             TARGET_DELTA_TIME = 0.016f,
             SMOOTH_FACTOR = 0.2f,
@@ -320,21 +319,19 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET);
     }
 
-    protected override void OnInitialize()
-    {
-        ExecuteSafely(
+    protected override void OnInitialize() =>
+        _logger.Safe(
             () =>
             {
                 base.OnInitialize();
                 InitializeFields();
                 SubscribeToSettingsChanges();
                 _frameTimer.Start();
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+                _logger.Debug(LOG_PREFIX, "Initialized");
             },
-            nameof(OnInitialize),
+            LOG_PREFIX,
             "Failed to initialize renderer"
         );
-    }
 
     private void InitializeFields()
     {
@@ -347,31 +344,29 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private void SubscribeToSettingsChanges() =>
         Settings.Instance.PropertyChanged += OnSettingsChanged;
 
-    protected override void OnConfigurationChanged()
-    {
-        ExecuteSafely(
+    protected override void OnConfigurationChanged() =>
+        _logger.Safe(
             () =>
             {
                 _cacheNeedsUpdate = true;
-                Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}, Effects Threshold: {_effectsThreshold}");
+                _logger.Debug(LOG_PREFIX,
+                              $"Configuration changed. New Quality: {Quality}, Effects Threshold: {_effectsThreshold}");
             },
-            nameof(OnConfigurationChanged),
+            LOG_PREFIX,
             "Failed to handle configuration change"
         );
-    }
 
-    protected override void OnQualitySettingsApplied()
-    {
-        ExecuteSafely(
+    protected override void OnQualitySettingsApplied() =>
+        _logger.Safe(
             () =>
             {
                 ApplyQualityBasedSettings();
-                Log(LogLevel.Debug, LOG_PREFIX, $"Quality changed to {Quality}, Effects Threshold: {_effectsThreshold}");
+                _logger.Debug(LOG_PREFIX,
+                              $"Quality changed to {Quality}, Effects Threshold: {_effectsThreshold}");
             },
-            nameof(OnQualitySettingsApplied),
+            LOG_PREFIX,
             "Failed to apply quality settings"
         );
-    }
 
     private void ApplyQualityBasedSettings()
     {
@@ -405,18 +400,16 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        ExecuteSafely(
+        SKPaint paint) =>
+        _logger.Safe(
             () =>
             {
                 UpdateState(spectrum, info, barCount);
                 RenderFrame(canvas, spectrum, paint);
             },
-            nameof(RenderEffect),
+            LOG_PREFIX,
             "Error during rendering"
         );
-    }
 
     private void UpdateState(
         float[] spectrum,
@@ -484,28 +477,6 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     private bool ShouldRenderTrails() =>
         _effectsThreshold < 3 && _averageLoudness > 0.3f;
-
-    private void ProcessSpectrum(float[] spectrum, int barCount)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (barCount <= 0) return;
-                ProcessSpectrumData(spectrum.AsSpan(0, Min(spectrum.Length, barCount)),
-                                  _smoothedSpectrumCache.AsSpan(0, barCount));
-                base._processedSpectrum = _smoothedSpectrumCache;
-            },
-            nameof(ProcessSpectrum),
-            "Error processing spectrum data"
-        );
-    }
-
-    private void ProcessSpectrumData(ReadOnlySpan<float> src, Span<float> dst)
-    {
-        if (src.IsEmpty || dst.IsEmpty) return;
-        float sum = ProcessSpectrumBlocks(src, dst);
-        UpdateAverageLoudness(sum, dst.Length);
-    }
 
     private void UpdateAverageLoudness(float sum, int length) =>
         _averageLoudness = Clamp(sum / length * 4.0f, 0f, 1f);
@@ -607,9 +578,8 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _firstRender = false;
     }
 
-    private void InitializeInitialDrops(int barCount)
-    {
-        ExecuteSafely(
+    private void InitializeInitialDrops(int barCount) =>
+        _logger.Safe(
             () =>
             {
                 _raindropCount = 0;
@@ -617,10 +587,9 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 for (int i = 0; i < initialCount; i++)
                     AddInitialDrop(barCount, _renderCache.Width, _renderCache.Height);
             },
-            nameof(InitializeInitialDrops),
+            LOG_PREFIX,
             "Error during initializing initial drops"
         );
-    }
 
     private void AddInitialDrop(int barCount, float width, float height)
     {
@@ -834,19 +803,17 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private void RenderRaindropTrails(
         SKCanvas canvas,
         float[] spectrum,
-        SKPaint basePaint)
-    {
-        ExecuteSafely(
+        SKPaint basePaint) =>
+        _logger.Safe(
             () =>
             {
                 using var trailPaint = ConfigureTrailPaint(basePaint);
                 if (base.UseAdvancedEffects) ApplyAdvancedTrailEffects(trailPaint, basePaint);
                 RenderAllTrails(canvas, trailPaint, spectrum, basePaint.Color);
             },
-            nameof(RenderRaindropTrails),
+            LOG_PREFIX,
             "Error rendering raindrop trails"
         );
-    }
 
     private SKPaint ConfigureTrailPaint(SKPaint basePaint)
     {
@@ -942,19 +909,17 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private void RenderRaindrops(
         SKCanvas canvas,
         float[] spectrum,
-        SKPaint basePaint)
-    {
-        ExecuteSafely(
+        SKPaint basePaint) =>
+        _logger.Safe(
             () =>
             {
                 using var dropPaint = ConfigureDropPaint(basePaint);
                 using var highlightPaint = ConfigureHighlightPaintBase();
                 RenderAllRaindrops(canvas, dropPaint, highlightPaint, spectrum, basePaint.Color);
             },
-            nameof(RenderRaindrops),
+            LOG_PREFIX,
             "Error rendering raindrops"
         );
-    }
 
     private SKPaint ConfigureDropPaint(SKPaint basePaint)
     {
@@ -1057,14 +1022,12 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         canvas.DrawCircle(highlightX, highlightY, highlightSize, paint);
     }
 
-    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        ExecuteSafely(
+    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e) =>
+        _logger.Safe(
             () => HandleSettingsChange(e.PropertyName),
-            nameof(OnSettingsChanged),
+            LOG_PREFIX,
             "Failed to process settings change"
         );
-    }
 
     private void HandleSettingsChange(string? propertyName)
     {
@@ -1087,34 +1050,30 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _cacheNeedsUpdate = true;
     }
 
-    protected override void OnInvalidateCachedResources()
-    {
-        ExecuteSafely(
+    protected override void OnInvalidateCachedResources() =>
+        _logger.Safe(
             () =>
             {
                 base.OnInvalidateCachedResources();
                 _cacheNeedsUpdate = true;
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+                _logger.Debug(LOG_PREFIX, "Cached resources invalidated");
             },
-            nameof(OnInvalidateCachedResources),
+            LOG_PREFIX,
             "Error invalidating cached resources"
         );
-    }
 
-    protected override void OnDispose()
-    {
-        ExecuteSafely(
+    protected override void OnDispose() =>
+        _logger.Safe(
             () =>
             {
                 UnsubscribeFromSettingsChanges();
                 _trailPath?.Dispose();
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+                _logger.Debug(LOG_PREFIX, "Disposed");
             },
-            nameof(OnDispose),
+            LOG_PREFIX,
             "Error during disposal"
         );
-    }
 
     private void UnsubscribeFromSettingsChanges() =>
         Settings.Instance.PropertyChanged -= OnSettingsChanged;

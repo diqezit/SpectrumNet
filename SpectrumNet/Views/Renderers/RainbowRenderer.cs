@@ -8,7 +8,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class RainbowRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<RainbowRenderer> _instance = new(() => new RainbowRenderer());
-    private const string LOG_PREFIX = "RainbowRenderer";
+    private const string LOG_PREFIX = nameof(RainbowRenderer);
 
     private RainbowRenderer() { }
 
@@ -16,8 +16,6 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "RainbowRenderer";
-
         public const float
             MIN_MAGNITUDE_THRESHOLD = 0.008f,
             ALPHA_MULTIPLIER = 1.7f,
@@ -96,10 +94,13 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeResources();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Debug(LOG_PREFIX, "Initialized");
     }
 
-    private void InitializeResources()
+    private void InitializeResources() =>
+        _logger.Safe(HandleInitializeResources, LOG_PREFIX, "Failed to initialize resources");
+
+    private void HandleInitializeResources()
     {
         InitializeGlowPaint();
         CreateColorCache();
@@ -131,8 +132,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
         _smoothingFactor = _isOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE;
 
-        Log(LogLevel.Information, LOG_PREFIX,
-            $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
+        _logger.Info(LOG_PREFIX, $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
     }
 
     protected override void OnQualitySettingsApplied()
@@ -156,7 +156,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
         UpdatePaintProperties();
 
-        Log(LogLevel.Debug, LOG_PREFIX,
+        _logger.Debug(LOG_PREFIX,
             $"Quality settings applied. Quality: {Quality}, " +
             $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}");
     }
@@ -210,15 +210,13 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        ExecuteSafely(
-            () => RenderBars(canvas, spectrum, info, barWidth, barSpacing, paint),
-            nameof(RenderEffect),
+        SKPaint paint) =>
+        _logger.Safe(
+            () => HandleRenderEffect(canvas, spectrum, info, barWidth, barSpacing, paint),
+            LOG_PREFIX,
             "Error during rendering");
-    }
 
-    private void RenderBars(
+    private void HandleRenderEffect(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
@@ -492,9 +490,9 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
     protected override void OnDispose()
     {
-        DisposeManagedResources();
+        _logger.Safe(DisposeManagedResources, LOG_PREFIX, "Error during disposal");
         base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _logger.Debug(LOG_PREFIX, "Disposed");
     }
 
     private void DisposeManagedResources()

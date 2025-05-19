@@ -4,13 +4,26 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace SpectrumNet.Controllers.Input;
 
-public class MouseInputHandler(IMainController controller) : IInputHandler
+public class MouseInputHandler : IInputHandler
 {
-    private readonly IMainController _controller = controller;
+    private const string LogPrefix = nameof(MouseInputHandler);
+    private readonly IMainController _controller;
     private readonly RendererTransparencyManager _transparencyManager = RendererTransparencyManager.Instance;
+    private readonly ISmartLogger _logger = Instance;
     private bool _isTrackingMouse;
 
-    public bool HandleMouseDown(object? sender, MouseButtonEventArgs e)
+    public MouseInputHandler(IMainController controller)
+    {
+        _controller = controller ?? throw new ArgumentNullException(nameof(controller));
+    }
+
+    public bool HandleMouseDown(object? sender, MouseButtonEventArgs e) =>
+        _logger.SafeResult(() => HandleMouseDownInternal(sender, e),
+            false,
+            LogPrefix,
+            "Error handling mouse down event");
+
+    private bool HandleMouseDownInternal(object? sender, MouseButtonEventArgs e)
     {
         if (!TryGetUiElementAndSkPoint(sender, e, out var element, out var skPoint)
             || e.LeftButton != MouseButtonState.Pressed)
@@ -22,7 +35,13 @@ public class MouseInputHandler(IMainController controller) : IInputHandler
         return false;
     }
 
-    public bool HandleMouseMove(object? sender, MouseEventArgs e)
+    public bool HandleMouseMove(object? sender, MouseEventArgs e) =>
+        _logger.SafeResult(() => HandleMouseMoveInternal(sender, e),
+            false,
+            LogPrefix,
+            "Error handling mouse move event");
+
+    private bool HandleMouseMoveInternal(object? sender, MouseEventArgs e)
     {
         _transparencyManager.OnMouseMove();
 
@@ -40,7 +59,13 @@ public class MouseInputHandler(IMainController controller) : IInputHandler
         return false;
     }
 
-    public bool HandleMouseUp(object? sender, MouseButtonEventArgs e)
+    public bool HandleMouseUp(object? sender, MouseButtonEventArgs e) =>
+        _logger.SafeResult(() => HandleMouseUpInternal(sender, e),
+            false,
+            LogPrefix,
+            "Error handling mouse up event");
+
+    private bool HandleMouseUpInternal(object? sender, MouseButtonEventArgs e)
     {
         if (!TryGetUiElementAndSkPoint(sender, e, out var element, out var skPoint)
             || e.LeftButton != MouseButtonState.Released
@@ -57,7 +82,13 @@ public class MouseInputHandler(IMainController controller) : IInputHandler
         return true;
     }
 
-    public bool HandleMouseDoubleClick(object? sender, MouseButtonEventArgs e)
+    public bool HandleMouseDoubleClick(object? sender, MouseButtonEventArgs e) =>
+        _logger.SafeResult(() => HandleMouseDoubleClickInternal(sender, e),
+            false,
+            LogPrefix,
+            "Error handling mouse double click event");
+
+    private bool HandleMouseDoubleClickInternal(object? sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left
             || sender is not FrameworkElement)
@@ -78,14 +109,24 @@ public class MouseInputHandler(IMainController controller) : IInputHandler
         return true;
     }
 
-    public void HandleMouseEnter(object? sender, MouseEventArgs e)
+    public void HandleMouseEnter(object? sender, MouseEventArgs e) =>
+        _logger.Safe(() => HandleMouseEnterInternal(sender, e),
+            LogPrefix,
+            "Error handling mouse enter event");
+
+    private void HandleMouseEnterInternal(object? sender, MouseEventArgs e)
     {
         _transparencyManager.OnMouseEnter();
 
         HandlePlaceholderMouseEnterIfRelevant();
     }
 
-    public void HandleMouseLeave(object? sender, MouseEventArgs e)
+    public void HandleMouseLeave(object? sender, MouseEventArgs e) =>
+        _logger.Safe(() => HandleMouseLeaveInternal(sender, e),
+            LogPrefix,
+            "Error handling mouse leave event");
+
+    private void HandleMouseLeaveInternal(object? sender, MouseEventArgs e)
     {
         _transparencyManager.OnMouseLeave();
 

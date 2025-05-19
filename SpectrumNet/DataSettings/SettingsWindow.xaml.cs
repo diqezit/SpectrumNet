@@ -4,7 +4,9 @@ namespace SpectrumNet;
 
 public partial class SettingsWindow : Window
 {
-    private const string LogPrefix = "SettingsWindow";
+    private const string LogPrefix = nameof(SettingsWindow);
+    private readonly ISmartLogger _logger = SmartLogger.Instance;
+
     private static readonly Lazy<SettingsWindow> _instance = new(() => new SettingsWindow());
     public static SettingsWindow Instance => _instance.Value;
 
@@ -35,23 +37,20 @@ public partial class SettingsWindow : Window
         }
     }
 
-    public void EnsureWindowVisible() => Safe(
-        () =>
+    public void EnsureWindowVisible() =>
+        _logger.Safe(() =>
         {
             if (!IsWindowOnScreen())
                 ResetWindowPosition();
         },
-        new ErrorHandlingOptions
-        {
-            Source = LogPrefix,
-            ErrorMessage = "Error ensuring window visibility"
-        });
+        LogPrefix,
+        "Error ensuring window visibility");
 
     public void LoadSettings() => _settings.LoadSettings();
     public void SaveSettings() => _settings.SaveSettings();
 
-    public void ResetToDefaults() => Safe(
-        () =>
+    public void ResetToDefaults() =>
+        _logger.Safe(() =>
         {
             if (!ConfirmSettingsReset())
                 return;
@@ -60,12 +59,8 @@ public partial class SettingsWindow : Window
             _changesApplied = true;
             ShowSettingsResetConfirmation();
         },
-        new ErrorHandlingOptions
-        {
-            Source = nameof(ResetToDefaults),
-            ErrorMessage = "Error resetting settings",
-            ExceptionHandler = ShowErrorMessage
-        });
+        LogPrefix,
+        "Error resetting settings");
 
     private void OnWindowDrag(object sender, MouseButtonEventArgs e)
     {
@@ -74,17 +69,13 @@ public partial class SettingsWindow : Window
     }
 
     private void Window_Closing(object sender, CancelEventArgs e) =>
-        Safe(
-            () =>
-            {
-                CleanupOnClosing();
-                _themeManager.UnregisterWindow(this);
-            },
-            new ErrorHandlingOptions
-            {
-                Source = nameof(Window_Closing),
-                ErrorMessage = "Error closing window"
-            });
+        _logger.Safe(() =>
+        {
+            CleanupOnClosing();
+            _themeManager.UnregisterWindow(this);
+        },
+        LogPrefix,
+        "Error closing window");
 
     private void OnCloseButton_Click(object sender, RoutedEventArgs e)
     {
@@ -92,19 +83,15 @@ public partial class SettingsWindow : Window
         Close();
     }
 
-    private void OnApplyButton_Click(object sender, RoutedEventArgs e) => Safe(
-        () =>
+    private void OnApplyButton_Click(object sender, RoutedEventArgs e) =>
+        _logger.Safe(() =>
         {
             ApplyAndSaveSettings();
             _changesApplied = true;
             ShowSettingsAppliedConfirmation();
         },
-        new ErrorHandlingOptions
-        {
-            Source = nameof(OnApplyButton_Click),
-            ErrorMessage = "Error applying settings",
-            ExceptionHandler = ShowErrorMessage
-        });
+        LogPrefix,
+        "Error applying settings");
 
     private void OnResetButton_Click(object sender, RoutedEventArgs e) => ResetToDefaults();
 
@@ -140,8 +127,8 @@ public partial class SettingsWindow : Window
             RestoreBackupSettings();
     }
 
-    private void UpdateAllRenderers() => Safe(
-        () =>
+    private void UpdateAllRenderers() =>
+        _logger.Safe(() =>
         {
             foreach (var renderer in _rendererFactory.GetAllRenderers())
             {
@@ -149,11 +136,8 @@ public partial class SettingsWindow : Window
                 renderer.Configure(isOverlayActive, _settings.SelectedRenderQuality);
             }
         },
-        new ErrorHandlingOptions
-        {
-            Source = nameof(UpdateAllRenderers),
-            ErrorMessage = "Error updating renderers"
-        });
+        LogPrefix,
+        "Error updating renderers");
 
     private bool IsWindowOnScreen()
     {
@@ -169,7 +153,7 @@ public partial class SettingsWindow : Window
     private void ResetWindowPosition()
     {
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Log(LogLevel.Warning, LogPrefix, "Window position reset to center");
+        _logger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center");
     }
 
     private static bool ConfirmSettingsReset() =>
@@ -192,11 +176,4 @@ public partial class SettingsWindow : Window
             "Settings",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
-
-    private static void ShowErrorMessage(Exception ex) =>
-        MessageBox.Show(
-            $"Error: {ex.Message}",
-            "Error",
-            MessageBoxButton.OK,
-            MessageBoxImage.Error);
 }

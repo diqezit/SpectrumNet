@@ -5,7 +5,7 @@ namespace SpectrumNet.Views.Abstract;
 public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 {
     private const int DEFAULT_POOL_SIZE = 5;
-    private const string LOG_PREFIX = nameof(EffectSpectrumRenderer);
+    private const string LogPrefix = nameof(EffectSpectrumRenderer);
 
     protected const float
         DEFAULT_OVERLAY_ALPHA_FACTOR = RendererTransparencyManager.Constants.INACTIVE_TRANSPARENCY,
@@ -37,16 +37,18 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         int barCount,
         SKPaint paint);
 
-    public override void Initialize() => ExecuteSafely(
-        () =>
-        {
-            base.Initialize();
-            ApplyQualitySettings();
-            OnInitialize();
-            Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
-        },
-        nameof(Initialize),
-        "Failed to initialize renderer");
+    public override void Initialize() =>
+        _logger.Safe(() => HandleInitialize(),
+                  LogPrefix,
+                  "Failed to initialize renderer");
+
+    protected override void HandleInitialize()
+    {
+        base.HandleInitialize();
+        ApplyQualitySettings();
+        OnInitialize();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+    }
 
     public override void SetOverlayTransparency(float level)
     {
@@ -67,12 +69,12 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
     public override void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium) => ExecuteSafely(
-        () => ConfigureRenderer(isOverlayActive, quality),
-        nameof(Configure),
-        "Failed to configure renderer");
+        RenderQuality quality = RenderQuality.Medium) =>
+        _logger.Safe(() => HandleConfigureRenderer(isOverlayActive, quality),
+                  LogPrefix,
+                  "Failed to configure renderer");
 
-    private void ConfigureRenderer(
+    private void HandleConfigureRenderer(
         bool isOverlayActive,
         RenderQuality quality)
     {
@@ -133,18 +135,17 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         var pr = processed!;
         var pt = paint!;
 
-        ExecuteSafely(
-            () => RenderLocked(
-                cv,
-                sp,
-                pr,
-                info,
-                barWidth,
-                barSpacing,
-                barCount,
-                pt),
-            nameof(Render),
-            "Error during rendering");
+        _logger.Safe(() => RenderLocked(
+                    cv,
+                    sp,
+                    pr,
+                    info,
+                    barWidth,
+                    barSpacing,
+                    barCount,
+                    pt),
+                 LogPrefix,
+                 "Error during rendering");
 
         drawPerformanceInfo?.Invoke(cv, info);
     }
@@ -265,10 +266,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         return paint;
     }
 
-    protected void InvalidateCachedResources() => ExecuteSafely(
-        OnInvalidateCachedResources,
-        nameof(InvalidateCachedResources),
-        "Failed to invalidate cached resources");
+    protected void InvalidateCachedResources() =>
+        _logger.Safe(() => OnInvalidateCachedResources(),
+                  LogPrefix,
+                  "Failed to invalidate cached resources");
 
     protected virtual void OnInvalidateCachedResources() { }
 
@@ -305,45 +306,46 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     private void RenderNormalMode(Action renderAction) =>
         renderAction();
 
-    protected override void ApplyQualitySettings() => ExecuteSafely(
-        () =>
+    protected override void ApplyQualitySettings() =>
+        _logger.Safe(() => HandleApplyEffectQualitySettings(),
+                  LogPrefix,
+                  "Failed to apply quality settings");
+
+    private void HandleApplyEffectQualitySettings()
+    {
+        if (_isApplyingQuality) return;
+
+        try
         {
-            if (_isApplyingQuality) return;
+            _isApplyingQuality = true;
 
-            try
-            {
-                _isApplyingQuality = true;
-
-                base.ApplyQualitySettings();
-                OnQualitySettingsApplied();
-            }
-            finally
-            {
-                _isApplyingQuality = false;
-            }
-        },
-        nameof(ApplyQualitySettings),
-        "Failed to apply quality settings");
-
-    protected override void OnQualitySettingsApplied() { }
+            base.HandleApplyQualitySettings();
+            OnQualitySettingsApplied();
+        }
+        finally
+        {
+            _isApplyingQuality = false;
+        }
+    }
 
     public override void Dispose()
     {
         if (!_disposed)
         {
-            ExecuteSafely(
-                () =>
-                {
-                    OnDispose();
-                    _pathPool.Dispose();
-                    _paintPool.Dispose();
-                    base.Dispose();
-                    _disposed = true;
-                },
-                nameof(Dispose),
-                "Error during disposal");
+            _logger.Safe(() => HandleEffectDispose(),
+                       LogPrefix,
+                       "Error during disposal");
 
             GC.SuppressFinalize(this);
         }
+    }
+
+    private void HandleEffectDispose()
+    {
+        OnDispose();
+        _pathPool.Dispose();
+        _paintPool.Dispose();
+        base.HandleDispose();
+        _disposed = true;
     }
 }

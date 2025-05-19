@@ -8,7 +8,7 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
 {
     public record Constants
     {
-        public const string LOG_PREFIX = "RendererTransparencyManager";
+        public const string LOG_PREFIX = nameof(RendererTransparencyManager);
         public const float OVERLAY_TIMEOUT_SECONDS = 3.0f;
 
         public const float
@@ -25,6 +25,7 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
 
     public static RendererTransparencyManager Instance => _instance.Value;
 
+    private readonly ISmartLogger _logger = SmartLogger.Instance;
     private DateTime _lastMouseActivity = DateTime.MinValue;
     private bool _isTransparencyActive;
 
@@ -66,7 +67,7 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         LogInitialization();
     }
 
-    private static DispatcherTimer CreateTransparencyTimer() =>
+    private DispatcherTimer CreateTransparencyTimer() =>
         new()
         {
             Interval = FromMilliseconds(100)
@@ -78,8 +79,8 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         _transparencyTimer.Start();
     }
 
-    private static void LogInitialization() =>
-        Log(LogLevel.Information, LOG_PREFIX, "Initialized");
+    private void LogInitialization() =>
+        _logger.Log(LogLevel.Information, LOG_PREFIX, "Initialized");
 
     public void SetRendererFactory(IRendererFactory factory) =>
         _rendererFactory ??= factory;
@@ -116,22 +117,18 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         }
     }
 
-    private void UpdateTransparency(float transparencyLevel)
-    {
-        try
-        {
-            if (ShouldSkipTransparencyUpdate(transparencyLevel))
-                return;
+    private void UpdateTransparency(float transparencyLevel) =>
+        _logger.Safe(() => HandleUpdateTransparency(transparencyLevel), LOG_PREFIX, "Error updating transparency");
 
-            LogTransparencyUpdate(transparencyLevel);
-            SetTransparencyValue(transparencyLevel);
-            NotifyTransparencyChanged();
-            UpdateRendererTransparency();
-        }
-        catch (Exception ex)
-        {
-            LogTransparencyUpdateError(ex);
-        }
+    private void HandleUpdateTransparency(float transparencyLevel)
+    {
+        if (ShouldSkipTransparencyUpdate(transparencyLevel))
+            return;
+
+        LogTransparencyUpdate(transparencyLevel);
+        SetTransparencyValue(transparencyLevel);
+        NotifyTransparencyChanged();
+        UpdateRendererTransparency();
     }
 
     private static bool ShouldSkipTransparencyUpdate(float desired, float current) =>
@@ -140,8 +137,8 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
     private bool ShouldSkipTransparencyUpdate(float desired) =>
         ShouldSkipTransparencyUpdate(desired, _currentTransparencyValue);
 
-    private static void LogTransparencyUpdate(float transparencyLevel) =>
-        Log(LogLevel.Debug, LOG_PREFIX, $"Updating transparency to {transparencyLevel}");
+    private void LogTransparencyUpdate(float transparencyLevel) =>
+        _logger.Log(LogLevel.Debug, LOG_PREFIX, $"Updating transparency to {transparencyLevel}");
 
     private void SetTransparencyValue(float transparencyLevel) =>
         _currentTransparencyValue = transparencyLevel;
@@ -166,10 +163,10 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         }
     }
 
-    private static void LogTransparencyUpdateError(Exception ex) =>
-        Log(LogLevel.Error, LOG_PREFIX, $"Error setting transparency: {ex.Message}");
+    private void CheckTransparencyTimeout(object? sender, EventArgs e) =>
+        _logger.Safe(() => HandleCheckTransparencyTimeout(sender, e), LOG_PREFIX, "Error checking transparency timeout");
 
-    private void CheckTransparencyTimeout(object? sender, EventArgs e)
+    private void HandleCheckTransparencyTimeout(object? sender, EventArgs e)
     {
         if (_disposed) return;
 
@@ -190,7 +187,10 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         }
     }
 
-    public void EnableGlobalMouseTracking()
+    public void EnableGlobalMouseTracking() =>
+        _logger.Safe(() => HandleEnableGlobalMouseTracking(), LOG_PREFIX, "Error enabling global mouse tracking");
+
+    private void HandleEnableGlobalMouseTracking()
     {
         if (_isMouseHookActive) return;
 
@@ -207,7 +207,10 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         }
     }
 
-    public void DisableGlobalMouseTracking()
+    public void DisableGlobalMouseTracking() =>
+        _logger.Safe(() => HandleDisableGlobalMouseTracking(), LOG_PREFIX, "Error disabling global mouse tracking");
+
+    private void HandleDisableGlobalMouseTracking()
     {
         if (!_isMouseHookActive || _mouseHook == IntPtr.Zero) return;
         UnhookWindowsHookEx(_mouseHook);
@@ -216,15 +219,15 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         LogMouseTrackingDisabled();
     }
 
-    private static void LogMouseTrackingEnabled() =>
-        Log(LogLevel.Debug, LOG_PREFIX, "Global mouse tracking enabled");
+    private void LogMouseTrackingEnabled() =>
+        _logger.Log(LogLevel.Debug, LOG_PREFIX, "Global mouse tracking enabled");
 
-    private static void LogMouseTrackingDisabled() =>
-        Log(LogLevel.Debug, LOG_PREFIX, "Global mouse tracking disabled");
+    private void LogMouseTrackingDisabled() =>
+        _logger.Log(LogLevel.Debug, LOG_PREFIX, "Global mouse tracking disabled");
 
     private nint MouseHookCallback(int nCode, nint wParam, nint lParam)
     {
-        ProcessMouseMessage(nCode, wParam);
+        _logger.Safe(() => ProcessMouseMessage(nCode, wParam), LOG_PREFIX, "Error processing mouse message");
         return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
@@ -236,7 +239,10 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
         }
     }
 
-    public void Dispose()
+    public void Dispose() =>
+        _logger.Safe(() => HandleDispose(), LOG_PREFIX, "Error during disposal");
+
+    private void HandleDispose()
     {
         if (_disposed) return;
 
@@ -248,9 +254,6 @@ public sealed partial class RendererTransparencyManager : ITransparencyManager, 
 
         _disposed = true;
         GC.SuppressFinalize(this);
-        LogDisposal();
+        _logger.Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
     }
-
-    private static void LogDisposal() =>
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
 }

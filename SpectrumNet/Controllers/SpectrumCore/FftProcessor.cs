@@ -4,7 +4,8 @@ namespace SpectrumNet.Controllers.SpectrumCore;
 
 public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
 {
-    private const string LOG_SOURCE = nameof(FftProcessor);
+    private const string LogPrefix = nameof(FftProcessor);
+    private readonly ISmartLogger _logger = Instance;
 
     private readonly int _fftSize;
     private readonly Complex[] _buffer;
@@ -44,24 +45,37 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
     public FftWindowType WindowType
     {
         get => _windowType;
-        set
-        {
-            if (_windowType == value)
-                return;
+        set => _logger.Safe(() => HandleSetWindowType(value),
+                        LogPrefix,
+                        "Error setting window type");
+    }
 
-            if (!_windows.TryGetValue(value, out var window) || window is null)
-                throw new InvalidOperationException($"Unsupported window type: {value}");
+    private void HandleSetWindowType(FftWindowType value)
+    {
+        if (_windowType == value)
+            return;
 
-            _windowType = value;
-            _window = window;
-            ResetFftState();
-        }
+        if (!_windows.TryGetValue(value, out var window) || window is null)
+            throw new InvalidOperationException($"Unsupported window type: {value}");
+
+        _windowType = value;
+        _window = window;
+        ResetFftState();
     }
 
     public ValueTask AddSamplesAsync(
         ReadOnlyMemory<float> samples,
         int sampleRate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        _logger.SafeResult(() => HandleAddSamplesAsync(samples, sampleRate, cancellationToken),
+                        ValueTask.CompletedTask,
+                        LogPrefix,
+                        "Error adding samples");
+
+    private ValueTask HandleAddSamplesAsync(
+        ReadOnlyMemory<float> samples,
+        int sampleRate,
+        CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
 
@@ -74,36 +88,35 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
         return WriteToChannelAsync(samples, sampleRate, cancellationToken);
     }
 
-    public void ResetFftState()
-    {
-        ThrowIfDisposed();
-        _sampleCount = 0;
-        Array.Clear(_buffer, 0, _fftSize);
-    }
+    public void ResetFftState() =>
+        _logger.Safe(() => {
+            ThrowIfDisposed();
+            _sampleCount = 0;
+            Array.Clear(_buffer, 0, _fftSize);
+        }, LogPrefix, "Error resetting FFT state");
 
-    protected override void DisposeManaged()
-    {
-        CleanupResources();
-        WaitForPendingTasksAsync(FromSeconds(5))
-            .ConfigureAwait(false)
-            .GetAwaiter()
-            .GetResult();
-        Dispose();
-    }
+    protected override void DisposeManaged() =>
+        _logger.Safe(() => {
+            CleanupResources();
+            WaitForPendingTasksAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false)
+                .GetAwaiter()
+                .GetResult();
+            GC.SuppressFinalize(this);
+        }, LogPrefix, "Error during managed disposal");
 
-    protected override async ValueTask DisposeAsyncManagedResources()
-    {
-        CleanupResources();
-        await WaitForPendingTasksAsync(FromSeconds(5));
-        Dispose();
-    }
+    protected override async ValueTask DisposeAsyncManagedResources() =>
+        await _logger.SafeAsync(async () => {
+            CleanupResources();
+            await WaitForPendingTasksAsync(TimeSpan.FromSeconds(5));
+            GC.SuppressFinalize(this);
+        }, LogPrefix, "Error during async managed disposal");
 
-    private void CleanupResources()
-    {
-        _cts.Cancel();
-        _channel.Writer.Complete();
-        Dispose();
-    }
+    private void CleanupResources() =>
+        _logger.Safe(() => {
+            _cts.Cancel();
+            _channel.Writer.Complete();
+        }, LogPrefix, "Error cleaning up resources");
 
     private static void ValidateFftSize(int fftSize)
     {
@@ -111,11 +124,11 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
             throw new ArgumentException("FFT size must be a positive power of 2", nameof(fftSize));
     }
 
-    private void InitializeWindows(int fftSize)
-    {
-        foreach (FftWindowType type in Enum.GetValues(typeof(FftWindowType)))
-            _windows[type] = WindowGenerator.Generate(fftSize, type);
-    }
+    private void InitializeWindows(int fftSize) =>
+        _logger.Safe(() => {
+            foreach (FftWindowType type in Enum.GetValues(typeof(FftWindowType)))
+                _windows[type] = WindowGenerator.Generate(fftSize, type);
+        }, LogPrefix, "Error initializing windows");
 
     private static Channel<(ReadOnlyMemory<float>, int, CancellationToken)> CreateProcessingChannel(int capacity)
     {
@@ -143,64 +156,66 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
                     linkedCts.Token).AsTask());
     }
 
-    private async Task ProcessAsync()
-    {
-        await SafeAsync(async () =>
+    private async Task ProcessAsync() =>
+        await _logger.SafeAsync(async () =>
         {
-            await foreach (var (samples, rate, token) in _channel.Reader.ReadAllAsync(_cts.Token))
+            try
             {
-                if (token.IsCancellationRequested)
-                    continue;
+                await foreach (var (samples, rate, token) in _channel.Reader.ReadAllAsync(_cts.Token))
+                {
+                    if (token.IsCancellationRequested)
+                        continue;
 
-                if (samples.Length > 0)
-                    await Task.Run(() => ProcessBatch(samples, rate, token), token);
+                    if (samples.Length > 0)
+                        await Task.Run(() => ProcessBatch(samples, rate, token), token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Ignore operation canceled exceptions
             }
         },
-        LOG_SOURCE,
-        "Error in FFT processing loop",
-        ignoreExceptions: [typeof(OperationCanceledException)]);
-    }
+        LogPrefix,
+        "Error in FFT processing loop");
 
     private void ProcessBatch(
         ReadOnlyMemory<float> samples,
         int rate,
+        CancellationToken cancellationToken) =>
+        _logger.Safe(() => HandleProcessBatch(samples, rate, cancellationToken),
+                  LogPrefix,
+                  "Error processing batch");
+
+    private void HandleProcessBatch(
+        ReadOnlyMemory<float> samples,
+        int rate,
         CancellationToken cancellationToken)
     {
-        Safe(() =>
+        int pos = 0;
+        while (pos < samples.Length && !cancellationToken.IsCancellationRequested)
         {
-            int pos = 0;
-            while (pos < samples.Length && !cancellationToken.IsCancellationRequested)
+            int count = Math.Min(_fftSize - _sampleCount, samples.Length - pos);
+            if (count <= 0)
+                break;
+
+            ProcessChunk(samples.Slice(pos, count));
+            pos += count;
+            _sampleCount += count;
+
+            if (_sampleCount >= _fftSize && !cancellationToken.IsCancellationRequested)
             {
-                int count = Min(_fftSize - _sampleCount, samples.Length - pos);
-                if (count <= 0)
-                    break;
-
-                ProcessChunk(samples.Slice(pos, count));
-                pos += count;
-                _sampleCount += count;
-
-                if (_sampleCount >= _fftSize && !cancellationToken.IsCancellationRequested)
-                {
-                    PerformFftAndNotify(rate, cancellationToken);
-                    ResetFftState();
-                }
+                PerformFftAndNotify(rate, cancellationToken);
+                ResetFftState();
             }
-        },
-        LOG_SOURCE,
-        "Error processing batch");
+        }
     }
 
-    private void PerformFftAndNotify(int rate, CancellationToken cancellationToken)
-    {
-        Safe(() =>
-        {
+    private void PerformFftAndNotify(int rate, CancellationToken cancellationToken) =>
+        _logger.Safe(() => {
             Complex[] fftBuffer = new Complex[_fftSize];
             Array.Copy(_buffer, fftBuffer, _fftSize);
             ScheduleFftCalculation(fftBuffer, rate, cancellationToken);
-        },
-        LOG_SOURCE,
-        "Error preparing FFT");
-    }
+        }, LogPrefix, "Error preparing FFT");
 
     private void ScheduleFftCalculation(
         Complex[] fftBuffer,
@@ -219,7 +234,7 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
             }
             catch (Exception ex)
             {
-                Error(LOG_SOURCE, $"FFT calculation failed: {ex}");
+                _logger.Error(LogPrefix, $"FFT calculation failed: {ex}");
             }
         }, cancellationToken);
 
@@ -249,11 +264,18 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
         try
         {
             await _pendingTasksSemaphore.WaitAsync();
-            _pendingTasks.Add(task);
+            try
+            {
+                _pendingTasks.Add(task);
+            }
+            finally
+            {
+                _pendingTasksSemaphore.Release();
+            }
         }
-        finally
+        catch (Exception ex)
         {
-            _pendingTasksSemaphore.Release();
+            _logger.Log(LogLevel.Error, LogPrefix, $"Error adding task to tracking: {ex.Message}");
         }
     }
 
@@ -262,11 +284,18 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
         try
         {
             await _pendingTasksSemaphore.WaitAsync();
-            _pendingTasks.TryTake(out _);
+            try
+            {
+                _pendingTasks.TryTake(out _);
+            }
+            finally
+            {
+                _pendingTasksSemaphore.Release();
+            }
         }
-        finally
+        catch (Exception ex)
         {
-            _pendingTasksSemaphore.Release();
+            _logger.Log(LogLevel.Error, LogPrefix, $"Error removing task from tracking: {ex.Message}");
         }
     }
 
@@ -282,7 +311,7 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Warning, LOG_SOURCE,
+                _logger.Log(LogLevel.Warning, LogPrefix,
                     $"Waiting for pending tasks interrupted: {ex.Message}");
             }
         }
@@ -293,57 +322,63 @@ public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
         try
         {
             await _pendingTasksSemaphore.WaitAsync();
-            return [.. _pendingTasks];
+            try
+            {
+                return [.. _pendingTasks];
+            }
+            finally
+            {
+                _pendingTasksSemaphore.Release();
+            }
         }
-        finally
+        catch (Exception ex)
         {
-            _pendingTasksSemaphore.Release();
+            _logger.Log(LogLevel.Error, LogPrefix, $"Error getting pending tasks: {ex.Message}");
+            return [];
         }
     }
 
     private void NotifyFftResultIfNeeded(
         Complex[] fftBuffer,
         int rate,
-        CancellationToken cancellationToken)
-    {
-        if (!cancellationToken.IsCancellationRequested && FftCalculated != null)
-            FftCalculated(this, new FftEventArgs(fftBuffer, rate));
-    }
+        CancellationToken cancellationToken) =>
+        _logger.Safe(() => {
+            if (!cancellationToken.IsCancellationRequested && FftCalculated != null)
+                FftCalculated(this, new FftEventArgs(fftBuffer, rate));
+        }, LogPrefix, "Error notifying FFT result");
 
-    private void ProcessChunk(ReadOnlyMemory<float> chunk)
+    private void ProcessChunk(ReadOnlyMemory<float> chunk) =>
+        _logger.Safe(() => HandleProcessChunk(chunk), LogPrefix, "Error processing chunk");
+
+    private void HandleProcessChunk(ReadOnlyMemory<float> chunk)
     {
-        Safe(() =>
+        int offset = _sampleCount;
+        int len = chunk.Length;
+
+        if (len > BATCH_SIZE)
         {
-            int offset = _sampleCount;
-            int len = chunk.Length;
-
-            if (len > BATCH_SIZE)
-            {
-                ProcessLargeChunkInParallel(chunk, offset, len);
-            }
-            else
-            {
-                FastFourierTransformHelper.ApplyWindowInPlaceVectorized(
-                    _buffer, chunk, _window, offset, _vecSize);
-            }
-        },
-        LOG_SOURCE,
-        "Error processing chunk");
-    }
-
-    private void ProcessLargeChunkInParallel(ReadOnlyMemory<float> chunk, int offset, int len)
-    {
-        int chunkSize = Max(BATCH_SIZE, len / ProcessorCount);
-        Parallel.For(0, (len + chunkSize - 1) / chunkSize, _parallelOpts, i =>
+            ProcessLargeChunkInParallel(chunk, offset, len);
+        }
+        else
         {
-            if (_parallelOpts.CancellationToken.IsCancellationRequested)
-                return;
-
-            int start = i * chunkSize;
-            int end = Min(start + chunkSize, len);
-
             FastFourierTransformHelper.ApplyWindowInPlaceVectorized(
-                _buffer, chunk[start..end], _window, offset + start, _vecSize);
-        });
+                _buffer, chunk, _window, offset, _vecSize);
+        }
     }
+
+    private void ProcessLargeChunkInParallel(ReadOnlyMemory<float> chunk, int offset, int len) =>
+        _logger.Safe(() => {
+            int chunkSize = Math.Max(BATCH_SIZE, len / ProcessorCount);
+            Parallel.For(0, (len + chunkSize - 1) / chunkSize, _parallelOpts, i =>
+            {
+                if (_parallelOpts.CancellationToken.IsCancellationRequested)
+                    return;
+
+                int start = i * chunkSize;
+                int end = Math.Min(start + chunkSize, len);
+
+                FastFourierTransformHelper.ApplyWindowInPlaceVectorized(
+                    _buffer, chunk[start..end], _window, offset + start, _vecSize);
+            });
+        }, LogPrefix, "Error processing large chunk in parallel");
 }

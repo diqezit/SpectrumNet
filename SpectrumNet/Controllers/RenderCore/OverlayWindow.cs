@@ -6,8 +6,9 @@ namespace SpectrumNet.Controllers.RenderCore;
 
 public sealed class OverlayWindow : Window, IDisposable
 {
-    private const string LogSource = "OverlayWindow";
+    private const string LogPrefix = nameof(OverlayWindow);
     private const int MaxConsecutiveRenderSkips = 3;
+    private readonly ISmartLogger _logger = Instance;
 
     private readonly record struct RenderContext(
         IMainController Controller,
@@ -32,15 +33,18 @@ public sealed class OverlayWindow : Window, IDisposable
     public new bool Topmost
     {
         get => base.Topmost;
-        set
-        {
-            if (base.Topmost == value) return;
-            base.Topmost = value;
+        set => _logger.Safe(() => HandleSetTopmost(value),
+            LogPrefix, "Error setting window topmost property");
+    }
 
-            ForceRedraw();
+    private void HandleSetTopmost(bool value)
+    {
+        if (base.Topmost == value) return;
+        base.Topmost = value;
 
-            Log(LogLevel.Debug, LogSource, $"Overlay topmost state changed to: {value}");
-        }
+        ForceRedraw();
+
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Overlay topmost state changed to: {value}");
     }
 
     public OverlayWindow(
@@ -63,12 +67,15 @@ public sealed class OverlayWindow : Window, IDisposable
         }
         catch (Exception ex)
         {
-            Error(LogSource, "Failed to initialize overlay window", ex);
+            _logger.Error(LogPrefix, "Failed to initialize overlay window", ex);
             throw;
         }
     }
 
-    public void ForceRedraw()
+    public void ForceRedraw() =>
+        _logger.Safe(() => HandleForceRedraw(), LogPrefix, "Error forcing window redraw");
+
+    private void HandleForceRedraw()
     {
         if (_isDisposed || _renderContext is null)
             return;
@@ -77,19 +84,19 @@ public sealed class OverlayWindow : Window, IDisposable
         element?.InvalidateVisual();
     }
 
-    private void OnTransparencyChanged(float level)
-    {
-        Dispatcher.Invoke(() => {
-            Opacity = level;
-            ForceRedraw();
-        });
-    }
+    private void OnTransparencyChanged(float level) =>
+        _logger.Safe(() => {
+            Dispatcher.Invoke(() => {
+                Opacity = level;
+                ForceRedraw();
+            });
+        }, LogPrefix, "Error handling transparency change");
 
-    private void ConfigureRenderingOptions()
-    {
-        SetHardwareAccelerationOptions();
-        SetRenderQualityOptions();
-    }
+    private void ConfigureRenderingOptions() =>
+        _logger.Safe(() => {
+            SetHardwareAccelerationOptions();
+            SetRenderQualityOptions();
+        }, LogPrefix, "Error configuring rendering options");
 
     private void SetHardwareAccelerationOptions()
     {
@@ -105,22 +112,22 @@ public sealed class OverlayWindow : Window, IDisposable
         SetValue(RenderOptions.ClearTypeHintProperty, ClearTypeHint.Enabled);
     }
 
-    private void InitializeOverlay(IMainController controller)
-    {
-        ConfigureWindowProperties();
-        CreateRenderContext(controller);
-        SubscribeToEvents();
-    }
+    private void InitializeOverlay(IMainController controller) =>
+        _logger.Safe(() => {
+            ConfigureWindowProperties();
+            CreateRenderContext(controller);
+            SubscribeToEvents();
+        }, LogPrefix, "Error initializing overlay");
 
-    private void ConfigureWindowProperties()
-    {
-        ConfigureWindowStyle();
-        ConfigureWindowVisibility();
-        ConfigureWindowInteraction();
+    private void ConfigureWindowProperties() =>
+        _logger.Safe(() => {
+            ConfigureWindowStyle();
+            ConfigureWindowVisibility();
+            ConfigureWindowInteraction();
 
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            SystemBackdrop.SetTransparentBackground(this);
-    }
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                SystemBackdrop.SetTransparentBackground(this);
+        }, LogPrefix, "Error configuring window properties");
 
     private void ConfigureWindowStyle()
     {
@@ -139,124 +146,125 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private void ConfigureWindowInteraction() => IsHitTestVisible = true;
 
-    private void CreateRenderContext(IMainController controller)
-    {
-        var skElement = CreateSkElement();
-        var renderTimer = CreateRenderTimer();
-        var rendererFactory = RendererFactory.Instance;
+    private void CreateRenderContext(IMainController controller) =>
+        _logger.Safe(() => {
+            var skElement = CreateSkElement();
+            var renderTimer = CreateRenderTimer();
+            var rendererFactory = RendererFactory.Instance;
 
-        _renderContext = new(controller, skElement, renderTimer, rendererFactory);
-        Content = skElement;
+            _renderContext = new(controller, skElement, renderTimer, rendererFactory);
+            Content = skElement;
 
-        controller.PropertyChanged += OnControllerPropertyChanged;
-    }
+            controller.PropertyChanged += OnControllerPropertyChanged;
+        }, LogPrefix, "Error creating render context");
 
-    private SKElement CreateSkElement()
-    {
-        var element = new SKElement
-        {
-            VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
-            SnapsToDevicePixels = true,
-            UseLayoutRounding = true
-        };
+    private SKElement CreateSkElement() =>
+        _logger.SafeResult(() => {
+            var element = new SKElement
+            {
+                VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+                SnapsToDevicePixels = true,
+                UseLayoutRounding = true
+            };
 
-        OptimizeElementForRender(element);
+            OptimizeElementForRender(element);
 
-        element.MouseMove += (s, e) => _transparencyManager.OnMouseMove();
-        element.MouseEnter += (s, e) => _transparencyManager.OnMouseEnter();
-        element.MouseLeave += (s, e) => _transparencyManager.OnMouseLeave();
+            element.MouseMove += (s, e) => _transparencyManager.OnMouseMove();
+            element.MouseEnter += (s, e) => _transparencyManager.OnMouseEnter();
+            element.MouseLeave += (s, e) => _transparencyManager.OnMouseLeave();
 
-        return element;
-    }
+            return element;
+        }, new SKElement(), LogPrefix, "Error creating SK element");
 
-    private static void OptimizeElementForRender(FrameworkElement element)
-    {
-        RenderOptions.SetCachingHint(element, CachingHint.Cache);
-        element.CacheMode = new BitmapCache
-        {
-            EnableClearType = false,
-            SnapsToDevicePixels = true,
-            RenderAtScale = 1.0
-        };
-    }
+    private void OptimizeElementForRender(FrameworkElement element) =>
+        _logger.Safe(() => {
+            RenderOptions.SetCachingHint(element, CachingHint.Cache);
+            element.CacheMode = new BitmapCache
+            {
+                EnableClearType = false,
+                SnapsToDevicePixels = true,
+                RenderAtScale = 1.0
+            };
+        }, LogPrefix, "Error optimizing element for render");
 
-    private DispatcherTimer CreateRenderTimer()
-    {
-        return new DispatcherTimer(DispatcherPriority.Render)
+    private DispatcherTimer CreateRenderTimer() =>
+        new(DispatcherPriority.Render)
         {
             Interval = FromMilliseconds(_configuration.RenderInterval)
         };
-    }
 
-    private void SubscribeToEvents()
-    {
-        if (_renderContext is null) return;
+    private void SubscribeToEvents() =>
+        _logger.Safe(() => {
+            if (_renderContext is null) return;
 
-        RegisterElementEvents();
-        RegisterWindowEvents();
-    }
+            RegisterElementEvents();
+            RegisterWindowEvents();
+        }, LogPrefix, "Error subscribing to events");
 
-    private void RegisterElementEvents()
-    {
-        if (_renderContext is null) return;
-        _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
-        _renderContext.Value.RenderTimer.Tick += RenderTimerTick;
-    }
+    private void RegisterElementEvents() =>
+        _logger.Safe(() => {
+            if (_renderContext is null) return;
+            _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
+            _renderContext.Value.RenderTimer.Tick += RenderTimerTick;
+        }, LogPrefix, "Error registering element events");
 
-    private void RegisterWindowEvents()
-    {
-        Closing += OnClosing;
-        SourceInitialized += OnSourceInitialized;
+    private void RegisterWindowEvents() =>
+        _logger.Safe(() => {
+            Closing += OnClosing;
+            SourceInitialized += OnSourceInitialized;
 
-        if (_configuration.EnableEscapeToClose)
-            KeyDown += OnKeyDown;
+            if (_configuration.EnableEscapeToClose)
+                KeyDown += OnKeyDown;
 
-        DpiChanged += OnDpiChanged;
-        IsVisibleChanged += OnIsVisibleChanged;
+            DpiChanged += OnDpiChanged;
+            IsVisibleChanged += OnIsVisibleChanged;
 
-        MouseMove += OnMouseMove;
-        MouseEnter += OnMouseEnter;
-        MouseLeave += OnMouseLeave;
-    }
+            MouseMove += OnMouseMove;
+            MouseEnter += OnMouseEnter;
+            MouseLeave += OnMouseLeave;
+        }, LogPrefix, "Error registering window events");
 
-    private void OnMouseMove(object sender, MouseEventArgs e)
-    {
-        _transparencyManager.OnMouseMove();
-        e.Handled = true;
-    }
+    private void OnMouseMove(object sender, MouseEventArgs e) =>
+        _logger.Safe(() => {
+            _transparencyManager.OnMouseMove();
+            e.Handled = true;
+        }, LogPrefix, "Error handling mouse move");
 
-    private void OnMouseEnter(object sender, MouseEventArgs e)
-    {
-        _transparencyManager.OnMouseEnter();
-        e.Handled = true;
-    }
+    private void OnMouseEnter(object sender, MouseEventArgs e) =>
+        _logger.Safe(() => {
+            _transparencyManager.OnMouseEnter();
+            e.Handled = true;
+        }, LogPrefix, "Error handling mouse enter");
 
-    private void OnMouseLeave(object sender, MouseEventArgs e)
-    {
-        _transparencyManager.OnMouseLeave();
-        e.Handled = true;
-    }
+    private void OnMouseLeave(object sender, MouseEventArgs e) =>
+        _logger.Safe(() => {
+            _transparencyManager.OnMouseLeave();
+            e.Handled = true;
+        }, LogPrefix, "Error handling mouse leave");
 
     private void OnControllerPropertyChanged(
         object? sender,
-        PropertyChangedEventArgs e)
-    {
-        if (string.Equals(e.PropertyName, nameof(IMainController.LimitFpsTo60)))
-        {
-            UpdateFpsLimit();
-        }
-    }
+        PropertyChangedEventArgs e) =>
+        _logger.Safe(() => {
+            if (string.Equals(e.PropertyName, nameof(IMainController.LimitFpsTo60)))
+            {
+                UpdateFpsLimit();
+            }
+        }, LogPrefix, "Error handling controller property changed");
 
-    private void UpdateFpsLimit()
-    {
-        _fpsLimiter.IsEnabled = _renderContext?.Controller.LimitFpsTo60 ?? false;
-        _fpsLimiter.Reset();
-        _consecutiveSkips = 0;
-        ForceRedraw();
-    }
+    private void UpdateFpsLimit() =>
+        _logger.Safe(() => {
+            _fpsLimiter.IsEnabled = _renderContext?.Controller.LimitFpsTo60 ?? false;
+            _fpsLimiter.Reset();
+            _consecutiveSkips = 0;
+            ForceRedraw();
+        }, LogPrefix, "Error updating FPS limit");
 
-    private void RenderTimerTick(object? sender, EventArgs e)
+    private void RenderTimerTick(object? sender, EventArgs e) =>
+        _logger.Safe(() => HandleRenderTimerTick(sender, e), LogPrefix, "Error handling render timer tick");
+
+    private void HandleRenderTimerTick(object? sender, EventArgs e)
     {
         if (_isDisposed) return;
 
@@ -287,60 +295,63 @@ public sealed class OverlayWindow : Window, IDisposable
         return !_fpsLimiter.IsEnabled || _fpsLimiter.ShouldRenderFrame();
     }
 
-    private void OnClosing(object? sender, CancelEventArgs e)
-    {
-        StopRenderTimer();
-        Dispose();
-    }
+    private void OnClosing(object? sender, CancelEventArgs e) =>
+        _logger.Safe(() => {
+            StopRenderTimer();
+            Dispose();
+        }, LogPrefix, "Error handling window closing");
 
-    private void StopRenderTimer()
-    {
-        if (_renderContext?.RenderTimer is { IsEnabled: true } timer)
-            timer.Stop();
-    }
+    private void StopRenderTimer() =>
+        _logger.Safe(() => {
+            if (_renderContext?.RenderTimer is { IsEnabled: true } timer)
+                timer.Stop();
+        }, LogPrefix, "Error stopping render timer");
 
-    private void OnSourceInitialized(object? sender, EventArgs e)
-    {
-        InitializeWindowHandle();
-        ApplyWindowOptimizations();
-        StartRenderTimer();
-        _transparencyManager.ActivateTransparency();
-        ForceRedraw();
-    }
+    private void OnSourceInitialized(object? sender, EventArgs e) =>
+        _logger.Safe(() => {
+            InitializeWindowHandle();
+            ApplyWindowOptimizations();
+            StartRenderTimer();
+            _transparencyManager.ActivateTransparency();
+            ForceRedraw();
+        }, LogPrefix, "Error handling source initialized");
 
     private void InitializeWindowHandle() =>
         _windowHandle = new WindowInteropHelper(this).Handle;
 
-    private void ApplyWindowOptimizations()
-    {
-        if (_windowHandle == nint.Zero) return;
+    private void ApplyWindowOptimizations() =>
+        _logger.Safe(() => {
+            if (_windowHandle == nint.Zero) return;
 
-        ConfigureWindowStyleEx();
+            ConfigureWindowStyleEx();
 
-        if (_configuration.DisableWindowAnimations)
-            SystemBackdrop.DisableWindowAnimations(_windowHandle);
-    }
+            if (_configuration.DisableWindowAnimations)
+                SystemBackdrop.DisableWindowAnimations(_windowHandle);
+        }, LogPrefix, "Error applying window optimizations");
 
-    private void ConfigureWindowStyleEx()
-    {
-        if (_windowHandle == nint.Zero) return;
+    private void ConfigureWindowStyleEx() =>
+        _logger.Safe(() => {
+            if (_windowHandle == nint.Zero) return;
 
-        var extendedStyle = NativeMethods.GetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE);
+            var extendedStyle = NativeMethods.GetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE);
 
-        _ = NativeMethods.SetWindowLong(
-            _windowHandle,
-            NativeMethods.GWL_EXSTYLE,
-            extendedStyle | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT
-        );
-    }
+            _ = NativeMethods.SetWindowLong(
+                _windowHandle,
+                NativeMethods.GWL_EXSTYLE,
+                extendedStyle | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT
+            );
+        }, LogPrefix, "Error configuring window style extended");
 
-    private void StartRenderTimer()
-    {
-        if (_renderContext?.RenderTimer is { IsEnabled: false } timer)
-            timer.Start();
-    }
+    private void StartRenderTimer() =>
+        _logger.Safe(() => {
+            if (_renderContext?.RenderTimer is { IsEnabled: false } timer)
+                timer.Start();
+        }, LogPrefix, "Error starting render timer");
 
-    private void OnKeyDown(object sender, KeyEventArgs e)
+    private void OnKeyDown(object sender, KeyEventArgs e) =>
+        _logger.Safe(() => HandleOnKeyDown(sender, e), LogPrefix, "Error handling key down");
+
+    private void HandleOnKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
@@ -353,26 +364,31 @@ public sealed class OverlayWindow : Window, IDisposable
             e.Handled = _renderContext.Value.Controller.HandleKeyDown(e, this);
     }
 
-    private void OnDpiChanged(object? sender, DpiChangedEventArgs e)
-    {
-        RefreshElementCacheForDpi();
-        ForceRedraw();
-    }
+    private void OnDpiChanged(object? sender, DpiChangedEventArgs e) =>
+        _logger.Safe(() => {
+            RefreshElementCacheForDpi();
+            ForceRedraw();
+        }, LogPrefix, "Error handling DPI changed");
 
-    private void RefreshElementCacheForDpi()
-    {
-        if (_renderContext?.SkElement is not { } element) return;
+    private void RefreshElementCacheForDpi() =>
+        _logger.Safe(() => {
+            if (_renderContext?.SkElement is not { } element) return;
 
-        element.CacheMode = null;
-        element.CacheMode = new BitmapCache
-        {
-            EnableClearType = false,
-            SnapsToDevicePixels = true,
-            RenderAtScale = 1.0
-        };
-    }
+            element.CacheMode = null;
+            element.CacheMode = new BitmapCache
+            {
+                EnableClearType = false,
+                SnapsToDevicePixels = true,
+                RenderAtScale = 1.0
+            };
+        }, LogPrefix, "Error refreshing element cache for DPI");
 
     private void OnIsVisibleChanged(
+        object? sender,
+        DependencyPropertyChangedEventArgs e) =>
+        _logger.Safe(() => HandleOnIsVisibleChanged(sender, e), LogPrefix, "Error handling is visible changed");
+
+    private void HandleOnIsVisibleChanged(
         object? sender,
         DependencyPropertyChangedEventArgs e)
     {
@@ -388,46 +404,39 @@ public sealed class OverlayWindow : Window, IDisposable
         }
     }
 
-    private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args)
-    {
-        if (_isDisposed || _renderContext is null) return;
-
-        try
-        {
+    private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args) =>
+        _logger.Safe(() => {
+            if (_isDisposed || _renderContext is null) return;
             PerformRender(sender, args);
-        }
-        catch (Exception ex)
-        {
-            Error(LogSource,
-                  "Error during paint surface handling",
-                  ex);
-        }
-    }
+        }, LogPrefix, "Error during paint surface handling");
 
-    private void PerformRender(object? sender, SKPaintSurfaceEventArgs args)
-    {
-        _frameTimeWatch.Restart();
+    private void PerformRender(object? sender, SKPaintSurfaceEventArgs args) =>
+        _logger.Safe(() => {
+            _frameTimeWatch.Restart();
 
-        ClearCanvas(args.Surface.Canvas);
-        RenderSpectrum(sender, args);
+            ClearCanvas(args.Surface.Canvas);
+            RenderSpectrum(sender, args);
 
-        _frameTimeWatch.Stop();
-        RecordPerformanceMetrics();
-    }
+            _frameTimeWatch.Stop();
+            RecordPerformanceMetrics();
+        }, LogPrefix, "Error performing render");
 
     private static void ClearCanvas(SKCanvas canvas) =>
         canvas.Clear(SKColors.Transparent);
 
-    private void RenderSpectrum(object? sender, SKPaintSurfaceEventArgs args)
-    {
-        if (_renderContext is null || args is null) return;
-        _renderContext.Value.Controller.OnPaintSurface(sender, args);
-    }
+    private void RenderSpectrum(object? sender, SKPaintSurfaceEventArgs args) =>
+        _logger.Safe(() => {
+            if (_renderContext is null || args is null) return;
+            _renderContext.Value.Controller.OnPaintSurface(sender, args);
+        }, LogPrefix, "Error rendering spectrum");
 
     private static void RecordPerformanceMetrics() =>
         PerformanceMetricsManager.RecordFrameTime();
 
-    public void Dispose()
+    public void Dispose() =>
+        _logger.Safe(() => HandleDispose(), LogPrefix, "Error disposing overlay window");
+
+    private void HandleDispose()
     {
         if (_isDisposed) return;
 
@@ -438,54 +447,54 @@ public sealed class OverlayWindow : Window, IDisposable
         DisposeResources();
     }
 
-    private void UnsubscribeFromEvents()
-    {
-        UnregisterElementEvents();
-        UnregisterWindowEvents();
-        UnregisterControllerEvents();
-    }
+    private void UnsubscribeFromEvents() =>
+        _logger.Safe(() => {
+            UnregisterElementEvents();
+            UnregisterWindowEvents();
+            UnregisterControllerEvents();
+        }, LogPrefix, "Error unsubscribing from events");
 
-    private void UnregisterElementEvents()
-    {
-        if (_renderContext is null) return;
+    private void UnregisterElementEvents() =>
+        _logger.Safe(() => {
+            if (_renderContext is null) return;
 
-        var element = _renderContext.Value.SkElement;
+            var element = _renderContext.Value.SkElement;
 
-        element.PaintSurface -= HandlePaintSurface;
-        element.MouseMove -= (s, e) => _transparencyManager.OnMouseMove();
-        element.MouseEnter -= (s, e) => _transparencyManager.OnMouseEnter();
-        element.MouseLeave -= (s, e) => _transparencyManager.OnMouseLeave();
+            element.PaintSurface -= HandlePaintSurface;
+            element.MouseMove -= (s, e) => _transparencyManager.OnMouseMove();
+            element.MouseEnter -= (s, e) => _transparencyManager.OnMouseEnter();
+            element.MouseLeave -= (s, e) => _transparencyManager.OnMouseLeave();
 
-        _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
-        _renderContext.Value.RenderTimer.Stop();
-    }
+            _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
+            _renderContext.Value.RenderTimer.Stop();
+        }, LogPrefix, "Error unregistering element events");
 
-    private void UnregisterWindowEvents()
-    {
-        Closing -= OnClosing;
-        SourceInitialized -= OnSourceInitialized;
+    private void UnregisterWindowEvents() =>
+        _logger.Safe(() => {
+            Closing -= OnClosing;
+            SourceInitialized -= OnSourceInitialized;
 
-        if (_configuration.EnableEscapeToClose)
-            KeyDown -= OnKeyDown;
+            if (_configuration.EnableEscapeToClose)
+                KeyDown -= OnKeyDown;
 
-        DpiChanged -= OnDpiChanged;
-        IsVisibleChanged -= OnIsVisibleChanged;
+            DpiChanged -= OnDpiChanged;
+            IsVisibleChanged -= OnIsVisibleChanged;
 
-        MouseMove -= OnMouseMove;
-        MouseEnter -= OnMouseEnter;
-        MouseLeave -= OnMouseLeave;
-    }
+            MouseMove -= OnMouseMove;
+            MouseEnter -= OnMouseEnter;
+            MouseLeave -= OnMouseLeave;
+        }, LogPrefix, "Error unregistering window events");
 
-    private void UnregisterControllerEvents()
-    {
-        if (_renderContext?.Controller is INotifyPropertyChanged controller)
-            controller.PropertyChanged -= OnControllerPropertyChanged;
-    }
+    private void UnregisterControllerEvents() =>
+        _logger.Safe(() => {
+            if (_renderContext?.Controller is INotifyPropertyChanged controller)
+                controller.PropertyChanged -= OnControllerPropertyChanged;
+        }, LogPrefix, "Error unregistering controller events");
 
-    private void DisposeResources()
-    {
-        _disposalTokenSource.Cancel();
-        _disposalTokenSource.Dispose();
-        _renderContext = null;
-    }
+    private void DisposeResources() =>
+        _logger.Safe(() => {
+            _disposalTokenSource.Cancel();
+            _disposalTokenSource.Dispose();
+            _renderContext = null;
+        }, LogPrefix, "Error disposing resources");
 }

@@ -4,7 +4,8 @@ namespace SpectrumNet.DataSettings;
 
 public class Settings : ISettings
 {
-    private const string LogPrefix = "Settings";
+    private const string LogPrefix = nameof(Settings);
+    private readonly ISmartLogger _logger = SmartLogger.Instance;
 
     private int _maxParticles;
     private float _spawnThresholdOverlay, _spawnThresholdNormal,
@@ -109,15 +110,14 @@ public class Settings : ISettings
     public bool IsDarkTheme { get => _isDarkTheme; set => SetProperty(ref _isDarkTheme, value); }
     public bool LimitFpsTo60 { get => _limitFpsTo60; set => SetProperty(ref _limitFpsTo60, value); }
 
-    public void LoadSettings(string? filePath = null)
-    {
-        Safe(() =>
+    public void LoadSettings(string? filePath = null) =>
+        _logger.Safe(() =>
         {
             string settingsPath = filePath ?? GetSettingsFilePath();
 
             if (!File.Exists(settingsPath))
             {
-                Log(LogLevel.Information, LogPrefix, "Settings file not found, using defaults");
+                _logger.Log(LogLevel.Information, LogPrefix, "Settings file not found, using defaults");
                 return;
             }
 
@@ -128,29 +128,24 @@ public class Settings : ISettings
 
                 if (loadedSettings == null)
                 {
-                    Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings. Using defaults.");
+                    _logger.Log(LogLevel.Warning, LogPrefix, "Failed to deserialize settings. Using defaults.");
                     return;
                 }
 
                 ApplySettings(loadedSettings);
-                Log(LogLevel.Information, LogPrefix, $"Settings loaded from {settingsPath}");
+                _logger.Log(LogLevel.Information, LogPrefix, $"Settings loaded from {settingsPath}");
                 SettingsChanged?.Invoke(this, "LoadSettings");
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}. Using defaults.");
+                _logger.Log(LogLevel.Error, LogPrefix, $"Error loading settings: {ex.Message}. Using defaults.");
             }
         },
-        new ErrorHandlingOptions
-        {
-            Source = nameof(LoadSettings),
-            ErrorMessage = "Error loading settings"
-        });
-    }
+        LogPrefix,
+        "Error loading settings");
 
-    public void SaveSettings(string? filePath = null)
-    {
-        Safe(() =>
+    public void SaveSettings(string? filePath = null) =>
+        _logger.Safe(() =>
         {
             string settingsPath = filePath ?? EnsureSettingsDirectory();
 
@@ -168,19 +163,14 @@ public class Settings : ISettings
             File.WriteAllText(settingsPath, json);
             File.WriteAllText("settings.json", json);
 
-            Log(LogLevel.Information, LogPrefix, $"Settings saved to {settingsPath}");
+            _logger.Log(LogLevel.Information, LogPrefix, $"Settings saved to {settingsPath}");
             SettingsChanged?.Invoke(this, "SaveSettings");
         },
-        new ErrorHandlingOptions
-        {
-            Source = nameof(SaveSettings),
-            ErrorMessage = "Error saving settings"
-        });
-    }
+        LogPrefix,
+        "Error saving settings");
 
-    public void ResetToDefaults()
-    {
-        Safe(() =>
+    public void ResetToDefaults() =>
+        _logger.Safe(() =>
         {
             MaxParticles = DefaultSettings.MaxParticles;
             SpawnThresholdOverlay = DefaultSettings.SpawnThresholdOverlay;
@@ -231,15 +221,11 @@ public class Settings : ISettings
             IsDarkTheme = DefaultSettings.IsDarkTheme;
             LimitFpsTo60 = DefaultSettings.LimitFpsTo60;
 
-            Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
+            _logger.Log(LogLevel.Information, LogPrefix, "Settings have been reset to defaults");
             SettingsChanged?.Invoke(this, "ResetToDefaults");
         },
-        new ErrorHandlingOptions
-        {
-            Source = nameof(ResetToDefaults),
-            ErrorMessage = "Error resetting settings to defaults"
-        });
-    }
+        LogPrefix,
+        "Error resetting settings to defaults");
 
     private void ApplySettings(Settings source)
     {

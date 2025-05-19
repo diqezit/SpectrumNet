@@ -5,7 +5,7 @@ namespace SpectrumNet.Controllers.RenderCore;
 public sealed class Renderer : AsyncDisposableBase
 {
     private const string DEFAULT_STYLE = "Solid";
-    private const string LOG_PREFIX = "Renderer";
+    private const string LogPrefix = nameof(Renderer);
 
     private record RenderState(
         SKPaint Paint,
@@ -21,6 +21,7 @@ public sealed class Renderer : AsyncDisposableBase
     private readonly RendererPlaceholder _placeholder = new() { CanvasSize = new SKSize(1, 1) };
     private readonly FrameCache _frameCache = new();
     private readonly IRendererFactory _rendererFactory;
+    private readonly ISmartLogger _logger = Instance;
 
     private readonly SKFont _performanceFont;
     private readonly SKPaint _performancePaint;
@@ -64,33 +65,37 @@ public sealed class Renderer : AsyncDisposableBase
         InitializeRenderer();
     }
 
-    private void InitializeRenderer()
-    {
-        InitializeRenderState();
-        SubscribeToEvents();
-        AttachUIElementEvents();
+    private void InitializeRenderer() =>
+        _logger.Safe(() => {
+            InitializeRenderState();
+            SubscribeToEvents();
+            AttachUIElementEvents();
 
-        FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
-    }
+            FpsLimiter.Instance.IsEnabled = _controller.LimitFpsTo60;
+        }, LogPrefix, "Error initializing renderer");
 
     private void InitializeRenderState()
     {
         var (_, brush) = _spectrumStyles.GetColorAndBrush(DEFAULT_STYLE);
         _currentState = new RenderState(
             brush.Clone()
-            ?? throw new InvalidOperationException($"{LOG_PREFIX} Failed to initialize {DEFAULT_STYLE} style"),
+            ?? throw new InvalidOperationException($"{LogPrefix} Failed to initialize {DEFAULT_STYLE} style"),
             _controller.SelectedDrawingType,
             DEFAULT_STYLE,
             _controller.RenderQuality);
     }
 
-    public void RequestRender()
-    {
-        if (_isDisposed) return;
-        SafeInvalidate();
-    }
+    public void RequestRender() =>
+        _logger.Safe(() => {
+            if (_isDisposed) return;
+            SafeInvalidate();
+        }, LogPrefix, "Error requesting render");
 
-    public void UpdateRenderDimensions(int width, int height)
+    public void UpdateRenderDimensions(int width, int height) =>
+        _logger.Safe(() => HandleUpdateRenderDimensions(width, height),
+            LogPrefix, "Error updating render dimensions");
+
+    private void HandleUpdateRenderDimensions(int width, int height)
     {
         if (_isDisposed) return;
         if (!ValidateAndSetDimensions(width, height)) return;
@@ -98,7 +103,11 @@ public sealed class Renderer : AsyncDisposableBase
         RequestRender();
     }
 
-    public void SynchronizeWithController()
+    public void SynchronizeWithController() =>
+        _logger.Safe(() => HandleSynchronizeWithController(),
+            LogPrefix, "Error synchronizing with controller");
+
+    private void HandleSynchronizeWithController()
     {
         if (_isDisposed) return;
         if (SynchronizeRenderSettings())
@@ -108,7 +117,11 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    public void UpdateRenderStyle(RenderStyle style)
+    public void UpdateRenderStyle(RenderStyle style) =>
+        _logger.Safe(() => HandleUpdateRenderStyle(style),
+            LogPrefix, "Error updating render style");
+
+    private void HandleUpdateRenderStyle(RenderStyle style)
     {
         if (_isDisposed
             || _currentState.Style == style
@@ -130,6 +143,13 @@ public sealed class Renderer : AsyncDisposableBase
     public void UpdateSpectrumStyle(
         string styleName,
         SKColor color,
+        SKPaint brush) =>
+        _logger.Safe(() => HandleUpdateSpectrumStyle(styleName, color, brush),
+            LogPrefix, "Error updating spectrum style");
+
+    private void HandleUpdateSpectrumStyle(
+        string styleName,
+        SKColor color,
         SKPaint brush)
     {
         if (_isDisposed
@@ -140,10 +160,8 @@ public sealed class Renderer : AsyncDisposableBase
         try
         {
             _isStyleUpdateInProgress = true;
-            ExecuteSafely(
-                () => UpdatePaintAndStyleName(styleName, brush),
-                nameof(UpdateSpectrumStyle),
-                "Error updating spectrum style");
+            _logger.Safe(() => UpdatePaintAndStyleName(styleName, brush),
+                LogPrefix, "Error updating paint and style name");
 
             _frameCache.MarkDirty();
             RequestRender();
@@ -154,7 +172,11 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    public void UpdateRenderQuality(RenderQuality quality)
+    public void UpdateRenderQuality(RenderQuality quality) =>
+        _logger.Safe(() => HandleUpdateRenderQuality(quality),
+            LogPrefix, "Error updating render quality");
+
+    private void HandleUpdateRenderQuality(RenderQuality quality)
     {
         if (_isDisposed
             || _currentState.Quality == quality
@@ -174,7 +196,11 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e)
+    public void RenderFrame(object? sender, SKPaintSurfaceEventArgs e) =>
+        _logger.Safe(() => HandleRenderFrame(sender, e),
+            LogPrefix, "Error rendering frame");
+
+    private void HandleRenderFrame(object? sender, SKPaintSurfaceEventArgs e)
     {
         if (ShouldSkipRenderingFrame(sender))
         {
@@ -205,58 +231,58 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    public void HandlePlaceholderMouseDown(SKPoint point)
-    {
-        if (ShouldShowPlaceholder && _placeholder != null)
-        {
-            _placeholder.IsInteractive = true;
-            _placeholder.OnMouseDown(point);
-            _frameCache.MarkDirty();
-            RequestRender();
-        }
-    }
+    public void HandlePlaceholderMouseDown(SKPoint point) =>
+        _logger.Safe(() => {
+            if (ShouldShowPlaceholder && _placeholder != null)
+            {
+                _placeholder.IsInteractive = true;
+                _placeholder.OnMouseDown(point);
+                _frameCache.MarkDirty();
+                RequestRender();
+            }
+        }, LogPrefix, "Error handling placeholder mouse down");
 
-    public void HandlePlaceholderMouseMove(SKPoint point)
-    {
-        if (ShouldShowPlaceholder && _placeholder != null)
-        {
-            _placeholder.OnMouseMove(point);
-            _frameCache.MarkDirty();
-            RequestRender();
-        }
-    }
+    public void HandlePlaceholderMouseMove(SKPoint point) =>
+        _logger.Safe(() => {
+            if (ShouldShowPlaceholder && _placeholder != null)
+            {
+                _placeholder.OnMouseMove(point);
+                _frameCache.MarkDirty();
+                RequestRender();
+            }
+        }, LogPrefix, "Error handling placeholder mouse move");
 
-    public void HandlePlaceholderMouseUp(SKPoint point)
-    {
-        if (ShouldShowPlaceholder && _placeholder != null)
-        {
-            _placeholder.OnMouseUp(point);
-            _frameCache.MarkDirty();
-            RequestRender();
-        }
-    }
+    public void HandlePlaceholderMouseUp(SKPoint point) =>
+        _logger.Safe(() => {
+            if (ShouldShowPlaceholder && _placeholder != null)
+            {
+                _placeholder.OnMouseUp(point);
+                _frameCache.MarkDirty();
+                RequestRender();
+            }
+        }, LogPrefix, "Error handling placeholder mouse up");
 
-    public void HandlePlaceholderMouseEnter()
-    {
-        if (ShouldShowPlaceholder && _placeholder != null)
-        {
-            _placeholder.OnMouseEnter();
-            _frameCache.MarkDirty();
-            RequestRender();
-        }
-    }
+    public void HandlePlaceholderMouseEnter() =>
+        _logger.Safe(() => {
+            if (ShouldShowPlaceholder && _placeholder != null)
+            {
+                _placeholder.OnMouseEnter();
+                _frameCache.MarkDirty();
+                RequestRender();
+            }
+        }, LogPrefix, "Error handling placeholder mouse enter");
 
-    public void HandlePlaceholderMouseLeave()
-    {
-        if (ShouldShowPlaceholder && _placeholder != null)
-        {
-            _placeholder.OnMouseLeave();
-            _frameCache.MarkDirty();
-            RequestRender();
-        }
-    }
+    public void HandlePlaceholderMouseLeave() =>
+        _logger.Safe(() => {
+            if (ShouldShowPlaceholder && _placeholder != null)
+            {
+                _placeholder.OnMouseLeave();
+                _frameCache.MarkDirty();
+                RequestRender();
+            }
+        }, LogPrefix, "Error handling placeholder mouse leave");
 
-    public IPlaceholder? GetPlaceholder() => 
+    public IPlaceholder? GetPlaceholder() =>
         ShouldShowPlaceholder ? _placeholder : null;
 
     private bool ShouldSkipRenderingFrame(object? sender) =>
@@ -272,21 +298,24 @@ public sealed class Renderer : AsyncDisposableBase
         ClearCanvas(e.Surface.Canvas);
         bool renderSuccessful = false;
 
-        Safe(
-            () =>
+        try
+        {
+            _logger.Safe(() =>
             {
                 RenderFrameInternal(e.Surface.Canvas, e.Info);
                 renderSuccessful = true;
             },
-            new ErrorHandlingOptions
-            {
-                Source = LOG_PREFIX,
-                ErrorMessage = "Error rendering frame",
-                ExceptionHandler = ex => HandleRenderFrameException(ex, e.Surface.Canvas, e.Info)
-            });
+            LogPrefix,
+            "Error rendering new frame");
+        }
+        catch (Exception ex)
+        {
+            HandleRenderFrameException(ex, e.Surface.Canvas, e.Info);
+        }
 
         if (renderSuccessful)
             UpdateFrameCache(e);
+
         RecordFrameMetrics();
     }
 
@@ -315,7 +344,11 @@ public sealed class Renderer : AsyncDisposableBase
         RenderSpectrumData(canvas, info);
     }
 
-    private void RenderSpectrumData(SKCanvas canvas, SKImageInfo info)
+    private void RenderSpectrumData(SKCanvas canvas, SKImageInfo info) =>
+        _logger.Safe(() => HandleRenderSpectrumData(canvas, info),
+            LogPrefix, "Error rendering spectrum data");
+
+    private void HandleRenderSpectrumData(SKCanvas canvas, SKImageInfo info)
     {
         var spectrum = GetSpectrumData();
         if (spectrum is null)
@@ -347,6 +380,16 @@ public sealed class Renderer : AsyncDisposableBase
         _controller.IsTransitioning || ShouldShowPlaceholder;
 
     private void RenderSpectrum(
+       SKCanvas canvas,
+       SKImageInfo info,
+       SpectralData spectrum,
+       float barWidth,
+       float barSpacing,
+       int barCount) =>
+        _logger.Safe(() => HandleRenderSpectrum(canvas, info, spectrum, barWidth, barSpacing, barCount),
+            LogPrefix, "Error rendering spectrum");
+
+    private void HandleRenderSpectrum(
        SKCanvas canvas,
        SKImageInfo info,
        SpectralData spectrum,
@@ -401,8 +444,8 @@ public sealed class Renderer : AsyncDisposableBase
     {
         if (_currentState.Style != expectedStyle)
         {
-            Log(LogLevel.Warning,
-                LOG_PREFIX,
+            _logger.Log(LogLevel.Warning,
+                LogPrefix,
                 $"RenderFrameInternal: " +
                 $"Style changed from {expectedStyle} " +
                 $"to {_currentState.Style} after getting renderer, resetting",
@@ -412,7 +455,11 @@ public sealed class Renderer : AsyncDisposableBase
         }
     }
 
-    private SpectralData? GetSpectrumData()
+    private SpectralData? GetSpectrumData() =>
+        _logger.SafeResult<SpectralData?>(() => HandleGetSpectrumData(), null,
+            LogPrefix, "Error getting spectrum data");
+
+    private SpectralData? HandleGetSpectrumData()
     {
         if (_isDisposed) return null;
 
@@ -432,17 +479,7 @@ public sealed class Renderer : AsyncDisposableBase
             _isAnalyzerDisposed = _shouldShowPlaceholder = true;
             return null;
         }
-        catch (Exception ex)
-        {
-            LogSpectrumDataError(ex);
-            return null;
-        }
     }
-
-    private static void LogSpectrumDataError(Exception ex) =>
-        Log(LogLevel.Error,
-            LOG_PREFIX,
-            $"Error getting spectrum data: {ex.Message}");
 
     private bool TryCalculateRenderParameters(
         SKImageInfo info,
@@ -476,23 +513,23 @@ public sealed class Renderer : AsyncDisposableBase
         return barWidth >= 1.0f;
     }
 
-    private void RenderPlaceholder(SKCanvas canvas, SKImageInfo info)
-    {
-        if (_isDisposed) return;
-        UpdatePlaceholderSize(info);
-        _placeholder.Render(canvas, info);
-    }
+    private void RenderPlaceholder(SKCanvas canvas, SKImageInfo info) =>
+        _logger.Safe(() => {
+            if (_isDisposed) return;
+            UpdatePlaceholderSize(info);
+            _placeholder.Render(canvas, info);
+        }, LogPrefix, "Error rendering placeholder");
 
     private void UpdatePlaceholderSize(SKImageInfo info) =>
         _placeholder.CanvasSize = new SKSize(info.Width, info.Height);
 
-    private void HandleRenderFrameException(Exception ex, SKCanvas canvas, SKImageInfo info)
-    {
-        if (ex is ObjectDisposedException)
-            HandleObjectDisposedException();
-        else if (!_isDisposed)
-            RenderPlaceholder(canvas, info);
-    }
+    private void HandleRenderFrameException(Exception ex, SKCanvas canvas, SKImageInfo info) =>
+        _logger.Safe(() => {
+            if (ex is ObjectDisposedException)
+                HandleObjectDisposedException();
+            else if (!_isDisposed)
+                RenderPlaceholder(canvas, info);
+        }, LogPrefix, "Error handling render frame exception");
 
     private void HandleObjectDisposedException() =>
         _isAnalyzerDisposed = true;
@@ -553,19 +590,19 @@ public sealed class Renderer : AsyncDisposableBase
         return false;
     }
 
-    private void UpdateOverlayState()
-    {
-        _rendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
-        _frameCache.MarkDirty();
-        RequestRender();
-    }
+    private void UpdateOverlayState() =>
+        _logger.Safe(() => {
+            _rendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
+            _frameCache.MarkDirty();
+            RequestRender();
+        }, LogPrefix, "Error updating overlay state");
 
-    private void UpdateStyleFromController()
-    {
-        if (_isStyleUpdateInProgress) return;
-        var (clr, br) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
-        UpdateSpectrumStyle(_controller.SelectedStyle, clr, br);
-    }
+    private void UpdateStyleFromController() =>
+        _logger.Safe(() => {
+            if (_isStyleUpdateInProgress) return;
+            var (clr, br) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
+            UpdateSpectrumStyle(_controller.SelectedStyle, clr, br);
+        }, LogPrefix, "Error updating style from controller");
 
     private static bool ValidateAndSetDimensions(int width, int height)
     {
@@ -582,8 +619,8 @@ public sealed class Renderer : AsyncDisposableBase
         width > 0 && height > 0;
 
     private static void LogInvalidDimensions(int width, int height) =>
-        Log(LogLevel.Warning,
-            LOG_PREFIX,
+        SmartLogger.Instance.Log(LogLevel.Warning,
+            LogPrefix,
             $"Invalid dimensions: {width}x{height}");
 
     private bool IsSkipRendering(object? sender) =>
@@ -592,33 +629,33 @@ public sealed class Renderer : AsyncDisposableBase
     private void SafeInvalidate() =>
         _skElement?.InvalidateVisual();
 
-    private void SubscribeToEvents()
-    {
-        PerformanceMetricsManager.PerformanceMetricsUpdated += OnPerformanceMetricsUpdated;
-        _controller.PropertyChanged += OnControllerPropertyChanged;
-        if (_analyzer is IComponent comp)
-            comp.Disposed += OnAnalyzerDisposed;
-    }
+    private void SubscribeToEvents() =>
+        _logger.Safe(() => {
+            PerformanceMetricsManager.PerformanceMetricsUpdated += OnPerformanceMetricsUpdated;
+            _controller.PropertyChanged += OnControllerPropertyChanged;
+            if (_analyzer is IComponent comp)
+                comp.Disposed += OnAnalyzerDisposed;
+        }, LogPrefix, "Error subscribing to events");
 
-    private void AttachUIElementEvents()
-    {
-        if (_skElement is null) return;
-        _skElement.PaintSurface += RenderFrame;
-        _skElement.Loaded += OnElementLoaded;
-        _skElement.Unloaded += OnElementUnloaded;
-    }
+    private void AttachUIElementEvents() =>
+        _logger.Safe(() => {
+            if (_skElement is null) return;
+            _skElement.PaintSurface += RenderFrame;
+            _skElement.Loaded += OnElementLoaded;
+            _skElement.Unloaded += OnElementUnloaded;
+        }, LogPrefix, "Error attaching UI element events");
 
-    private void DetachUIElementEvents()
-    {
-        if (_skElement is null) return;
+    private void DetachUIElementEvents() =>
+        _logger.Safe(() => {
+            if (_skElement is null) return;
 
-        _skElement.Dispatcher.Invoke(() =>
-        {
-            _skElement.PaintSurface -= RenderFrame;
-            _skElement.Loaded -= OnElementLoaded;
-            _skElement.Unloaded -= OnElementUnloaded;
-        });
-    }
+            _skElement.Dispatcher.Invoke(() =>
+            {
+                _skElement.PaintSurface -= RenderFrame;
+                _skElement.Loaded -= OnElementLoaded;
+                _skElement.Unloaded -= OnElementUnloaded;
+            });
+        }, LogPrefix, "Error detaching UI element events");
 
     private void OnAnalyzerDisposed(object? sender, EventArgs e) =>
         _isAnalyzerDisposed = true;
@@ -626,106 +663,95 @@ public sealed class Renderer : AsyncDisposableBase
     private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics) =>
         PerformanceUpdate?.Invoke(this, metrics);
 
-    private void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e?.PropertyName is null || _isDisposed) return;
-        HandlePropertyChange(e.PropertyName);
-    }
+    private void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+        _logger.Safe(() => {
+            if (e?.PropertyName is null || _isDisposed) return;
+            HandlePropertyChange(e.PropertyName);
+        }, LogPrefix, "Error handling property change");
 
-    private void OnElementLoaded(object? sender, RoutedEventArgs e)
-    {
-        if (_isDisposed) return;
-        UpdateRenderDimensions((int)(_skElement?.ActualWidth ?? 0),
-                               (int)(_skElement?.ActualHeight ?? 0));
-    }
+    private void OnElementLoaded(object? sender, RoutedEventArgs e) =>
+        _logger.Safe(() => {
+            if (_isDisposed) return;
+            UpdateRenderDimensions((int)(_skElement?.ActualWidth ?? 0),
+                                  (int)(_skElement?.ActualHeight ?? 0));
+        }, LogPrefix, "Error handling element loaded");
 
     private void OnElementUnloaded(object? sender, RoutedEventArgs e)
     {
         if (_isDisposed) return;
     }
 
-    private void HandlePropertyChange(string propertyName)
-    {
-        switch (propertyName)
-        {
-            case nameof(IMainController.LimitFpsTo60):
-                HandleFpsLimitChange();
-                break;
+    private void HandlePropertyChange(string propertyName) =>
+        _logger.Safe(() => {
+            switch (propertyName)
+            {
+                case nameof(IMainController.LimitFpsTo60):
+                    HandleFpsLimitChange();
+                    break;
 
-            case nameof(IMainController.IsRecording):
-                ShouldShowPlaceholder = !_controller.IsRecording;
-                _frameCache.MarkDirty();
-                RequestRender();
-                break;
+                case nameof(IMainController.IsRecording):
+                    ShouldShowPlaceholder = !_controller.IsRecording;
+                    _frameCache.MarkDirty();
+                    RequestRender();
+                    break;
 
-            case nameof(IMainController.IsOverlayActive):
-                UpdateOverlayState();
-                break;
+                case nameof(IMainController.IsOverlayActive):
+                    UpdateOverlayState();
+                    break;
 
-            case nameof(IMainController.SelectedDrawingType):
-                if (!_isStyleUpdateInProgress)
-                    UpdateRenderStyle(_controller.SelectedDrawingType);
-                break;
+                case nameof(IMainController.SelectedDrawingType):
+                    if (!_isStyleUpdateInProgress)
+                        UpdateRenderStyle(_controller.SelectedDrawingType);
+                    break;
 
-            case nameof(IMainController.SelectedStyle)
-            when !string.IsNullOrEmpty(_controller.SelectedStyle) && !_isStyleUpdateInProgress:
-                UpdateStyleFromController();
-                break;
+                case nameof(IMainController.SelectedStyle)
+                when !string.IsNullOrEmpty(_controller.SelectedStyle) && !_isStyleUpdateInProgress:
+                    UpdateStyleFromController();
+                    break;
 
-            case nameof(IMainController.RenderQuality):
-                if (!_updatingQuality)
-                    UpdateRenderQuality(_controller.RenderQuality);
-                break;
+                case nameof(IMainController.RenderQuality):
+                    if (!_updatingQuality)
+                        UpdateRenderQuality(_controller.RenderQuality);
+                    break;
 
-            case nameof(IMainController.WindowType):
-            case nameof(IMainController.ScaleType):
-                _frameCache.MarkDirty();
-                RequestRender();
-                break;
+                case nameof(IMainController.WindowType):
+                case nameof(IMainController.ScaleType):
+                    _frameCache.MarkDirty();
+                    RequestRender();
+                    break;
 
-            case nameof(IMainController.BarSpacing):
-            case nameof(IMainController.BarCount):
-            case nameof(IMainController.ShowPerformanceInfo):
-                HandleParameterChange();
-                break;
-        }
-    }
+                case nameof(IMainController.BarSpacing):
+                case nameof(IMainController.BarCount):
+                case nameof(IMainController.ShowPerformanceInfo):
+                    HandleParameterChange();
+                    break;
+            }
+        }, LogPrefix, $"Error handling property change: {propertyName}");
 
-    private void HandleFpsLimitChange()
-    {
-        if (_controller is IMainController controller)
-        {
-            FpsLimiter.Instance.IsEnabled = controller.LimitFpsTo60;
-            FpsLimiter.Instance.Reset();
-        }
-        else
-        {
-            FpsLimiter.Instance.IsEnabled = Settings.Instance.LimitFpsTo60;
-            FpsLimiter.Instance.Reset();
-        }
-    }
+    private void HandleFpsLimitChange() =>
+        _logger.Safe(() => {
+            if (_controller is IMainController controller)
+            {
+                FpsLimiter.Instance.IsEnabled = controller.LimitFpsTo60;
+                FpsLimiter.Instance.Reset();
+            }
+            else
+            {
+                FpsLimiter.Instance.IsEnabled = Settings.Instance.LimitFpsTo60;
+                FpsLimiter.Instance.Reset();
+            }
+        }, LogPrefix, "Error handling FPS limit change");
 
-    private void HandleParameterChange()
-    {
-        _frameCache.MarkDirty();
-        RequestRender();
-    }
+    private void HandleParameterChange() =>
+        _logger.Safe(() => {
+            _frameCache.MarkDirty();
+            RequestRender();
+        }, LogPrefix, "Error handling parameter change");
 
-    protected override void DisposeManaged()
-    {
-        if (_isDisposed) return;
-        _disposalTokenSource.Cancel();
-        UnsubscribeFromEvents();
-        DisposeResources();
-    }
+    protected override void DisposeManaged() =>
+        _logger.Safe(() => HandleDisposeManaged(), LogPrefix, "Error during managed disposal");
 
-    protected override ValueTask DisposeAsyncManagedResources()
-    {
-        CleanUp("Renderer async disposed");
-        return ValueTask.CompletedTask;
-    }
-
-    private void CleanUp(string message)
+    private void HandleDisposeManaged()
     {
         if (_isDisposed) return;
         _disposalTokenSource.Cancel();
@@ -733,51 +759,49 @@ public sealed class Renderer : AsyncDisposableBase
         DisposeResources();
     }
 
-    private void UnsubscribeFromEvents()
-    {
-        PerformanceMetricsManager.PerformanceMetricsUpdated -= OnPerformanceMetricsUpdated;
+    protected override ValueTask DisposeAsyncManagedResources() =>
+        _logger.SafeResult(() => {
+            CleanUp("Renderer async disposed");
+            return ValueTask.CompletedTask;
+        }, ValueTask.CompletedTask, LogPrefix, "Error during async managed disposal");
 
-        if (_controller is INotifyPropertyChanged notifier)
-            notifier.PropertyChanged -= OnControllerPropertyChanged;
+    private void CleanUp(string message) =>
+        _logger.Safe(() => {
+            if (_isDisposed) return;
+            _disposalTokenSource.Cancel();
+            UnsubscribeFromEvents();
+            DisposeResources();
+        }, LogPrefix, $"Error during cleanup: {message}");
 
-        if (_analyzer is IComponent comp)
-            comp.Disposed -= OnAnalyzerDisposed;
+    private void UnsubscribeFromEvents() =>
+        _logger.Safe(() => {
+            PerformanceMetricsManager.PerformanceMetricsUpdated -= OnPerformanceMetricsUpdated;
 
-        DetachUIElementEvents();
-    }
+            if (_controller is INotifyPropertyChanged notifier)
+                notifier.PropertyChanged -= OnControllerPropertyChanged;
 
-    private void DisposeResources()
-    {
-        ExecuteSafely(() => _currentState?.Paint?.Dispose(),
-            nameof(DisposeResources), "Error disposing paint");
+            if (_analyzer is IComponent comp)
+                comp.Disposed -= OnAnalyzerDisposed;
 
-        ExecuteSafely(() => _placeholder?.Dispose(),
-            nameof(DisposeResources), "Error disposing placeholder");
+            DetachUIElementEvents();
+        }, LogPrefix, "Error unsubscribing from events");
 
-        ExecuteSafely(() => _frameCache?.Dispose(),
-            nameof(DisposeResources), "Error disposing frame cache");
+    private void DisposeResources() =>
+        _logger.Safe(() => {
+            _logger.Safe(() => _currentState?.Paint?.Dispose(), LogPrefix, "Error disposing paint");
+            _logger.Safe(() => _placeholder?.Dispose(), LogPrefix, "Error disposing placeholder");
+            _logger.Safe(() => _frameCache?.Dispose(), LogPrefix, "Error disposing frame cache");
+            _logger.Safe(() => _renderLock?.Dispose(), LogPrefix, "Error disposing lock");
+            _logger.Safe(() => _disposalTokenSource?.Dispose(), LogPrefix, "Error disposing token source");
+            _logger.Safe(() => _performanceFont?.Dispose(), LogPrefix, "Error disposing performance font");
+            _logger.Safe(() => _performancePaint?.Dispose(), LogPrefix, "Error disposing performance paint");
+        }, LogPrefix, "Error disposing resources");
 
-        ExecuteSafely(() => _renderLock?.Dispose(),
-            nameof(DisposeResources), "Error disposing lock");
+    private void DrawPerformanceInfoOnCanvas(SKCanvas canvas, SKImageInfo info) =>
+        _logger.Safe(() => HandleDrawPerformanceInfoOnCanvas(canvas, info),
+            LogPrefix, "Error drawing performance info");
 
-        ExecuteSafely(() => _disposalTokenSource?.Dispose(),
-            nameof(DisposeResources), "Error disposing token source");
-
-        ExecuteSafely(() => _performanceFont?.Dispose(),
-            nameof(DisposeResources), "Error disposing performance font");
-
-        ExecuteSafely(() => _performancePaint?.Dispose(),
-            nameof(DisposeResources), "Error disposing performance paint");
-    }
-
-    private static void ExecuteSafely(Action action, string source, string errorMessage) =>
-        Safe(action, new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.{source}",
-            ErrorMessage = errorMessage
-        });
-
-    private void DrawPerformanceInfoOnCanvas(SKCanvas canvas, SKImageInfo info)
+    private void HandleDrawPerformanceInfoOnCanvas(SKCanvas canvas, SKImageInfo info)
     {
         if (!_controller.ShowPerformanceInfo || _isDisposed) return;
 

@@ -4,6 +4,9 @@ namespace SpectrumNet;
 
 public partial class App : Application
 {
+    private const string LogPrefix = nameof(App);
+    private readonly ISmartLogger _logger = Instance;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         try
@@ -15,13 +18,13 @@ public partial class App : Application
             {
                 if (args.ExceptionObject is Exception ex)
                 {
-                    Fatal(nameof(App),
+                    _logger.Error(LogPrefix,
                           "Unhandled exception in application",
                           ex);
                 }
                 else
                 {
-                    Fatal(nameof(App),
+                    _logger.Fatal(LogPrefix,
                           $"Unhandled non-Exception object in application: {args.ExceptionObject}");
                 }
             };
@@ -34,8 +37,8 @@ public partial class App : Application
                 conv.BrushesProvider = SpectrumBrushes.Instance;
 
             Current.Exit += (_, _) =>
-                Log(LogLevel.Information,
-                    nameof(App),
+                _logger.Log(LogLevel.Information,
+                    LogPrefix,
                     "Application is shutting down normally",
                     forceLog: true);
         }
@@ -43,7 +46,7 @@ public partial class App : Application
         {
             try
             {
-                Fatal(nameof(App),
+                _logger.Error(LogPrefix,
                       "Critical error during startup",
                       ex);
             }
@@ -60,30 +63,26 @@ public partial class App : Application
         {
             var shutdown = Task.Run(() =>
             {
-                try { Shutdown(e.ApplicationExitCode); }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error during SmartLogger.Shutdown: {ex.Message}");
-                }
+                _logger.Safe(() => Shutdown(e.ApplicationExitCode),
+                    LogPrefix,
+                    "Error during SmartLogger.Shutdown");
 
-                try { SpectrumBrushes.Instance.Dispose(); }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error disposing SpectrumBrushes: {ex.Message}");
-                }
+                _logger.Safe(() => SpectrumBrushes.Instance.Dispose(),
+                    LogPrefix,
+                    "Error disposing SpectrumBrushes");
             });
 
             if (!shutdown.Wait(3000))
-                Log(LogLevel.Warning,
-                    nameof(App),
+                _logger.Log(LogLevel.Warning,
+                    LogPrefix,
                     "Shutdown process taking too long, forcing exit");
         }
         catch (Exception ex)
         {
             try
             {
-                Log(LogLevel.Error,
-                    nameof(App),
+                _logger.Log(LogLevel.Error,
+                    LogPrefix,
                     $"Error during shutdown: {ex.Message}");
             }
             catch { }

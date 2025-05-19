@@ -14,6 +14,7 @@ public partial class MainWindow : Window, IAsyncDisposable
     private readonly ManualResetEventSlim _disposeCompleted = new(false);
     private readonly ISettings _settings;
     private readonly IThemes _themeManager;
+    private readonly ISmartLogger _logger = Instance;
 
     private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
@@ -68,14 +69,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        Safe(() => HandleClosing(e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error handling window closing"
-            }
-        );
-
+        _logger.Safe(() => HandleClosing(e), LogPrefix, "Error handling window closing");
         base.OnClosing(e);
     }
 
@@ -103,7 +97,7 @@ public partial class MainWindow : Window, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error, LogPrefix, $"Error during resource cleanup: {ex.Message}");
+                _logger.Error(LogPrefix, $"Error during resource cleanup: {ex.Message}");
             }
         });
 
@@ -138,9 +132,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private void OnButtonClick(object sender, RoutedEventArgs e)
     {
-        Safe(() => HandleButtonClick(sender, e),
-            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling button click" }
-        );
+        _logger.Safe(() => HandleButtonClick(sender, e), LogPrefix, "Error handling button click");
     }
 
     private void HandleButtonClick(object sender, RoutedEventArgs e)
@@ -150,18 +142,10 @@ public partial class MainWindow : Window, IAsyncDisposable
             action();
     }
 
-    private void OnWindowDrag(object? sender, MouseButtonEventArgs e)
-    {
-        Safe(() => HandleWindowDrag(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error moving window"
-            }
-        );
-    }
+    private void OnWindowDrag(object? sender, MouseButtonEventArgs e) => 
+        _logger.Safe(() => HandleWindowDrag(sender, e), LogPrefix, "Error moving window");
 
-    private void HandleWindowDrag(object? sender, MouseButtonEventArgs e) => Safe(() =>
+    private void HandleWindowDrag(object? sender, MouseButtonEventArgs e)
     {
         if (_isDisposed
             || _isClosing
@@ -176,22 +160,12 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
         catch (InvalidOperationException ex)
         {
-            Log(LogLevel.Error, LogPrefix, $"Window drag error: {ex.Message}");
+            _logger.Error(LogPrefix, $"Window drag error: {ex.Message}");
         }
-    },
-    new ErrorHandlingOptions
-    {
-        Source = LogPrefix,
-        ErrorMessage = "Error moving window",
-        IgnoreExceptions = [typeof(InvalidOperationException)]
-    });
-
-    private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
-    {
-        Safe(() => HandleWindowMouseDoubleClick(sender, e),
-            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling double click" }
-        );
     }
+
+    private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e) => 
+        _logger.Safe(() => HandleWindowMouseDoubleClick(sender, e), LogPrefix, "Error handling double click");
 
     private void HandleWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
     {
@@ -229,16 +203,8 @@ public partial class MainWindow : Window, IAsyncDisposable
             WindowState = WindowState.Maximized;
     }
 
-    private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        Safe(() => HandleWindowSizeChanged(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating dimensions"
-            }
-        );
-    }
+    private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) => 
+        _logger.Safe(() => HandleWindowSizeChanged(sender, e), LogPrefix, "Error updating dimensions");
 
     private void HandleWindowSizeChanged(object? sender, SizeChangedEventArgs e)
     {
@@ -254,16 +220,8 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private void OnStateChanged(object? sender, EventArgs e)
-    {
-        Safe(() => HandleStateChanged(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error changing icon"
-            }
-        );
-    }
+    private void OnStateChanged(object? sender, EventArgs e) => 
+        _logger.Safe(() => HandleStateChanged(sender, e), LogPrefix, "Error changing icon");
 
     private void HandleStateChanged(object? sender, EventArgs e)
     {
@@ -277,16 +235,8 @@ public partial class MainWindow : Window, IAsyncDisposable
         Settings.Instance.WindowState = WindowState;
     }
 
-    private void OnWindowLocationChanged(object? sender, EventArgs e)
-    {
-        Safe(() => HandleWindowLocationChanged(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error updating window location"
-            }
-        );
-    }
+    private void OnWindowLocationChanged(object? sender, EventArgs e) => 
+        _logger.Safe(() => HandleWindowLocationChanged(sender, e), LogPrefix, "Error updating window location");
 
     private void HandleWindowLocationChanged(object? sender, EventArgs e)
     {
@@ -311,16 +261,8 @@ public partial class MainWindow : Window, IAsyncDisposable
         return false;
     }
 
-    private void OnWindowClosed(object? sender, EventArgs e)
-    {
-        Safe(() => HandleWindowClosed(sender, e),
-            new ErrorHandlingOptions
-            {
-                Source = LogPrefix,
-                ErrorMessage = "Error during window close"
-            }
-        );
-    }
+    private void OnWindowClosed(object? sender, EventArgs e) => 
+        _logger.Safe(() => HandleWindowClosed(sender, e), LogPrefix, "Error during window close");
 
     private void HandleWindowClosed(object? sender, EventArgs e)
     {
@@ -366,7 +308,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 
         if (!await _disposeLock.WaitAsync(FromSeconds(5)))
         {
-            Log(LogLevel.Warning, LogPrefix, "Failed to acquire dispose lock within timeout");
+            _logger.Warning(LogPrefix, "Failed to acquire dispose lock within timeout");
             return;
         }
 
@@ -385,7 +327,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LogPrefix, $"Error during cleanup: {ex.Message}");
+            _logger.Error(LogPrefix, $"Error during cleanup: {ex.Message}");
         }
         finally
         {
@@ -398,7 +340,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         bool settingsSaved = await SaveSettingsWithTimeoutAsync(FromSeconds(3));
         if (!settingsSaved)
         {
-            Log(LogLevel.Warning, LogPrefix, "Failed to save settings within timeout, continuing with cleanup");
+            _logger.Warning(LogPrefix, "Failed to save settings within timeout, continuing with cleanup");
         }
     }
 
@@ -409,7 +351,7 @@ public partial class MainWindow : Window, IAsyncDisposable
             bool captureStoppedSuccessfully = await StopCaptureWithTimeoutAsync(FromSeconds(5));
             if (!captureStoppedSuccessfully)
             {
-                Log(LogLevel.Warning, LogPrefix, "Failed to stop audio capture within timeout, continuing with cleanup");
+                _logger.Warning(LogPrefix, "Failed to stop audio capture within timeout, continuing with cleanup");
             }
         }
     }
@@ -431,7 +373,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         bool controllerDisposed = await DisposeControllerWithTimeoutAsync(FromSeconds(10));
         if (!controllerDisposed)
         {
-            Log(LogLevel.Warning, LogPrefix, "Failed to dispose controller within timeout");
+            _logger.Warning(LogPrefix, "Failed to dispose controller within timeout");
         }
     }
 
@@ -456,12 +398,9 @@ public partial class MainWindow : Window, IAsyncDisposable
         {
             await Task.Run(() =>
             {
-                Safe(() => SettingsWindow.Instance.SaveSettings(),
-                    new ErrorHandlingOptions
-                    {
-                        Source = LogPrefix,
-                        ErrorMessage = "Error saving settings"
-                    });
+                DoSafe(() => SettingsWindow.Instance.SaveSettings(),
+                    LogPrefix,
+                    "Error saving settings");
             }, cts.Token);
             return true;
         }
@@ -516,12 +455,8 @@ public partial class MainWindow : Window, IAsyncDisposable
         UpdateThemeToggleButtonState();
     }
 
-    private void OnThemePropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        Safe(() => HandleThemePropertyChanged(sender, e),
-            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error handling theme change" }
-        );
-    }
+    private void OnThemePropertyChanged(object? sender, PropertyChangedEventArgs e) => 
+        _logger.Safe(() => HandleThemePropertyChanged(sender, e), LogPrefix, "Error handling theme change");
 
     private void HandleThemePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -547,18 +482,6 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private void OnThemeToggleButtonChanged(object? sender, RoutedEventArgs e)
         => _controller.ToggleTheme();
-
-    private static void Safe(Action action, ErrorHandlingOptions options)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, options.Source!, options.ErrorMessage + ": " + ex.Message);
-        }
-    }
 
     private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
     {

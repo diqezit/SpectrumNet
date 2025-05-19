@@ -5,6 +5,7 @@ namespace SpectrumNet.Controllers.UICore;
 public class UIController : AsyncDisposableBase, IUIController
 {
     private const string LogPrefix = nameof(UIController);
+    private readonly ISmartLogger _logger = Instance;
 
     private readonly IMainController _mainController;
     private readonly ITransparencyManager _transparencyManager;
@@ -64,21 +65,21 @@ public class UIController : AsyncDisposableBase, IUIController
     public bool IsControlPanelOpen => _controlPanelWindow is { IsVisible: true };
 
     public void ToggleTheme() =>
-        Safe(() => _themeManager.ToggleTheme(),
-            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error toggling theme" });
+        _logger.Safe(() => _themeManager.ToggleTheme(),
+            LogPrefix, "Error toggling theme");
 
     public void OpenControlPanel() =>
-        Safe(() =>
+        _logger.Safe(() =>
         {
             if (TryActivateExistingControlPanel()) return;
 
             CreateAndShowControlPanel();
             _mainController.OnPropertyChanged(nameof(IsControlPanelOpen));
         },
-        new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error opening control panel" });
+        LogPrefix, "Error opening control panel");
 
     public void CloseControlPanel() =>
-        Safe(() =>
+        _logger.Safe(() =>
         {
             if (_controlPanelWindow is null) return;
 
@@ -87,7 +88,7 @@ public class UIController : AsyncDisposableBase, IUIController
             NotifyControlPanelClosed();
             ActivateOwnerWindow();
         },
-        new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error closing control panel" });
+        LogPrefix, "Error closing control panel");
 
     public void ToggleControlPanel()
     {
@@ -98,20 +99,20 @@ public class UIController : AsyncDisposableBase, IUIController
     }
 
     public void OpenOverlay() =>
-        Safe(() => _ = _overlayManager.OpenAsync(),
-            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error opening overlay" });
+        _logger.Safe(() => _ = _overlayManager.OpenAsync(),
+            LogPrefix, "Error opening overlay");
 
     public void CloseOverlay() =>
-        Safe(() => _ = _overlayManager.CloseAsync(),
-            new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error closing overlay" });
+        _logger.Safe(() => _ = _overlayManager.CloseAsync(),
+            LogPrefix, "Error closing overlay");
 
     public void OnPropertyChanged(params string[] propertyNames) =>
-        Safe(() =>
+        _logger.Safe(() =>
         {
             foreach (var name in propertyNames)
                 _mainController.OnPropertyChanged(name);
         },
-        new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error propagating property changes" });
+        LogPrefix, "Error propagating property changes");
 
     private void OnOverlayStateChanged(object? sender, bool isActive)
     {
@@ -226,9 +227,8 @@ public class UIController : AsyncDisposableBase, IUIController
         return true;
     }
 
-    protected override void DisposeManaged()
-    {
-        try
+    protected override void DisposeManaged() =>
+        _logger.Safe(() =>
         {
             _overlayManager.StateChanged -= OnOverlayStateChanged;
 
@@ -237,20 +237,20 @@ public class UIController : AsyncDisposableBase, IUIController
 
             if (IsControlPanelOpen)
                 _controlPanelWindow?.Close();
-        }
-        finally
-        {
+
             if (_controlPanelWindow is IDisposable disposableControlPanel)
                 disposableControlPanel.Dispose();
 
             _controlPanelWindow = null;
-        }
-    }
+        },
+        LogPrefix, "Error during managed disposal");
 
-    protected override async ValueTask DisposeAsyncManagedResources()
-    {
-        _overlayManager.StateChanged -= OnOverlayStateChanged;
-        await _overlayManager.DisposeAsync();
-        CloseControlPanel();
-    }
+    protected override async ValueTask DisposeAsyncManagedResources() =>
+        await _logger.SafeAsync(async () =>
+        {
+            _overlayManager.StateChanged -= OnOverlayStateChanged;
+            await _overlayManager.DisposeAsync();
+            CloseControlPanel();
+        },
+        LogPrefix, "Error during async managed disposal");
 }

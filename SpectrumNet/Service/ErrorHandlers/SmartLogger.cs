@@ -2,7 +2,7 @@
 
 namespace SpectrumNet.Service.ErrorHandlers;
 
-public static class SmartLogger
+public class SmartLogger : ISmartLogger
 {
     private const string
         LogDirectoryPath = "logs",
@@ -13,69 +13,46 @@ public static class SmartLogger
         MaxFileSizeMB = 5,
         RetainedFileCount = 10;
 
-    public static void Initialize() =>
-        Safe(() =>
+    private static readonly SmartLogger _instance = new();
+    public static SmartLogger Instance => _instance;
+
+    // Инициализация логгера
+    public static void Initialize()
+    {
+        DoSafe(() =>
         {
             EnsureLogDirectoryExists();
             TryDeleteLatestLog();
-            ConfigureLoggerSettings();
+            ConfigureLogger();
             LogStartupInfo();
-        }, nameof(SmartLogger), "Error initializing logging", LogLevel.Fatal);
+        }, nameof(SmartLogger), "Error initializing logging");
+    }
 
-    public static void Log(LogLevel level, string source, string message, bool forceLog = false) =>
-        ForContext("Source", source).Write(ConvertToSerilogLevel(level), message);
+    #region ISmartLogger Implementation
 
-    public static void Error(string source, string message) =>
+    public void Log(LogLevel level, string source, string message, bool forceLog = false) =>
+        ForContext("Source", source).Write(ToSerilogLevel(level), message);
+
+    public void Debug(string source, string message) =>
+        Log(LogLevel.Debug, source, message);
+
+    public void Info(string source, string message) =>
+        Log(LogLevel.Information, source, message);
+
+    public void Warning(string source, string message) =>
+        Log(LogLevel.Warning, source, message);
+
+    public void Error(string source, string message) =>
         Log(LogLevel.Error, source, message);
 
-    public static void Error(string source, string message, Exception ex) =>
+    public void Error(string source, string message, Exception ex) =>
         ForContext("Source", source).Error(ex, message);
 
-    public static void Fatal(string source, string message) =>
+    public void Fatal(string source, string message) =>
         Log(LogLevel.Fatal, source, message);
 
-    public static bool Safe(Action action, string source, string errorMessage,
-        LogLevel logLevel = LogLevel.Error, Type[]? ignoreExceptions = null)
+    public bool Safe(Action action, string source, string errorMessage)
     {
-        return Safe(action, new ErrorHandlingOptions
-        {
-            Source = source,
-            ErrorMessage = errorMessage,
-            LogLevel = logLevel,
-            IgnoreExceptions = ignoreExceptions
-        });
-    }
-
-    public static async Task<bool> SafeAsync(Func<Task> asyncAction, string source, string errorMessage,
-        LogLevel logLevel = LogLevel.Error, Type[]? ignoreExceptions = null)
-    {
-        return await SafeAsync(asyncAction, new ErrorHandlingOptions
-        {
-            Source = source,
-            ErrorMessage = errorMessage,
-            LogLevel = logLevel,
-            IgnoreExceptions = ignoreExceptions
-        });
-    }
-
-    public static T SafeResult<T>(Func<T> func, T defaultValue, string source, string errorMessage,
-        LogLevel logLevel = LogLevel.Error, Type[]? ignoreExceptions = null)
-    {
-        return SafeResult(func, defaultValue, new ErrorHandlingOptions
-        {
-            Source = source,
-            ErrorMessage = errorMessage,
-            LogLevel = logLevel,
-            IgnoreExceptions = ignoreExceptions
-        });
-    }
-
-    public static bool Safe(Action action, ErrorHandlingOptions? options = null)
-    {
-        options ??= new();
-        options.Source ??= GetCallerInfo();
-        options.ErrorMessage ??= "Operation failed";
-
         try
         {
             action();
@@ -83,39 +60,13 @@ public static class SmartLogger
         }
         catch (Exception ex)
         {
-            HandleException(ex, options);
+            Error(source, errorMessage, ex);
             return false;
         }
     }
 
-    public static T SafeResult<T>(
-        Func<T> func,
-        T defaultValue = default!,
-        ErrorHandlingOptions? options = null)
+    public async Task<bool> SafeAsync(Func<Task> asyncAction, string source, string errorMessage)
     {
-        options ??= new();
-        options.Source ??= GetCallerInfo();
-        options.ErrorMessage ??= "Operation failed";
-
-        try
-        {
-            return func();
-        }
-        catch (Exception ex)
-        {
-            HandleException(ex, options);
-            return defaultValue;
-        }
-    }
-
-    public static async Task<bool> SafeAsync(
-        Func<Task> asyncAction,
-        ErrorHandlingOptions? options = null)
-    {
-        options ??= new();
-        options.Source ??= GetCallerInfo();
-        options.ErrorMessage ??= "Async operation failed";
-
         try
         {
             await asyncAction();
@@ -123,27 +74,52 @@ public static class SmartLogger
         }
         catch (Exception ex)
         {
-            HandleException(ex, options);
+            Error(source, errorMessage, ex);
             return false;
         }
     }
 
-    public static bool SafeDispose(
-        IDisposable? resource,
-        string resourceName,
-        ErrorHandlingOptions? options = null)
+    public T SafeResult<T>(Func<T> func, T defaultValue, string source, string errorMessage)
     {
-        if (resource == null)
-            return true;
-
-        options ??= new();
-        options.Source ??= GetCallerInfo();
-        options.ErrorMessage ??= $"Error disposing {resourceName}";
-
-        return Safe(() => resource.Dispose(), options);
+        try
+        {
+            return func();
+        }
+        catch (Exception ex)
+        {
+            Error(source, errorMessage, ex);
+            return defaultValue;
+        }
     }
 
-    private static void ConfigureLoggerSettings()
+    #endregion
+
+    #region Static Methods (для обратной совместимости)
+
+    // Статические методы с именами, отличными от экземплярных методов
+    public static void LogMessage(LogLevel level, string source, string message) =>
+        Instance.Log(level, source, message);
+
+    public static void LogError(string source, string message) =>
+        Instance.Error(source, message);
+
+    public static void LogError(string source, string message, Exception ex) =>
+        Instance.Error(source, message, ex);
+
+    public static bool DoSafe(Action action, string source, string errorMessage) =>
+        Instance.Safe(action, source, errorMessage);
+
+    public static async Task<bool> DoSafeAsync(Func<Task> asyncAction, string source, string errorMessage) =>
+        await Instance.SafeAsync(asyncAction, source, errorMessage);
+
+    public static T DoSafeResult<T>(Func<T> func, T defaultValue, string source, string errorMessage) =>
+        Instance.SafeResult(func, defaultValue, source, errorMessage);
+
+    #endregion
+
+    #region Private Implementation Methods
+
+    private static void ConfigureLogger()
     {
         Serilog.Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
@@ -163,20 +139,10 @@ public static class SmartLogger
     private static void LogStartupInfo()
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "Unknown";
-        Log(LogLevel.Information, nameof(SmartLogger),
-            $"Application 'SpectrumNet' version '{version}' started");
+        _instance.Info(nameof(SmartLogger), $"Application 'SpectrumNet' version '{version}' started");
     }
 
-    private static void HandleException(Exception ex, ErrorHandlingOptions options)
-    {
-        if (ShouldIgnoreException(ex, options.IgnoreExceptions))
-            return;
-
-        Error(options.Source!, options.ErrorMessage!, ex);
-        options.ExceptionHandler?.Invoke(ex);
-    }
-
-    private static LogEventLevel ConvertToSerilogLevel(LogLevel level) =>
+    private static LogEventLevel ToSerilogLevel(LogLevel level) =>
         level switch
         {
             LogLevel.Trace => LogEventLevel.Verbose,
@@ -201,26 +167,6 @@ public static class SmartLogger
             File.Delete(latestLogPath);
     }
 
-    private static string GetCallerInfo(int skipFrames = 2)
-    {
-        var stackFrame = new StackFrame(skipFrames, true);
-        var method = stackFrame.GetMethod();
-        if (method == null) return "Unknown";
-
-        var className = method.DeclaringType?.Name ?? "Unknown";
-        var methodName = method.Name;
-
-        if (stackFrame.GetFileName() is string fileName
-            && stackFrame.GetFileLineNumber() is int lineNumber
-            && lineNumber > 0)
-            return $"{className}.{methodName} ({Path.GetFileName(fileName)}:{lineNumber})";
-
-        return $"{className}.{methodName}";
-    }
-
-    private static bool ShouldIgnoreException(Exception exception, Type[]? ignoreExceptionTypes) =>
-        ignoreExceptionTypes?.Any(type => type.IsAssignableFrom(exception.GetType())) ?? false;
-
     private class ThreadEnricher : ILogEventEnricher
     {
         public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
@@ -230,12 +176,5 @@ public static class SmartLogger
         }
     }
 
-    public class ErrorHandlingOptions
-    {
-        public LogLevel LogLevel { get; set; } = LogLevel.Error;
-        public string? ErrorMessage { get; set; }
-        public string? Source { get; set; }
-        public Action<Exception>? ExceptionHandler { get; set; }
-        public Type[]? IgnoreExceptions { get; set; }
-    }
+    #endregion
 }

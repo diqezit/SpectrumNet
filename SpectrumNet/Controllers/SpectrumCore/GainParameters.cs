@@ -4,7 +4,8 @@ namespace SpectrumNet.Controllers.SpectrumCore;
 
 public sealed class GainParameters : IGainParametersProvider, INotifyPropertyChanged
 {
-    private const string LOG_SOURCE = nameof(GainParameters);
+    private const string LogPrefix = nameof(GainParameters);
+    private readonly ISmartLogger _logger = Instance;
 
     private float _amplificationFactor = DEFAULT_AMPLIFICATION_FACTOR;
     private float _minDbValue = DEFAULT_MIN_DB_VALUE;
@@ -58,9 +59,8 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
         NotifyPropertyChanged(propertyName);
     }
 
-    private void NotifyPropertyChanged(string? propertyName)
-    {
-        Safe(() =>
+    private void NotifyPropertyChanged(string? propertyName) =>
+        _logger.Safe(() =>
         {
             if (_context != null)
                 _context.Post(_ => PropertyChanged?.Invoke(
@@ -68,7 +68,6 @@ public sealed class GainParameters : IGainParametersProvider, INotifyPropertyCha
             else
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         },
-         LOG_SOURCE,
-         $"Error notifying property change: {propertyName}");
-    }
+        LogPrefix,
+        $"Error notifying property change: {propertyName}");
 }

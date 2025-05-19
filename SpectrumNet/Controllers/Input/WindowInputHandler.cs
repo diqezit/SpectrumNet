@@ -4,8 +4,10 @@ namespace SpectrumNet.Controllers.Input;
 
 public class WindowInputHandler : IInputHandler
 {
+    private const string LogPrefix = nameof(WindowInputHandler);
     private readonly IMainController _controller;
     private readonly Dictionary<string, Action> _buttonActions;
+    private readonly ISmartLogger _logger = Instance;
 
     public WindowInputHandler(IMainController controller)
     {
@@ -13,7 +15,13 @@ public class WindowInputHandler : IInputHandler
         _buttonActions = CreateButtonActionsMap();
     }
 
-    public bool HandleWindowDrag(object? sender, MouseButtonEventArgs e)
+    public bool HandleWindowDrag(object? sender, MouseButtonEventArgs e) =>
+        _logger.SafeResult(() => HandleWindowDragInternal(sender, e),
+            false,
+            LogPrefix,
+            "Error handling window drag event");
+
+    private static bool HandleWindowDragInternal(object? sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left || sender is not DependencyObject obj)
             return false;
@@ -21,9 +29,8 @@ public class WindowInputHandler : IInputHandler
         if (FindParentBorder(obj, "TitleBar") is Border titleBar)
         {
             var mousePos = e.GetPosition(titleBar);
-            var closeButton = titleBar.FindName("CloseButton") as Button;
 
-            if (closeButton != null)
+            if (titleBar.FindName("CloseButton") is Button closeButton)
             {
                 var closeButtonBounds = closeButton.TransformToAncestor(titleBar)
                     .TransformBounds(new Rect(0, 0, closeButton.ActualWidth, closeButton.ActualHeight));
@@ -43,11 +50,17 @@ public class WindowInputHandler : IInputHandler
         return false;
     }
 
-    public bool HandleButtonClick(object? sender, RoutedEventArgs e)
+    public bool HandleButtonClick(object? sender, RoutedEventArgs e) =>
+        _logger.SafeResult(() => HandleButtonClickInternal(sender, e),
+            false,
+            LogPrefix,
+            "Error handling button click event");
+
+    private bool HandleButtonClickInternal(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Name: var btnName } button && _buttonActions.TryGetValue(btnName, out var action))
         {
-            action();
+            _logger.Safe(() => action(), LogPrefix, $"Error executing action for button {btnName}");
             e.Handled = true;
             return true;
         }

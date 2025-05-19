@@ -4,7 +4,7 @@ namespace SpectrumNet.Views;
 
 public sealed class RendererFactory : IRendererFactory
 {
-    private const string LOG_PREFIX = "RendererFactory";
+    private const string LogPrefix = nameof(RendererFactory);
 
     private static readonly Lazy<RendererFactory> _instance =
         new(() => new RendererFactory(RenderQuality.Medium),
@@ -13,6 +13,7 @@ public sealed class RendererFactory : IRendererFactory
     public static RendererFactory Instance => _instance.Value;
 
     private readonly object _lock = new();
+    private readonly ISmartLogger _logger = SmartLogger.Instance;
 
     private readonly ConcurrentDictionary<RenderStyle, ISpectrumRenderer> _rendererCache = new();
     private readonly ConcurrentDictionary<RenderStyle, bool> _initializedRenderers = new();
@@ -67,7 +68,7 @@ public sealed class RendererFactory : IRendererFactory
             try
             {
                 _suppressConfigEvents = true;
-                ConfigureRendererSafe(renderer, isOverlayActive, actualQuality);
+                ConfigureRenderer(renderer, isOverlayActive, actualQuality);
                 _rendererQualityState[renderer] = actualQuality;
             }
             finally
@@ -106,7 +107,7 @@ public sealed class RendererFactory : IRendererFactory
 
                     if (ShouldConfigureRenderer(renderer, actualOverlay, actualQuality))
                     {
-                        ConfigureRendererSafe(renderer, actualOverlay, actualQuality);
+                        ConfigureRenderer(renderer, actualOverlay, actualQuality);
                         _rendererQualityState[renderer] = actualQuality;
                     }
                 }
@@ -177,16 +178,13 @@ public sealed class RendererFactory : IRendererFactory
             LogRendererAlreadyInitialized(style);
     }
 
-    private static void InitializeRenderer(
+    private void InitializeRenderer(
         RenderStyle style,
         ISpectrumRenderer renderer)
     {
-        Safe(() => renderer.Initialize(),
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.EnsureInitialized",
-                ErrorMessage = $"Initialization error for style {style}"
-            });
+        _logger.Safe(() => renderer.Initialize(),
+            LogPrefix,
+            $"Initialization error for style {style}");
 
         LogRendererInitialized(style);
     }
@@ -223,20 +221,17 @@ public sealed class RendererFactory : IRendererFactory
         _ => throw new ArgumentException($"Unknown render style: {style}")
     };
 
-    private static void ConfigureRendererSafe(
+    private void ConfigureRenderer(
         ISpectrumRenderer renderer,
         bool? isOverlayActive,
         RenderQuality? quality)
     {
-        Safe(() => ConfigureRenderer(renderer, isOverlayActive, quality),
-            new ErrorHandlingOptions
-            {
-                Source = $"{LOG_PREFIX}.ConfigureRendererSafe",
-                ErrorMessage = "Error configuring renderer"
-            });
+        _logger.Safe(() => HandleConfigureRenderer(renderer, isOverlayActive, quality),
+            LogPrefix,
+            "Error configuring renderer");
     }
 
-    private static void ConfigureRenderer(
+    private void HandleConfigureRenderer(
         ISpectrumRenderer renderer,
         bool? isOverlayActive,
         RenderQuality? quality)
@@ -270,107 +265,108 @@ public sealed class RendererFactory : IRendererFactory
         if (_isApplyingGlobalQuality)
             return;
 
-        Safe(() =>
-        {
-            var oldSuppress = _suppressConfigEvents;
-            _isApplyingGlobalQuality = true;
-            try
-            {
-                _suppressConfigEvents = true;
-
-                lock (_lock)
-                {
-                    foreach (var renderer in _rendererCache.Values)
-                    {
-                        ConfigureRendererSafe(renderer, renderer.IsOverlayActive, _globalQuality);
-                        _rendererQualityState[renderer] = _globalQuality;
-                    }
-                }
-            }
-            finally
-            {
-                _suppressConfigEvents = oldSuppress;
-                _isApplyingGlobalQuality = false;
-            }
-        },
-        new ErrorHandlingOptions
-        {
-            Source = $"{LOG_PREFIX}.GlobalQualitySetter",
-            ErrorMessage = $"Failed to apply global quality {_globalQuality}"
-        });
+        _logger.Safe(() => HandleApplyGlobalQualityToRenderers(),
+            LogPrefix,
+            $"Failed to apply global quality {_globalQuality}");
     }
 
-    private static void LogQualityChange(RenderQuality oldQuality, RenderQuality newQuality)
+    private void HandleApplyGlobalQualityToRenderers()
     {
-        Log(LogLevel.Information,
-            LOG_PREFIX,
+        var oldSuppress = _suppressConfigEvents;
+        _isApplyingGlobalQuality = true;
+        try
+        {
+            _suppressConfigEvents = true;
+
+            lock (_lock)
+            {
+                foreach (var renderer in _rendererCache.Values)
+                {
+                    ConfigureRenderer(renderer, renderer.IsOverlayActive, _globalQuality);
+                    _rendererQualityState[renderer] = _globalQuality;
+                }
+            }
+        }
+        finally
+        {
+            _suppressConfigEvents = oldSuppress;
+            _isApplyingGlobalQuality = false;
+        }
+    }
+
+    private void LogQualityChange(RenderQuality oldQuality, RenderQuality newQuality)
+    {
+        _logger.Log(LogLevel.Information,
+            LogPrefix,
             $"Global quality changed from {oldQuality} to {newQuality}",
             forceLog: true);
     }
 
-    private static void LogRendererInstanceCreation(RenderStyle style)
+    private void LogRendererInstanceCreation(RenderStyle style)
     {
-        Log(LogLevel.Debug,
-            LOG_PREFIX,
+        _logger.Log(LogLevel.Debug,
+            LogPrefix,
             $"Instance created for style {style}",
             forceLog: true);
     }
 
-    private static void LogRendererInitialized(RenderStyle style)
+    private void LogRendererInitialized(RenderStyle style)
     {
-        Log(LogLevel.Information,
-            LOG_PREFIX,
+        _logger.Log(LogLevel.Information,
+            LogPrefix,
             $"Initialized renderer for style {style}",
             forceLog: true);
     }
 
-    private static void LogRendererAlreadyInitialized(RenderStyle style)
+    private void LogRendererAlreadyInitialized(RenderStyle style)
     {
-        Log(LogLevel.Debug,
-            LOG_PREFIX,
+        _logger.Log(LogLevel.Debug,
+            LogPrefix,
             $"Renderer for style {style} already initialized",
             forceLog: true);
     }
 
-    private static void LogRendererConfiguration()
+    private void LogRendererConfiguration()
     {
-        Log(LogLevel.Information,
-            LOG_PREFIX,
+        _logger.Log(LogLevel.Information,
+            LogPrefix,
             "Configured all cached renderers",
             forceLog: true);
     }
 
-    private static void LogRendererCreationError(RenderStyle style, string errorType, Exception ex)
+    private void LogRendererCreationError(RenderStyle style, string errorType, Exception ex)
     {
-        Log(LogLevel.Error,
-            LOG_PREFIX,
+        _logger.Log(LogLevel.Error,
+            LogPrefix,
             $"{errorType} during creation/initialization of renderer for style {style}: {ex.Message}",
             forceLog: true);
     }
 
     public void Dispose()
     {
-        Safe(() =>
-        {
-            lock (_lock)
-            {
-                foreach (var renderer in _rendererCache.Values)
-                {
-                    Safe(() => renderer.Dispose(),
-                         renderer.GetType().Name,
-                         "Error disposing renderer");
-                }
-                _rendererCache.Clear();
-                _initializedRenderers.Clear();
-                _rendererQualityState.Clear();
+        _logger.Safe(() => HandleDispose(),
+            LogPrefix,
+            "Error during RendererFactory disposal");
+    }
 
-                if (_transparencyManager is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
+    private void HandleDispose()
+    {
+        lock (_lock)
+        {
+            foreach (var renderer in _rendererCache.Values)
+            {
+                _logger.Safe(() => renderer.Dispose(),
+                    renderer.GetType().Name,
+                    "Error disposing renderer");
             }
-        },
-        nameof(Dispose),
-        "Error during RendererFactory disposal");
+            _rendererCache.Clear();
+            _initializedRenderers.Clear();
+            _rendererQualityState.Clear();
+
+            if (_transparencyManager is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
     }
 }

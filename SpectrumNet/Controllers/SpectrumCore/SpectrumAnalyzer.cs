@@ -7,15 +7,15 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
     ISpectralDataProvider,
     IComponent
 {
-    private const string LOG_SOURCE = nameof(SpectrumAnalyzer);
+    private const string LogPrefix = nameof(SpectrumAnalyzer);
+    private readonly ISmartLogger _logger = Instance;
 
     private readonly IFftProcessor _fftProcessor;
     private readonly ISpectrumConverter _converter;
     private readonly SynchronizationContext? _context;
     private readonly object _lock = new();
     private readonly CancellationTokenSource _cts = new();
-    private readonly Channel<(Complex[] Fft, int SampleRate)>
-        _processingChannel;
+    private readonly Channel<(Complex[] Fft, int SampleRate)> _processingChannel;
 
     private Complex[]? _lastFftResult;
     private int _lastSampleRate;
@@ -23,8 +23,7 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
     private SpectrumScale _scaleType = SpectrumScale.Linear;
     private volatile bool _processorDisposed;
 
-    public event EventHandler<SpectralDataEventArgs>?
-        SpectralDataReady;
+    public event EventHandler<SpectralDataEventArgs>? SpectralDataReady;
     public event EventHandler? Disposed;
 
     public ISite? Site { get; set; }
@@ -42,8 +41,7 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
         _fftProcessor = fftProcessor;
         _converter = converter;
         _context = context;
-        _processingChannel = Channel.CreateBounded<
-            (Complex[] Fft, int SampleRate)>(
+        _processingChannel = Channel.CreateBounded<(Complex[] Fft, int SampleRate)>(
             new BoundedChannelOptions(channelCapacity)
             {
                 FullMode = BoundedChannelFullMode.DropOldest,
@@ -57,35 +55,42 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
     public SpectrumScale ScaleType
     {
         get => _scaleType;
-        set => SafeExecute(
-            () => {
-                bool changed = UpdateScaleType(value);
-                if (changed)
-                {
-                    ReprocessLastData();
-                }
-            },
-            nameof(ScaleType),
-            "Error setting scale"
-        );
+        set => _logger.Safe(() => HandleSetScaleType(value),
+                        LogPrefix,
+                        "Error setting scale");
+    }
+
+    private void HandleSetScaleType(SpectrumScale value)
+    {
+        bool changed = UpdateScaleType(value);
+        if (changed)
+        {
+            ReprocessLastData();
+        }
     }
 
     public void UpdateSettings(
         FftWindowType windowType,
         SpectrumScale scaleType) =>
-        SafeExecute(
-            () => {
-                bool changed = UpdateWindow(windowType) | UpdateScaleType(scaleType);
-                if (changed)
-                {
-                    ReprocessLastData();
-                }
-            },
-            nameof(UpdateSettings),
-            "Error updating settings"
-        );
+        _logger.Safe(() => HandleUpdateSettings(windowType, scaleType),
+                  LogPrefix,
+                  "Error updating settings");
 
-    public void ReprocessLastData()
+    private void HandleUpdateSettings(FftWindowType windowType, SpectrumScale scaleType)
+    {
+        bool changed = UpdateWindow(windowType) | UpdateScaleType(scaleType);
+        if (changed)
+        {
+            ReprocessLastData();
+        }
+    }
+
+    public void ReprocessLastData() =>
+        _logger.Safe(() => HandleReprocessLastData(),
+                  LogPrefix,
+                  "Error reprocessing data");
+
+    private void HandleReprocessLastData()
     {
         lock (_lock)
         {
@@ -96,30 +101,41 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
 
                 if (!_processingChannel.Writer.TryWrite((fftCopy, _lastSampleRate)))
                 {
-                    Log(LogLevel.Warning,
-                        LOG_SOURCE,
+                    _logger.Log(LogLevel.Warning,
+                        LogPrefix,
                         "Could not enqueue last FFT data for reprocessing");
                 }
                 else
                 {
-                    Log(LogLevel.Debug,
-                        LOG_SOURCE,
+                    _logger.Log(LogLevel.Debug,
+                        LogPrefix,
                         "Reprocessing last FFT data with new settings");
                 }
             }
         }
     }
 
-    public SpectralData? GetCurrentSpectrum()
-    {
-        ThrowIfDisposed();
-        lock (_lock) return _lastData;
-    }
+    public SpectralData? GetCurrentSpectrum() =>
+        _logger.SafeResult(() => {
+            ThrowIfDisposed();
+            lock (_lock) return _lastData;
+        },
+        (SpectralData?)null,
+        LogPrefix,
+        "Error getting current spectrum");
 
     public async Task AddSamplesAsync(
         ReadOnlyMemory<float> samples,
         int sampleRate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await _logger.SafeAsync(async () => await HandleAddSamples(samples, sampleRate, cancellationToken),
+                            LogPrefix,
+                            "Error adding samples");
+
+    private async Task HandleAddSamples(
+        ReadOnlyMemory<float> samples,
+        int sampleRate,
+        CancellationToken cancellationToken)
     {
         if (samples.Length == 0 || _processorDisposed)
             return;
@@ -132,17 +148,23 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
         ).ConfigureAwait(false);
     }
 
-    public void SafeReset() => ResetSpectrum();
+    public void SafeReset() =>
+        _logger.Safe(() => ResetSpectrum(),
+                  LogPrefix,
+                  "Error resetting spectrum analyzer");
 
     protected override void DisposeManaged() =>
-        DisposeCore(async: false)
-            .GetAwaiter()
-            .GetResult();
+        _logger.Safe(() => {
+            DisposeCore(async: false)
+                .GetAwaiter()
+                .GetResult();
+        }, LogPrefix, "Error during managed disposal");
 
-    protected override async ValueTask
-        DisposeAsyncManagedResources() =>
-        await DisposeCore(async: true)
-            .ConfigureAwait(false);
+    protected override async ValueTask DisposeAsyncManagedResources() =>
+        await _logger.SafeAsync(async () =>
+            await DisposeCore(async: true).ConfigureAwait(false),
+            LogPrefix,
+            "Error during async managed disposal");
 
     private bool UpdateScaleType(SpectrumScale value)
     {
@@ -176,8 +198,8 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
     private void MarkProcessorDisposed(string context)
     {
         _processorDisposed = true;
-        Log(LogLevel.Warning,
-            LOG_SOURCE,
+        _logger.Log(LogLevel.Warning,
+            LogPrefix,
             $"Processor disposed: {context}"
         );
     }
@@ -208,23 +230,19 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
         catch (Exception ex) when (
             ex is not OperationCanceledException)
         {
-            Log(LogLevel.Error,
-                LOG_SOURCE,
+            _logger.Log(LogLevel.Error,
+                LogPrefix,
                 $"Error adding samples: {ex}"
             );
             throw;
         }
     }
 
-    private Task ProcessLoopAsync() => SafeExecuteAsync(
-        ProcessCoreAsync,
-        nameof(ProcessLoopAsync),
-        "Processing loop error",
-        [
-            typeof(OperationCanceledException),
-            typeof(ObjectDisposedException)
-        ]
-    );
+    private Task ProcessLoopAsync() =>
+        _logger.SafeAsync(
+            async () => await ProcessCoreAsync(),
+            LogPrefix,
+            "Processing loop error");
 
     private async Task ProcessCoreAsync()
     {
@@ -295,12 +313,10 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
 
     private void HandleFftEvent(
         object? sender,
-        FftEventArgs e
-    ) => SafeExecute(
-        () => EnqueueFft(e),
-        nameof(HandleFftEvent),
-        "FFT event error"
-    );
+        FftEventArgs e) =>
+        _logger.Safe(() => EnqueueFft(e),
+                  LogPrefix,
+                  "FFT event error");
 
     private void EnqueueFft(FftEventArgs e)
     {
@@ -317,8 +333,8 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
                 .Writer
                 .TryWrite((copy, e.SampleRate))
         )
-            Log(LogLevel.Warning,
-                LOG_SOURCE,
+            _logger.Log(LogLevel.Warning,
+                LogPrefix,
                 "Channel full"
             );
     }
@@ -336,16 +352,15 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
         );
     }
 
-    private void ResetSpectrum() => SafeExecute(
-        () => NotifyEmpty(),
-        nameof(ResetSpectrum),
-        "Error resetting"
-    );
+    private void ResetSpectrum() =>
+        _logger.Safe(() => NotifyEmpty(),
+                  LogPrefix,
+                  "Error resetting spectrum");
 
     private void NotifyEmpty()
     {
         _lastData = null;
-        var emptyData = new SpectralData([], UtcNow);
+        var emptyData = new SpectralData([], DateTime.UtcNow);
         PostEvent(() =>
             SpectralDataReady?.Invoke(
                 this,
@@ -365,8 +380,8 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error,
-                LOG_SOURCE,
+            _logger.Log(LogLevel.Error,
+                LogPrefix,
                 $"PostEvent error: {ex.Message}"
             );
         }
@@ -375,15 +390,15 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
     private async Task DisposeCore(bool async)
     {
         if (async)
-            await SafeExecuteAsync(
-                CleanupAsync,
-                nameof(DisposeCore),
+            await _logger.SafeAsync(
+                async () => await CleanupAsync(),
+                LogPrefix,
                 "Async cleanup error"
             ).ConfigureAwait(false);
         else
-            SafeExecute(
-                Cleanup,
-                nameof(DisposeCore),
+            _logger.Safe(
+                () => Cleanup(),
+                LogPrefix,
                 "Cleanup error"
             );
 
@@ -419,32 +434,4 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
 
         _cts.Dispose();
     }
-
-    private static void SafeExecute(
-        Action action,
-        string methodName,
-        string errorMessage
-    ) => Safe(
-        action,
-        new ErrorHandlingOptions
-        {
-            Source = $"{LOG_SOURCE}.{methodName}",
-            ErrorMessage = errorMessage
-        }
-    );
-
-    private static Task SafeExecuteAsync(
-        Func<Task> asyncAction,
-        string methodName,
-        string errorMessage,
-        Type[]? ignoreExceptions = null
-    ) => SafeAsync(
-        asyncAction,
-        new ErrorHandlingOptions
-        {
-            Source = $"{LOG_SOURCE}.{methodName}",
-            ErrorMessage = errorMessage,
-            IgnoreExceptions = ignoreExceptions
-        }
-    );
 }

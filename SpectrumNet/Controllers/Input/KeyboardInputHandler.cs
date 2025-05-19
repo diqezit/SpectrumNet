@@ -6,8 +6,10 @@ namespace SpectrumNet.Controllers.Input;
 
 public class KeyboardInputHandler : IInputHandler
 {
+    private const string LogPrefix = nameof(KeyboardInputHandler);
     private readonly IMainController _controller;
     private readonly Dictionary<Key, Action> _globalKeyActions;
+    private readonly ISmartLogger _logger = Instance;
 
     public KeyboardInputHandler(IMainController controller)
     {
@@ -20,9 +22,10 @@ public class KeyboardInputHandler : IInputHandler
         if (ShouldIgnoreKeyPress(focusedElement))
             return false;
 
-        if (e.Key == Space && !e.IsRepeat)
+        if (e.Key == Key.Space && !e.IsRepeat)
         {
-            _ = _controller.ToggleCaptureAsync();
+            _logger.Safe(() => _controller.ToggleCaptureAsync(),
+                LogPrefix, "Error toggling capture");
             e.Handled = true;
             return true;
         }
@@ -46,19 +49,13 @@ public class KeyboardInputHandler : IInputHandler
             ExecuteAction(action, $"global key action for {key}");
             return true;
         }
-
         return false;
     }
 
-    private static void ExecuteAction(Action action, string context)
-    {
-        Safe(() => action(),
-            new ErrorHandlingOptions
-            {
-                Source = nameof(KeyboardInputHandler),
-                ErrorMessage = $"Error executing {context}"
-            });
-    }
+    private void ExecuteAction(Action action, string context) =>
+        _logger.Safe(() => action(),
+            LogPrefix,
+            $"Error executing {context}");
 
     private Dictionary<Key, Action> CreateGlobalKeyActionsMap() => new()
     {
@@ -67,7 +64,7 @@ public class KeyboardInputHandler : IInputHandler
         { Key.Q, () => _controller.RenderQuality = RenderQuality.Low },
         { Key.W, () => _controller.RenderQuality = RenderQuality.Medium },
         { Key.E, () => _controller.RenderQuality = RenderQuality.High },
-        { Escape, () => HandleEscapeKey() }
+        { Key.Escape, () => HandleEscapeKey() }
     };
 
     private void HandleEscapeKey()

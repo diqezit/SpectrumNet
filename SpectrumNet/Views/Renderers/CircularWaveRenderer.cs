@@ -7,8 +7,9 @@ namespace SpectrumNet.Views.Renderers;
 
 public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 {
+    private const string LogPrefix = nameof(CircularWaveRenderer);
+
     private static readonly Lazy<CircularWaveRenderer> _instance = new(() => new CircularWaveRenderer());
-    private const string LOG_PREFIX = "CircularWaveRenderer";
 
     private CircularWaveRenderer() { }
 
@@ -16,8 +17,6 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "CircularWaveRenderer";
-
         public const float
             TIME_STEP = 0.016f,
             ROTATION_SPEED = 0.5f,
@@ -84,12 +83,12 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         CreateCirclePointsCache();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        Log(LogLevel.Information, LOG_PREFIX,
+        _logger.Log(LogLevel.Information, LogPrefix,
             $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
             $"AdvancedEffects: {_useAdvancedEffects}, PointsPerCircle: {_pointsPerCircle}, " +
             $"GlowRadius: {_glowRadius}");
@@ -112,7 +111,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
         CreateCirclePointsCache();
 
-        Log(LogLevel.Information, LOG_PREFIX,
+        _logger.Log(LogLevel.Information, LogPrefix,
             $"Quality settings applied: {Quality}, AntiAlias: {_useAntiAlias}, " +
             $"AdvancedEffects: {_useAdvancedEffects}, PointsPerCircle: {_pointsPerCircle}, " +
             $"GlowRadius: {_glowRadius}");
@@ -154,13 +153,13 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 UpdateState(spectrum, info, barCount);
                 RenderFrame(canvas, info, paint, barWidth, barSpacing);
             },
-            nameof(RenderEffect),
+            LogPrefix,
             "Error during rendering"
         );
     }
@@ -185,7 +184,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         if (_ringMagnitudes == null || _circlePoints == null)
         {
-            Log(LogLevel.Error, LOG_PREFIX, "RenderFrame called with null state (magnitudes or points)");
+            _logger.Log(LogLevel.Error, LogPrefix, "RenderFrame called with null state (magnitudes or points)");
             return;
         }
 
@@ -305,7 +304,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 
     private void CreateCirclePointsCache()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 if (_circlePoints != null
@@ -320,11 +319,11 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
                     float angle = i * angleStep;
                     _circlePoints[i] = new SKPoint(MathF.Cos(angle), MathF.Sin(angle));
                 }
-                Log(LogLevel.Debug,
-                    LOG_PREFIX,
+                _logger.Log(LogLevel.Debug,
+                    LogPrefix,
                     $"Circle points cache created with {_pointsPerCircle} points.");
             },
-            nameof(CreateCirclePointsCache),
+            LogPrefix,
             "Failed to create circle points cache"
         );
     }
@@ -482,7 +481,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         if (_circlePoints == null)
         {
-            Log(LogLevel.Error, LOG_PREFIX, "DrawRingPath called with null _circlePoints");
+            _logger.Log(LogLevel.Error, LogPrefix, "DrawRingPath called with null _circlePoints");
             return;
         }
 
@@ -521,7 +520,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         base.OnInvalidateCachedResources();
         _ringMagnitudes = null;
         _circlePoints = null;
-        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
     }
 
     protected override void OnDispose()
@@ -529,6 +528,6 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         _ringMagnitudes = null;
         _circlePoints = null;
         base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

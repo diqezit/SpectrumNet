@@ -15,6 +15,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
     private readonly GainParameters _gainParameters;
     private readonly ICaptureService _captureService;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
+    private readonly ISmartLogger _logger = Instance;
 
     private DateTime _lastOperationTime = DateTime.MinValue;
     private FftWindowType _windowType = FftWindowType.Hann;
@@ -58,11 +59,11 @@ public class AudioController : AsyncDisposableBase, IAudioController
             if (value == IsRecording) return;
 
             if (value)
-                Safe(() => StartCaptureAsync().GetAwaiter().GetResult(),
-                    new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error starting capture" });
+                _logger.Safe(() => StartCaptureAsync().GetAwaiter().GetResult(),
+                    LogPrefix, "Error starting capture");
             else
-                Safe(() => StopCaptureAsync().GetAwaiter().GetResult(),
-                    new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error stopping capture" });
+                _logger.Safe(() => StopCaptureAsync().GetAwaiter().GetResult(),
+                    LogPrefix, "Error stopping capture");
         }
     }
 
@@ -99,21 +100,16 @@ public class AudioController : AsyncDisposableBase, IAudioController
         }
     }
 
-    private void UpdateAnalyzerSettings()
+    private void UpdateAnalyzerSettings() =>
+        _logger.Safe(() => HandleUpdateAnalyzerSettings(), LogPrefix, "Error updating analyzer settings");
+
+    private void HandleUpdateAnalyzerSettings()
     {
         var analyzer = GetCurrentAnalyzer();
         if (analyzer == null) return;
 
-        Safe(() =>
-        {
-            analyzer.UpdateSettings(_windowType, _mainController.ScaleType);
-            _mainController.RequestRender();
-        },
-        new ErrorHandlingOptions
-        {
-            Source = LogPrefix,
-            ErrorMessage = "Error updating analyzer settings"
-        });
+        analyzer.UpdateSettings(_windowType, _mainController.ScaleType);
+        _mainController.RequestRender();
     }
 
     public float MinDbLevel
@@ -179,7 +175,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
     {
         if (IsRecording || IsOperationInCooldown())
         {
-            Log(LogLevel.Debug, LogPrefix,
+            _logger.Log(LogLevel.Debug, LogPrefix,
                 $"Start capture ignored: Already recording: {IsRecording}, In cooldown: {IsOperationInCooldown()}");
             return true;
         }
@@ -209,7 +205,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
         {
             if (!IsRecording)
             {
-                Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
+                _logger.Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
                 return;
             }
 
@@ -257,31 +253,33 @@ public class AudioController : AsyncDisposableBase, IAudioController
         {
             if (!await _operationLock.WaitAsync(TimeSpan.FromMilliseconds(OPERATION_TIMEOUT_MS)))
             {
-                Log(LogLevel.Warning, LogPrefix, "Cannot acquire operation lock: timeout");
+                _logger.Log(LogLevel.Warning, LogPrefix, "Cannot acquire operation lock: timeout");
                 return false;
             }
             return true;
         }
         catch
         {
-            Log(LogLevel.Warning, LogPrefix, "Error acquiring operation lock");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Error acquiring operation lock");
             return false;
         }
     }
 
     private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName) =>
-        Safe(() =>
-        {
-            if (setter is null)
-            {
-                Log(LogLevel.Error, LogPrefix, "Null setter delegate provided");
-                return;
-            }
+        _logger.Safe(() => HandleUpdateGainParameter(newValue, setter, propertyName),
+            LogPrefix, "Error updating gain parameter");
 
-            setter(newValue);
-            _mainController.OnPropertyChanged(propertyName);
-        },
-        new ErrorHandlingOptions { Source = LogPrefix, ErrorMessage = "Error updating gain parameter" });
+    private void HandleUpdateGainParameter(float newValue, Action<float> setter, string propertyName)
+    {
+        if (setter is null)
+        {
+            _logger.Log(LogLevel.Error, LogPrefix, "Null setter delegate provided");
+            return;
+        }
+
+        setter(newValue);
+        _mainController.OnPropertyChanged(propertyName);
+    }
 
     private void UpdateDbLevel(
         float value,
@@ -294,13 +292,13 @@ public class AudioController : AsyncDisposableBase, IAudioController
     {
         if (_gainParameters is null)
         {
-            Log(LogLevel.Error, LogPrefix, "Gain parameters not initialized");
+            _logger.Log(LogLevel.Error, LogPrefix, "Gain parameters not initialized");
             return;
         }
 
         if (!validator(value))
         {
-            Log(LogLevel.Warning, LogPrefix, errorMessage);
+            _logger.Log(LogLevel.Warning, LogPrefix, errorMessage);
             value = fallbackValue;
         }
 
@@ -310,74 +308,56 @@ public class AudioController : AsyncDisposableBase, IAudioController
 
     #endregion
 
-    protected override void DisposeManaged()
+    protected override void DisposeManaged() =>
+        _logger.Safe(() => HandleDisposeManaged(), LogPrefix, "Error during managed disposal");
+
+    private void HandleDisposeManaged()
     {
         _mainController.PropertyChanged -= OnMainControllerPropertyChanged;
-
         PerformDisposeSync();
     }
 
-    protected override async ValueTask DisposeAsyncManagedResources()
+    protected override async ValueTask DisposeAsyncManagedResources() =>
+        await _logger.SafeAsync(async () => await HandleDisposeAsyncManagedResources(),
+            LogPrefix, "Error during async managed disposal");
+
+    private async Task HandleDisposeAsyncManagedResources()
     {
         _mainController.PropertyChanged -= OnMainControllerPropertyChanged;
-
         await PerformDisposeAsync();
     }
 
     private void PerformDisposeSync()
     {
-        Log(LogLevel.Information, LogPrefix, "AudioController disposing");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController disposing");
         DisposeCaptureServiceInternalSync();
         DisposeOperationLock();
-        Log(LogLevel.Information, LogPrefix, "AudioController disposed successfully");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController disposed successfully");
     }
 
-    private void DisposeCaptureServiceInternalSync()
-    {
-        try
-        {
+    private void DisposeCaptureServiceInternalSync() =>
+        _logger.Safe(() => {
             if (_captureService is IDisposable disposable)
             {
                 _captureService.StopCaptureAsync().GetAwaiter().GetResult();
                 disposable.Dispose();
             }
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix, $"Error during synchronous capture service disposal: {ex.Message}");
-        }
-    }
+        }, LogPrefix, "Error during synchronous capture service disposal");
 
-    private void DisposeOperationLock()
-    {
-        try
-        {
-            _operationLock.Dispose();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix, $"Error disposing operation lock: {ex.Message}");
-        }
-    }
+    private void DisposeOperationLock() =>
+        _logger.Safe(() => _operationLock.Dispose(), LogPrefix, "Error disposing operation lock");
 
     private async Task PerformDisposeAsync()
     {
-        Log(LogLevel.Information, LogPrefix, "AudioController async disposing");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController async disposing");
         await DisposeCaptureServiceInternalAsync();
         DisposeOperationLock();
-        Log(LogLevel.Information, LogPrefix, "AudioController async disposed successfully");
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController async disposed successfully");
     }
 
-    private async Task DisposeCaptureServiceInternalAsync()
-    {
-        try
-        {
+    private async Task DisposeCaptureServiceInternalAsync() =>
+        await _logger.SafeAsync(async () => {
             await _captureService.StopCaptureAsync();
             await _captureService.DisposeAsync();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix, $"Error during asynchronous capture service disposal: {ex.Message}");
-        }
-    }
+        }, LogPrefix, "Error during asynchronous capture service disposal");
 }

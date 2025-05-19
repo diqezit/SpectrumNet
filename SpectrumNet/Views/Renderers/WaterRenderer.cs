@@ -9,13 +9,15 @@ namespace SpectrumNet.Views.Renderers;
 
 public sealed class WaterRenderer : EffectSpectrumRenderer
 {
+    private const string LogPrefix = nameof(WaterRenderer);
+
     private static readonly Lazy<WaterRenderer> _instance = new(() => new WaterRenderer());
 
     private WaterRenderer()
     {
-        _gridState = new WaterGridState();
-        _physicsEngine = new WaterPhysicsEngine();
-        _renderState = new WaterRenderState();
+        _gridState = new WaterGridState(_logger);
+        _physicsEngine = new WaterPhysicsEngine(_logger);
+        _renderState = new WaterRenderState(_logger);
         _spectrumImpactFactor = SPECTRUM_IMPACT_MIN;
     }
 
@@ -23,7 +25,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "WaterRenderer";
+        public const string LOG_PREFIX = nameof(WaterRenderer);
 
         // Grid layout constants
         public const int
@@ -179,7 +181,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 base.OnInitialize();
@@ -188,16 +190,16 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                 _renderState.InitializePaintResources(UseAntiAlias);
                 _physicsEngine.Initialize(_timeFactor, _spectrumImpactFactor);
 
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+                _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
             },
-            nameof(OnInitialize),
+            LogPrefix,
             "Failed during renderer initialization"
         );
     }
 
     protected override void OnConfigurationChanged()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 _gridState.MarkForRebuild();
@@ -210,16 +212,16 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                     .Append($"ShowConnections: {_showConnections}, ")
                     .Append($"TimeFactor: {_timeFactor}");
 
-                Log(LogLevel.Information, LOG_PREFIX, configInfo.ToString());
+                _logger.Log(LogLevel.Information, LogPrefix, configInfo.ToString());
             },
-            nameof(OnConfigurationChanged),
+            LogPrefix,
             "Failed to handle configuration change"
         );
     }
 
     protected override void OnQualitySettingsApplied()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 switch (Quality)
@@ -249,9 +251,9 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                     .Append($"ShowConnections: {_showConnections}, ")
                     .Append($"TimeFactor: {_timeFactor}");
 
-                Log(LogLevel.Debug, LOG_PREFIX, qualityInfo.ToString());
+                _logger.Log(LogLevel.Debug, LogPrefix, qualityInfo.ToString());
             },
-            nameof(OnQualitySettingsApplied),
+            LogPrefix,
             "Failed to apply quality settings"
         );
     }
@@ -292,9 +294,9 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        ExecuteSafely(
+        _logger.Safe(
             () => ProcessRenderEffect(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
-            nameof(RenderEffect),
+            LogPrefix,
             "Error during rendering"
         );
     }
@@ -320,9 +322,9 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         float barSpacing,
         int barCount)
     {
-        ExecuteSafely(
+        _logger.Safe(
             () => ProcessStateUpdate(spectrum, info, barWidth, barSpacing, barCount),
-            nameof(UpdateState),
+            LogPrefix,
             "Error updating renderer state"
         );
     }
@@ -416,9 +418,9 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         float barSpacing,
         int barCount)
     {
-        ExecuteSafely(
+        _logger.Safe(
             () => CreateAndConnectGrid(width, height, barWidth, barSpacing, barCount),
-            nameof(BuildWaterGrid),
+            LogPrefix,
             "Error building water grid"
         );
     }
@@ -443,7 +445,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         var gridInfo = $"Water grid built: {_gridState.Columns}x{_gridState.Rows} points, " +
                      $"spacing: {_gridState.Spacing:F2}px";
 
-        Log(LogLevel.Debug, LOG_PREFIX, gridInfo);
+        _logger.Log(LogLevel.Debug, LogPrefix, gridInfo);
     }
 
     private void CalculateGridDimensions(float width, float height, int barCount)
@@ -482,7 +484,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             .Append($"Scale: {scaleFactor:F2}, ")
             .Append($"New size: {columns}x{rows}");
 
-        Log(LogLevel.Debug, LOG_PREFIX, logMessage.ToString());
+        _logger.Log(LogLevel.Debug, LogPrefix, logMessage.ToString());
     }
 
     private void IncrementFrameCounter() =>
@@ -503,9 +505,9 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         if (_gridState.Points.Count == 0)
             return;
 
-        ExecuteSafely(
+        _logger.Safe(
             () => RenderWaterContent(canvas, paint),
-            nameof(RenderFrame),
+            LogPrefix,
             "Error rendering frame"
         );
     }
@@ -687,36 +689,38 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 base.OnInvalidateCachedResources();
                 _renderState.InvalidateResources();
                 _gridState.MarkForRebuild();
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+                _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
             },
-            nameof(OnInvalidateCachedResources),
+            LogPrefix,
             "Error invalidating cached resources"
         );
     }
 
     protected override void OnDispose()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 _physicsEngine.Dispose();
                 _renderState.Dispose();
                 _gridState.Clear();
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+                _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
             },
-            nameof(OnDispose),
+            LogPrefix,
             "Error during specific disposal"
         );
     }
 
-    private class WaterGridState
+#pragma warning disable CS9113 // Parameter is unread.
+    private class WaterGridState(ISmartLogger logger)
+#pragma warning restore CS9113 // Parameter is unread.
     {
         public int Columns { get; private set; }
         public int Rows { get; private set; }
@@ -917,29 +921,34 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         }
     }
 
-    private class WaterPhysicsEngine
+    private class WaterPhysicsEngine(ISmartLogger logger)
     {
+        private const string LogPrefix = nameof(WaterPhysicsEngine);
         private Vector2[] _forces = [];
-        private float _animationTime;
-        private float _physicsTimeAccumulator;
-        private float _timeFactor = 1.0f;
-        private float _spectrumImpactFactor;
-        private float[] _spectrumForPhysics = [];
-        private readonly object _syncRoot = new();
-        private readonly TaskFactory _physicsTaskFactory;
-        private Task? _physicsTask;
-        private bool _physicsTaskRunning;
-        private bool _pendingPhysicsUpdate;
-        private float _substepsCount = PHYSICS_SUBSTEPS;
 
-        public WaterPhysicsEngine()
-        {
-            _physicsTaskFactory = new TaskFactory(
+        private float 
+            _animationTime,
+            _physicsTimeAccumulator,
+            _timeFactor = 1.0f,
+            _spectrumImpactFactor;
+
+        private float[] _spectrumForPhysics = [];
+
+        private readonly object _syncRoot = new();
+
+        private readonly TaskFactory _physicsTaskFactory = new(
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,
                 TaskContinuationOptions.None,
                 TaskScheduler.Default);
-        }
+
+        private Task? _physicsTask;
+
+        private bool 
+            _physicsTaskRunning,
+            _pendingPhysicsUpdate;
+
+        private float _substepsCount = PHYSICS_SUBSTEPS;
 
         public void Initialize(float timeFactor, float spectrumImpactFactor)
         {
@@ -967,9 +976,9 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
         {
             if (points.Count == 0 || spectrum.Length == 0) return;
 
-            ExecuteSafely(
+            logger.Safe(
                 () => ProcessSpectrumData(spectrum),
-                nameof(ScheduleUpdate),
+                LogPrefix,
                 "Error scheduling physics update"
             );
         }
@@ -997,7 +1006,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         private void StartPhysicsTask()
         {
-            ExecuteSafely(
+            logger.Safe(
                 () =>
                 {
                     if (_physicsTask != null) return;
@@ -1005,7 +1014,7 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                     _physicsTaskRunning = true;
                     _physicsTask = _physicsTaskFactory.StartNew(RunPhysicsLoop);
                 },
-                nameof(StartPhysicsTask),
+                LogPrefix,
                 "Failed to start physics task"
             );
         }
@@ -1044,8 +1053,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         private void PerformPhysicsCalculations()
         {
-            float[] spectrum = _spectrumForPhysics;
-
             _animationTime += TIME_STEP * _timeFactor;
             _physicsTimeAccumulator += TIME_STEP * _timeFactor;
 
@@ -1053,7 +1060,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             {
                 if (_physicsTimeAccumulator >= PHYSICS_UPDATE_STEP)
                 {
-                    ProcessPhysicsStep(spectrum);
                     _physicsTimeAccumulator -= PHYSICS_UPDATE_STEP;
                 }
             }
@@ -1061,19 +1067,13 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
 
         private void HandlePhysicsError(Exception ex)
         {
-            Log(LogLevel.Error, LOG_PREFIX, $"Physics error: {ex.Message}");
+            logger.Log(LogLevel.Error, LogPrefix, $"Physics error: {ex.Message}");
             Thread.Sleep(100);
-        }
-
-        private void ProcessPhysicsStep(float[] spectrum)
-        {
-            // Этот метод будет иметь реальную реализацию при доступе к points
-            // Сейчас это заглушка
         }
 
         public void Dispose()
         {
-            ExecuteSafely(
+            logger.Safe(
                 () =>
                 {
                     _physicsTaskRunning = false;
@@ -1087,27 +1087,16 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                     _forces = [];
                     _spectrumForPhysics = [];
                 },
-                nameof(Dispose),
+                LogPrefix,
                 "Error stopping physics task"
             );
         }
-
-        private static bool ExecuteSafely(
-            Action action,
-            string source,
-            string errorMessage)
-        {
-            return SmartLogger.Safe(action, source, errorMessage);
-        }
-
-        private static void Log(LogLevel level, string prefix, string message)
-        {
-            SmartLogger.Log(level, prefix, message);
-        }
     }
 
-    private class WaterRenderState
+    private class WaterRenderState(ISmartLogger logger)
     {
+        private const string LogPrefix = nameof(WaterRenderState);
+
         public SKPath FillPath { get; } = new();
         public SKPaint? PointPaint { get; private set; }
         public SKPaint? LinePaint { get; private set; }
@@ -1225,9 +1214,9 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
             bool useAdvancedEffects,
             bool updateShader)
         {
-            ExecuteSafely(
+            logger.Safe(
                 () => ProcessVisualParameterUpdate(spectrum, info, useAdvancedEffects, updateShader),
-                nameof(UpdateVisualParameters),
+                LogPrefix,
                 "Error updating visual parameters"
             );
         }
@@ -1432,14 +1421,6 @@ public sealed class WaterRenderer : EffectSpectrumRenderer
                     FillPath.LineTo(points[bottomRowStart + x].Position);
                 }
             }
-        }
-
-        private static bool ExecuteSafely(
-            Action action,
-            string source,
-            string errorMessage)
-        {
-            return SmartLogger.Safe(action, source, errorMessage);
         }
     }
 

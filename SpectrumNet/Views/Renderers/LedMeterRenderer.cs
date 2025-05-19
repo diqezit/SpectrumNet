@@ -10,14 +10,14 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
     private static readonly Lazy<LedMeterRenderer> _instance =
         new(() => new LedMeterRenderer());
 
+    public const string LOG_PREFIX = nameof(LedMeterRenderer);
+
     private LedMeterRenderer() { }
 
     public static LedMeterRenderer GetInstance() => _instance.Value;
 
     public record Constants
     {
-        public const string LOG_PREFIX = "LedMeterRenderer";
-
         public const float
             ANIMATION_SPEED = 0.015f,
             SMOOTHING_FACTOR_NORMAL = 0.3f,
@@ -107,7 +107,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             base.OnInitialize();
             InitializeVariations();
             CreateCachedTextures();
@@ -164,7 +164,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         _overlayStateChangeRequested = false;
     }
 
-    protected override void OnConfigurationChanged() => 
+    protected override void OnConfigurationChanged() =>
         _smoothingFactor = _isOverlayActive ? SMOOTHING_FACTOR_OVERLAY : SMOOTHING_FACTOR_NORMAL;
 
     protected override void OnQualitySettingsApplied()
@@ -234,7 +234,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
             paint == null || info.Width <= 0 || info.Height <= 0 || _disposed)
             return;
 
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             if (_overlayStateChangeRequested)
             {
                 _overlayStateChangeRequested = false;
@@ -1334,7 +1334,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             base.OnInvalidateCachedResources();
             _cachedLoudness = null;
             _overlayStateChanged = true;
@@ -1343,7 +1343,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     protected override void OnDispose()
     {
-        ExecuteSafely(() => {
+        _logger.Safe(() => {
             _ledPath?.Dispose();
             _highlightPath?.Dispose();
             _screwBitmap?.Dispose();

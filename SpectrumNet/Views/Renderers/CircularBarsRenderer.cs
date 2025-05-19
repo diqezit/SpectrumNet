@@ -8,8 +8,9 @@ namespace SpectrumNet.Views.Renderers;
 
 public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 {
+    private const string LogPrefix = nameof(CircularBarsRenderer);
+
     private static readonly Lazy<CircularBarsRenderer> _instance = new(() => new CircularBarsRenderer());
-    private const string LOG_PREFIX = "CircularBarsRenderer";
 
     private CircularBarsRenderer() { }
 
@@ -17,8 +18,6 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "CircularBarsRenderer";
-
         public const float
             RADIUS_PROPORTION = 0.8f,
             INNER_RADIUS_FACTOR = 0.9f,
@@ -90,12 +89,12 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         _barVectors = null;
         _previousBarCount = 0;
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        Log(LogLevel.Information, LOG_PREFIX,
+        _logger.Log(LogLevel.Information, LogPrefix,
             $"Configuration changed. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
             $"AdvancedEffects: {_useAdvancedEffects}, " +
             $"GlowEffect: {_useGlowEffect}, HighlightEffect: {_useHighlightEffect}");
@@ -116,7 +115,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
                 break;
         }
 
-        Log(LogLevel.Information, LOG_PREFIX,
+        _logger.Log(LogLevel.Information, LogPrefix,
             $"Quality settings applied: {Quality}, AntiAlias: {_useAntiAlias}, " +
             $"AdvancedEffects: {_useAdvancedEffects}, GlowRadius: {_glowRadius}, " +
             $"GlowEffect: {_useGlowEffect}, HighlightEffect: {_useHighlightEffect}");
@@ -164,7 +163,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 float centerX = info.Width * CENTER_PROPORTION;
@@ -176,7 +175,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
                 RenderCircularBarsInternal(canvas, spectrum, barCount, centerX,
                     centerY, mainRadius, adjustedBarWidth, paint);
             },
-            nameof(RenderEffect),
+            LogPrefix,
             "Error during rendering"
         );
     }
@@ -198,7 +197,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             // Рендеринг внутреннего круга (всегда)
             RenderInnerCircle(canvas, centerX, centerY, mainRadius, barWidth, basePaint);
@@ -217,7 +216,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             {
                 RenderHighlights(canvas, spectrum, barCount, centerX, centerY, mainRadius, barWidth, basePaint);
             }
-        }, nameof(RenderCircularBarsInternal), "Error rendering circular bars");
+        }, LogPrefix, "Error rendering circular bars");
     }
 
     private void RenderInnerCircle(
@@ -228,11 +227,11 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             using var innerCirclePaint = ConfigureInnerCirclePaint(basePaint, barWidth);
             canvas.DrawCircle(centerX, centerY, mainRadius * INNER_RADIUS_FACTOR, innerCirclePaint);
-        }, nameof(RenderInnerCircle), "Error rendering inner circle");
+        }, LogPrefix, "Error rendering inner circle");
     }
 
     private SKPaint ConfigureInnerCirclePaint(SKPaint basePaint, float barWidth)
@@ -247,7 +246,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 
     private void EnsureBarVectors(int barCount)
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             if (_barVectors == null || _barVectors.Length != barCount || _previousBarCount != barCount)
             {
@@ -259,9 +258,9 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
                     _barVectors[i] = new Vector2(Cos(angleStep * i), Sin(angleStep * i));
                 }
                 _previousBarCount = barCount;
-                Log(LogLevel.Debug, LOG_PREFIX, $"Bar vectors cache created with {barCount} bars");
+                _logger.Log(LogLevel.Debug, LogPrefix, $"Bar vectors cache created with {barCount} bars");
             }
-        }, nameof(EnsureBarVectors), "Error calculating bar vectors");
+        }, LogPrefix, "Error calculating bar vectors");
     }
 
     private void RenderGlowEffects(
@@ -274,7 +273,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             if (!_useAdvancedEffects || !_useGlowEffect) return;
 
@@ -293,7 +292,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
                 using var glowPaint = ConfigureGlowPaint(basePaint, barWidth);
                 canvas.DrawPath(batchPath, glowPaint);
             }
-        }, nameof(RenderGlowEffects), "Error rendering glow effects");
+        }, LogPrefix, "Error rendering glow effects");
     }
 
     private SKPaint ConfigureGlowPaint(SKPaint basePaint, float barWidth)
@@ -317,7 +316,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             using var batchPath = new SKPath();
             for (int i = 0; i < barCount; i++)
@@ -334,7 +333,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
                 using var barPaint = ConfigureBarPaint(basePaint, barWidth);
                 canvas.DrawPath(batchPath, barPaint);
             }
-        }, nameof(RenderMainBars), "Error rendering main bars");
+        }, LogPrefix, "Error rendering main bars");
     }
 
     private SKPaint ConfigureBarPaint(SKPaint basePaint, float barWidth)
@@ -358,7 +357,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint _)
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             if (!_useAdvancedEffects || !_useHighlightEffect) return;
 
@@ -378,7 +377,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
                 using var highlightPaint = ConfigureHighlightPaint(barWidth);
                 canvas.DrawPath(batchPath, highlightPaint);
             }
-        }, nameof(RenderHighlights), "Error rendering highlights");
+        }, LogPrefix, "Error rendering highlights");
     }
 
     private SKPaint ConfigureHighlightPaint(float barWidth)
@@ -399,13 +398,13 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float innerRadius,
         float outerRadius)
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             if (_barVectors == null || index < 0 || index >= _barVectors.Length) return;
             Vector2 vector = _barVectors[index];
             path.MoveTo(centerX + innerRadius * vector.X, centerY + innerRadius * vector.Y);
             path.LineTo(centerX + outerRadius * vector.X, centerY + outerRadius * vector.Y);
-        }, nameof(AddBarToPath), "Error adding bar to path");
+        }, LogPrefix, "Error adding bar to path");
     }
 
     protected override void OnInvalidateCachedResources()
@@ -413,13 +412,13 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         base.OnInvalidateCachedResources();
         _barVectors = null;
         _previousBarCount = 0;
-        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
     }
 
     protected override void OnDispose()
     {
         _barVectors = null;
         base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

@@ -8,8 +8,9 @@ namespace SpectrumNet.Views.Renderers;
 
 public sealed class CubesRenderer : EffectSpectrumRenderer
 {
+    private const string LogPrefix = nameof(CubesRenderer);
+
     private static readonly Lazy<CubesRenderer> _instance = new(() => new CubesRenderer());
-    private const string LOG_PREFIX = "CubesRenderer";
 
     private CubesRenderer() { }
 
@@ -17,8 +18,6 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "CubesRenderer";
-
         public const float
             CUBE_TOP_WIDTH_PROPORTION = 0.75f,
             CUBE_TOP_HEIGHT_PROPORTION = 0.25f;
@@ -87,11 +86,11 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
-    protected override void OnConfigurationChanged() => 
-        Log(LogLevel.Debug, LOG_PREFIX, $"Configuration changed. New Quality: {Quality}");
+    protected override void OnConfigurationChanged() =>
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Configuration changed. New Quality: {Quality}");
 
     protected override void OnQualitySettingsApplied()
     {
@@ -108,7 +107,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
                 break;
         }
 
-        Log(LogLevel.Debug, LOG_PREFIX,
+        _logger.Log(LogLevel.Debug, LogPrefix,
             $"Quality settings applied. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
             $"AdvancedEffects: {_useAdvancedEffects}, TopFace: {_useTopFaceEffect}, " +
             $"SideFace: {_useSideFaceEffect}");
@@ -159,7 +158,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 float canvasHeight = info.Height;
@@ -185,7 +184,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
                     RenderCube(canvas, x, y, barWidth, height, magnitude, cubePaint);
                 }
             },
-            nameof(RenderEffect),
+            LogPrefix,
             "Error during rendering"
         );
     }
@@ -289,6 +288,6 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

@@ -6,7 +6,8 @@ namespace SpectrumNet.Controllers;
 
 public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory, IMainController
 {
-    private const string LOG_PREFIX = "ControllerFactory";
+    private const string LogPrefix = nameof(ControllerFactory);
+    private readonly ISmartLogger _logger = Instance;
 
     private readonly IUIController _uiController;
     private readonly IAudioController _audioController;
@@ -97,8 +98,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error,
-                    LOG_PREFIX,
+                _logger.Log(LogLevel.Error,
+                    LogPrefix,
                     $"Error in UI operation: {ex.Message}");
             }
             processedCount++;
@@ -168,7 +169,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         {
             if (_isDisposed) return;
 
-            Log(LogLevel.Information, LOG_PREFIX,
+            _logger.Log(LogLevel.Information, LogPrefix,
                 $"LimitFpsTo60 changing from {_fpsLimiter.IsLimited} to {value}",
                 forceLog: true);
 
@@ -562,8 +563,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
 
         _fpsLimiter.LimitChanged -= OnFpsLimitChanged;
 
-        Log(LogLevel.Information,
-            LOG_PREFIX,
+        _logger.Log(LogLevel.Information,
+            LogPrefix,
             "Starting synchronous dispose");
 
         SafeExecuteDisposeAction(CleanupInitiation, "CleanupInitiation");
@@ -572,24 +573,15 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         SafeExecuteDisposeAction(DisposeAllControllers, "DisposeAllControllers");
         SafeExecuteDisposeAction(DisposeResourceObjects, "DisposeResourceObjects");
 
-        Log(LogLevel.Information,
-            LOG_PREFIX,
+        _logger.Log(LogLevel.Information,
+            LogPrefix,
             "Synchronous dispose completed");
     }
 
-    private static void SafeExecuteDisposeAction(Action action, string actionName)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error,
-                LOG_PREFIX,
-                $"Error during {actionName}: {ex.Message}");
-        }
-    }
+    private void SafeExecuteDisposeAction(Action action, string actionName) =>
+        _logger.Safe(() => action(),
+            LogPrefix,
+            $"Error during {actionName}");
 
     private void CleanupInitiation()
     {
@@ -612,8 +604,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error,
-                    LOG_PREFIX,
+                _logger.Log(LogLevel.Error,
+                    LogPrefix,
                     $"Error handling operation during dispose: {ex.Message}");
             }
         }
@@ -631,15 +623,15 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
 
             if (!stopTask.Wait(5000))
             {
-                Log(LogLevel.Warning,
-                    LOG_PREFIX,
+                _logger.Log(LogLevel.Warning,
+                    LogPrefix,
                     "StopCaptureAsync timed out, continuing with disposal");
             }
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error,
-                LOG_PREFIX,
+            _logger.Log(LogLevel.Error,
+                LogPrefix,
                 $"Error stopping capture during dispose: {ex.Message}");
         }
     }
@@ -671,36 +663,25 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             DisposeController(inputController, "InputController");
     }
 
-    private static void DisposeController<T>(
+    private void DisposeController<T>(
         T controller,
-        string controllerName) where T : class
-    {
-        try
+        string controllerName) where T : class =>
+        _logger.Safe(() =>
         {
             if (controller is IDisposable disposable)
                 disposable.Dispose();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error,
-                LOG_PREFIX,
-                $"Error disposing {controllerName}: {ex.Message}");
-        }
-    }
+        },
+        LogPrefix,
+        $"Error disposing {controllerName}");
 
-    private void DisposeResourceObjects()
-    {
-        Safe(() =>
+    private void DisposeResourceObjects() =>
+        _logger.Safe(() =>
         {
             _transitionLock?.Dispose();
             _cleanupCts?.Dispose();
         },
-        new ErrorHandlingOptions
-        {
-            Source = LOG_PREFIX,
-            ErrorMessage = "Error disposing resource objects"
-        });
-    }
+        LogPrefix,
+        "Error disposing resource objects");
 
     protected override async ValueTask DisposeAsyncManagedResources()
     {
@@ -708,7 +689,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
 
         _fpsLimiter.LimitChanged -= OnFpsLimitChanged;
 
-        Log(LogLevel.Information, LOG_PREFIX, "Starting asynchronous dispose");
+        _logger.Log(LogLevel.Information, LogPrefix, "Starting asynchronous dispose");
 
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
@@ -718,15 +699,15 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         }
         catch (OperationCanceledException)
         {
-            Log(LogLevel.Warning, LOG_PREFIX, "Async disposal operation cancelled due to timeout");
+            _logger.Log(LogLevel.Warning, LogPrefix, "Async disposal operation cancelled due to timeout");
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LOG_PREFIX, $"Error during asynchronous dispose: {ex.Message}");
+            _logger.Log(LogLevel.Error, LogPrefix, $"Error during asynchronous dispose: {ex.Message}");
         }
         finally
         {
-            Log(LogLevel.Information, LOG_PREFIX, "Asynchronous dispose completed");
+            _logger.Log(LogLevel.Information, LogPrefix, "Asynchronous dispose completed");
         }
     }
 
@@ -749,52 +730,50 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         _cleanupCts?.Dispose();
     }
 
-    private async Task DetachEventHandlersAsync(CancellationToken token)
-    {
-        await Dispatcher.InvokeAsync(() =>
+    private async Task DetachEventHandlersAsync(CancellationToken token) =>
+        await _logger.SafeAsync(async () =>
         {
-            if (_ownerWindow != null)
-                _ownerWindow.KeyDown -= OnWindowKeyDown;
-        }).Task.WaitAsync(token);
-    }
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (_ownerWindow != null)
+                    _ownerWindow.KeyDown -= OnWindowKeyDown;
+            }).Task.WaitAsync(token);
+        },
+        LogPrefix,
+        "Error detaching event handlers");
 
-    private async Task StopCaptureAsync(CancellationToken token)
-    {
-        if (IsRecording)
+    private async Task StopCaptureAsync(CancellationToken token) =>
+        await _logger.SafeAsync(async () =>
         {
-            try
+            if (IsRecording)
             {
-                await _audioController.StopCaptureAsync().WaitAsync(TimeSpan.FromSeconds(3), token);
+                try
+                {
+                    await _audioController.StopCaptureAsync().WaitAsync(TimeSpan.FromSeconds(3), token);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.Log(LogLevel.Warning, LogPrefix, "Stop capture operation cancelled or timed out");
+                }
             }
-            catch (OperationCanceledException)
-            {
-                Log(LogLevel.Warning, LOG_PREFIX, "Stop capture operation cancelled or timed out");
-            }
-            catch (Exception ex)
-            {
-                Log(LogLevel.Error, LOG_PREFIX, $"Error stopping capture: {ex.Message}");
-            }
-        }
-    }
+        },
+        LogPrefix,
+        "Error stopping capture");
 
-    private async Task CloseUIElementsAsync(CancellationToken token)
-    {
-        await Dispatcher.InvokeAsync(() =>
+    private async Task CloseUIElementsAsync(CancellationToken token) =>
+        await _logger.SafeAsync(async () =>
         {
-            try
+            await Dispatcher.InvokeAsync(() =>
             {
                 if (_overlayManager.IsActive)
                     _ = _overlayManager.CloseAsync();
 
                 if (IsControlPanelOpen)
                     _uiController.CloseControlPanel();
-            }
-            catch (Exception ex)
-            {
-                Log(LogLevel.Error, LOG_PREFIX, $"Error closing UI elements: {ex.Message}");
-            }
-        }).Task.WaitAsync(token);
-    }
+            }).Task.WaitAsync(token);
+        },
+        LogPrefix,
+        "Error closing UI elements");
 
     private async Task DisposeControllersAsync(CancellationToken token)
     {
@@ -824,25 +803,17 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             DisposeController(disposableInputController, "InputController");
     }
 
-    private static async Task DisposeControllerAsync<T>(
+    private async Task DisposeControllerAsync<T>(
         T controller,
         string controllerName,
-        CancellationToken token) where T : class
-    {
-        try
+        CancellationToken token) where T : class =>
+        await _logger.SafeAsync(async () =>
         {
             if (controller is IAsyncDisposable asyncDisposable)
             {
                 await asyncDisposable.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3), token);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            Log(LogLevel.Warning, LOG_PREFIX, $"Dispose operation for {controllerName} timed out");
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LOG_PREFIX, $"Error disposing {controllerName}: {ex.Message}");
-        }
-    }
+        },
+        LogPrefix,
+        $"Error disposing {controllerName}");
 }

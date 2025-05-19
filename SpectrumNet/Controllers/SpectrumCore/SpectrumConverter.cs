@@ -5,22 +5,34 @@ using static SpectrumNet.Controllers.SpectrumCore.FrequencyConverter;
 
 namespace SpectrumNet.Controllers.SpectrumCore;
 
-public sealed class SpectrumConverter
-    (IGainParametersProvider parameters)
-    : ISpectrumConverter
+public sealed class SpectrumConverter : ISpectrumConverter
 {
-    private const string LOG_SOURCE = nameof(SpectrumConverter);
+    private const string LogPrefix = nameof(SpectrumConverter);
+    private readonly ISmartLogger _logger = Instance;
 
-    private readonly IGainParametersProvider _params = parameters ??
-        throw new ArgumentNullException(nameof(parameters));
-
+    private readonly IGainParametersProvider _params;
     private readonly ParallelOptions _parallelOpts = new() { MaxDegreeOfParallelism = ProcessorCount };
+
+    public SpectrumConverter(IGainParametersProvider parameters)
+    {
+        _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
+    }
 
     public float[] ConvertToSpectrum(
         Complex[] fft,
         int sampleRate,
         SpectrumScale scale,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        _logger.SafeResult(() => HandleConvertToSpectrum(fft, sampleRate, scale, cancellationToken),
+            Array.Empty<float>(),
+            LogPrefix,
+            "Error converting to spectrum");
+
+    private float[] HandleConvertToSpectrum(
+        Complex[] fft,
+        int sampleRate,
+        SpectrumScale scale,
+        CancellationToken cancellationToken)
     {
         ValidateInputParameters(fft, sampleRate);
 
@@ -84,18 +96,14 @@ public sealed class SpectrumConverter
         float[] spectrum,
         int nBins,
         SpectrumParameters spectrumParams) =>
-        SafeResult(() =>
+        _logger.SafeResult<float[]>(() =>
         {
             ComputeLinearSpectrum(fft, spectrum, nBins, spectrumParams);
             return spectrum;
         },
-        defaultValue: [],
-        options: new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = "Error processing linear spectrum",
-            IgnoreExceptions = [typeof(OperationCanceledException)]
-        });
+        [],
+        LogPrefix,
+        "Error processing linear spectrum");
 
     private void ComputeLinearSpectrum(
         Complex[] fft,
@@ -167,7 +175,7 @@ public sealed class SpectrumConverter
         float maxDomain,
         Func<float, float> domainToFreq,
         SpectrumParameters spectrumParams) =>
-        SafeResult(() =>
+        _logger.SafeResult<float[]>(() =>
         {
             ComputeScaledSpectrum(
                 fft, spectrum, nBins, sampleRate,
@@ -175,13 +183,9 @@ public sealed class SpectrumConverter
 
             return spectrum;
         },
-        defaultValue: [],
-        options: new ErrorHandlingOptions
-        {
-            Source = LOG_SOURCE,
-            ErrorMessage = "Error processing non-linear spectrum",
-            IgnoreExceptions = [typeof(OperationCanceledException)]
-        });
+        [],
+        LogPrefix,
+        "Error processing non-linear spectrum");
 
     private void ComputeScaledSpectrum(
         Complex[] fft,

@@ -9,7 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class ParticlesRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<ParticlesRenderer> _instance = new(() => new ParticlesRenderer());
-    private const string LOG_PREFIX = "ParticlesRenderer";
+    private const string LOG_PREFIX = nameof(ParticlesRenderer);
 
     private ParticlesRenderer() { }
 
@@ -17,8 +17,6 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "ParticlesRenderer";
-
         public const float
             DEFAULT_LINE_WIDTH = 3f,
             GLOW_INTENSITY = 0.3f,
@@ -62,7 +60,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         float alpha,
         bool isActive)
     {
-        public readonly float 
+        public readonly float
             X = x,
             Y = y,
             Velocity = velocity,
@@ -286,7 +284,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         InitializeResources();
         InitializeQualityParams();
         StartProcessingThread();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
     }
 
     private void InitializeResources()
@@ -299,9 +297,9 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
     private void InitializeQualityParams()
     {
-        ExecuteSafely(
+        _logger.Safe(
             () => ApplyQualitySettings(),
-            nameof(InitializeQualityParams),
+            LOG_PREFIX,
             "Failed to initialize quality parameters");
     }
 
@@ -340,7 +338,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
         InvalidateCachedPicture();
 
-        Log(LogLevel.Information, LOG_PREFIX,
+        _logger.Log(LogLevel.Information, LOG_PREFIX,
             $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
     }
 
@@ -363,9 +361,9 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
         InvalidateCachedPicture();
 
-        Log(LogLevel.Debug, LOG_PREFIX,
+        _logger.Log(LogLevel.Debug, LOG_PREFIX,
             $"Quality settings applied. Quality: {Quality}, " +
-            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
+            $"AntiAlias: {_useAntiAlias}, AdvancedEffects: {_useAdvancedEffects}, " +
             $"SampleCount: {_sampleCount}");
     }
 
@@ -411,7 +409,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
             return;
 
-        ExecuteSafely(
+        _logger.Safe(
             () =>
             {
                 UpdateRenderCache(info, barCount, barWidth);
@@ -419,7 +417,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
                 UpdateParticles(_renderCache.UpperBound);
                 RenderParticles(canvas, paint, _renderCache.UpperBound, _renderCache.LowerBound);
             },
-            nameof(RenderEffect),
+            LOG_PREFIX,
             "Error during rendering");
     }
 
@@ -466,7 +464,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LOG_PREFIX, $"Error in processing thread: {ex.Message}");
+            _logger.Error(LOG_PREFIX, $"Error in processing thread: {ex.Message}");
         }
     }
 
@@ -737,7 +735,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     protected override void OnInvalidateCachedResources()
     {
         InvalidateCachedPicture();
-        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+        _logger.Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
     }
 
     protected override void OnDispose()

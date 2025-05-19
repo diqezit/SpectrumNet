@@ -4,17 +4,20 @@ namespace SpectrumNet.Themes;
 
 public partial class CommonResources
 {
-    public static void InitialiseResources() => Safe(
-        () =>
+    private const string LogPrefix = nameof(CommonResources);
+    private readonly ISmartLogger _logger = Instance;
+
+    public static void InitialiseResources() =>
+        Instance.Safe(() =>
         {
             IThemes themeManager = ThemeManager.Instance;
             themeManager.ApplyThemeToCurrentWindow();
         },
-        nameof(InitialiseResources),
+        nameof(CommonResources),
         "Failed to initialize application resources");
 
-    public void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e) => Safe(
-        () =>
+    public void Slider_MouseWheelScroll(object sender, MouseWheelEventArgs e) =>
+        _logger.Safe(() =>
         {
             if (sender is Slider slider)
             {
@@ -26,6 +29,6 @@ public partial class CommonResources
                 e.Handled = true;
             }
         },
-        nameof(Slider_MouseWheelScroll),
+        LogPrefix,
         "Error handling mouse wheel scroll for slider");
 }

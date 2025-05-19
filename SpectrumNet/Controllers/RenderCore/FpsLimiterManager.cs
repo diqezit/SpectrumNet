@@ -4,7 +4,9 @@ namespace SpectrumNet.Controllers.RenderCore;
 
 public sealed class FpsLimiterManager : IFpsLimiter
 {
-    private const string LOG_PREFIX = nameof(FpsLimiterManager);
+    private const string LogPrefix = nameof(FpsLimiterManager);
+    private readonly ISmartLogger _logger = Instance;
+
     private readonly ISettings _settings;
     private readonly FpsLimiter _fpsLimiter = FpsLimiter.Instance;
 
@@ -24,31 +26,24 @@ public sealed class FpsLimiterManager : IFpsLimiter
         if (_settings.LimitFpsTo60 == enabled)
             return;
 
-        try
+        _logger.Safe(() =>
         {
             _settings.LimitFpsTo60 = enabled;
             _fpsLimiter.IsEnabled = enabled;
-
             if (enabled)
                 _fpsLimiter.Reset();
-
             LimitChanged?.Invoke(this, enabled);
-
-            Log(LogLevel.Information,
-                LOG_PREFIX,
+            _logger.Log(LogLevel.Information,
+                LogPrefix,
                 $"FPS limit changed to: {(enabled ? "enabled" : "disabled")}");
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error,
-                LOG_PREFIX,
-                $"Error setting FPS limit: {ex.Message}");
-        }
+        },
+        LogPrefix,
+        "Error setting FPS limit");
     }
 
     public void Reset() => _fpsLimiter.Reset();
 
-    public bool ShouldRenderFrame() => 
+    public bool ShouldRenderFrame() =>
         !_fpsLimiter.IsEnabled
         || _fpsLimiter.ShouldRenderFrame();
 }

@@ -4,6 +4,9 @@ namespace SpectrumNet.Themes;
 
 public sealed class ThemeManager : IThemes
 {
+    private const string LogPrefix = nameof(ThemeManager);
+    private readonly ISmartLogger _logger = SmartLogger.Instance;
+
     private static readonly Lazy<ThemeManager> _instance = new(() => new ThemeManager());
     private readonly List<WeakReference<Window>> _registeredWindows = [];
     private bool _isDarkTheme = DefaultSettings.IsDarkTheme;
@@ -54,28 +57,30 @@ public sealed class ThemeManager : IThemes
         }
     }
 
-    public void ToggleTheme()
-    {
-        SetTheme(!_isDarkTheme);
-    }
+    public void ToggleTheme() => SetTheme(!_isDarkTheme);
 
-    public void SetTheme(bool isDark)
-    {
-        if (_isDarkTheme == isDark) return;
-
-        IsDarkTheme = isDark;
-        ApplyThemeToAllWindows();
-
-        Settings.Instance.IsDarkTheme = isDark;
-    }
-
-    public void ApplyThemeToCurrentWindow()
-    {
-        if (Application.Current?.MainWindow != null)
+    public void SetTheme(bool isDark) =>
+        _logger.Safe(() =>
         {
-            ApplyThemeToWindow(Application.Current.MainWindow);
-        }
-    }
+            if (_isDarkTheme == isDark) return;
+
+            IsDarkTheme = isDark;
+            ApplyThemeToAllWindows();
+            Settings.Instance.IsDarkTheme = isDark;
+        },
+        LogPrefix,
+        "Error setting theme");
+
+    public void ApplyThemeToCurrentWindow() =>
+        _logger.Safe(() =>
+        {
+            if (Application.Current?.MainWindow != null)
+            {
+                ApplyThemeToWindow(Application.Current.MainWindow);
+            }
+        },
+        LogPrefix,
+        "Error applying theme to current window");
 
     private void CleanupWeakReferences()
     {
@@ -88,48 +93,50 @@ public sealed class ThemeManager : IThemes
         }
     }
 
-    private void ApplyThemeToAllWindows()
-    {
-        CleanupWeakReferences();
-
-        foreach (var windowRef in _registeredWindows)
+    private void ApplyThemeToAllWindows() =>
+        _logger.Safe(() =>
         {
-            if (windowRef.TryGetTarget(out var window))
+            CleanupWeakReferences();
+            foreach (var windowRef in _registeredWindows)
             {
-                ApplyThemeToWindow(window);
+                if (windowRef.TryGetTarget(out var window))
+                {
+                    ApplyThemeToWindow(window);
+                }
             }
-        }
-    }
+        },
+        LogPrefix,
+        "Error applying theme to all windows");
 
-    private void ApplyThemeToWindow(Window window)
-    {
-        if (window == null) return;
-
-        var resources = window.Resources.MergedDictionaries;
-
-        Application.Current.Dispatcher.Invoke(() =>
+    private void ApplyThemeToWindow(Window window) =>
+        _logger.Safe(() =>
         {
-            var oldThemeDict = resources.FirstOrDefault(d =>
-                d.Source?.ToString().Contains("LightTheme.xaml") == true ||
-                d.Source?.ToString().Contains("DarkTheme.xaml") == true);
+            if (window == null) return;
 
-            if (oldThemeDict != null)
-                resources.Remove(oldThemeDict);
-
-            var newThemeDict = new ResourceDictionary
+            var resources = window.Resources.MergedDictionaries;
+            Application.Current.Dispatcher.Invoke(() =>
             {
-                Source = new Uri(_isDarkTheme ?
-                    "/Themes/DarkTheme.xaml" :
-                    "/Themes/LightTheme.xaml",
-                    UriKind.RelativeOrAbsolute)
-            };
+                var oldThemeDict = resources.FirstOrDefault(d =>
+                    d.Source?.ToString().Contains("LightTheme.xaml") == true ||
+                    d.Source?.ToString().Contains("DarkTheme.xaml") == true);
 
-            resources.Add(newThemeDict);
-        });
-    }
+                if (oldThemeDict != null)
+                    resources.Remove(oldThemeDict);
 
-    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-    {
+                var newThemeDict = new ResourceDictionary
+                {
+                    Source = new Uri(_isDarkTheme ?
+                        "/Themes/DarkTheme.xaml" :
+                        "/Themes/LightTheme.xaml",
+                        UriKind.RelativeOrAbsolute)
+                };
+
+                resources.Add(newThemeDict);
+            });
+        },
+        LogPrefix,
+        "Error applying theme to window");
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-    }
 }

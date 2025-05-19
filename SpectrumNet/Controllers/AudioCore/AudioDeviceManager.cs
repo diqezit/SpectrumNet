@@ -6,6 +6,7 @@ namespace SpectrumNet.Controllers.AudioCore;
 public sealed class AudioDeviceManager : AsyncDisposableBase, IAudioDeviceManager
 {
     private const string LogPrefix = nameof(AudioDeviceManager);
+    private readonly ISmartLogger _logger = Instance;
     private readonly MMDeviceEnumerator _deviceEnumerator;
     private readonly AudioEndpointNotificationHandler _notificationHandler;
     private MMDevice? _currentDevice;
@@ -19,25 +20,31 @@ public sealed class AudioDeviceManager : AsyncDisposableBase, IAudioDeviceManage
         _notificationHandler = new AudioEndpointNotificationHandler(OnDeviceChanged);
     }
 
-    public MMDevice? GetDefaultAudioDevice()
+    public MMDevice? GetDefaultAudioDevice() =>
+        _logger.SafeResult<MMDevice?>(
+            () => HandleGetDefaultAudioDevice(),
+            null,
+            LogPrefix,
+            "Error getting default audio device"
+        );
+
+    private MMDevice? HandleGetDefaultAudioDevice()
     {
-        try
-        {
-            DisposeCurrentDevice();
-            return AcquireNewDevice();
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, LogPrefix, $"Error getting default audio device: {ex.Message}");
-            return null;
-        }
+        DisposeCurrentDevice();
+        return AcquireNewDevice();
     }
 
     private void DisposeCurrentDevice() =>
-        SafeDispose(
-            _currentDevice,
-            nameof(_currentDevice),
-            new ErrorHandlingOptions { Source = LogPrefix }
+        _logger.Safe(
+            () => {
+                if (_currentDevice != null)
+                {
+                    _currentDevice.Dispose();
+                    _currentDevice = null;
+                }
+            },
+            LogPrefix,
+            "Error disposing current device"
         );
 
     private MMDevice? AcquireNewDevice()
@@ -46,38 +53,49 @@ public sealed class AudioDeviceManager : AsyncDisposableBase, IAudioDeviceManage
             DataFlow.Render,
             Role.Multimedia
         );
+
         if (_currentDevice != null && _currentDevice.ID != _lastDeviceId)
             _lastDeviceId = _currentDevice.ID;
+
         return _currentDevice;
     }
 
     public void RegisterDeviceNotifications() =>
-        Safe(
+        _logger.Safe(
             () => _deviceEnumerator.RegisterEndpointNotificationCallback(_notificationHandler),
-            new ErrorHandlingOptions { Source = LogPrefix }
+            LogPrefix,
+            "Error registering device notifications"
         );
 
     public void UnregisterDeviceNotifications() =>
-        Safe(
+        _logger.Safe(
             () => _deviceEnumerator.UnregisterEndpointNotificationCallback(_notificationHandler),
-            new ErrorHandlingOptions { Source = LogPrefix }
+            LogPrefix,
+            "Error unregistering device notifications"
         );
 
     private void OnDeviceChanged() =>
-        Safe(() => DeviceChanged(), new ErrorHandlingOptions { Source = LogPrefix });
+        _logger.Safe(() => DeviceChanged(), LogPrefix, "Error in device change callback");
 
-    protected override void DisposeManaged()
+    protected override void DisposeManaged() =>
+        _logger.Safe(() => HandleDispose(), LogPrefix, "Error during dispose");
+
+    private void HandleDispose()
     {
         UnregisterDeviceNotifications();
-        SafeDispose(_currentDevice, nameof(_currentDevice));
-        SafeDispose(_deviceEnumerator, nameof(_deviceEnumerator));
+
+        if (_currentDevice != null)
+        {
+            _currentDevice.Dispose();
+            _currentDevice = null;
+        }
+
+        _deviceEnumerator?.Dispose();
     }
 
     protected override ValueTask DisposeAsyncManagedResources()
     {
-        UnregisterDeviceNotifications();
-        SafeDispose(_currentDevice, nameof(_currentDevice));
-        SafeDispose(_deviceEnumerator, nameof(_deviceEnumerator));
+        HandleDispose();
         return ValueTask.CompletedTask;
     }
 

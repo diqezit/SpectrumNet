@@ -9,7 +9,7 @@ namespace SpectrumNet.Views.Renderers;
 public sealed class PolarRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<PolarRenderer> _instance = new(() => new PolarRenderer());
-    private const string LOG_PREFIX = "PolarRenderer";
+    private const string LOG_PREFIX = nameof(PolarRenderer);
 
     private PolarRenderer() { }
 
@@ -17,8 +17,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "PolarRenderer";
-
         public const float
             MIN_RADIUS = 30f,
             RADIUS_MULTIPLIER = 200f,
@@ -165,10 +163,13 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeResources();
-        Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+        _logger.Debug(LOG_PREFIX, "Initialized");
     }
 
-    private void InitializeResources()
+    private void InitializeResources() =>
+        _logger.Safe(HandleInitializeResources, LOG_PREFIX, "Failed to initialize resources");
+
+    private void HandleInitializeResources()
     {
         InitializePoints();
         InitializePaths();
@@ -285,8 +286,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         UpdateOverlayState(isOverlayActive);
         InvalidatePolarCachedResources();
 
-        Log(LogLevel.Information, LOG_PREFIX,
-            $"Configuration changed. Quality: {Quality}, Overlay: {isOverlayActive}");
+        _logger.Info(LOG_PREFIX, $"Configuration changed. Quality: {Quality}, Overlay: {isOverlayActive}");
     }
 
     private void UpdateOverlayState(bool isOverlayActive)
@@ -324,7 +324,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
         ApplyQualityDependentChanges();
 
-        Log(LogLevel.Debug, LOG_PREFIX, $"Quality settings applied. Quality: {Quality}");
+        _logger.Debug(LOG_PREFIX, $"Quality settings applied. Quality: {Quality}");
     }
 
     private void ApplyQualityDependentChanges()
@@ -336,7 +336,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         UpdatePointCountBasedOnOverlay();
         MarkPathsForUpdate();
 
-        Log(LogLevel.Debug, LOG_PREFIX,
+        _logger.Debug(LOG_PREFIX,
             $"Quality settings applied. Quality: {Quality}, " +
             $"UseGlow: {_useGlow}, UseHighlight: {_useHighlight}, " +
             $"UsePulseEffect: {_usePulseEffect}, UseDashEffect: {_useDashEffect}");
@@ -444,7 +444,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         base.OnInvalidateCachedResources();
         InvalidatePolarCachedResources();
-        Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+        _logger.Debug(LOG_PREFIX, "Cached resources invalidated");
     }
 
     private void DisposeAllCachedResources()
@@ -486,17 +486,15 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        ExecuteSafely(
+        SKPaint paint) =>
+        _logger.Safe(
             () =>
             {
                 UpdateState(spectrum, info, barWidth, barCount, paint);
                 RenderFrame(canvas, info);
             },
-            nameof(RenderEffect),
+            LOG_PREFIX,
             "Error during rendering");
-    }
 
     private void UpdateState(
         float[] spectrum,
@@ -780,7 +778,10 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             ? 1.0f + MathF.Sin(base._time * PULSE_SPEED * 0.5f) * PULSE_SCALE_MULTIPLIER
             : 1.0f;
 
-    private void UpdatePolarPaths(SKImageInfo _, int barCount)
+    private void UpdatePolarPaths(SKImageInfo _, int barCount) =>
+        _logger.Safe(() => HandleUpdatePolarPaths(barCount), LOG_PREFIX, "Failed to update polar paths");
+
+    private void HandleUpdatePolarPaths(int barCount)
     {
         if (!ArePathResourcesValid()) return;
 
@@ -963,7 +964,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, LOG_PREFIX, $"Failed to create path: {ex.Message}");
+            _logger.Error(LOG_PREFIX, $"Failed to create path: {ex.Message}");
             CreatePathsUsingLines(effectivePointCount, skipFactor);
         }
     }
@@ -1029,7 +1030,10 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _innerPath!.Close();
     }
 
-    private void ProcessSpectrum(float[] spectrum, int barCount)
+    private void ProcessSpectrum(float[] spectrum, int barCount) =>
+        _logger.Safe(() => HandleProcessSpectrum(spectrum, barCount), LOG_PREFIX, "Error processing spectrum");
+
+    private void HandleProcessSpectrum(float[] spectrum, int barCount)
     {
         if (_disposed || _tempSpectrum == null || base._previousSpectrum == null ||
             base._processedSpectrum == null)
@@ -1060,7 +1064,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         if (_tempSpectrum == null)
         {
-            Log(LogLevel.Error, LOG_PREFIX, "Temporary spectrum array is null");
+            _logger.Error(LOG_PREFIX, "Temporary spectrum array is null");
             return;
         }
 
@@ -1105,7 +1109,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
         if (_tempSpectrum == null || base._previousSpectrum == null || base._processedSpectrum == null)
         {
-            Log(LogLevel.Error, LOG_PREFIX, "Spectrum data arrays are null");
+            _logger.Error(LOG_PREFIX, "Spectrum data arrays are null");
             return maxChange;
         }
 
@@ -1160,7 +1164,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         }
         catch (NullReferenceException)
         {
-            Log(LogLevel.Error, LOG_PREFIX, "Null reference in SIMD processing");
+            _logger.Error(LOG_PREFIX, "Null reference in SIMD processing");
             ProcessSpectrumRemainder(startIndex, Vector<float>.Count, ref maxChange);
         }
     }
@@ -1222,7 +1226,10 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void UpdateCenterCircle(SKColor baseColor)
+    private void UpdateCenterCircle(SKColor baseColor) =>
+        _logger.Safe(() => HandleUpdateCenterCircle(baseColor), LOG_PREFIX, "Error updating center circle");
+
+    private void HandleUpdateCenterCircle(SKColor baseColor)
     {
         if (_centerPaint == null) return;
 
@@ -1296,7 +1303,10 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             highlightPaint);
     }
 
-    private void UpdateVisualEffects(SKColor baseColor)
+    private void UpdateVisualEffects(SKColor baseColor) =>
+        _logger.Safe(() => HandleUpdateVisualEffects(baseColor), LOG_PREFIX, "Error updating visual effects");
+
+    private void HandleUpdateVisualEffects(SKColor baseColor)
     {
         if (_fillPaint == null || _strokePaint == null ||
             _glowPaint == null || _highlightPaint == null)
@@ -1399,13 +1409,11 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         UpdateCenterCircle(baseColor);
     }
 
-
-
     protected override void OnDispose()
     {
-        DisposeManagedResources();
+        _logger.Safe(DisposeManagedResources, LOG_PREFIX, "Error disposing managed resources");
         base.OnDispose();
-        Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+        _logger.Debug(LOG_PREFIX, "Disposed");
     }
 
     private void DisposeManagedResources()

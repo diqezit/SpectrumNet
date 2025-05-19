@@ -9,14 +9,14 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
 {
     private static readonly Lazy<LoudnessMeterRenderer> _instance = new(() => new LoudnessMeterRenderer());
 
+    public const string LOG_PREFIX = nameof(LoudnessMeterRenderer);
+
     private LoudnessMeterRenderer() { }
 
     public static LoudnessMeterRenderer GetInstance() => _instance.Value;
 
     public record Constants
     {
-        public const string LOG_PREFIX = "LoudnessMeterRenderer";
-
         public const float
             MIN_LOUDNESS_THRESHOLD = 0.001f,
             SMOOTHING_FACTOR_ATTACK_NORMAL = 0.6f,
@@ -98,7 +98,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             base.OnInitialize();
 
@@ -116,7 +116,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             ApplyQualitySettingsInternal();
             InitializePaints();
 
-        }, nameof(OnInitialize), "Failed to initialize renderer");
+        }, LOG_PREFIX, "Failed to initialize renderer");
     }
 
     private void InitializePaints()
@@ -210,7 +210,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             paint == null || info.Width <= 0 || info.Height <= 0 || _disposed)
             return;
 
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             CheckAndUpdateDimensions(info);
 
@@ -221,7 +221,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
                 info,
                 loudness);
 
-        }, nameof(RenderEffect), "Error during rendering");
+        }, LOG_PREFIX, "Error during rendering");
     }
 
     private void CheckAndUpdateDimensions(SKImageInfo info)
@@ -462,7 +462,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
 
     protected override void OnDispose()
     {
-        ExecuteSafely(() =>
+        _logger.Safe(() =>
         {
             _loudnessSemaphore?.Dispose();
 
@@ -480,6 +480,6 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             _previousLoudness = 0;
 
             base.OnDispose();
-        }, nameof(OnDispose), "Error during disposal");
+        }, LOG_PREFIX, "Error during disposal");
     }
 }

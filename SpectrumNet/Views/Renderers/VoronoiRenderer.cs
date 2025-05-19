@@ -8,7 +8,10 @@ namespace SpectrumNet.Views.Renderers;
 
 public sealed class VoronoiRenderer : EffectSpectrumRenderer
 {
-    private static readonly Lazy<VoronoiRenderer> _instance = new(() => new VoronoiRenderer());
+    private static readonly Lazy<VoronoiRenderer> _instance = 
+        new(() => new VoronoiRenderer());
+
+    private const string LOG_PREFIX = nameof(VoronoiRenderer);
 
     private VoronoiRenderer() { }
 
@@ -16,8 +19,6 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
 
     public record Constants
     {
-        public const string LOG_PREFIX = "VoronoiRenderer";
-
         public const int
             DEFAULT_POINT_COUNT = 25,
             OVERLAY_POINT_COUNT = 15,
@@ -84,43 +85,41 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         public int FrequencyIndex;
     }
 
-    protected override void OnInitialize()
-    {
-        ExecuteSafely(
+    protected override void OnInitialize() =>
+        _logger.Safe(
             () =>
             {
                 base.OnInitialize();
                 InitializePaints();
                 InitializePoints(GetPointCount());
-                Log(LogLevel.Debug, LOG_PREFIX, "Initialized");
+                _logger.Debug(LOG_PREFIX, "Initialized");
             },
-            nameof(OnInitialize),
+            LOG_PREFIX,
             "Failed during renderer initialization"
         );
-    }
 
-    private void InitializePaints()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                _cellPaint = new SKPaint
-                {
-                    IsAntialias = UseAntiAlias,
-                    Style = SKPaintStyle.Fill
-                };
-
-                _borderPaint = new SKPaint
-                {
-                    IsAntialias = UseAntiAlias,
-                    Style = SKPaintStyle.Stroke,
-                    StrokeWidth = BORDER_WIDTH,
-                    Color = SKColors.White.WithAlpha(BORDER_ALPHA)
-                };
-            },
-            nameof(InitializePaints),
+    private void InitializePaints() =>
+        _logger.Safe(
+            HandleInitializePaints,
+            LOG_PREFIX,
             "Failed to initialize paints"
         );
+
+    private void HandleInitializePaints()
+    {
+        _cellPaint = new SKPaint
+        {
+            IsAntialias = UseAntiAlias,
+            Style = SKPaintStyle.Fill
+        };
+
+        _borderPaint = new SKPaint
+        {
+            IsAntialias = UseAntiAlias,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = BORDER_WIDTH,
+            Color = SKColors.White.WithAlpha(BORDER_ALPHA)
+        };
     }
 
     private int GetPointCount() =>
@@ -128,24 +127,21 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
             ? OVERLAY_POINT_COUNT
             : DEFAULT_POINT_COUNT;
 
-    protected override void OnConfigurationChanged()
-    {
-        ExecuteSafely(
+    protected override void OnConfigurationChanged() =>
+        _logger.Safe(
             () =>
             {
                 InitializePoints(GetPointCount());
-                Log(LogLevel.Information,
+                _logger.Info(
                     LOG_PREFIX,
                     $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
             },
-            nameof(OnConfigurationChanged),
+            LOG_PREFIX,
             "Failed to handle configuration change"
         );
-    }
 
-    protected override void OnQualitySettingsApplied()
-    {
-        ExecuteSafely(
+    protected override void OnQualitySettingsApplied() =>
+        _logger.Safe(
             () =>
             {
                 switch (Quality)
@@ -164,15 +160,14 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
                 UpdatePaintQualitySettings();
                 InvalidateCachedResources();
 
-                Log(LogLevel.Debug, LOG_PREFIX,
+                _logger.Debug(LOG_PREFIX,
                     $"Quality settings applied. Quality: {Quality}, " +
                     $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}, " +
                     $"BatchedPoints: {_useBatchedPoints}");
             },
-            nameof(OnQualitySettingsApplied),
+            LOG_PREFIX,
             "Failed to apply quality settings"
         );
-    }
 
     private void LowQualitySettings()
     {
@@ -195,25 +190,24 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         _useBatchedPoints = HIGH_USE_BATCHED_POINTS;
     }
 
-    private void UpdatePaintQualitySettings()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_cellPaint != null)
-                    _cellPaint.IsAntialias = UseAntiAlias;
-
-                if (_borderPaint != null)
-                    _borderPaint.IsAntialias = UseAntiAlias;
-            },
-            nameof(UpdatePaintQualitySettings),
+    private void UpdatePaintQualitySettings() =>
+        _logger.Safe(
+            HandleUpdatePaintQualitySettings,
+            LOG_PREFIX,
             "Failed to update paint quality settings"
         );
+
+    private void HandleUpdatePaintQualitySettings()
+    {
+        if (_cellPaint != null)
+            _cellPaint.IsAntialias = UseAntiAlias;
+
+        if (_borderPaint != null)
+            _borderPaint.IsAntialias = UseAntiAlias;
     }
 
-    protected override void OnInvalidateCachedResources()
-    {
-        ExecuteSafely(
+    protected override void OnInvalidateCachedResources() =>
+        _logger.Safe(
             () =>
             {
                 base.OnInvalidateCachedResources();
@@ -221,12 +215,11 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
                 _lastWidth = 0;
                 _lastHeight = 0;
 
-                Log(LogLevel.Debug, LOG_PREFIX, "Cached resources invalidated");
+                _logger.Debug(LOG_PREFIX, "Cached resources invalidated");
             },
-            nameof(OnInvalidateCachedResources),
+            LOG_PREFIX,
             "Failed to invalidate cached resources"
         );
-    }
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -235,118 +228,120 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
-        ExecuteSafely(
+        SKPaint paint) =>
+        _logger.Safe(
             () =>
             {
                 UpdateState(spectrum, info);
                 RenderWithOverlay(canvas, () => RenderFrame(canvas, info, paint));
             },
-            nameof(RenderEffect),
+            LOG_PREFIX,
             "Error during rendering"
         );
-    }
 
-    private void UpdateState(float[] spectrum, SKImageInfo info)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                ProcessSpectrum(
-                    spectrum,
-                    Min(spectrum.Length, DEFAULT_POINT_COUNT));
-
-                UpdateVoronoiPoints(info.Width, info.Height);
-                UpdateGridIfNeeded(info.Width, info.Height);
-
-                if (Quality != RenderQuality.Low)
-                {
-                    PrecalculateNearestPoints();
-                }
-            },
-            nameof(UpdateState),
+    private void UpdateState(float[] spectrum, SKImageInfo info) =>
+        _logger.Safe(
+            () => HandleUpdateState(spectrum, info),
+            LOG_PREFIX,
             "Error updating state"
         );
+
+    private void HandleUpdateState(float[] spectrum, SKImageInfo info)
+    {
+        ProcessSpectrum(
+            spectrum,
+            Min(spectrum.Length, DEFAULT_POINT_COUNT));
+
+        UpdateVoronoiPoints(info.Width, info.Height);
+        UpdateGridIfNeeded(info.Width, info.Height);
+
+        if (Quality != RenderQuality.Low)
+        {
+            PrecalculateNearestPoints();
+        }
     }
 
-    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                RenderVoronoiDiagram(canvas, info, paint);
-            },
-            nameof(RenderFrame),
+    private void RenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint) =>
+        _logger.Safe(
+            () => HandleRenderFrame(canvas, info, paint),
+            LOG_PREFIX,
             "Error rendering frame"
         );
-    }
 
-    private void UpdateGridIfNeeded(float width, float height)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_lastWidth != width || _lastHeight != height)
-                {
-                    _gridCols = (int)Ceiling(width / GRID_CELL_SIZE);
-                    _gridRows = (int)Ceiling(height / GRID_CELL_SIZE);
-                    _nearestPointGrid = new int[_gridCols, _gridRows];
-                    _lastWidth = (int)width;
-                    _lastHeight = (int)height;
-                }
-            },
-            nameof(UpdateGridIfNeeded),
+    private void HandleRenderFrame(SKCanvas canvas, SKImageInfo info, SKPaint paint) => 
+        RenderVoronoiDiagram(canvas, info, paint);
+
+    private void UpdateGridIfNeeded(float width, float height) =>
+        _logger.Safe(
+            () => HandleUpdateGridIfNeeded(width, height),
+            LOG_PREFIX,
             "Failed to update grid"
         );
+
+    private void HandleUpdateGridIfNeeded(float width, float height)
+    {
+        if (_lastWidth != width || _lastHeight != height)
+        {
+            _gridCols = (int)Ceiling(width / GRID_CELL_SIZE);
+            _gridRows = (int)Ceiling(height / GRID_CELL_SIZE);
+            _nearestPointGrid = new int[_gridCols, _gridRows];
+            _lastWidth = (int)width;
+            _lastHeight = (int)height;
+        }
     }
 
     private void RenderVoronoiDiagram(
         SKCanvas canvas,
         SKImageInfo info,
-        SKPaint basePaint)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_voronoiPoints.Count == 0 || _cellPaint == null || _borderPaint == null)
-                    return;
-
-                _borderPaint.Color = basePaint.Color.WithAlpha(BORDER_ALPHA);
-
-                DrawVoronoiCells(canvas, info, basePaint);
-
-                if (Quality != RenderQuality.Low && UseAdvancedEffects)
-                {
-                    DrawVoronoiBorders(canvas, info);
-                }
-
-                DrawVoronoiPoints(canvas, basePaint);
-            },
-            nameof(RenderVoronoiDiagram),
+        SKPaint basePaint) =>
+        _logger.Safe(
+            () => HandleRenderVoronoiDiagram(canvas, info, basePaint),
+            LOG_PREFIX,
             "Error rendering Voronoi diagram"
         );
+
+    private void HandleRenderVoronoiDiagram(
+        SKCanvas canvas,
+        SKImageInfo info,
+        SKPaint basePaint)
+    {
+        if (_voronoiPoints.Count == 0 || _cellPaint == null || _borderPaint == null)
+            return;
+
+        _borderPaint.Color = basePaint.Color.WithAlpha(BORDER_ALPHA);
+
+        DrawVoronoiCells(canvas, info, basePaint);
+
+        if (Quality != RenderQuality.Low && UseAdvancedEffects)
+        {
+            DrawVoronoiBorders(canvas, info);
+        }
+
+        DrawVoronoiPoints(canvas, basePaint);
     }
 
     private void DrawVoronoiCells(
         SKCanvas canvas,
         SKImageInfo info,
-        SKPaint basePaint)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                for (int row = 0; row < _gridRows; row++)
-                {
-                    for (int col = 0; col < _gridCols; col++)
-                    {
-                        DrawSingleCell(canvas, info, basePaint, row, col);
-                    }
-                }
-            },
-            nameof(DrawVoronoiCells),
+        SKPaint basePaint) =>
+        _logger.Safe(
+            () => HandleDrawVoronoiCells(canvas, info, basePaint),
+            LOG_PREFIX,
             "Error drawing Voronoi cells"
         );
+
+    private void HandleDrawVoronoiCells(
+        SKCanvas canvas,
+        SKImageInfo info,
+        SKPaint basePaint)
+    {
+        for (int row = 0; row < _gridRows; row++)
+        {
+            for (int col = 0; col < _gridCols; col++)
+            {
+                DrawSingleCell(canvas, info, basePaint, row, col);
+            }
+        }
     }
 
     private void DrawSingleCell(
@@ -402,51 +397,51 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         canvas.DrawRect(x, y, width, height, _cellPaint!);
     }
 
-    private void DrawVoronoiBorders(SKCanvas canvas, SKImageInfo info)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                float maxDistance = Max(info.Width, info.Height) * MAX_DISTANCE_FACTOR;
-                using var path = new SKPath();
-
-                for (int i = 0; i < _voronoiPoints.Count; i++)
-                {
-                    DrawBordersForPoint(path, i, maxDistance);
-                }
-
-                canvas.DrawPath(path, _borderPaint!);
-            },
-            nameof(DrawVoronoiBorders),
+    private void DrawVoronoiBorders(SKCanvas canvas, SKImageInfo info) =>
+        _logger.Safe(
+            () => HandleDrawVoronoiBorders(canvas, info),
+            LOG_PREFIX,
             "Error drawing Voronoi borders"
         );
+
+    private void HandleDrawVoronoiBorders(SKCanvas canvas, SKImageInfo info)
+    {
+        float maxDistance = Max(info.Width, info.Height) * MAX_DISTANCE_FACTOR;
+        using var path = new SKPath();
+
+        for (int i = 0; i < _voronoiPoints.Count; i++)
+        {
+            DrawBordersForPoint(path, i, maxDistance);
+        }
+
+        canvas.DrawPath(path, _borderPaint!);
     }
 
-    private void DrawBordersForPoint(SKPath path, int pointIndex, float maxDistance)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                var p1 = _voronoiPoints[pointIndex];
-
-                for (int j = pointIndex + 1; j < _voronoiPoints.Count; j++)
-                {
-                    var p2 = _voronoiPoints[j];
-                    float distance = CalculateDistance(p1.X, p1.Y, p2.X, p2.Y);
-
-                    if (distance < maxDistance)
-                    {
-                        float midX = (p1.X + p2.X) / 2;
-                        float midY = (p1.Y + p2.Y) / 2;
-
-                        path.MoveTo(p1.X, p1.Y);
-                        path.LineTo(midX, midY);
-                    }
-                }
-            },
-            nameof(DrawBordersForPoint),
+    private void DrawBordersForPoint(SKPath path, int pointIndex, float maxDistance) =>
+        _logger.Safe(
+            () => HandleDrawBordersForPoint(path, pointIndex, maxDistance),
+            LOG_PREFIX,
             "Error drawing borders for point"
         );
+
+    private void HandleDrawBordersForPoint(SKPath path, int pointIndex, float maxDistance)
+    {
+        var p1 = _voronoiPoints[pointIndex];
+
+        for (int j = pointIndex + 1; j < _voronoiPoints.Count; j++)
+        {
+            var p2 = _voronoiPoints[j];
+            float distance = CalculateDistance(p1.X, p1.Y, p2.X, p2.Y);
+
+            if (distance < maxDistance)
+            {
+                float midX = (p1.X + p2.X) / 2;
+                float midY = (p1.Y + p2.Y) / 2;
+
+                path.MoveTo(p1.X, p1.Y);
+                path.LineTo(midX, midY);
+            }
+        }
     }
 
     private static float CalculateDistance(
@@ -460,75 +455,75 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         return Sqrt(dx * dx + dy * dy);
     }
 
-    private void DrawVoronoiPoints(SKCanvas canvas, SKPaint basePaint)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                _cellPaint!.Color = basePaint.Color.WithAlpha(200);
-
-                if (_useBatchedPoints && UseAdvancedEffects)
-                {
-                    DrawVoronoiPointsWithPath(canvas);
-                }
-                else
-                {
-                    DrawVoronoiPointsIndividually(canvas);
-                }
-            },
-            nameof(DrawVoronoiPoints),
+    private void DrawVoronoiPoints(SKCanvas canvas, SKPaint basePaint) =>
+        _logger.Safe(
+            () => HandleDrawVoronoiPoints(canvas, basePaint),
+            LOG_PREFIX,
             "Error drawing Voronoi points"
         );
+
+    private void HandleDrawVoronoiPoints(SKCanvas canvas, SKPaint basePaint)
+    {
+        _cellPaint!.Color = basePaint.Color.WithAlpha(200);
+
+        if (_useBatchedPoints && UseAdvancedEffects)
+        {
+            DrawVoronoiPointsWithPath(canvas);
+        }
+        else
+        {
+            DrawVoronoiPointsIndividually(canvas);
+        }
     }
 
-    private void DrawVoronoiPointsWithPath(SKCanvas canvas)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                using var pointsPath = new SKPath();
-
-                foreach (var point in _voronoiPoints)
-                {
-                    pointsPath.AddCircle(point.X, point.Y, point.Size);
-                }
-
-                canvas.DrawPath(pointsPath, _cellPaint!);
-            },
-            nameof(DrawVoronoiPointsWithPath),
+    private void DrawVoronoiPointsWithPath(SKCanvas canvas) =>
+        _logger.Safe(
+            () => HandleDrawVoronoiPointsWithPath(canvas),
+            LOG_PREFIX,
             "Error drawing points with path"
         );
+
+    private void HandleDrawVoronoiPointsWithPath(SKCanvas canvas)
+    {
+        using var pointsPath = new SKPath();
+
+        foreach (var point in _voronoiPoints)
+        {
+            pointsPath.AddCircle(point.X, point.Y, point.Size);
+        }
+
+        canvas.DrawPath(pointsPath, _cellPaint!);
     }
 
-    private void DrawVoronoiPointsIndividually(SKCanvas canvas)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                foreach (var point in _voronoiPoints)
-                {
-                    canvas.DrawCircle(point.X, point.Y, point.Size, _cellPaint!);
-                }
-            },
-            nameof(DrawVoronoiPointsIndividually),
+    private void DrawVoronoiPointsIndividually(SKCanvas canvas) =>
+        _logger.Safe(
+            () => HandleDrawVoronoiPointsIndividually(canvas),
+            LOG_PREFIX,
             "Error drawing individual points"
         );
+
+    private void HandleDrawVoronoiPointsIndividually(SKCanvas canvas)
+    {
+        foreach (var point in _voronoiPoints)
+        {
+            canvas.DrawCircle(point.X, point.Y, point.Size, _cellPaint!);
+        }
     }
 
-    private void ProcessSpectrum(float[] spectrum, int freqBands)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_voronoiPoints.Count == 0) return;
-
-                EnsureProcessedSpectrumSize(freqBands);
-                CalculateProcessedSpectrum(spectrum, freqBands);
-                UpdatePointsBasedOnSpectrum();
-            },
-            nameof(ProcessSpectrum),
+    private void ProcessSpectrum(float[] spectrum, int freqBands) =>
+        _logger.Safe(
+            () => HandleProcessSpectrum(spectrum, freqBands),
+            LOG_PREFIX,
             "Error processing spectrum"
         );
+
+    private void HandleProcessSpectrum(float[] spectrum, int freqBands)
+    {
+        if (_voronoiPoints.Count == 0) return;
+
+        EnsureProcessedSpectrumSize(freqBands);
+        CalculateProcessedSpectrum(spectrum, freqBands);
+        UpdatePointsBasedOnSpectrum();
     }
 
     private void EnsureProcessedSpectrumSize(int freqBands)
@@ -537,56 +532,56 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
             _processedSpectrum = new float[freqBands];
     }
 
-    private void CalculateProcessedSpectrum(float[] spectrum, int freqBands)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                float spectrumStep = spectrum.Length / (float)freqBands;
-
-                for (int i = 0; i < freqBands; i++)
-                {
-                    int startBin = (int)(i * spectrumStep);
-                    int endBin = Min((int)((i + 1) * spectrumStep), spectrum.Length);
-
-                    float sum = 0;
-                    for (int j = startBin; j < endBin; j++)
-                    {
-                        sum += spectrum[j];
-                    }
-
-                    float avg = sum / (endBin - startBin);
-                    _processedSpectrum![i] = Clamp(
-                        avg * SPECTRUM_AMPLIFICATION,
-                        0,
-                        1);
-                }
-            },
-            nameof(CalculateProcessedSpectrum),
+    private void CalculateProcessedSpectrum(float[] spectrum, int freqBands) =>
+        _logger.Safe(
+            () => HandleCalculateProcessedSpectrum(spectrum, freqBands),
+            LOG_PREFIX,
             "Error calculating processed spectrum"
         );
+
+    private void HandleCalculateProcessedSpectrum(float[] spectrum, int freqBands)
+    {
+        float spectrumStep = spectrum.Length / (float)freqBands;
+
+        for (int i = 0; i < freqBands; i++)
+        {
+            int startBin = (int)(i * spectrumStep);
+            int endBin = Min((int)((i + 1) * spectrumStep), spectrum.Length);
+
+            float sum = 0;
+            for (int j = startBin; j < endBin; j++)
+            {
+                sum += spectrum[j];
+            }
+
+            float avg = sum / (endBin - startBin);
+            _processedSpectrum![i] = Clamp(
+                avg * SPECTRUM_AMPLIFICATION,
+                0,
+                1);
+        }
     }
 
-    private void UpdatePointsBasedOnSpectrum()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                for (int i = 0; i < _voronoiPoints.Count; i++)
-                {
-                    var point = _voronoiPoints[i];
-                    int freqIndex = point.FrequencyIndex;
-
-                    if (freqIndex < _processedSpectrum!.Length)
-                    {
-                        UpdatePointProperties(ref point, freqIndex);
-                        _voronoiPoints[i] = point;
-                    }
-                }
-            },
-            nameof(UpdatePointsBasedOnSpectrum),
+    private void UpdatePointsBasedOnSpectrum() =>
+        _logger.Safe(
+            HandleUpdatePointsBasedOnSpectrum,
+            LOG_PREFIX,
             "Error updating points based on spectrum"
         );
+
+    private void HandleUpdatePointsBasedOnSpectrum()
+    {
+        for (int i = 0; i < _voronoiPoints.Count; i++)
+        {
+            var point = _voronoiPoints[i];
+            int freqIndex = point.FrequencyIndex;
+
+            if (freqIndex < _processedSpectrum!.Length)
+            {
+                UpdatePointProperties(ref point, freqIndex);
+                _voronoiPoints[i] = point;
+            }
+        }
     }
 
     private void UpdatePointProperties(ref VoronoiPoint point, int freqIndex)
@@ -600,21 +595,21 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         point.VelocityY *= 1 + intensity * VELOCITY_BOOST_FACTOR;
     }
 
-    private void InitializePoints(int count)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                _voronoiPoints.Clear();
-
-                for (int i = 0; i < count; i++)
-                {
-                    _voronoiPoints.Add(CreateVoronoiPoint(i));
-                }
-            },
-            nameof(InitializePoints),
+    private void InitializePoints(int count) =>
+        _logger.Safe(
+            () => HandleInitializePoints(count),
+            LOG_PREFIX,
             "Error initializing points"
         );
+
+    private void HandleInitializePoints(int count)
+    {
+        _voronoiPoints.Clear();
+
+        for (int i = 0; i < count; i++)
+        {
+            _voronoiPoints.Add(CreateVoronoiPoint(i));
+        }
     }
 
     private VoronoiPoint CreateVoronoiPoint(int index) =>
@@ -632,21 +627,21 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
             FrequencyIndex = index % DEFAULT_POINT_COUNT
         };
 
-    private void UpdateVoronoiPoints(float width, float height)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                _timeAccumulator += TIME_STEP;
-
-                for (int i = 0; i < _voronoiPoints.Count; i++)
-                {
-                    UpdateSinglePoint(i, width, height);
-                }
-            },
-            nameof(UpdateVoronoiPoints),
+    private void UpdateVoronoiPoints(float width, float height) =>
+        _logger.Safe(
+            () => HandleUpdateVoronoiPoints(width, height),
+            LOG_PREFIX,
             "Error updating Voronoi points"
         );
+
+    private void HandleUpdateVoronoiPoints(float width, float height)
+    {
+        _timeAccumulator += TIME_STEP;
+
+        for (int i = 0; i < _voronoiPoints.Count; i++)
+        {
+            UpdateSinglePoint(i, width, height);
+        }
     }
 
     private void UpdateSinglePoint(int index, float width, float height)
@@ -690,38 +685,38 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void PrecalculateNearestPoints()
-    {
-        ExecuteSafely(
-            () =>
-            {
-                if (_nearestPointGrid == null) return;
-
-                Parallel.For(0, _gridRows, row =>
-                {
-                    CalculateNearestPointsForRow(row);
-                });
-            },
-            nameof(PrecalculateNearestPoints),
+    private void PrecalculateNearestPoints() =>
+        _logger.Safe(
+            HandlePrecalculateNearestPoints,
+            LOG_PREFIX,
             "Error precalculating nearest points"
         );
+
+    private void HandlePrecalculateNearestPoints()
+    {
+        if (_nearestPointGrid == null) return;
+
+        Parallel.For(0, _gridRows, row =>
+        {
+            CalculateNearestPointsForRow(row);
+        });
     }
 
-    private void CalculateNearestPointsForRow(int row)
-    {
-        ExecuteSafely(
-            () =>
-            {
-                for (int col = 0; col < _gridCols; col++)
-                {
-                    float cellX = col * GRID_CELL_SIZE;
-                    float cellY = row * GRID_CELL_SIZE;
-                    _nearestPointGrid![col, row] = FindNearestPointIndex(cellX, cellY);
-                }
-            },
-            nameof(CalculateNearestPointsForRow),
+    private void CalculateNearestPointsForRow(int row) =>
+        _logger.Safe(
+            () => HandleCalculateNearestPointsForRow(row),
+            LOG_PREFIX,
             "Error calculating nearest points for row"
         );
+
+    private void HandleCalculateNearestPointsForRow(int row)
+    {
+        for (int col = 0; col < _gridCols; col++)
+        {
+            float cellX = col * GRID_CELL_SIZE;
+            float cellY = row * GRID_CELL_SIZE;
+            _nearestPointGrid![col, row] = FindNearestPointIndex(cellX, cellY);
+        }
     }
 
     private int FindNearestPointIndex(float x, float y)
@@ -758,9 +753,8 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
         return dx * dx + dy * dy;
     }
 
-    protected override void OnDispose()
-    {
-        ExecuteSafely(
+    protected override void OnDispose() =>
+        _logger.Safe(
             () =>
             {
                 _cellPaint?.Dispose();
@@ -772,10 +766,9 @@ public sealed class VoronoiRenderer : EffectSpectrumRenderer
                 _nearestPointGrid = null;
 
                 base.OnDispose();
-                Log(LogLevel.Debug, LOG_PREFIX, "Disposed");
+                _logger.Debug(LOG_PREFIX, "Disposed");
             },
-            nameof(OnDispose),
+            LOG_PREFIX,
             "Error during specific disposal"
         );
-    }
 }
