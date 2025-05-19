@@ -28,10 +28,18 @@ public sealed class SpectrumBrushes : IBrushProvider, IDisposable
         if (string.IsNullOrWhiteSpace(paletteName))
             throw new ArgumentException("Palette name cannot be empty", nameof(paletteName));
 
-        if (_palettes.TryGetValue(paletteName, out var palette))
-            return (palette.Color, palette.Brush);
-
-        throw new KeyNotFoundException($"Palette '{paletteName}' not registered");
+        if (!_palettes.TryGetValue(paletteName, out var palette))
+        {
+            var colorDefinitions = _colorDefinitionProvider.GetColorDefinitions();
+            if (colorDefinitions.TryGetValue(paletteName, out var color))
+            {
+                palette = new Palette(paletteName, color);
+                _palettes[paletteName] = palette;
+            }
+            else
+                throw new KeyNotFoundException($"Palette '{paletteName}' not registered");
+        }
+        return (palette.Color, palette.Brush);
     }
 
     public void Register(Palette palette)
@@ -50,9 +58,8 @@ public sealed class SpectrumBrushes : IBrushProvider, IDisposable
     {
         if (_disposed) return;
 
-        foreach (var palette in _palettes.Values)
-            palette.Dispose();
-
+        Parallel.ForEach(_palettes.Values,
+            palette => palette.Dispose());
         _palettes.Clear();
         _disposed = true;
     }

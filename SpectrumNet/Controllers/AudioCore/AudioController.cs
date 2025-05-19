@@ -7,9 +7,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
 {
     private const string LogPrefix = nameof(AudioController);
 
-    private const int
-        OPERATION_COOLDOWN_MS = 1000,
-        OPERATION_TIMEOUT_MS = 5000;
+    private const int OPERATION_COOLDOWN_MS = 1000;
 
     private readonly IMainController _mainController;
     private readonly GainParameters _gainParameters;
@@ -155,31 +153,24 @@ public class AudioController : AsyncDisposableBase, IAudioController
     {
         ThrowIfDisposed();
 
-        if (!await TryAcquireOperationLock())
-            return;
+        await _operationLock.WaitAsync();
 
         try
         {
-            if (ShouldSkipStartCapture())
+            if (IsRecording || IsOperationInCooldown())
+            {
+                _logger.Log(LogLevel.Debug,
+                    LogPrefix,
+                    "Start capture ignored");
                 return;
-
-            await ExecuteStartCapture();
+            }
         }
         finally
         {
             _operationLock.Release();
         }
-    }
 
-    private bool ShouldSkipStartCapture()
-    {
-        if (IsRecording || IsOperationInCooldown())
-        {
-            _logger.Log(LogLevel.Debug, LogPrefix,
-                $"Start capture ignored: Already recording: {IsRecording}, In cooldown: {IsOperationInCooldown()}");
-            return true;
-        }
-        return false;
+        await ExecuteStartCapture();
     }
 
     private async Task ExecuteStartCapture()
@@ -196,30 +187,29 @@ public class AudioController : AsyncDisposableBase, IAudioController
     {
         ThrowIfDisposed();
 
-        if (!await TryAcquireOperationLock())
-            return;
-
-        _lastOperationTime = DateTime.Now;
+        await _operationLock.WaitAsync();
 
         try
         {
             if (!IsRecording)
             {
-                _logger.Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
+                _logger.Log(LogLevel.Debug,
+                    LogPrefix,
+                    "Stop capture ignored: Not recording");
                 return;
             }
-
-            await ExecuteStopCapture();
         }
         finally
         {
             _operationLock.Release();
         }
+        await ExecuteStopCapture();
     }
 
     private async Task ExecuteStopCapture()
     {
         await _captureService.StopCaptureAsync();
+        _lastOperationTime = DateTime.Now;
         await Task.Delay(OPERATION_COOLDOWN_MS);
         NotifyCaptureStateChanged();
     }
@@ -246,24 +236,6 @@ public class AudioController : AsyncDisposableBase, IAudioController
 
     private bool IsOperationInCooldown() =>
         (DateTime.Now - _lastOperationTime).TotalMilliseconds < OPERATION_COOLDOWN_MS;
-
-    private async Task<bool> TryAcquireOperationLock()
-    {
-        try
-        {
-            if (!await _operationLock.WaitAsync(TimeSpan.FromMilliseconds(OPERATION_TIMEOUT_MS)))
-            {
-                _logger.Log(LogLevel.Warning, LogPrefix, "Cannot acquire operation lock: timeout");
-                return false;
-            }
-            return true;
-        }
-        catch
-        {
-            _logger.Log(LogLevel.Warning, LogPrefix, "Error acquiring operation lock");
-            return false;
-        }
-    }
 
     private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName) =>
         _logger.Safe(() => HandleUpdateGainParameter(newValue, setter, propertyName),

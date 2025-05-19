@@ -246,17 +246,28 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
 
     private async Task ProcessCoreAsync()
     {
-        await foreach (
-            var (fft, rate) in
-            _processingChannel.Reader
-                .ReadAllAsync(_cts.Token)
-        )
+        try
         {
-            if (_cts.IsCancellationRequested)
-                break;
+            await foreach (var (fft, rate) in _processingChannel.Reader.ReadAllAsync(_cts.Token))
+            {
+                if (_cts.IsCancellationRequested)
+                    break;
 
-            await HandleFftDataAsync(fft, rate)
-                .ConfigureAwait(false);
+                await HandleFftDataAsync(fft, rate).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.Log(LogLevel.Information,
+                LogPrefix,
+                "Processing loop cancelled normally");
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(LogLevel.Error,
+                LogPrefix,
+                $"Processing loop error: {ex.Message}");
         }
     }
 

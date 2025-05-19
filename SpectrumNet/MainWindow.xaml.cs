@@ -398,7 +398,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         {
             await Task.Run(() =>
             {
-                DoSafe(() => SettingsWindow.Instance.SaveSettings(),
+                Instance.Safe(() => SettingsWindow.Instance.SaveSettings(),
                     LogPrefix,
                     "Error saving settings");
             }, cts.Token);

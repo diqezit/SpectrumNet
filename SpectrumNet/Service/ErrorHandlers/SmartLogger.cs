@@ -19,7 +19,7 @@ public class SmartLogger : ISmartLogger
     // Инициализация логгера
     public static void Initialize()
     {
-        DoSafe(() =>
+        Instance.Safe(() =>
         {
             EnsureLogDirectoryExists();
             TryDeleteLatestLog();
@@ -91,29 +91,6 @@ public class SmartLogger : ISmartLogger
             return defaultValue;
         }
     }
-
-    #endregion
-
-    #region Static Methods (для обратной совместимости)
-
-    // Статические методы с именами, отличными от экземплярных методов
-    public static void LogMessage(LogLevel level, string source, string message) =>
-        Instance.Log(level, source, message);
-
-    public static void LogError(string source, string message) =>
-        Instance.Error(source, message);
-
-    public static void LogError(string source, string message, Exception ex) =>
-        Instance.Error(source, message, ex);
-
-    public static bool DoSafe(Action action, string source, string errorMessage) =>
-        Instance.Safe(action, source, errorMessage);
-
-    public static async Task<bool> DoSafeAsync(Func<Task> asyncAction, string source, string errorMessage) =>
-        await Instance.SafeAsync(asyncAction, source, errorMessage);
-
-    public static T DoSafeResult<T>(Func<T> func, T defaultValue, string source, string errorMessage) =>
-        Instance.SafeResult(func, defaultValue, source, errorMessage);
 
     #endregion
 

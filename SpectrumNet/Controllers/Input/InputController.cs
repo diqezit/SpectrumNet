@@ -111,10 +111,16 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
         subscriptions.Add(new EventSubscription(eventName, handler));
     }
 
-    private void UnsubscribeAllEvents(Window window) =>
-        _logger.Safe(() => HandleUnsubscribeAllEvents(window),
-            LogPrefix,
-            $"Error unsubscribing events for window {window.Name}");
+    private void UnsubscribeAllEvents(Window window)
+    {
+        _logger.Safe(() =>
+        {
+            window.Dispatcher.Invoke(() =>
+            {
+                HandleUnsubscribeAllEvents(window);
+            });
+        }, LogPrefix, $"Error unsubscribing events for window");
+    }
 
     private void HandleUnsubscribeAllEvents(Window window)
     {
@@ -124,7 +130,6 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
             {
                 UnsubscribeWindowEvent(window, subscription);
             }
-
             _eventSubscriptions.Remove(window);
         }
     }
