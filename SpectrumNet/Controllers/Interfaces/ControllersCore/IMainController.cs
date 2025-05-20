@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Controllers.Interfaces.ControllersCore;
+
 namespace SpectrumNet.Controllers.Interfaces.ControllersCore;
 
 public interface IMainController :

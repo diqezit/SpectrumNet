@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using SpectrumNet;
-
 namespace SpectrumNet.Controllers.Interfaces.SpectrumCore;
 
 /// <summary>

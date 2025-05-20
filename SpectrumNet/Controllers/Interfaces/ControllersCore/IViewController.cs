@@ -1,4 +1,5 @@
-﻿// IViewController.cs
+﻿#nullable enable
+
 namespace SpectrumNet.Controllers.Interfaces.ControllersCore;
 
 public interface IViewController
