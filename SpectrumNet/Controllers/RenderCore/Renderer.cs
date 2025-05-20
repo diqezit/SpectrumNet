@@ -14,7 +14,7 @@ public sealed class Renderer : AsyncDisposableBase
     private readonly IPlaceholderRenderer _placeholderRenderer;
     private readonly IRendererFactory _rendererFactory;
     private readonly IPerformanceMetricsManager _performanceMetricsManager;
-    private readonly FrameCache _frameCache = new();
+    private readonly IFrameCache _frameCache;
 
     private readonly SKElement? _skElement;
     private RenderStyle _currentStyle;
@@ -43,6 +43,7 @@ public sealed class Renderer : AsyncDisposableBase
         _dataProcessor = new SpectrumDataProcessor(controller);
         _performanceRenderer = new PerformanceRenderer(controller, _performanceMetricsManager);
         _placeholderRenderer = new PlaceholderRenderer(controller);
+        _frameCache = new FrameCache(_logger);
 
         var (_, brush) = _brushProvider.GetColorAndBrush(_styleName);
         _currentPaint = brush.Clone() ?? throw new InvalidOperationException($"Failed to initialize {_styleName} style");
@@ -72,7 +73,7 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error handling controller property changed");
     }
 
-    private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics) => 
+    private void OnPerformanceMetricsUpdated(object? sender, PerformanceMetrics metrics) =>
         _performanceRenderer.UpdateMetrics(metrics);
 
     public bool ShouldShowPlaceholder => _placeholderRenderer.ShouldShowPlaceholder;
@@ -237,15 +238,15 @@ public sealed class Renderer : AsyncDisposableBase
             }
 
             bool forceNewFrame = sender is SKElement sendingElement &&
-                                _skElement != null &&
-                                sendingElement != _skElement;
+                                 _skElement != null &&
+                                 sendingElement != _skElement;
 
             if (forceNewFrame || ShouldRenderNewFrame())
             {
                 if (forceNewFrame)
                     _frameCache.MarkDirty();
 
-                RenderNewFrame(sender, e);
+                RenderNewFrame(e);
             }
             else
             {
@@ -266,7 +267,7 @@ public sealed class Renderer : AsyncDisposableBase
         _frameCache.ShouldForceRefresh() ||
         _dataProcessor.RequiresRedraw();
 
-    private void RenderNewFrame(object? sender, SKPaintSurfaceEventArgs e)
+    private void RenderNewFrame(SKPaintSurfaceEventArgs e)
     {
         ClearCanvas(e.Surface.Canvas);
         bool renderSuccessful = false;
@@ -285,19 +286,16 @@ public sealed class Renderer : AsyncDisposableBase
         }
 
         if (renderSuccessful)
-            UpdateFrameCache(e);
+            _frameCache.Update(e.Surface, e.Info);
 
         RecordFrameMetrics();
     }
 
     private void RenderCachedFrame(SKPaintSurfaceEventArgs e) =>
-        _frameCache.DrawCachedFrame(e.Surface.Canvas);
+        _frameCache.Draw(e.Surface.Canvas);
 
     private static void ClearCanvas(SKCanvas canvas) =>
         canvas.Clear(SKColors.Transparent);
-
-    private void UpdateFrameCache(SKPaintSurfaceEventArgs e) =>
-        _frameCache.UpdateCache(e.Surface, e.Info);
 
     private void RecordFrameMetrics() =>
         _performanceMetricsManager.RecordFrameTime();
