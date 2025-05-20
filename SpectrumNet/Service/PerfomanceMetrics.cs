@@ -2,351 +2,175 @@
 
 namespace SpectrumNet.Service;
 
-public readonly record struct PerformanceMetrics(
-    double FrameTimeMs,
-    double Fps
-);
-
+public readonly record struct PerformanceMetrics(double FrameTimeMs, double Fps);
 public enum PerformanceLevel { Excellent, Good, Fair, Poor }
 
-public sealed class PerformanceMetricsManager : IPerformanceMetricsManager
+public sealed class PerformanceMetricsManager : IPerformanceMetricsManager, IDisposable
 {
-    private static readonly object _syncLock = new();
-    private static readonly int _processorCount = ProcessorCount > 0 ? ProcessorCount : 1;
+    private const int MaxFrames = 120;
+    private const double CpuSmoothFactor = 0.2,
+                         HighCpuPct = 80.0, MedCpuPct = 60.0,
+                         HighMemMb = 1000.0, MedMemMb = 500.0,
+                         MinDeltaFpsSec = 0.001, MinDeltaCpuSec = 0.01;
+    private const float DefaultFps = 60f, MinGoodFps = 50f, MinFairFps = 30f;
+    private static readonly TimeSpan UpdateInterval = TimeSpan.FromMilliseconds(250);
 
-    private const double
-        HIGH_CPU_THRESHOLD_PERCENT = 80.0,
-        MEDIUM_CPU_THRESHOLD_PERCENT = 60.0,
-        HIGH_MEMORY_THRESHOLD_MB = 1000.0,
-        MEDIUM_MEMORY_THRESHOLD_MB = 500.0,
-        MIN_TIME_DELTA_SECONDS_FOR_FPS = 0.001,
-        MIN_TIME_DELTA_SECONDS_FOR_CPU = 0.01,
-        CPU_USAGE_SMOOTHING_FACTOR = 0.2;
+    private static readonly Lazy<PerformanceMetricsManager> _lazy
+        = new(() => new PerformanceMetricsManager());
 
-    private const int
-        MAX_FRAMES_FOR_FPS_CALCULATION = 120;
-
-    private const float
-        DEFAULT_FPS = 60.0f,
-        MIN_GOOD_FPS = 50.0f,
-        MIN_FAIR_FPS = 30.0f;
-
-    private static readonly TimeSpan METRICS_UPDATE_INTERVAL = TimeSpan.FromMilliseconds(250);
-
-    private static readonly double[] _frameTimes = new double[MAX_FRAMES_FOR_FPS_CALCULATION];
-    private static readonly Stopwatch _timer = new();
-
-    private static TimeSpan _lastProcessCpuTime = TimeSpan.Zero;
-    private static double _lastWallClockTimeSeconds;
-
-    private static int _frameIndex;
-    private static float _currentFps = DEFAULT_FPS;
-    private static double _currentCpuUsagePercent;
-    private static double _currentRamUsageMb;
-    private static PerformanceLevel _currentPerformanceLevel = PerformanceLevel.Good;
-
-    private static bool _isInitialized;
-    private static CancellationTokenSource? _cancellationTokenSource;
-    private static Task? _updateTask;
-
-    private static readonly Lazy<PerformanceMetricsManager> _instance = 
-        new(() => new PerformanceMetricsManager());
-
-    public static PerformanceMetricsManager Instance => _instance.Value;
-
+    public static PerformanceMetricsManager Instance => _lazy.Value;
     public event EventHandler<PerformanceMetrics>? PerformanceMetricsUpdated;
     public event EventHandler<PerformanceLevel>? PerformanceLevelChanged;
 
-    public float GetCurrentFps() 
-    { 
-        lock (_syncLock) return _currentFps;
-    }
+    private readonly object _lock = new();
+    private readonly double[] _frameTimes = new double[MaxFrames];
+    private readonly Stopwatch _stopwatch = new();
+    private CancellationTokenSource? _cts;
+    private Task? _loop;
 
-    public double GetCurrentCpuUsagePercent()
-    {
-        lock (_syncLock) return _currentCpuUsagePercent;
-    }
+    private TimeSpan _lastProcCpuTime;
+    private double _lastWallTime;
+    private int _frameCount;
+    private float _fps = DefaultFps;
+    private double _cpuPct, _ramMb;
+    private PerformanceLevel _level = PerformanceLevel.Good;
 
-    public double GetCurrentRamUsageMb()
-    {
-        lock (_syncLock) return _currentRamUsageMb;
-    }
-
-    public PerformanceLevel GetCurrentPerformanceLevel()
-    {
-        lock (_syncLock) return _currentPerformanceLevel;
-    }
+    private PerformanceMetricsManager() { }
 
     public void Initialize()
     {
-        if (_isInitialized) return;
-
-        lock (_syncLock)
+        if (_cts != null) return;
+        lock (_lock)
         {
-            if (_isInitialized) return;
-
-            _timer.Start();
-            _lastWallClockTimeSeconds = _timer.Elapsed.TotalSeconds;
-
-            try
-            {
-                using var currentProcess = Process.GetCurrentProcess();
-                _lastProcessCpuTime = currentProcess.TotalProcessorTime;
-            }
-            catch (PlatformNotSupportedException)
-            {
-                _lastProcessCpuTime = TimeSpan.Zero;
-            }
-            catch (Exception)
-            {
-                _lastProcessCpuTime = TimeSpan.Zero;
-            }
-
-            AppDomain.CurrentDomain.ProcessExit += HandleApplicationExit;
-
-            _cancellationTokenSource = new CancellationTokenSource();
-            _updateTask = Task.Run(() => UpdateMetricsLoopAsync(_cancellationTokenSource.Token));
-
-            _isInitialized = true;
+            if (_cts != null) return;
+            _stopwatch.Start();
+            _lastWallTime = _stopwatch.Elapsed.TotalSeconds;
+            _lastProcCpuTime = TryGetProcess()?.TotalProcessorTime ?? TimeSpan.Zero;
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => Dispose();
+            _cts = new CancellationTokenSource();
+            _loop = Task.Run(() => LoopAsync(_cts.Token), _cts.Token);
         }
     }
 
     public void RecordFrameTime()
     {
-        if (!_isInitialized)
+        if (_cts == null) Initialize();
+        lock (_lock)
         {
-            Initialize();
-            if (!_isInitialized) return;
-        }
-
-        lock (_syncLock)
-        {
-            double currentTimeSeconds = _timer.Elapsed.TotalSeconds;
-            _frameTimes[_frameIndex % MAX_FRAMES_FOR_FPS_CALCULATION] = currentTimeSeconds;
-            _frameIndex++;
+            var t = _stopwatch.Elapsed.TotalSeconds;
+            _frameTimes[_frameCount % MaxFrames] = t;
+            _frameCount++;
         }
     }
 
-    public void Cleanup()
+    public float GetCurrentFps() => Safe(() => _fps);
+    public double GetCurrentCpuUsagePercent() => Safe(() => _cpuPct);
+    public double GetCurrentRamUsageMb() => Safe(() => _ramMb);
+    public PerformanceLevel GetCurrentPerformanceLevel() => Safe(() => _level);
+
+    public void Cleanup() => Dispose();
+
+    public void Dispose()
     {
-        lock (_syncLock)
+        lock (_lock)
         {
-            if (!_isInitialized) return;
-
-            if (_cancellationTokenSource != null)
-            {
-                _cancellationTokenSource.Cancel();
-                _cancellationTokenSource.Dispose();
-                _cancellationTokenSource = null;
-            }
-
-            if (_updateTask != null && !_updateTask.IsCompleted)
-            {
-                try
-                {
-                    _updateTask.Wait(TimeSpan.FromSeconds(1));
-                }
-                catch (AggregateException ae)
-                {
-                    ae.Handle(ex => ex is OperationCanceledException);
-                }
-                catch (OperationCanceledException)
-                {
-                }
-                catch (Exception)
-                {
-                }
-            }
-            _updateTask = null;
-
-            AppDomain.CurrentDomain.ProcessExit -= HandleApplicationExit;
-
-            _timer.Stop();
-
+            _cts?.Cancel();
+            try { _loop?.Wait(TimeSpan.FromSeconds(1)); } catch { }
+            _cts?.Dispose(); _cts = null;
+            AppDomain.CurrentDomain.ProcessExit -= (_, _) => Dispose();
+            _stopwatch.Stop();
             PerformanceMetricsUpdated = null;
             PerformanceLevelChanged = null;
-
-            _isInitialized = false;
         }
     }
 
-    private static void HandleApplicationExit(object? sender, EventArgs e) => Instance.Cleanup();
-
-    private static async Task UpdateMetricsLoopAsync(CancellationToken token)
+    private async Task LoopAsync(CancellationToken token)
     {
         while (!token.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(METRICS_UPDATE_INTERVAL, token);
-                ProcessAndNotifyMetrics();
+                await Task.Delay(UpdateInterval, token);
+                UpdateMetrics();
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(5), token);
-            }
+            catch (OperationCanceledException) { break; }
+            catch { await Task.Delay(TimeSpan.FromSeconds(5), token); }
         }
     }
 
-    private static void ProcessAndNotifyMetrics()
+    private void UpdateMetrics()
     {
         float fps;
-        double cpuUsagePercent;
-        double ramUsageMb;
+        double cpu, ram;
         PerformanceLevel newLevel;
 
-        lock (_syncLock)
+        lock (_lock)
         {
-            fps = CalculateFpsInternal();
-            cpuUsagePercent = CalculateCpuUsagePercentInternal();
-            ramUsageMb = CalculateCurrentRamUsageMbInternal();
+            fps = CalculateFps();
+            cpu = CalculateCpu();
+            ram = GetRamUsage();
+            newLevel = DetermineLevel(fps, cpu, ram);
 
-            _currentFps = fps;
-            _currentCpuUsagePercent = cpuUsagePercent;
-            _currentRamUsageMb = ramUsageMb;
-
-            newLevel = DeterminePerformanceLevelInternal(fps, cpuUsagePercent, ramUsageMb);
+            _fps = fps;
+            _cpuPct = cpu;
+            _ramMb = ram;
         }
 
-        NotifyPerformanceMetricsUpdated(fps);
-        NotifyPerformanceLevelChanged(newLevel);
-    }
-
-    private static void NotifyPerformanceMetricsUpdated(float fps)
-    {
-        double frameTimeMs = (fps > 0.001f) ? (1000.0 / fps) : 0.0;
-        Instance.PerformanceMetricsUpdated?.Invoke(null, new PerformanceMetrics(frameTimeMs, fps));
-    }
-
-    private static void NotifyPerformanceLevelChanged(PerformanceLevel newLevel)
-    {
-        bool levelActuallyChanged = false;
-
-        lock (_syncLock)
+        PerformanceMetricsUpdated?.Invoke(this, new PerformanceMetrics(fps > 0 ? 1000.0 / fps : 0, fps));
+        if (newLevel != _level)
         {
-            if (newLevel != _currentPerformanceLevel)
-            {
-                _currentPerformanceLevel = newLevel;
-                levelActuallyChanged = true;
-            }
-        }
-
-        if (levelActuallyChanged)
-        {
-            Instance.PerformanceLevelChanged?.Invoke(null, newLevel);
+            _level = newLevel;
+            PerformanceLevelChanged?.Invoke(this, newLevel);
         }
     }
 
-    private static float CalculateFpsInternal()
+    private T Safe<T>(Func<T> fn) { lock (_lock) return fn(); }
+
+    private float CalculateFps()
     {
-        int framesAvailable = _frameIndex;
-        int framesToConsider = Math.Min(framesAvailable, MAX_FRAMES_FOR_FPS_CALCULATION);
+        int count = Math.Min(_frameCount, MaxFrames);
+        if (count < 2) return _fps;
 
-        if (framesToConsider < 2)
-        {
-            return _currentFps;
-        }
-
-        int newestFrameBufferIndex = (framesAvailable - 1 + MAX_FRAMES_FOR_FPS_CALCULATION)
-            % MAX_FRAMES_FOR_FPS_CALCULATION;
-
-        int oldestFrameBufferIndex = (framesAvailable - framesToConsider + MAX_FRAMES_FOR_FPS_CALCULATION)
-            % MAX_FRAMES_FOR_FPS_CALCULATION;
-
-        double newestTime = _frameTimes[newestFrameBufferIndex];
-        double oldestTime = _frameTimes[oldestFrameBufferIndex];
-        double deltaTimeSeconds = newestTime - oldestTime;
-
-        if (deltaTimeSeconds <= MIN_TIME_DELTA_SECONDS_FOR_FPS)
-        {
-            return _currentFps;
-        }
-        return (float)((framesToConsider - 1) / deltaTimeSeconds);
+        int newest = (_frameCount - 1) % MaxFrames;
+        int oldest = (_frameCount - count) % MaxFrames;
+        double delta = _frameTimes[newest] - _frameTimes[oldest];
+        return delta <= MinDeltaFpsSec ? _fps : (float)((count - 1) / delta);
     }
 
-    private static double CalculateCpuUsagePercentInternal()
+    private double CalculateCpu()
     {
-        if (_lastProcessCpuTime == TimeSpan.Zero)
-        {
-            return _currentCpuUsagePercent;
-        }
-
-        try
-        {
-            using var currentProcess = Process.GetCurrentProcess();
-            TimeSpan currentProcessCpuTime = currentProcess.TotalProcessorTime;
-            double currentWallClockTimeSeconds = _timer.Elapsed.TotalSeconds;
-
-            double cpuTimeDeltaSeconds = (currentProcessCpuTime - _lastProcessCpuTime).TotalSeconds;
-            double wallClockDeltaSeconds = currentWallClockTimeSeconds - _lastWallClockTimeSeconds;
-
-            _lastProcessCpuTime = currentProcessCpuTime;
-            _lastWallClockTimeSeconds = currentWallClockTimeSeconds;
-
-            if (wallClockDeltaSeconds <= MIN_TIME_DELTA_SECONDS_FOR_CPU || _processorCount <= 0)
-            {
-                return _currentCpuUsagePercent;
-            }
-
-            double instantaneousUsage = (cpuTimeDeltaSeconds / wallClockDeltaSeconds) / _processorCount * 100.0;
-            double smoothedUsage = _currentCpuUsagePercent * (1.0 - CPU_USAGE_SMOOTHING_FACTOR) +
-                                   instantaneousUsage * CPU_USAGE_SMOOTHING_FACTOR;
-
-            return Math.Clamp(smoothedUsage, 0.0, 100.0);
-        }
-        catch (PlatformNotSupportedException)
-        {
-            _lastProcessCpuTime = TimeSpan.Zero;
-            return _currentCpuUsagePercent;
-        }
-        catch (InvalidOperationException)
-        {
-            _lastProcessCpuTime = TimeSpan.Zero;
-            return _currentCpuUsagePercent;
-        }
-        catch (Exception)
-        {
-            _lastProcessCpuTime = TimeSpan.Zero;
-            return _currentCpuUsagePercent;
-        }
+        if (_lastProcCpuTime == TimeSpan.Zero) return _cpuPct;
+        var proc = TryGetProcess();
+        var nowCpu = proc?.TotalProcessorTime ?? _lastProcCpuTime;
+        var nowWall = _stopwatch.Elapsed.TotalSeconds;
+        var cpuDelta = (nowCpu - _lastProcCpuTime).TotalSeconds;
+        var wallDelta = nowWall - _lastWallTime;
+        _lastProcCpuTime = nowCpu;
+        _lastWallTime = nowWall;
+        if (wallDelta <= MinDeltaCpuSec) return _cpuPct;
+        double inst = cpuDelta / wallDelta / Math.Max(Environment.ProcessorCount, 1) * 100;
+        return Math.Clamp(_cpuPct * (1 - CpuSmoothFactor) + inst * CpuSmoothFactor, 0, 100);
     }
 
-    private static double CalculateCurrentRamUsageMbInternal()
+    private double GetRamUsage()
     {
-        try
-        {
-            using var currentProcess = Process.GetCurrentProcess();
-            return currentProcess.WorkingSet64 / (1024.0 * 1024.0);
-        }
-        catch (Exception)
-        {
-            return _currentRamUsageMb;
-        }
+        try { return TryGetProcess()?.WorkingSet64 / 1024.0 / 1024.0 ?? _ramMb; }
+        catch { return _ramMb; }
     }
 
-    private static PerformanceLevel DeterminePerformanceLevelInternal(
-        float fps,
-        double cpuUsagePercent,
-        double ramUsageMb)
+    private static Process? TryGetProcess()
     {
-        bool isCpuHigh = cpuUsagePercent > HIGH_CPU_THRESHOLD_PERCENT;
-        bool isCpuMedium = !isCpuHigh && cpuUsagePercent > MEDIUM_CPU_THRESHOLD_PERCENT;
-        bool isMemoryHigh = ramUsageMb > HIGH_MEMORY_THRESHOLD_MB;
-        bool isMemoryMedium = !isMemoryHigh && ramUsageMb > MEDIUM_MEMORY_THRESHOLD_MB;
+        try { return Process.GetCurrentProcess(); }
+        catch { return null; }
+    }
 
-        if (fps >= MIN_GOOD_FPS && !isCpuHigh && !isCpuMedium && !isMemoryHigh && !isMemoryMedium)
-            return PerformanceLevel.Excellent;
-
-        if (fps >= MIN_GOOD_FPS && !isCpuHigh && !isMemoryHigh)
-            return PerformanceLevel.Good;
-
-        if (fps >= MIN_FAIR_FPS && !isCpuHigh)
-            return PerformanceLevel.Fair;
-
-        return PerformanceLevel.Poor;
+    private static PerformanceLevel DetermineLevel(float fps, double cpu, double ram)
+    {
+        bool hiCpu = cpu > HighCpuPct, medCpu = cpu > MedCpuPct && !hiCpu;
+        bool hiMem = ram > HighMemMb, medMem = ram > MedMemMb && !hiMem;
+        return fps >= MinGoodFps && !hiCpu && !medCpu && !hiMem && !medMem ? PerformanceLevel.Excellent
+             : fps >= MinGoodFps && !hiCpu && !hiMem ? PerformanceLevel.Good
+             : fps >= MinFairFps && !hiCpu ? PerformanceLevel.Fair
+             : PerformanceLevel.Poor;
     }
 }
