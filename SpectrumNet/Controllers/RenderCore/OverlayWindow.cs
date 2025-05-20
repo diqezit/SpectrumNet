@@ -22,6 +22,7 @@ public sealed class OverlayWindow : Window, IDisposable
     private readonly FpsLimiter _fpsLimiter = FpsLimiter.Instance;
     private readonly Stopwatch _frameTimeWatch = new();
     private readonly ITransparencyManager _transparencyManager;
+    private readonly IPerformanceMetricsManager _performanceMetricsManager = PerformanceMetricsManager.Instance;
 
     private int _consecutiveSkips;
     private nint _windowHandle;
@@ -455,8 +456,8 @@ public sealed class OverlayWindow : Window, IDisposable
             _renderContext.Value.Controller.OnPaintSurface(sender, args);
         }, LogPrefix, "Error rendering spectrum");
 
-    private static void RecordPerformanceMetrics() =>
-        PerformanceMetricsManager.RecordFrameTime();
+    private void RecordPerformanceMetrics() =>
+        _performanceMetricsManager.RecordFrameTime();
 
     public void Dispose() =>
         _logger.Safe(() => HandleDispose(), LogPrefix, "Error disposing overlay window");

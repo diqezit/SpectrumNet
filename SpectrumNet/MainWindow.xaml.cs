@@ -15,6 +15,7 @@ public partial class MainWindow : Window, IAsyncDisposable
     private readonly ISettings _settings;
     private readonly IThemes _themeManager;
     private readonly ISmartLogger _logger = Instance;
+    private readonly IPerformanceMetricsManager _performanceMetricsManager = PerformanceMetricsManager.Instance;
 
     private PropertyChangedEventHandler? _themePropertyChangedHandler;
 
@@ -126,7 +127,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         if (shouldRender)
         {
             _controller.RequestRender();
-            PerformanceMetricsManager.RecordFrameTime();
+            _performanceMetricsManager.RecordFrameTime();
         }
     }
 

@@ -22,6 +22,7 @@ public sealed class Renderer : AsyncDisposableBase
     private readonly FrameCache _frameCache = new();
     private readonly IRendererFactory _rendererFactory;
     private readonly ISmartLogger _logger = Instance;
+    private readonly IPerformanceMetricsManager _performanceMetricsManager;
 
     private readonly SKFont _performanceFont;
     private readonly SKPaint _performancePaint;
@@ -50,13 +51,15 @@ public sealed class Renderer : AsyncDisposableBase
         IMainController controller,
         SpectrumAnalyzer analyzer,
         SKElement element,
-        IRendererFactory rendererFactory)
+        IRendererFactory rendererFactory,
+        IPerformanceMetricsManager? performanceMetricsManager = null)
     {
         _spectrumStyles = styles ?? throw new ArgumentNullException(nameof(styles));
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
         _skElement = element ?? throw new ArgumentNullException(nameof(element));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _performanceMetricsManager = performanceMetricsManager ?? PerformanceMetricsManager.Instance;
 
         _performanceFont = new SKFont { Size = 12, Edging = SKFontEdging.SubpixelAntialias };
         _performancePaint = new SKPaint { IsAntialias = true };
@@ -335,8 +338,8 @@ public sealed class Renderer : AsyncDisposableBase
     private void UpdateFrameCache(SKPaintSurfaceEventArgs e) =>
         _frameCache.UpdateCache(e.Surface, e.Info);
 
-    private static void RecordFrameMetrics() =>
-        PerformanceMetricsManager.RecordFrameTime();
+    private void RecordFrameMetrics() =>
+        _performanceMetricsManager.RecordFrameTime();
 
     private void RenderFrameInternal(SKCanvas canvas, SKImageInfo info)
     {
@@ -643,7 +646,7 @@ public sealed class Renderer : AsyncDisposableBase
     private void SubscribeToEvents() =>
         _logger.Safe(() =>
         {
-            PerformanceMetricsManager.PerformanceMetricsUpdated += OnPerformanceMetricsUpdated;
+            _performanceMetricsManager.PerformanceMetricsUpdated += OnPerformanceMetricsUpdated;
             _controller.PropertyChanged += OnControllerPropertyChanged;
             if (_analyzer is IComponent comp)
                 comp.Disposed += OnAnalyzerDisposed;
@@ -797,7 +800,7 @@ public sealed class Renderer : AsyncDisposableBase
     private void UnsubscribeFromEvents() =>
         _logger.Safe(() =>
         {
-            PerformanceMetricsManager.PerformanceMetricsUpdated -= OnPerformanceMetricsUpdated;
+            _performanceMetricsManager.PerformanceMetricsUpdated -= OnPerformanceMetricsUpdated;
 
             if (_controller is INotifyPropertyChanged notifier)
                 notifier.PropertyChanged -= OnControllerPropertyChanged;
@@ -828,18 +831,63 @@ public sealed class Renderer : AsyncDisposableBase
     {
         if (!_controller.ShowPerformanceInfo || _isDisposed) return;
 
-        float fps = PerformanceMetricsManager.GetCurrentFps();
-        double cpu = PerformanceMetricsManager.GetCurrentCpuUsagePercent();
-        double ram = PerformanceMetricsManager.GetCurrentRamUsageMb();
-        PerformanceLevel level = PerformanceMetricsManager.GetCurrentPerformanceLevel();
+        (float fps, double cpu, double ram, PerformanceLevel level) = GetPerformanceMetrics();
+        string infoText = CreateInfoText(fps, cpu, ram, level);
+        SKRect backgroundRect = CalculateMetricsBackgroundRect(info, infoText);
 
-        _performancePaint.Color = GetPerformanceTextColor(level);
+        DrawMetricsBackground(canvas, backgroundRect);
+        DrawMetricsText(canvas, infoText, backgroundRect, level);
+    }
 
+    private (float fps, double cpu, double ram, PerformanceLevel level) GetPerformanceMetrics() => (
+        _performanceMetricsManager.GetCurrentFps(),
+        _performanceMetricsManager.GetCurrentCpuUsagePercent(),
+        _performanceMetricsManager.GetCurrentRamUsageMb(),
+        _performanceMetricsManager.GetCurrentPerformanceLevel()
+    );
+
+    private static string CreateInfoText(float fps, double cpu, double ram, PerformanceLevel level)
+    {
         string fpsLimiterInfo = FpsLimiter.Instance.IsEnabled ? " [60 FPS Lock]" : "";
-        string infoText = string.Create(CultureInfo.InvariantCulture,
+        return string.Create(CultureInfo.InvariantCulture,
             $"RAM: {ram:F1} MB | CPU: {cpu:F1}% | FPS: {fps:F0}{fpsLimiterInfo} | {level}");
+    }
 
-        canvas.DrawText(infoText, 10, info.Height - 10, _performanceFont, _performancePaint);
+    private SKRect CalculateMetricsBackgroundRect(SKImageInfo info, string infoText)
+    {
+        float textWidth = _performanceFont.MeasureText(infoText);
+        float textHeight = _performanceFont.Size;
+        float padding = 8f;
+
+        return new SKRect(
+            10f,
+            info.Height - textHeight - padding * 2 - 10f,
+            textWidth + padding * 2 + 10f,
+            info.Height - 10f
+        );
+    }
+
+    private static void DrawMetricsBackground(SKCanvas canvas, SKRect backgroundRect)
+    {
+        using var bgPaint = new SKPaint
+        {
+            Color = new SKColor(0, 0, 0, 180),
+            IsAntialias = true
+        };
+
+        float cornerRadius = 5f;
+        canvas.DrawRoundRect(backgroundRect, cornerRadius, cornerRadius, bgPaint);
+    }
+
+    private void DrawMetricsText(SKCanvas canvas,
+        string infoText,
+        SKRect backgroundRect,
+        PerformanceLevel level)
+    {
+        float padding = 8f;
+        _performancePaint.Color = GetPerformanceTextColor(level);
+        canvas.DrawText(infoText, backgroundRect.Left + padding, backgroundRect.Bottom - padding, _performanceFont,
+            _performancePaint);
     }
 
     private static SKColor GetPerformanceTextColor(PerformanceLevel level) =>

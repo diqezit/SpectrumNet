@@ -9,7 +9,7 @@ public readonly record struct PerformanceMetrics(
 
 public enum PerformanceLevel { Excellent, Good, Fair, Poor }
 
-public static class PerformanceMetricsManager
+public sealed class PerformanceMetricsManager : IPerformanceMetricsManager
 {
     private static readonly object _syncLock = new();
     private static readonly int _processorCount = ProcessorCount > 0 ? ProcessorCount : 1;
@@ -49,10 +49,35 @@ public static class PerformanceMetricsManager
     private static CancellationTokenSource? _cancellationTokenSource;
     private static Task? _updateTask;
 
-    public static event EventHandler<PerformanceMetrics>? PerformanceMetricsUpdated;
-    public static event EventHandler<PerformanceLevel>? PerformanceLevelChanged;
+    private static readonly Lazy<PerformanceMetricsManager> _instance = 
+        new(() => new PerformanceMetricsManager());
 
-    public static void Initialize()
+    public static PerformanceMetricsManager Instance => _instance.Value;
+
+    public event EventHandler<PerformanceMetrics>? PerformanceMetricsUpdated;
+    public event EventHandler<PerformanceLevel>? PerformanceLevelChanged;
+
+    public float GetCurrentFps() 
+    { 
+        lock (_syncLock) return _currentFps;
+    }
+
+    public double GetCurrentCpuUsagePercent()
+    {
+        lock (_syncLock) return _currentCpuUsagePercent;
+    }
+
+    public double GetCurrentRamUsageMb()
+    {
+        lock (_syncLock) return _currentRamUsageMb;
+    }
+
+    public PerformanceLevel GetCurrentPerformanceLevel()
+    {
+        lock (_syncLock) return _currentPerformanceLevel;
+    }
+
+    public void Initialize()
     {
         if (_isInitialized) return;
 
@@ -77,7 +102,6 @@ public static class PerformanceMetricsManager
                 _lastProcessCpuTime = TimeSpan.Zero;
             }
 
-
             AppDomain.CurrentDomain.ProcessExit += HandleApplicationExit;
 
             _cancellationTokenSource = new CancellationTokenSource();
@@ -87,7 +111,7 @@ public static class PerformanceMetricsManager
         }
     }
 
-    public static void RecordFrameTime()
+    public void RecordFrameTime()
     {
         if (!_isInitialized)
         {
@@ -103,7 +127,7 @@ public static class PerformanceMetricsManager
         }
     }
 
-    public static void Cleanup()
+    public void Cleanup()
     {
         lock (_syncLock)
         {
@@ -146,27 +170,7 @@ public static class PerformanceMetricsManager
         }
     }
 
-    public static float GetCurrentFps()
-    {
-        lock (_syncLock) return _currentFps;
-    }
-
-    public static double GetCurrentCpuUsagePercent()
-    {
-        lock (_syncLock) return _currentCpuUsagePercent;
-    }
-
-    public static double GetCurrentRamUsageMb()
-    {
-        lock (_syncLock) return _currentRamUsageMb;
-    }
-
-    public static PerformanceLevel GetCurrentPerformanceLevel()
-    {
-        lock (_syncLock) return _currentPerformanceLevel;
-    }
-
-    private static void HandleApplicationExit(object? sender, EventArgs e) => Cleanup();
+    private static void HandleApplicationExit(object? sender, EventArgs e) => Instance.Cleanup();
 
     private static async Task UpdateMetricsLoopAsync(CancellationToken token)
     {
@@ -215,7 +219,7 @@ public static class PerformanceMetricsManager
     private static void NotifyPerformanceMetricsUpdated(float fps)
     {
         double frameTimeMs = (fps > 0.001f) ? (1000.0 / fps) : 0.0;
-        PerformanceMetricsUpdated?.Invoke(null, new PerformanceMetrics(frameTimeMs, fps));
+        Instance.PerformanceMetricsUpdated?.Invoke(null, new PerformanceMetrics(frameTimeMs, fps));
     }
 
     private static void NotifyPerformanceLevelChanged(PerformanceLevel newLevel)
@@ -233,7 +237,7 @@ public static class PerformanceMetricsManager
 
         if (levelActuallyChanged)
         {
-            PerformanceLevelChanged?.Invoke(null, newLevel);
+            Instance.PerformanceLevelChanged?.Invoke(null, newLevel);
         }
     }
 
