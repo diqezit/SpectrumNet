@@ -66,7 +66,8 @@ public sealed class Renderer : AsyncDisposableBase
     }
 
     private void InitializeRenderer() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             InitializeRenderState();
             SubscribeToEvents();
             AttachUIElementEvents();
@@ -86,7 +87,8 @@ public sealed class Renderer : AsyncDisposableBase
     }
 
     public void RequestRender() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_isDisposed) return;
             SafeInvalidate();
         }, LogPrefix, "Error requesting render");
@@ -232,7 +234,8 @@ public sealed class Renderer : AsyncDisposableBase
     }
 
     public void HandlePlaceholderMouseDown(SKPoint point) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (ShouldShowPlaceholder && _placeholder != null)
             {
                 _placeholder.IsInteractive = true;
@@ -243,7 +246,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error handling placeholder mouse down");
 
     public void HandlePlaceholderMouseMove(SKPoint point) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (ShouldShowPlaceholder && _placeholder != null)
             {
                 _placeholder.OnMouseMove(point);
@@ -253,7 +257,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error handling placeholder mouse move");
 
     public void HandlePlaceholderMouseUp(SKPoint point) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (ShouldShowPlaceholder && _placeholder != null)
             {
                 _placeholder.OnMouseUp(point);
@@ -263,7 +268,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error handling placeholder mouse up");
 
     public void HandlePlaceholderMouseEnter() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (ShouldShowPlaceholder && _placeholder != null)
             {
                 _placeholder.OnMouseEnter();
@@ -273,7 +279,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error handling placeholder mouse enter");
 
     public void HandlePlaceholderMouseLeave() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (ShouldShowPlaceholder && _placeholder != null)
             {
                 _placeholder.OnMouseLeave();
@@ -514,7 +521,8 @@ public sealed class Renderer : AsyncDisposableBase
     }
 
     private void RenderPlaceholder(SKCanvas canvas, SKImageInfo info) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_isDisposed) return;
             UpdatePlaceholderSize(info);
             _placeholder.Render(canvas, info);
@@ -524,7 +532,8 @@ public sealed class Renderer : AsyncDisposableBase
         _placeholder.CanvasSize = new SKSize(info.Width, info.Height);
 
     private void HandleRenderFrameException(Exception ex, SKCanvas canvas, SKImageInfo info) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (ex is ObjectDisposedException)
                 HandleObjectDisposedException();
             else if (!_isDisposed)
@@ -591,14 +600,16 @@ public sealed class Renderer : AsyncDisposableBase
     }
 
     private void UpdateOverlayState() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _rendererFactory.ConfigureAllRenderers(_controller.IsOverlayActive);
             _frameCache.MarkDirty();
             RequestRender();
         }, LogPrefix, "Error updating overlay state");
 
     private void UpdateStyleFromController() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_isStyleUpdateInProgress) return;
             var (clr, br) = _spectrumStyles.GetColorAndBrush(_controller.SelectedStyle);
             UpdateSpectrumStyle(_controller.SelectedStyle, clr, br);
@@ -630,7 +641,8 @@ public sealed class Renderer : AsyncDisposableBase
         _skElement?.InvalidateVisual();
 
     private void SubscribeToEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             PerformanceMetricsManager.PerformanceMetricsUpdated += OnPerformanceMetricsUpdated;
             _controller.PropertyChanged += OnControllerPropertyChanged;
             if (_analyzer is IComponent comp)
@@ -638,7 +650,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error subscribing to events");
 
     private void AttachUIElementEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_skElement is null) return;
             _skElement.PaintSurface += RenderFrame;
             _skElement.Loaded += OnElementLoaded;
@@ -646,7 +659,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error attaching UI element events");
 
     private void DetachUIElementEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_skElement is null) return;
 
             _skElement.Dispatcher.Invoke(() =>
@@ -664,13 +678,15 @@ public sealed class Renderer : AsyncDisposableBase
         PerformanceUpdate?.Invoke(this, metrics);
 
     private void OnControllerPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (e?.PropertyName is null || _isDisposed) return;
             HandlePropertyChange(e.PropertyName);
         }, LogPrefix, "Error handling property change");
 
     private void OnElementLoaded(object? sender, RoutedEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_isDisposed) return;
             UpdateRenderDimensions((int)(_skElement?.ActualWidth ?? 0),
                                   (int)(_skElement?.ActualHeight ?? 0));
@@ -682,7 +698,8 @@ public sealed class Renderer : AsyncDisposableBase
     }
 
     private void HandlePropertyChange(string propertyName) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             switch (propertyName)
             {
                 case nameof(IMainController.LimitFpsTo60):
@@ -729,7 +746,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, $"Error handling property change: {propertyName}");
 
     private void HandleFpsLimitChange() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_controller is IMainController controller)
             {
                 FpsLimiter.Instance.IsEnabled = controller.LimitFpsTo60;
@@ -743,7 +761,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error handling FPS limit change");
 
     private void HandleParameterChange() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _frameCache.MarkDirty();
             RequestRender();
         }, LogPrefix, "Error handling parameter change");
@@ -760,13 +779,15 @@ public sealed class Renderer : AsyncDisposableBase
     }
 
     protected override ValueTask DisposeAsyncManagedResources() =>
-        _logger.SafeResult(() => {
+        _logger.SafeResult(() =>
+        {
             CleanUp("Renderer async disposed");
             return ValueTask.CompletedTask;
         }, ValueTask.CompletedTask, LogPrefix, "Error during async managed disposal");
 
     private void CleanUp(string message) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_isDisposed) return;
             _disposalTokenSource.Cancel();
             UnsubscribeFromEvents();
@@ -774,7 +795,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, $"Error during cleanup: {message}");
 
     private void UnsubscribeFromEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             PerformanceMetricsManager.PerformanceMetricsUpdated -= OnPerformanceMetricsUpdated;
 
             if (_controller is INotifyPropertyChanged notifier)
@@ -787,7 +809,8 @@ public sealed class Renderer : AsyncDisposableBase
         }, LogPrefix, "Error unsubscribing from events");
 
     private void DisposeResources() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _logger.Safe(() => _currentState?.Paint?.Dispose(), LogPrefix, "Error disposing paint");
             _logger.Safe(() => _placeholder?.Dispose(), LogPrefix, "Error disposing placeholder");
             _logger.Safe(() => _frameCache?.Dispose(), LogPrefix, "Error disposing frame cache");

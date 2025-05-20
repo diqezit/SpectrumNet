@@ -142,7 +142,7 @@ public partial class MainWindow : Window, IAsyncDisposable
             action();
     }
 
-    private void OnWindowDrag(object? sender, MouseButtonEventArgs e) => 
+    private void OnWindowDrag(object? sender, MouseButtonEventArgs e) =>
         _logger.Safe(() => HandleWindowDrag(sender, e), LogPrefix, "Error moving window");
 
     private void HandleWindowDrag(object? sender, MouseButtonEventArgs e)
@@ -164,7 +164,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e) => 
+    private void OnWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e) =>
         _logger.Safe(() => HandleWindowMouseDoubleClick(sender, e), LogPrefix, "Error handling double click");
 
     private void HandleWindowMouseDoubleClick(object? sender, MouseButtonEventArgs e)
@@ -203,7 +203,7 @@ public partial class MainWindow : Window, IAsyncDisposable
             WindowState = WindowState.Maximized;
     }
 
-    private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) => 
+    private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) =>
         _logger.Safe(() => HandleWindowSizeChanged(sender, e), LogPrefix, "Error updating dimensions");
 
     private void HandleWindowSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -220,7 +220,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private void OnStateChanged(object? sender, EventArgs e) => 
+    private void OnStateChanged(object? sender, EventArgs e) =>
         _logger.Safe(() => HandleStateChanged(sender, e), LogPrefix, "Error changing icon");
 
     private void HandleStateChanged(object? sender, EventArgs e)
@@ -235,7 +235,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         Settings.Instance.WindowState = WindowState;
     }
 
-    private void OnWindowLocationChanged(object? sender, EventArgs e) => 
+    private void OnWindowLocationChanged(object? sender, EventArgs e) =>
         _logger.Safe(() => HandleWindowLocationChanged(sender, e), LogPrefix, "Error updating window location");
 
     private void HandleWindowLocationChanged(object? sender, EventArgs e)
@@ -261,7 +261,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         return false;
     }
 
-    private void OnWindowClosed(object? sender, EventArgs e) => 
+    private void OnWindowClosed(object? sender, EventArgs e) =>
         _logger.Safe(() => HandleWindowClosed(sender, e), LogPrefix, "Error during window close");
 
     private void HandleWindowClosed(object? sender, EventArgs e)
@@ -455,7 +455,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         UpdateThemeToggleButtonState();
     }
 
-    private void OnThemePropertyChanged(object? sender, PropertyChangedEventArgs e) => 
+    private void OnThemePropertyChanged(object? sender, PropertyChangedEventArgs e) =>
         _logger.Safe(() => HandleThemePropertyChanged(sender, e), LogPrefix, "Error handling theme change");
 
     private void HandleThemePropertyChanged(object? sender, PropertyChangedEventArgs e)

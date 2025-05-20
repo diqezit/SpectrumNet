@@ -1,5 +1,5 @@
 ﻿// IUIController.cs
-namespace SpectrumNet.Controllers.Interfaces;
+namespace SpectrumNet.Controllers.Interfaces.ControllersCore;
 
 public interface IUIController
 {

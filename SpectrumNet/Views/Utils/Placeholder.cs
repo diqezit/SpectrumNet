@@ -1,5 +1,6 @@
 ﻿#nullable enable
 
+using SpectrumNet.Controllers.Interfaces.RenderCore;
 using static SpectrumNet.Views.Utils.RendererPlaceholder.Constants;
 
 namespace SpectrumNet.Views.Utils;

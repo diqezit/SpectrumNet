@@ -1,5 +1,6 @@
 ﻿#nullable enable
 
+using SpectrumNet.Controllers.Interfaces.FactoryCore;
 using static SpectrumNet.Views.Utils.RendererTransparencyManager.Constants;
 
 namespace SpectrumNet.Views.Utils;

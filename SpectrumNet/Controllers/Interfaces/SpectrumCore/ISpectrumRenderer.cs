@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.Controllers.Interfaces;
+using SpectrumNet;
+
+namespace SpectrumNet.Controllers.Interfaces.SpectrumCore;
 
 /// <summary>
 /// Interface for classes that perform spectrum rendering.

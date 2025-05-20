@@ -602,7 +602,8 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     }
 
     private void UnsubscribeFromEvents(CaptureState state) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (state.Capture != null)
             {
                 state.Capture.DataAvailable -= OnDataAvailable;
@@ -618,17 +619,20 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     }
 
     private void DisposeCapture(CaptureState state) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             state.Capture?.Dispose();
         }, LogPrefix, "Error disposing capture");
 
     private void DisposeCts(CaptureState state) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             state.CTS?.Dispose();
         }, LogPrefix, "Error disposing CTS");
 
     private void DisposeAnalyzer(CaptureState state) =>
-        _logger.Safe(async () => {
+        _logger.Safe(async () =>
+        {
             if (state.Analyzer is IAsyncDisposable asyncDisposable)
             {
                 var task = asyncDisposable.DisposeAsync();
@@ -641,7 +645,8 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         }, LogPrefix, "Error disposing analyzer");
 
     protected override void DisposeManaged() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             UnsubscribeDeviceManager();
             StopCapture();
             CleanupResources();
@@ -657,7 +662,8 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         _operationLock.Dispose();
 
     private void TryStopCaptureOnDispose() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (IsRecording)
             {
                 using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -669,14 +675,16 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         }, LogPrefix, "Error stopping capture during dispose");
 
     protected override async ValueTask DisposeAsyncManagedResources() =>
-        await _logger.SafeAsync(async () => {
+        await _logger.SafeAsync(async () =>
+        {
             UnsubscribeDeviceManager();
             await TryStopCaptureAsyncOnDispose();
             CleanupResources();
         }, LogPrefix, "Error during async managed disposal");
 
     private async Task TryStopCaptureAsyncOnDispose() =>
-        await _logger.SafeAsync(async () => {
+        await _logger.SafeAsync(async () =>
+        {
             if (IsRecording)
             {
                 using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));

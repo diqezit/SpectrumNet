@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Controllers.Interfaces.FactoryCore;
+
 namespace SpectrumNet;
 
 public partial class SettingsWindow : Window

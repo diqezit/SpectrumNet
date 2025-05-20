@@ -2,7 +2,7 @@
 
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
-namespace SpectrumNet.Controllers.Interfaces;
+namespace SpectrumNet.Controllers.Interfaces.InputCore;
 
 public interface IInputHandler
 {

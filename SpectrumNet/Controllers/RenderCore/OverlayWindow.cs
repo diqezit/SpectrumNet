@@ -85,15 +85,18 @@ public sealed class OverlayWindow : Window, IDisposable
     }
 
     private void OnTransparencyChanged(float level) =>
-        _logger.Safe(() => {
-            Dispatcher.Invoke(() => {
+        _logger.Safe(() =>
+        {
+            Dispatcher.Invoke(() =>
+            {
                 Opacity = level;
                 ForceRedraw();
             });
         }, LogPrefix, "Error handling transparency change");
 
     private void ConfigureRenderingOptions() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             SetHardwareAccelerationOptions();
             SetRenderQualityOptions();
         }, LogPrefix, "Error configuring rendering options");
@@ -113,14 +116,16 @@ public sealed class OverlayWindow : Window, IDisposable
     }
 
     private void InitializeOverlay(IMainController controller) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             ConfigureWindowProperties();
             CreateRenderContext(controller);
             SubscribeToEvents();
         }, LogPrefix, "Error initializing overlay");
 
     private void ConfigureWindowProperties() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             ConfigureWindowStyle();
             ConfigureWindowVisibility();
             ConfigureWindowInteraction();
@@ -147,7 +152,8 @@ public sealed class OverlayWindow : Window, IDisposable
     private void ConfigureWindowInteraction() => IsHitTestVisible = true;
 
     private void CreateRenderContext(IMainController controller) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             var skElement = CreateSkElement();
             var renderTimer = CreateRenderTimer();
             var rendererFactory = RendererFactory.Instance;
@@ -159,7 +165,8 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error creating render context");
 
     private SKElement CreateSkElement() =>
-        _logger.SafeResult(() => {
+        _logger.SafeResult(() =>
+        {
             var element = new SKElement
             {
                 VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
@@ -178,7 +185,8 @@ public sealed class OverlayWindow : Window, IDisposable
         }, new SKElement(), LogPrefix, "Error creating SK element");
 
     private void OptimizeElementForRender(FrameworkElement element) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             RenderOptions.SetCachingHint(element, CachingHint.Cache);
             element.CacheMode = new BitmapCache
             {
@@ -195,7 +203,8 @@ public sealed class OverlayWindow : Window, IDisposable
         };
 
     private void SubscribeToEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext is null) return;
 
             RegisterElementEvents();
@@ -203,14 +212,16 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error subscribing to events");
 
     private void RegisterElementEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext is null) return;
             _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
             _renderContext.Value.RenderTimer.Tick += RenderTimerTick;
         }, LogPrefix, "Error registering element events");
 
     private void RegisterWindowEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             Closing += OnClosing;
             SourceInitialized += OnSourceInitialized;
 
@@ -226,19 +237,22 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error registering window events");
 
     private void OnMouseMove(object sender, MouseEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _transparencyManager.OnMouseMove();
             e.Handled = true;
         }, LogPrefix, "Error handling mouse move");
 
     private void OnMouseEnter(object sender, MouseEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _transparencyManager.OnMouseEnter();
             e.Handled = true;
         }, LogPrefix, "Error handling mouse enter");
 
     private void OnMouseLeave(object sender, MouseEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _transparencyManager.OnMouseLeave();
             e.Handled = true;
         }, LogPrefix, "Error handling mouse leave");
@@ -246,7 +260,8 @@ public sealed class OverlayWindow : Window, IDisposable
     private void OnControllerPropertyChanged(
         object? sender,
         PropertyChangedEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (string.Equals(e.PropertyName, nameof(IMainController.LimitFpsTo60)))
             {
                 UpdateFpsLimit();
@@ -254,7 +269,8 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error handling controller property changed");
 
     private void UpdateFpsLimit() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _fpsLimiter.IsEnabled = _renderContext?.Controller.LimitFpsTo60 ?? false;
             _fpsLimiter.Reset();
             _consecutiveSkips = 0;
@@ -296,19 +312,22 @@ public sealed class OverlayWindow : Window, IDisposable
     }
 
     private void OnClosing(object? sender, CancelEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             StopRenderTimer();
             Dispose();
         }, LogPrefix, "Error handling window closing");
 
     private void StopRenderTimer() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext?.RenderTimer is { IsEnabled: true } timer)
                 timer.Stop();
         }, LogPrefix, "Error stopping render timer");
 
     private void OnSourceInitialized(object? sender, EventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             InitializeWindowHandle();
             ApplyWindowOptimizations();
             StartRenderTimer();
@@ -320,7 +339,8 @@ public sealed class OverlayWindow : Window, IDisposable
         _windowHandle = new WindowInteropHelper(this).Handle;
 
     private void ApplyWindowOptimizations() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_windowHandle == nint.Zero) return;
 
             ConfigureWindowStyleEx();
@@ -330,7 +350,8 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error applying window optimizations");
 
     private void ConfigureWindowStyleEx() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_windowHandle == nint.Zero) return;
 
             var extendedStyle = NativeMethods.GetWindowLong(_windowHandle, NativeMethods.GWL_EXSTYLE);
@@ -343,7 +364,8 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error configuring window style extended");
 
     private void StartRenderTimer() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext?.RenderTimer is { IsEnabled: false } timer)
                 timer.Start();
         }, LogPrefix, "Error starting render timer");
@@ -365,13 +387,15 @@ public sealed class OverlayWindow : Window, IDisposable
     }
 
     private void OnDpiChanged(object? sender, DpiChangedEventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             RefreshElementCacheForDpi();
             ForceRedraw();
         }, LogPrefix, "Error handling DPI changed");
 
     private void RefreshElementCacheForDpi() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext?.SkElement is not { } element) return;
 
             element.CacheMode = null;
@@ -405,13 +429,15 @@ public sealed class OverlayWindow : Window, IDisposable
     }
 
     private void HandlePaintSurface(object? sender, SKPaintSurfaceEventArgs args) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_isDisposed || _renderContext is null) return;
             PerformRender(sender, args);
         }, LogPrefix, "Error during paint surface handling");
 
     private void PerformRender(object? sender, SKPaintSurfaceEventArgs args) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _frameTimeWatch.Restart();
 
             ClearCanvas(args.Surface.Canvas);
@@ -425,7 +451,8 @@ public sealed class OverlayWindow : Window, IDisposable
         canvas.Clear(SKColors.Transparent);
 
     private void RenderSpectrum(object? sender, SKPaintSurfaceEventArgs args) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext is null || args is null) return;
             _renderContext.Value.Controller.OnPaintSurface(sender, args);
         }, LogPrefix, "Error rendering spectrum");
@@ -448,14 +475,16 @@ public sealed class OverlayWindow : Window, IDisposable
     }
 
     private void UnsubscribeFromEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             UnregisterElementEvents();
             UnregisterWindowEvents();
             UnregisterControllerEvents();
         }, LogPrefix, "Error unsubscribing from events");
 
     private void UnregisterElementEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext is null) return;
 
             var element = _renderContext.Value.SkElement;
@@ -470,7 +499,8 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error unregistering element events");
 
     private void UnregisterWindowEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             Closing -= OnClosing;
             SourceInitialized -= OnSourceInitialized;
 
@@ -486,13 +516,15 @@ public sealed class OverlayWindow : Window, IDisposable
         }, LogPrefix, "Error unregistering window events");
 
     private void UnregisterControllerEvents() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_renderContext?.Controller is INotifyPropertyChanged controller)
                 controller.PropertyChanged -= OnControllerPropertyChanged;
         }, LogPrefix, "Error unregistering controller events");
 
     private void DisposeResources() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _disposalTokenSource.Cancel();
             _disposalTokenSource.Dispose();
             _renderContext = null;

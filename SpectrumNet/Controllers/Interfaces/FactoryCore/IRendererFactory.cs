@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.Controllers.Interfaces;
+namespace SpectrumNet.Controllers.Interfaces.FactoryCore;
 
 public interface IRendererFactory
 {

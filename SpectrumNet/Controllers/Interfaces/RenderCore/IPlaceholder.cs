@@ -1,8 +1,6 @@
 ﻿#nullable enable
 
-using SpectrumNet;
-
-namespace SpectrumNet.Controllers.Interfaces;
+namespace SpectrumNet.Controllers.Interfaces.RenderCore;
 
 public interface IPlaceholder : IDisposable
 {

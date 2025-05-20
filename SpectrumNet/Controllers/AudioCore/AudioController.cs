@@ -308,7 +308,8 @@ public class AudioController : AsyncDisposableBase, IAudioController
     }
 
     private void DisposeCaptureServiceInternalSync() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_captureService is IDisposable disposable)
             {
                 _captureService.StopCaptureAsync().GetAwaiter().GetResult();
@@ -328,7 +329,8 @@ public class AudioController : AsyncDisposableBase, IAudioController
     }
 
     private async Task DisposeCaptureServiceInternalAsync() =>
-        await _logger.SafeAsync(async () => {
+        await _logger.SafeAsync(async () =>
+        {
             await _captureService.StopCaptureAsync();
             await _captureService.DisposeAsync();
         }, LogPrefix, "Error during asynchronous capture service disposal");

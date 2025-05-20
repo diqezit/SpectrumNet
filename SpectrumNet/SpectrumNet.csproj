@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
@@ -63,6 +63,9 @@
 	<!-- XAML markup -->
 	<ItemGroup>
 		<Page Include="App.xaml" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Controllers\Interfaces\UICore\" />
 	</ItemGroup>
 
 	<!-- Remove unnecessary runtime folders after build -->

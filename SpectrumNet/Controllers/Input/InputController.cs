@@ -154,7 +154,8 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
     }
 
     private void OnWindowClosed(object? sender, EventArgs e) =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (sender is Window window)
                 UnregisterWindow(window);
         }, LogPrefix, "Error handling window closed event");
@@ -179,7 +180,8 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
     ];
 
     private void UnregisterAllWindows() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             foreach (var window in _registeredWindows.ToList())
             {
                 UnregisterWindow(window);

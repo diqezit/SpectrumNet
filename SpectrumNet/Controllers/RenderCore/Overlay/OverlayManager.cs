@@ -4,7 +4,7 @@ namespace SpectrumNet.Controllers.RenderCore.Overlay;
 
 public sealed class OverlayManager(
     IMainController mainController,
-    ITransparencyManager transparencyManager) 
+    ITransparencyManager transparencyManager)
     : AsyncDisposableBase, IOverlayManager
 {
     private const string LogPrefix = nameof(OverlayManager);
@@ -65,7 +65,8 @@ public sealed class OverlayManager(
             return;
         }
 
-        await Task.Run(() => {
+        await Task.Run(() =>
+        {
             InitializeOverlayWindow();
         });
     }
@@ -154,7 +155,8 @@ public sealed class OverlayManager(
     }
 
     private void CreateOverlayWindow() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _overlayWindow = new OverlayWindow(_mainController, _configuration)
                 ?? throw new InvalidOperationException("Failed to create overlay window");
         }, LogPrefix, "Error creating overlay window");
@@ -209,13 +211,15 @@ public sealed class OverlayManager(
     }
 
     private void DisposeOverlayWindow() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             if (_overlayWindow is IDisposable disposable)
                 disposable.Dispose();
         }, LogPrefix, "Error disposing overlay window");
 
     private void ClearOverlayState() =>
-        _logger.Safe(() => {
+        _logger.Safe(() =>
+        {
             _overlayWindow = null;
             _isActive = false;
             _mainController.OnPropertyChanged(nameof(IMainController.IsOverlayActive));
