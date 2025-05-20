@@ -16,6 +16,7 @@ public sealed class SpectrumConverter : ISpectrumConverter
     public SpectrumConverter(IGainParametersProvider parameters)
     {
         _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
+        _parallelOpts = new() { MaxDegreeOfParallelism = ProcessorCount };
     }
 
     public float[] ConvertToSpectrum(
@@ -23,8 +24,7 @@ public sealed class SpectrumConverter : ISpectrumConverter
         int sampleRate,
         SpectrumScale scale,
         CancellationToken cancellationToken = default) =>
-        _logger.SafeResult(() => HandleConvertToSpectrum(fft, sampleRate, scale, cancellationToken),
-            Array.Empty<float>(),
+        _logger.SafeResult(() => HandleConvertToSpectrum(fft, sampleRate, scale, cancellationToken), [],
             LogPrefix,
             "Error converting to spectrum");
 

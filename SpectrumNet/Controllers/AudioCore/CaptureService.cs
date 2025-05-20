@@ -182,7 +182,17 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private SpectrumAnalyzer InitializeAnalyzer() =>
         _controller.Dispatcher.Invoke(() =>
         {
-            var analyzer = CreateAnalyzer();
+            var fftProcessor = new FftProcessor { WindowType = _controller.WindowType };
+            var spectrumConverter = new SpectrumConverter(SettingsProvider.Instance.GainParameters);
+
+            var analyzer = new SpectrumAnalyzer(
+                fftProcessor,
+                spectrumConverter,
+                SynchronizationContext.Current
+            );
+
+            analyzer.ScaleType = _controller.ScaleType;
+            analyzer.UpdateSettings(_controller.WindowType, _controller.ScaleType);
 
             if (_controller.SpectrumCanvas is SkiaSharp.Views.WPF.SKElement canvas &&
                 canvas.ActualWidth > 0 && canvas.ActualHeight > 0)

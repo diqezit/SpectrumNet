@@ -1,5 +1,4 @@
-﻿// Controllers/AudioCore/AudioController.cs
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet.Controllers.AudioCore;
 
@@ -30,13 +29,16 @@ public class AudioController : AsyncDisposableBase, IAudioController
         _mainController.PropertyChanged += OnMainControllerPropertyChanged;
     }
 
-    private static GainParameters CreateGainParameters(SynchronizationContext syncContext) =>
-        new GainParameters(
+    private static GainParameters CreateGainParameters(SynchronizationContext syncContext)
+    {
+        var gainProvider = SettingsProvider.Instance.GainParameters;
+        return new GainParameters(
             syncContext,
-            Settings.Instance.UIMinDbLevel,
-            Settings.Instance.UIMaxDbLevel,
-            Settings.Instance.UIAmplificationFactor
-        ) ?? throw new InvalidOperationException("Failed to create gain parameters");
+            gainProvider.MinDbValue,
+            gainProvider.MaxDbValue,
+            gainProvider.AmplificationFactor
+        );
+    }
 
     private static ICaptureService CreateCaptureService(IMainController controller)
     {

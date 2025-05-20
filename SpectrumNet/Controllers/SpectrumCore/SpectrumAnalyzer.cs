@@ -78,11 +78,11 @@ public sealed class SpectrumAnalyzer : AsyncDisposableBase,
 
     private void HandleUpdateSettings(FftWindowType windowType, SpectrumScale scaleType)
     {
-        bool changed = UpdateWindow(windowType) | UpdateScaleType(scaleType);
-        if (changed)
-        {
+        bool windowChanged = UpdateWindow(windowType);
+        bool scaleChanged = UpdateScaleType(scaleType);
+
+        if (windowChanged || scaleChanged)
             ReprocessLastData();
-        }
     }
 
     public void ReprocessLastData() =>
