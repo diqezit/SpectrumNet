@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using MouseEventArgs = System.Windows.Input.MouseEventArgs;
-
 namespace SpectrumNet.Controllers;
 
 public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory, IMainController
@@ -17,6 +15,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
     private readonly IRendererFactory _rendererFactory;
     private readonly ITransparencyManager _transparencyManager;
     private readonly IFpsLimiter _fpsLimiter;
+    private readonly IBatchOperationsManager _batchOperationsManager;
+    private readonly IResourceCleanupManager _cleanupManager;
 
     private readonly CancellationTokenSource _cleanupCts = new();
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
@@ -26,10 +26,6 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
     private readonly SKElement _renderElement;
     private bool _isTransitioning;
     private bool _isRecording;
-
-    private readonly ConcurrentQueue<Action> _pendingUIOperations = new();
-    private DispatcherTimer? _batchUpdateTimer;
-    private const int BATCH_UPDATE_INTERVAL_MS = 8;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -44,6 +40,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             throw new InvalidOperationException
                 ("No synchronization context. Controller must be created in UI thread.");
         }
+
+        _batchOperationsManager = new BatchOperationsManager();
+        _cleanupManager = new ResourceCleanupManager();
 
         _fpsLimiter = new FpsLimiterManager(Settings.Instance);
         _fpsLimiter.LimitChanged += OnFpsLimitChanged;
@@ -60,7 +59,6 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         ownerWindow.Closed += (_, _) => DisposeResources();
         ownerWindow.KeyDown += OnWindowKeyDown;
 
-        StartBatchUpdate();
         Initialize();
     }
 
@@ -72,46 +70,12 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             RequestRender();
     }
 
-    private void StartBatchUpdate()
-    {
-        _batchUpdateTimer = new DispatcherTimer(DispatcherPriority.Render)
-        {
-            Interval = FromMilliseconds(BATCH_UPDATE_INTERVAL_MS)
-        };
-        _batchUpdateTimer.Tick += ProcessBatchedUIOperations;
-        _batchUpdateTimer.Start();
-    }
-
-    private void ProcessBatchedUIOperations(object? sender, EventArgs e)
-    {
-        if (_isDisposed) return;
-
-        int processedCount = 0;
-        const int MAX_OPERATIONS_PER_FRAME = 10;
-
-        while (processedCount < MAX_OPERATIONS_PER_FRAME &&
-               _pendingUIOperations.TryDequeue(out var operation))
-        {
-            try
-            {
-                operation();
-            }
-            catch (Exception ex)
-            {
-                _logger.Log(LogLevel.Error,
-                    LogPrefix,
-                    $"Error in UI operation: {ex.Message}");
-            }
-            processedCount++;
-        }
-    }
-
     public void Initialize()
     {
         InitializeRenderingState();
     }
 
-    private void OnWindowKeyDown(object sender, KeyEventArgs e)
+    private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (_isDisposed) return;
 
@@ -153,12 +117,15 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         RequestRender();
     }
 
+    #region IControllerFactory Implementation
     public IUIController UIController => _uiController;
     public IAudioController AudioController => _audioController;
     public IViewController ViewController => _viewController;
     public IInputController InputController => _inputController;
     public IOverlayManager OverlayManager => _overlayManager;
+    #endregion
 
+    #region IMainController Properties
     public Dispatcher Dispatcher => Application.Current?.Dispatcher ??
         throw new InvalidOperationException("Application.Current is null");
 
@@ -249,7 +216,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             _audioController.AmplificationFactor = value;
         }
     }
+    #endregion
 
+    #region Audio Management Methods
     public async Task StartCaptureAsync()
     {
         if (_isDisposed) return;
@@ -270,7 +239,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
 
     public SpectrumAnalyzer? GetCurrentAnalyzer() =>
         _isDisposed ? null : _audioController.GetCurrentAnalyzer();
+    #endregion
 
+    #region View Controller Properties
     public SKElement SpectrumCanvas => _renderElement;
 
     public SpectrumBrushes SpectrumStyles => SpectrumBrushes.Instance;
@@ -373,7 +344,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         get => _viewController.Analyzer;
         set => _viewController.Analyzer = value;
     }
+    #endregion
 
+    #region View Controller Methods
     public void RequestRender()
     {
         if (_isDisposed) return;
@@ -397,7 +370,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         if (_isDisposed || e == null) return;
         _viewController.OnPaintSurface(sender, e);
     }
+    #endregion
 
+    #region UI Controller Properties and Methods
     public bool IsOverlayActive
     {
         get => _overlayManager.IsActive;
@@ -472,7 +447,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         if (_isDisposed) return;
         _ = _overlayManager.CloseAsync();
     }
+    #endregion
 
+    #region Input Controller Methods
     public void RegisterWindow(Window window)
     {
         if (_isDisposed) return;
@@ -538,18 +515,29 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         if (_isDisposed) return false;
         return _inputController.HandleButtonClick(sender, e);
     }
+    #endregion
 
     public void OnPropertyChanged(params string[] propertyNames)
     {
         if (_isDisposed) return;
 
-        _pendingUIOperations.Enqueue(() =>
+        if (_batchOperationsManager != null)
         {
-            if (_isDisposed) return;
+            _batchOperationsManager.ExecuteOrEnqueue(() =>
+            {
+                if (_isDisposed) return;
 
+                foreach (var name in propertyNames)
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            });
+        }
+        else
+        {
+            // Запасной вариант, если _batchOperationsManager == null
+            if (_isDisposed) return;
             foreach (var name in propertyNames)
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-        });
+        }
     }
 
     public void DisposeResources()
@@ -567,21 +555,16 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
             LogPrefix,
             "Starting synchronous dispose");
 
-        SafeExecuteDisposeAction(CleanupInitiation, "CleanupInitiation");
-        SafeExecuteDisposeAction(StopCaptureIfNeeded, "StopCaptureIfNeeded");
-        SafeExecuteDisposeAction(CloseUIElementsIfNeeded, "CloseUIElementsIfNeeded");
-        SafeExecuteDisposeAction(DisposeAllControllers, "DisposeAllControllers");
-        SafeExecuteDisposeAction(DisposeResourceObjects, "DisposeResourceObjects");
+        _cleanupManager.SafeExecuteAction(CleanupInitiation, "CleanupInitiation");
+        _cleanupManager.SafeExecuteAction(StopCaptureIfNeeded, "StopCaptureIfNeeded");
+        _cleanupManager.SafeExecuteAction(CloseUIElementsIfNeeded, "CloseUIElementsIfNeeded");
+        _cleanupManager.SafeExecuteAction(DisposeAllControllers, "DisposeAllControllers");
+        _cleanupManager.SafeExecuteAction(DisposeResourceObjects, "DisposeResourceObjects");
 
         _logger.Log(LogLevel.Information,
             LogPrefix,
             "Synchronous dispose completed");
     }
-
-    private void SafeExecuteDisposeAction(Action action, string actionName) =>
-        _logger.Safe(() => action(),
-            LogPrefix,
-            $"Error during {actionName}");
 
     private void CleanupInitiation()
     {
@@ -590,25 +573,8 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
 
         _cleanupCts.Cancel();
 
-        if (_batchUpdateTimer != null)
-        {
-            _batchUpdateTimer.Stop();
-            _batchUpdateTimer = null;
-        }
-
-        while (_pendingUIOperations.TryDequeue(out var operation))
-        {
-            try
-            {
-                operation();
-            }
-            catch (Exception ex)
-            {
-                _logger.Log(LogLevel.Error,
-                    LogPrefix,
-                    $"Error handling operation during dispose: {ex.Message}");
-            }
-        }
+        if (_batchOperationsManager is IDisposable disposableBatch)
+            disposableBatch.Dispose();
     }
 
     private void StopCaptureIfNeeded()
@@ -648,31 +614,20 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
     private void DisposeAllControllers()
     {
         if (_overlayManager is IDisposable overlayManager)
-            DisposeController(overlayManager, "OverlayManager");
+            _cleanupManager.DisposeController(overlayManager, "OverlayManager");
 
         if (_viewController is IDisposable viewController)
-            DisposeController(viewController, "ViewController");
+            _cleanupManager.DisposeController(viewController, "ViewController");
 
         if (_audioController is IDisposable audioController)
-            DisposeController(audioController, "AudioController");
+            _cleanupManager.DisposeController(audioController, "AudioController");
 
         if (_uiController is IDisposable uiController)
-            DisposeController(uiController, "UIController");
+            _cleanupManager.DisposeController(uiController, "UIController");
 
         if (_inputController is IDisposable inputController)
-            DisposeController(inputController, "InputController");
+            _cleanupManager.DisposeController(inputController, "InputController");
     }
-
-    private void DisposeController<T>(
-        T controller,
-        string controllerName) where T : class =>
-        _logger.Safe(() =>
-        {
-            if (controller is IDisposable disposable)
-                disposable.Dispose();
-        },
-        LogPrefix,
-        $"Error disposing {controllerName}");
 
     private void DisposeResourceObjects() =>
         _logger.Safe(() =>
@@ -713,107 +668,49 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
 
     private async Task PerformAsyncCleanup(CancellationToken token)
     {
-        await DetachEventHandlersAsync(token);
+        await _cleanupManager.DetachEventHandlersAsync(
+            _ownerWindow,
+            new KeyEventHandler(OnWindowKeyDown),
+            token);
+
         _cleanupCts.Cancel();
 
-        if (_batchUpdateTimer != null)
-        {
-            await Dispatcher.InvokeAsync(() => _batchUpdateTimer.Stop()).Task;
-            _batchUpdateTimer = null;
-        }
+        if (_batchOperationsManager is IDisposable disposableBatch)
+            disposableBatch.Dispose();
 
-        await StopCaptureAsync(token);
-        await CloseUIElementsAsync(token);
+        await _cleanupManager.StopCaptureAsync(_audioController, IsRecording, token);
+        await _cleanupManager.CloseUIElementsAsync(_uiController, _overlayManager, Dispatcher, token);
         await DisposeControllersAsync(token);
 
         _transitionLock?.Dispose();
         _cleanupCts?.Dispose();
     }
 
-    private async Task DetachEventHandlersAsync(CancellationToken token) =>
-        await _logger.SafeAsync(async () =>
-        {
-            await Dispatcher.InvokeAsync(() =>
-            {
-                if (_ownerWindow != null)
-                    _ownerWindow.KeyDown -= OnWindowKeyDown;
-            }).Task.WaitAsync(token);
-        },
-        LogPrefix,
-        "Error detaching event handlers");
-
-    private async Task StopCaptureAsync(CancellationToken token) =>
-        await _logger.SafeAsync(async () =>
-        {
-            if (IsRecording)
-            {
-                try
-                {
-                    await _audioController.StopCaptureAsync().WaitAsync(TimeSpan.FromSeconds(3), token);
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.Log(LogLevel.Warning, LogPrefix, "Stop capture operation cancelled or timed out");
-                }
-            }
-        },
-        LogPrefix,
-        "Error stopping capture");
-
-    private async Task CloseUIElementsAsync(CancellationToken token) =>
-        await _logger.SafeAsync(async () =>
-        {
-            await Dispatcher.InvokeAsync(() =>
-            {
-                if (_overlayManager.IsActive)
-                    _ = _overlayManager.CloseAsync();
-
-                if (IsControlPanelOpen)
-                    _uiController.CloseControlPanel();
-            }).Task.WaitAsync(token);
-        },
-        LogPrefix,
-        "Error closing UI elements");
-
     private async Task DisposeControllersAsync(CancellationToken token)
     {
         if (_overlayManager is IAsyncDisposable asyncOverlayManager)
-            await DisposeControllerAsync(asyncOverlayManager, "OverlayManager", token);
+            await _cleanupManager.DisposeControllerAsync(asyncOverlayManager, "OverlayManager", token);
         else if (_overlayManager is IDisposable disposableOverlayManager)
-            DisposeController(disposableOverlayManager, "OverlayManager");
+            _cleanupManager.DisposeController(disposableOverlayManager, "OverlayManager");
 
         if (_viewController is IAsyncDisposable asyncViewController)
-            await DisposeControllerAsync(asyncViewController, "ViewController", token);
+            await _cleanupManager.DisposeControllerAsync(asyncViewController, "ViewController", token);
         else if (_viewController is IDisposable disposableViewController)
-            DisposeController(disposableViewController, "ViewController");
+            _cleanupManager.DisposeController(disposableViewController, "ViewController");
 
         if (_audioController is IAsyncDisposable asyncAudioController)
-            await DisposeControllerAsync(asyncAudioController, "AudioController", token);
+            await _cleanupManager.DisposeControllerAsync(asyncAudioController, "AudioController", token);
         else if (_audioController is IDisposable disposableAudioController)
-            DisposeController(disposableAudioController, "AudioController");
+            _cleanupManager.DisposeController(disposableAudioController, "AudioController");
 
         if (_uiController is IAsyncDisposable asyncUiController)
-            await DisposeControllerAsync(asyncUiController, "UIController", token);
+            await _cleanupManager.DisposeControllerAsync(asyncUiController, "UIController", token);
         else if (_uiController is IDisposable disposableUiController)
-            DisposeController(disposableUiController, "UIController");
+            _cleanupManager.DisposeController(disposableUiController, "UIController");
 
         if (_inputController is IAsyncDisposable asyncInputController)
-            await DisposeControllerAsync(asyncInputController, "InputController", token);
+            await _cleanupManager.DisposeControllerAsync(asyncInputController, "InputController", token);
         else if (_inputController is IDisposable disposableInputController)
-            DisposeController(disposableInputController, "InputController");
+            _cleanupManager.DisposeController(disposableInputController, "InputController");
     }
-
-    private async Task DisposeControllerAsync<T>(
-        T controller,
-        string controllerName,
-        CancellationToken token) where T : class =>
-        await _logger.SafeAsync(async () =>
-        {
-            if (controller is IAsyncDisposable asyncDisposable)
-            {
-                await asyncDisposable.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3), token);
-            }
-        },
-        LogPrefix,
-        $"Error disposing {controllerName}");
 }

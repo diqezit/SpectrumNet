@@ -64,9 +64,6 @@
 	<ItemGroup>
 		<Page Include="App.xaml" />
 	</ItemGroup>
-	<ItemGroup>
-	  <Folder Include="Controllers\Interfaces\UICore\" />
-	</ItemGroup>
 
 	<!-- Remove unnecessary runtime folders after build -->
 	<Target Name="RemoveUnnecessaryRuntimes" AfterTargets="Build">

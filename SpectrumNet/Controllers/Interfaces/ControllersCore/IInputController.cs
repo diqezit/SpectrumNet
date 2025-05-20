@@ -1,7 +1,5 @@
 ﻿#nullable enable 
 
-using MouseEventArgs = System.Windows.Input.MouseEventArgs;
-
 namespace SpectrumNet.Controllers.Interfaces.ControllersCore;
 
 public interface IInputController
