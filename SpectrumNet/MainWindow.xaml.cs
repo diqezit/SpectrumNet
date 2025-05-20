@@ -45,11 +45,25 @@ public partial class MainWindow : Window, IAsyncDisposable
 
         _controller.InputController.RegisterWindow(this);
 
+        this.PreviewKeyDown += OnPreviewKeyDown;
+
         spectrumCanvas.MouseDown += (s, e) => _controller.InputController.HandleMouseDown(s, e);
         spectrumCanvas.MouseMove += (s, e) => _controller.InputController.HandleMouseMove(s, e);
         spectrumCanvas.MouseUp += (s, e) => _controller.InputController.HandleMouseUp(s, e);
         spectrumCanvas.MouseEnter += (s, e) => _controller.InputController.HandleMouseEnter(s, e);
         spectrumCanvas.MouseLeave += (s, e) => _controller.InputController.HandleMouseLeave(s, e);
+    }
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space && !e.IsRepeat)
+        {
+            bool handled = _controller.InputController.HandleKeyDown(e, Keyboard.FocusedElement);
+            if (handled)
+            {
+                e.Handled = true;
+            }
+        }
     }
 
     public void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs? e)
@@ -286,6 +300,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         MouseLeftButtonDown -= OnWindowDrag;
         Closed -= OnWindowClosed;
         LocationChanged -= OnWindowLocationChanged;
+        PreviewKeyDown -= OnPreviewKeyDown;
 
         if (spectrumCanvas != null)
         {

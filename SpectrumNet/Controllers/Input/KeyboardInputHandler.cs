@@ -17,16 +17,18 @@ public class KeyboardInputHandler : IInputHandler
 
     public bool HandleKeyDown(KeyEventArgs e, IInputElement? focusedElement)
     {
-        if (ShouldIgnoreKeyPress(focusedElement))
-            return false;
-
-        if (e.Key == Key.Space && !e.IsRepeat)
+        if (e.Key == Key.Space
+            && !e.IsRepeat
+            && !IsTextInputElement(focusedElement))
         {
             _logger.Safe(() => _controller.ToggleCaptureAsync(),
                 LogPrefix, "Error toggling capture");
             e.Handled = true;
             return true;
         }
+
+        if (ShouldIgnoreKeyPress(focusedElement))
+            return false;
 
         if (TryExecuteGlobalKeyAction(e.Key))
         {
@@ -36,6 +38,9 @@ public class KeyboardInputHandler : IInputHandler
 
         return false;
     }
+
+    private static bool IsTextInputElement(IInputElement? focusedElement) =>
+        focusedElement is TextBox or PasswordBox;
 
     private static bool ShouldIgnoreKeyPress(IInputElement? focusedElement) =>
         focusedElement is TextBox or PasswordBox or ComboBox;

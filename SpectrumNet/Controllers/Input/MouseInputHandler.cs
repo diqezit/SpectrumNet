@@ -2,18 +2,17 @@
 
 namespace SpectrumNet.Controllers.Input;
 
-public class MouseInputHandler : IInputHandler
+public class MouseInputHandler(IMainController controller) : IInputHandler
 {
     private const string LogPrefix = nameof(MouseInputHandler);
-    private readonly IMainController _controller;
-    private readonly RendererTransparencyManager _transparencyManager = RendererTransparencyManager.Instance;
-    private readonly ISmartLogger _logger = Instance;
-    private bool _isTrackingMouse;
 
-    public MouseInputHandler(IMainController controller)
-    {
-        _controller = controller ?? throw new ArgumentNullException(nameof(controller));
-    }
+    private readonly IMainController _controller = controller ?? 
+        throw new ArgumentNullException(nameof(controller));
+
+    private readonly ITransparencyManager _transparencyManager = RendererTransparencyManager.Instance;
+    private readonly ISmartLogger _logger = Instance;
+
+    private bool _isTrackingMouse;
 
     public bool HandleMouseDown(object? sender, MouseButtonEventArgs e) =>
         _logger.SafeResult(() => HandleMouseDownInternal(sender, e),
