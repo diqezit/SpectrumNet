@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using SpectrumNet.Controllers.Interfaces.ControllersCore;
-
 namespace SpectrumNet.Controllers.Interfaces.FactoryCore;
 
 public interface IControllerFactory

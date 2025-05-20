@@ -50,7 +50,7 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         _rendererFactory = RendererFactory.Instance;
         _transparencyManager = RendererTransparencyManager.Instance;
 
-        _viewController = new ViewController(this, _renderElement, _rendererFactory);
+        _viewController = ViewControllerFactory.Create(this, _renderElement);
         _audioController = new AudioController(this, SynchronizationContext.Current!);
         _uiController = new UIController(this, _transparencyManager);
         _inputController = new InputController(this);
@@ -113,6 +113,9 @@ public sealed class ControllerFactory : AsyncDisposableBase, IControllerFactory,
         );
 
         _viewController.Renderer = renderer;
+
+        if (_viewController is VisualizationController viewController)
+            viewController.SettingsManager.InitializeAfterRendererCreated();
 
         RequestRender();
     }
