@@ -2,33 +2,45 @@
 
 namespace SpectrumNet.Controllers.ViewCore;
 
-public class VisualizationSettingsManager(
-    IMainController mainController,
-    IRendererFactory rendererFactory) : IVisualizationSettingsManager
+public class VisualizationSettingsManager : IVisualizationSettingsManager
 {
     private const string LogPrefix = nameof(VisualizationSettingsManager);
     private readonly ISmartLogger _logger = Instance;
 
-    private readonly IMainController _mainController = mainController ?? 
-        throw new ArgumentNullException(nameof(mainController));
+    private readonly IMainController _mainController;
+    private readonly IRendererFactory _rendererFactory;
+    private readonly ISettings _settings;
 
-    private readonly IRendererFactory _rendererFactory = rendererFactory ?? 
-        throw new ArgumentNullException(nameof(rendererFactory));
-
-    private RenderStyle _selectedDrawingType = Settings.Instance.SelectedRenderStyle;
-    private SpectrumScale _selectedScaleType = Settings.Instance.SelectedScaleType;
-    private RenderQuality _renderQuality = Settings.Instance.SelectedRenderQuality;
-    private string _selectedStyle = Settings.Instance.SelectedPalette;
-    private bool _showPerformanceInfo = Settings.Instance.ShowPerformanceInfo;
+    private RenderStyle _selectedDrawingType;
+    private SpectrumScale _selectedScaleType;
+    private RenderQuality _renderQuality;
+    private string _selectedStyle;
+    private bool _showPerformanceInfo;
 
     private bool _updatingQuality;
 
+    public VisualizationSettingsManager(
+        IMainController mainController,
+        IRendererFactory rendererFactory,
+        ISettings settings)
+    {
+        _mainController = mainController ?? throw new ArgumentNullException(nameof(mainController));
+        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+
+        _selectedDrawingType = _settings.SelectedRenderStyle;
+        _selectedScaleType = _settings.SelectedScaleType;
+        _renderQuality = _settings.SelectedRenderQuality;
+        _selectedStyle = _settings.SelectedPalette;
+        _showPerformanceInfo = _settings.ShowPerformanceInfo;
+    }
+
     public int BarCount
     {
-        get => Settings.Instance.UIBarCount;
+        get => _settings.UIBarCount;
         set => UpdateSetting(
             value,
-            v => Settings.Instance.UIBarCount = v,
+            v => _settings.UIBarCount = v,
             nameof(BarCount),
             v => v > 0,
             DefaultSettings.UIBarCount,
@@ -37,10 +49,10 @@ public class VisualizationSettingsManager(
 
     public double BarSpacing
     {
-        get => Settings.Instance.UIBarSpacing;
+        get => _settings.UIBarSpacing;
         set => UpdateSetting(
             value,
-            v => Settings.Instance.UIBarSpacing = v,
+            v => _settings.UIBarSpacing = v,
             nameof(BarSpacing),
             v => v >= 0,
             DefaultSettings.UIBarSpacing,
@@ -59,7 +71,7 @@ public class VisualizationSettingsManager(
             {
                 _updatingQuality = true;
                 _renderQuality = value;
-                Settings.Instance.SelectedRenderQuality = value;
+                _settings.SelectedRenderQuality = value;
                 _mainController.OnPropertyChanged(nameof(RenderQuality));
 
                 _rendererFactory.GlobalQuality = value;
@@ -80,8 +92,11 @@ public class VisualizationSettingsManager(
     public RenderStyle SelectedDrawingType
     {
         get => _selectedDrawingType;
-        set => UpdateEnumProperty(ref _selectedDrawingType, value,
-            v => Settings.Instance.SelectedRenderStyle = v, nameof(SelectedDrawingType));
+        set => UpdateEnumProperty(
+            ref _selectedDrawingType,
+            value,
+            v => _settings.SelectedRenderStyle = v,
+            nameof(SelectedDrawingType));
     }
 
     public SpectrumScale ScaleType
@@ -95,7 +110,7 @@ public class VisualizationSettingsManager(
         if (_selectedScaleType == value) return;
 
         _selectedScaleType = value;
-        Settings.Instance.SelectedScaleType = value;
+        _settings.SelectedScaleType = value;
         _mainController.OnPropertyChanged(nameof(ScaleType));
         UpdateAnalyzerSettings(value);
     }
@@ -117,7 +132,7 @@ public class VisualizationSettingsManager(
         if (_selectedStyle == value) return;
 
         _selectedStyle = value;
-        Settings.Instance.SelectedPalette = value;
+        _settings.SelectedPalette = value;
         _mainController.OnPropertyChanged(nameof(SelectedStyle));
 
         if (_mainController.Renderer != null)
@@ -137,7 +152,7 @@ public class VisualizationSettingsManager(
             if (_showPerformanceInfo == value) return;
 
             _showPerformanceInfo = value;
-            Settings.Instance.ShowPerformanceInfo = value;
+            _settings.ShowPerformanceInfo = value;
             _mainController.OnPropertyChanged(nameof(ShowPerformanceInfo));
         }
     }
@@ -147,11 +162,11 @@ public class VisualizationSettingsManager(
 
     private void HandleLoadAndApplySettings()
     {
-        ShowPerformanceInfo = Settings.Instance.ShowPerformanceInfo;
-        SelectedDrawingType = Settings.Instance.SelectedRenderStyle;
-        ScaleType = Settings.Instance.SelectedScaleType;
-        RenderQuality = Settings.Instance.SelectedRenderQuality;
-        SelectedStyle = Settings.Instance.SelectedPalette;
+        ShowPerformanceInfo = _settings.ShowPerformanceInfo;
+        SelectedDrawingType = _settings.SelectedRenderStyle;
+        ScaleType = _settings.SelectedScaleType;
+        RenderQuality = _settings.SelectedRenderQuality;
+        SelectedStyle = _settings.SelectedPalette;
 
         _logger.Log(LogLevel.Information, LogPrefix, "View settings loaded and applied successfully");
     }
@@ -175,8 +190,13 @@ public class VisualizationSettingsManager(
         }
     }
 
-    private void UpdateSetting<T>(T value, Action<T> setter, string propertyName,
-                                Func<T, bool> validator, T defaultValue, string errorMessage)
+    private void UpdateSetting<T>(
+        T value,
+        Action<T> setter,
+        string propertyName,
+        Func<T, bool> validator,
+        T defaultValue,
+        string errorMessage)
     {
         if (!validator(value))
         {
@@ -188,9 +208,12 @@ public class VisualizationSettingsManager(
         _mainController.OnPropertyChanged(propertyName);
     }
 
-    private void UpdateEnumProperty<T>(ref T field, T value, Action<T> settingUpdater,
-                                     [CallerMemberName] string propertyName = "")
-                                     where T : struct, Enum
+    private void UpdateEnumProperty<T>(
+        ref T field,
+        T value,
+        Action<T> settingUpdater,
+        [CallerMemberName] string propertyName = "")
+        where T : struct, Enum
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return;
 
