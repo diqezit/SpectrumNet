@@ -8,6 +8,7 @@ public partial class MainWindow : Window, IAsyncDisposable
 {
     private const string LogPrefix = nameof(MainWindow);
 
+    private readonly IControllerProvider _controllerProvider;
     private readonly IMainController _controller;
     private readonly Dictionary<string, Action> _windowButtonActions;
     private readonly SemaphoreSlim _disposeLock = new(1, 1);
@@ -26,8 +27,9 @@ public partial class MainWindow : Window, IAsyncDisposable
     {
         InitializeComponent();
 
-        _controller = new ControllerFactory(this, spectrumCanvas);
-        _settings = Settings.Instance;
+        _controllerProvider = new ControllerFactory(this, spectrumCanvas);
+        _controller = _controllerProvider.MainController;
+        _settings = SettingsProvider.Instance.Settings;
         _themeManager = ThemeManager.Instance;
         DataContext = _controller;
 
@@ -229,9 +231,8 @@ public partial class MainWindow : Window, IAsyncDisposable
 
         if (WindowState == WindowState.Normal)
         {
-            var settings = Settings.Instance;
-            settings.WindowWidth = Width;
-            settings.WindowHeight = Height;
+            _settings.WindowWidth = Width;
+            _settings.WindowHeight = Height;
         }
     }
 
@@ -247,7 +248,7 @@ public partial class MainWindow : Window, IAsyncDisposable
                 ? "M0,0 L20,0 L20,20 L0,20 Z"
                 : "M2,2 H18 V18 H2 Z");
 
-        Settings.Instance.WindowState = WindowState;
+        _settings.WindowState = WindowState;
     }
 
     private void OnWindowLocationChanged(object? sender, EventArgs e) =>
@@ -261,9 +262,8 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private void SaveWindowPosition()
     {
-        var settings = Settings.Instance;
-        settings.WindowLeft = Left;
-        settings.WindowTop = Top;
+        _settings.WindowLeft = Left;
+        _settings.WindowTop = Top;
     }
 
     private static bool IsCheckBoxOrChild(DependencyObject? element)
@@ -311,9 +311,9 @@ public partial class MainWindow : Window, IAsyncDisposable
             spectrumCanvas.MouseLeave -= (s, e) => _controller.InputController.HandleMouseLeave(s, e);
         }
 
-        if (ThemeManager.Instance != null && _themePropertyChangedHandler != null)
+        if (_themeManager != null && _themePropertyChangedHandler != null)
         {
-            ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
+            _themeManager.PropertyChanged -= _themePropertyChangedHandler;
             _themePropertyChangedHandler = null;
         }
     }
@@ -334,9 +334,13 @@ public partial class MainWindow : Window, IAsyncDisposable
             _isDisposed = true;
 
             await SaveSettingsDuringCleanupAsync();
-            await StopCaptureDuringCleanupAsync();
-            await CloseChildWindowsAsync();
-            await DisposeControllerDuringCleanupAsync();
+
+            if (_controllerProvider is IDisposable disposableProvider)
+                disposableProvider.Dispose();
+            if (_controller is IAsyncDisposable asyncDisposableMain)
+                await asyncDisposableMain.DisposeAsync();
+            else if (_controller is IDisposable disposableMain)
+                disposableMain.Dispose();
 
             UnsubscribePostCleanupEvents();
             _disposeCompleted.Set();
@@ -360,53 +364,6 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private async Task StopCaptureDuringCleanupAsync()
-    {
-        if (_controller.IsRecording)
-        {
-            bool captureStoppedSuccessfully = await StopCaptureWithTimeoutAsync(FromSeconds(5));
-            if (!captureStoppedSuccessfully)
-            {
-                _logger.Warning(LogPrefix, "Failed to stop audio capture within timeout, continuing with cleanup");
-            }
-        }
-    }
-
-    private async Task CloseChildWindowsAsync()
-    {
-        await Dispatcher.InvokeAsync(() =>
-        {
-            if (_controller.IsOverlayActive)
-                _controller.CloseOverlay();
-
-            if (_controller.IsControlPanelOpen)
-                _controller.CloseControlPanel();
-        });
-    }
-
-    private async Task DisposeControllerDuringCleanupAsync()
-    {
-        bool controllerDisposed = await DisposeControllerWithTimeoutAsync(FromSeconds(10));
-        if (!controllerDisposed)
-        {
-            _logger.Warning(LogPrefix, "Failed to dispose controller within timeout");
-        }
-    }
-
-    private void UnsubscribePostCleanupEvents()
-    {
-        Dispatcher.Invoke(() =>
-        {
-            CompositionTarget.Rendering -= OnRendering;
-
-            if (ThemeManager.Instance != null && _themePropertyChangedHandler != null)
-            {
-                ThemeManager.Instance.PropertyChanged -= _themePropertyChangedHandler;
-                _themePropertyChangedHandler = null;
-            }
-        });
-    }
-
     private static async Task<bool> SaveSettingsWithTimeoutAsync(TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);
@@ -426,39 +383,18 @@ public partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private async Task<bool> StopCaptureWithTimeoutAsync(TimeSpan timeout)
+    private void UnsubscribePostCleanupEvents()
     {
-        using var cts = new CancellationTokenSource(timeout);
-        try
+        Dispatcher.Invoke(() =>
         {
-            await _controller.StopCaptureAsync().WaitAsync(timeout, cts.Token);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-    }
+            CompositionTarget.Rendering -= OnRendering;
 
-    private async Task<bool> DisposeControllerWithTimeoutAsync(TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        try
-        {
-            if (_controller is IAsyncDisposable asyncDisposable)
+            if (_themeManager != null && _themePropertyChangedHandler != null)
             {
-                await asyncDisposable.DisposeAsync().AsTask().WaitAsync(timeout, cts.Token);
+                _themeManager.PropertyChanged -= _themePropertyChangedHandler;
+                _themePropertyChangedHandler = null;
             }
-            else if (_controller is IDisposable disposable)
-            {
-                await Task.Run(() => disposable.Dispose(), cts.Token);
-            }
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
+        });
     }
 
     private void ConfigureTheme()

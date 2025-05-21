@@ -1,0 +1,16 @@
+﻿#nullable enable
+
+namespace SpectrumNet.Controllers.Interfaces.FactoryCore;
+
+public interface IControllerProvider
+{
+    IUIController UIController { get; }
+    IAudioController AudioController { get; }
+    IViewController ViewController { get; }
+    IInputController InputController { get; }
+    IOverlayManager OverlayManager { get; }
+    IBatchOperationsManager BatchOperationsManager { get; }
+    IResourceCleanupManager ResourceCleanupManager { get; }
+    IFpsLimiter FpsLimiter { get; }
+    IMainController MainController { get; }
+}
