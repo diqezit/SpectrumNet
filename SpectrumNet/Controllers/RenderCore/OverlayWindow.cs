@@ -5,13 +5,11 @@ namespace SpectrumNet.Controllers.RenderCore;
 public sealed class OverlayWindow : Window, IDisposable
 {
     private const string LogPrefix = nameof(OverlayWindow);
-    private const int MaxConsecutiveRenderSkips = 3;
     private readonly ISmartLogger _logger = Instance;
 
     private readonly record struct RenderContext(
         IMainController Controller,
         SKElement SkElement,
-        DispatcherTimer RenderTimer,
         IRendererFactory RendererFactory);
 
     private readonly OverlayConfiguration _configuration;
@@ -23,8 +21,6 @@ public sealed class OverlayWindow : Window, IDisposable
     private readonly Stopwatch _frameTimeWatch = new();
     private readonly ITransparencyManager _transparencyManager;
     private readonly IPerformanceMetricsManager _performanceMetricsManager = PerformanceMetricsManager.Instance;
-
-    private int _consecutiveSkips;
     private nint _windowHandle;
 
     public new bool IsInitialized => _renderContext != null && !_isDisposed;
@@ -154,10 +150,9 @@ public sealed class OverlayWindow : Window, IDisposable
         _logger.Safe(() =>
         {
             var skElement = CreateSkElement();
-            var renderTimer = CreateRenderTimer();
             var rendererFactory = RendererFactory.Instance;
 
-            _renderContext = new(controller, skElement, renderTimer, rendererFactory);
+            _renderContext = new(controller, skElement, rendererFactory);
             Content = skElement;
 
             controller.PropertyChanged += OnControllerPropertyChanged;
@@ -168,7 +163,7 @@ public sealed class OverlayWindow : Window, IDisposable
         {
             var element = new SKElement
             {
-                VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
                 SnapsToDevicePixels = true,
                 UseLayoutRounding = true
@@ -195,12 +190,6 @@ public sealed class OverlayWindow : Window, IDisposable
             };
         }, LogPrefix, "Error optimizing element for render");
 
-    private DispatcherTimer CreateRenderTimer() =>
-        new(DispatcherPriority.Render)
-        {
-            Interval = FromMilliseconds(_configuration.RenderInterval)
-        };
-
     private void SubscribeToEvents() =>
         _logger.Safe(() =>
         {
@@ -208,6 +197,8 @@ public sealed class OverlayWindow : Window, IDisposable
 
             RegisterElementEvents();
             RegisterWindowEvents();
+
+            CompositionTarget.Rendering += OnRendering;
         }, LogPrefix, "Error subscribing to events");
 
     private void RegisterElementEvents() =>
@@ -215,7 +206,6 @@ public sealed class OverlayWindow : Window, IDisposable
         {
             if (_renderContext is null) return;
             _renderContext.Value.SkElement.PaintSurface += HandlePaintSurface;
-            _renderContext.Value.RenderTimer.Tick += RenderTimerTick;
         }, LogPrefix, "Error registering element events");
 
     private void RegisterWindowEvents() =>
@@ -272,33 +262,22 @@ public sealed class OverlayWindow : Window, IDisposable
         {
             _fpsLimiter.IsEnabled = _renderContext?.Controller.LimitFpsTo60 ?? false;
             _fpsLimiter.Reset();
-            _consecutiveSkips = 0;
             ForceRedraw();
         }, LogPrefix, "Error updating FPS limit");
 
-    private void RenderTimerTick(object? sender, EventArgs e) =>
-        _logger.Safe(() => HandleRenderTimerTick(sender, e), LogPrefix, "Error handling render timer tick");
+    private void OnRendering(object? sender, EventArgs e) =>
+        _logger.Safe(() => HandleRendering(sender, e), LogPrefix, "Error handling rendering event");
 
-    private void HandleRenderTimerTick(object? sender, EventArgs e)
+    private void HandleRendering(object? sender, EventArgs e)
     {
         if (_isDisposed) return;
 
         if (ShouldRender())
-        {
-            _consecutiveSkips = 0;
             ForceRedraw();
-        }
-        else
-        {
-            _consecutiveSkips++;
-        }
     }
 
     private bool ShouldRender()
     {
-        if (_consecutiveSkips >= MaxConsecutiveRenderSkips)
-            return true;
-
         if (_transparencyManager.IsActive)
             return true;
 
@@ -313,23 +292,15 @@ public sealed class OverlayWindow : Window, IDisposable
     private void OnClosing(object? sender, CancelEventArgs e) =>
         _logger.Safe(() =>
         {
-            StopRenderTimer();
+            CompositionTarget.Rendering -= OnRendering;
             Dispose();
         }, LogPrefix, "Error handling window closing");
-
-    private void StopRenderTimer() =>
-        _logger.Safe(() =>
-        {
-            if (_renderContext?.RenderTimer is { IsEnabled: true } timer)
-                timer.Stop();
-        }, LogPrefix, "Error stopping render timer");
 
     private void OnSourceInitialized(object? sender, EventArgs e) =>
         _logger.Safe(() =>
         {
             InitializeWindowHandle();
             ApplyWindowOptimizations();
-            StartRenderTimer();
             _transparencyManager.ActivateTransparency();
             ForceRedraw();
         }, LogPrefix, "Error handling source initialized");
@@ -361,13 +332,6 @@ public sealed class OverlayWindow : Window, IDisposable
                 extendedStyle | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT
             );
         }, LogPrefix, "Error configuring window style extended");
-
-    private void StartRenderTimer() =>
-        _logger.Safe(() =>
-        {
-            if (_renderContext?.RenderTimer is { IsEnabled: false } timer)
-                timer.Start();
-        }, LogPrefix, "Error starting render timer");
 
     private void OnKeyDown(object sender, KeyEventArgs e) =>
         _logger.Safe(() => HandleOnKeyDown(sender, e), LogPrefix, "Error handling key down");
@@ -417,13 +381,8 @@ public sealed class OverlayWindow : Window, IDisposable
     {
         if (IsVisible)
         {
-            StartRenderTimer();
             _transparencyManager.ActivateTransparency();
             ForceRedraw();
-        }
-        else
-        {
-            StopRenderTimer();
         }
     }
 
@@ -468,6 +427,8 @@ public sealed class OverlayWindow : Window, IDisposable
 
         _transparencyManager.TransparencyChanged -= OnTransparencyChanged;
 
+        CompositionTarget.Rendering -= OnRendering;
+
         _isDisposed = true;
         UnsubscribeFromEvents();
         DisposeResources();
@@ -492,9 +453,6 @@ public sealed class OverlayWindow : Window, IDisposable
             element.MouseMove -= (s, e) => _transparencyManager.OnMouseMove();
             element.MouseEnter -= (s, e) => _transparencyManager.OnMouseEnter();
             element.MouseLeave -= (s, e) => _transparencyManager.OnMouseLeave();
-
-            _renderContext.Value.RenderTimer.Tick -= RenderTimerTick;
-            _renderContext.Value.RenderTimer.Stop();
         }, LogPrefix, "Error unregistering element events");
 
     private void UnregisterWindowEvents() =>
