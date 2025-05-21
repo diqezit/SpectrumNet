@@ -9,7 +9,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
     private const int OPERATION_COOLDOWN_MS = 1000;
 
     private readonly IMainController _mainController;
-    private readonly GainParameters _gainParameters;
+    private readonly IGainParametersProvider _gainParameters;
     private readonly ICaptureService _captureService;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
     private readonly ISmartLogger _logger = Instance;
@@ -49,7 +49,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
 
     #region IAudioController Implementation
 
-    public GainParameters GainParameters => _gainParameters;
+    public IGainParametersProvider GainParameters => _gainParameters;
 
     public bool IsRecording
     {

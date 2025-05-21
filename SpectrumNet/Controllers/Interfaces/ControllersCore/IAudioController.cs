@@ -18,6 +18,6 @@ public interface IAudioController
     float MinDbLevel { get; set; }
     float MaxDbLevel { get; set; }
     float AmplificationFactor { get; set; }
-    GainParameters GainParameters { get; }
+    IGainParametersProvider GainParameters { get; }
     SpectrumAnalyzer? GetCurrentAnalyzer();
 }

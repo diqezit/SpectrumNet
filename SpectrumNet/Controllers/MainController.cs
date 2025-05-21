@@ -44,7 +44,7 @@ public sealed class MainController : AsyncDisposableBase, IMainController
         }
     }
 
-    public GainParameters GainParameters => AudioController.GainParameters;
+    public IGainParametersProvider GainParameters => AudioController.GainParameters;
 
     public bool IsRecording
     {
