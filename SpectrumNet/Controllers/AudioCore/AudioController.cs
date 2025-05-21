@@ -5,12 +5,13 @@ namespace SpectrumNet.Controllers.AudioCore;
 public class AudioController : AsyncDisposableBase, IAudioController
 {
     private const string LogPrefix = nameof(AudioController);
-
     private const int OPERATION_COOLDOWN_MS = 1000;
+    private const float MIN_DB_DIFFERENCE = 1.0f;
 
     private readonly IMainController _mainController;
     private readonly IGainParametersProvider _gainParameters;
     private readonly ICaptureService _captureService;
+    private readonly ISettings _settings;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
     private readonly ISmartLogger _logger = Instance;
 
@@ -24,6 +25,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
         _mainController = mainController ??
                           throw new ArgumentNullException(nameof(mainController));
 
+        _settings = SettingsProvider.Instance.Settings;
         _gainParameters = CreateGainParameters(syncContext);
         _captureService = CreateCaptureService(mainController);
         _mainController.PropertyChanged += OnMainControllerPropertyChanged;
@@ -46,8 +48,6 @@ public class AudioController : AsyncDisposableBase, IAudioController
         var rendererFactory = RendererFactory.Instance;
         return new CaptureService(controller, deviceManager, rendererFactory);
     }
-
-    #region IAudioController Implementation
 
     public IGainParametersProvider GainParameters => _gainParameters;
 
@@ -87,10 +87,16 @@ public class AudioController : AsyncDisposableBase, IAudioController
         if (_windowType == value) return;
 
         _windowType = value;
-        Settings.Instance.SelectedFftWindowType = value;
-        _mainController.OnPropertyChanged(nameof(WindowType));
+        SaveWindowTypeToSettings(value);
+        NotifyWindowTypeChanged();
         UpdateAnalyzerSettings();
     }
+
+    private void SaveWindowTypeToSettings(FftWindowType value) =>
+        _settings.SelectedFftWindowType = value;
+
+    private void NotifyWindowTypeChanged() =>
+        _mainController.OnPropertyChanged(nameof(WindowType));
 
     private void OnMainControllerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -112,75 +118,151 @@ public class AudioController : AsyncDisposableBase, IAudioController
         _mainController.RequestRender();
     }
 
+    private static (float minDb, float maxDb) ValidateDbLevels(float minDb, float maxDb)
+    {
+        if (minDb >= maxDb - MIN_DB_DIFFERENCE)
+        {
+            float midPoint = (minDb + maxDb) / 2f;
+            return (midPoint - MIN_DB_DIFFERENCE, midPoint + MIN_DB_DIFFERENCE);
+        }
+
+        return (minDb, maxDb);
+    }
+
     public float MinDbLevel
     {
         get => _gainParameters.MinDbValue;
-        set => UpdateDbLevel(
-            value,
-            v => v < _gainParameters.MaxDbValue,
-            v => _gainParameters.MinDbValue = v,
-            _gainParameters.MaxDbValue - 1,
-            v => Settings.Instance.UIMinDbLevel = v,
-            $"Min dB level ({value}) must be less than max ({_gainParameters.MaxDbValue})",
-            nameof(MinDbLevel));
+        set => SetMinDbLevel(value);
+    }
+
+    private void SetMinDbLevel(float value)
+    {
+        if (_gainParameters is null)
+        {
+            LogGainParametersNotInitialized();
+            return;
+        }
+
+        var (validMin, validMax) = ValidateDbLevels(value, _gainParameters.MaxDbValue);
+        UpdateDbLevels(validMin, validMax);
     }
 
     public float MaxDbLevel
     {
         get => _gainParameters.MaxDbValue;
-        set => UpdateDbLevel(
-            value,
-            v => v > _gainParameters.MinDbValue,
-            v => _gainParameters.MaxDbValue = v,
-            _gainParameters.MinDbValue + 1,
-            v => Settings.Instance.UIMaxDbLevel = v,
-            $"Max dB level ({value}) must be greater than min ({_gainParameters.MinDbValue})",
-            nameof(MaxDbLevel));
+        set => SetMaxDbLevel(value);
     }
+
+    private void SetMaxDbLevel(float value)
+    {
+        if (_gainParameters is null)
+        {
+            LogGainParametersNotInitialized();
+            return;
+        }
+
+        var (validMin, validMax) = ValidateDbLevels(_gainParameters.MinDbValue, value);
+        UpdateDbLevels(validMin, validMax);
+    }
+
+    private void UpdateDbLevels(float minDbValue, float maxDbValue)
+    {
+        UpdateGainParameterValue(_gainParameters.MinDbValue, minDbValue, v => 
+        _gainParameters.MinDbValue = v, nameof(MinDbLevel));
+
+        UpdateGainParameterValue(_gainParameters.MaxDbValue, maxDbValue, v => 
+        _gainParameters.MaxDbValue = v, nameof(MaxDbLevel));
+
+        SaveDbLevelsToSettings(minDbValue, maxDbValue);
+    }
+
+    private void SaveDbLevelsToSettings(float minDbValue, float maxDbValue)
+    {
+        _settings.UIMinDbLevel = minDbValue;
+        _settings.UIMaxDbLevel = maxDbValue;
+    }
+
+    private void LogGainParametersNotInitialized() =>
+        _logger.Log(LogLevel.Error, LogPrefix, "Gain parameters not initialized");
 
     public float AmplificationFactor
     {
         get => _gainParameters.AmplificationFactor;
-        set => UpdateDbLevel(
-            value,
-            v => v >= 0,
-            v => _gainParameters.AmplificationFactor = v,
-            0,
-            v => Settings.Instance.UIAmplificationFactor = v,
-            $"Amplification factor cannot be negative: {value}",
-            nameof(AmplificationFactor));
+        set => SetAmplificationFactor(value);
     }
+
+    private void SetAmplificationFactor(float value)
+    {
+        if (_gainParameters is null)
+        {
+            LogGainParametersNotInitialized();
+            return;
+        }
+
+        var validValue = ValidateAmplificationFactor(value);
+        UpdateGainParameterValue(_gainParameters.AmplificationFactor, validValue,
+            v => _gainParameters.AmplificationFactor = v, nameof(AmplificationFactor));
+        SaveAmplificationFactorToSettings(validValue);
+    }
+
+    private float ValidateAmplificationFactor(float value)
+    {
+        if (value < 0)
+        {
+            LogInvalidAmplificationFactor(value);
+            return 0.1f;
+        }
+        return value;
+    }
+
+    private void LogInvalidAmplificationFactor(float value) =>
+        _logger.Log(LogLevel.Warning, LogPrefix,
+            $"Amplification factor cannot be negative: {value}");
+
+    private void SaveAmplificationFactorToSettings(float value) =>
+        _settings.UIAmplificationFactor = value;
 
     public async Task StartCaptureAsync()
     {
         ThrowIfDisposed();
 
+        if (!await CanStartCaptureNow())
+            return;
+
+        await ExecuteStartCapture();
+    }
+
+    private async Task<bool> CanStartCaptureNow()
+    {
         await _operationLock.WaitAsync();
 
         try
         {
             if (IsRecording || IsOperationInCooldown())
             {
-                _logger.Log(LogLevel.Debug,
-                    LogPrefix,
-                    "Start capture ignored");
-                return;
+                LogStartCaptureIgnored();
+                return false;
             }
+            return true;
         }
         finally
         {
             _operationLock.Release();
         }
-
-        await ExecuteStartCapture();
     }
+
+    private void LogStartCaptureIgnored() =>
+        _logger.Log(LogLevel.Debug, LogPrefix, "Start capture ignored");
 
     private async Task ExecuteStartCapture()
     {
         await _captureService.StartCaptureAsync();
-        _lastOperationTime = DateTime.Now;
+        UpdateLastOperationTime();
         NotifyCaptureStateChanged();
     }
+
+    private void UpdateLastOperationTime() =>
+        _lastOperationTime = DateTime.Now;
 
     private void NotifyCaptureStateChanged() =>
         _mainController.OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
@@ -189,32 +271,44 @@ public class AudioController : AsyncDisposableBase, IAudioController
     {
         ThrowIfDisposed();
 
+        if (!await CanStopCaptureNow())
+            return;
+
+        await ExecuteStopCapture();
+    }
+
+    private async Task<bool> CanStopCaptureNow()
+    {
         await _operationLock.WaitAsync();
 
         try
         {
             if (!IsRecording)
             {
-                _logger.Log(LogLevel.Debug,
-                    LogPrefix,
-                    "Stop capture ignored: Not recording");
-                return;
+                LogStopCaptureIgnored();
+                return false;
             }
+            return true;
         }
         finally
         {
             _operationLock.Release();
         }
-        await ExecuteStopCapture();
     }
+
+    private void LogStopCaptureIgnored() =>
+        _logger.Log(LogLevel.Debug, LogPrefix, "Stop capture ignored: Not recording");
 
     private async Task ExecuteStopCapture()
     {
         await _captureService.StopCaptureAsync();
-        _lastOperationTime = DateTime.Now;
-        await Task.Delay(OPERATION_COOLDOWN_MS);
+        UpdateLastOperationTime();
+        await ApplyCooldown();
         NotifyCaptureStateChanged();
     }
+
+    private static async Task ApplyCooldown() =>
+        await Task.Delay(OPERATION_COOLDOWN_MS);
 
     public async Task ToggleCaptureAsync()
     {
@@ -232,22 +326,30 @@ public class AudioController : AsyncDisposableBase, IAudioController
         return _captureService.GetAnalyzer();
     }
 
-    #endregion
-
-    #region Helper Methods
-
     private bool IsOperationInCooldown() =>
         (DateTime.Now - _lastOperationTime).TotalMilliseconds < OPERATION_COOLDOWN_MS;
 
+    private void UpdateGainParameterValue(
+        float oldValue,
+        float newValue,
+        Action<float> setter,
+        string propertyName)
+    {
+        if (Math.Abs(oldValue - newValue) < float.Epsilon)
+            return;
+
+        UpdateGainParameter(newValue, setter, propertyName);
+    }
+
     private void UpdateGainParameter(float newValue, Action<float> setter, string propertyName) =>
-        _logger.Safe(() => HandleUpdateGainParameter(newValue, setter, propertyName),
+        _logger.Safe(() => ExecuteUpdateGainParameter(newValue, setter, propertyName),
             LogPrefix, "Error updating gain parameter");
 
-    private void HandleUpdateGainParameter(float newValue, Action<float> setter, string propertyName)
+    private void ExecuteUpdateGainParameter(float newValue, Action<float> setter, string propertyName)
     {
         if (setter is null)
         {
-            _logger.Log(LogLevel.Error, LogPrefix, "Null setter delegate provided");
+            LogNullSetterDelegate();
             return;
         }
 
@@ -255,32 +357,8 @@ public class AudioController : AsyncDisposableBase, IAudioController
         _mainController.OnPropertyChanged(propertyName);
     }
 
-    private void UpdateDbLevel(
-        float value,
-        Func<float, bool> validator,
-        Action<float> setter,
-        float fallbackValue,
-        Action<float> settingUpdater,
-        string errorMessage,
-        string propertyName)
-    {
-        if (_gainParameters is null)
-        {
-            _logger.Log(LogLevel.Error, LogPrefix, "Gain parameters not initialized");
-            return;
-        }
-
-        if (!validator(value))
-        {
-            _logger.Log(LogLevel.Warning, LogPrefix, errorMessage);
-            value = fallbackValue;
-        }
-
-        UpdateGainParameter(value, setter, propertyName);
-        settingUpdater(value);
-    }
-
-    #endregion
+    private void LogNullSetterDelegate() =>
+        _logger.Log(LogLevel.Error, LogPrefix, "Null setter delegate provided");
 
     protected override void DisposeManaged() =>
         _logger.Safe(() => HandleDisposeManaged(), LogPrefix, "Error during managed disposal");
@@ -303,15 +381,20 @@ public class AudioController : AsyncDisposableBase, IAudioController
 
     private void PerformDisposeSync()
     {
-        _logger.Log(LogLevel.Information, LogPrefix, "AudioController disposing");
+        LogAudioControllerDisposing();
         DisposeCaptureServiceInternalSync();
         DisposeOperationLock();
-        _logger.Log(LogLevel.Information, LogPrefix, "AudioController disposed successfully");
+        LogAudioControllerDisposed();
     }
 
+    private void LogAudioControllerDisposing() =>
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController disposing");
+
+    private void LogAudioControllerDisposed() =>
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController disposed successfully");
+
     private void DisposeCaptureServiceInternalSync() =>
-        _logger.Safe(() =>
-        {
+        _logger.Safe(() => {
             if (_captureService is IDisposable disposable)
             {
                 _captureService.StopCaptureAsync().GetAwaiter().GetResult();
@@ -324,15 +407,20 @@ public class AudioController : AsyncDisposableBase, IAudioController
 
     private async Task PerformDisposeAsync()
     {
-        _logger.Log(LogLevel.Information, LogPrefix, "AudioController async disposing");
+        LogAudioControllerAsyncDisposing();
         await DisposeCaptureServiceInternalAsync();
         DisposeOperationLock();
-        _logger.Log(LogLevel.Information, LogPrefix, "AudioController async disposed successfully");
+        LogAudioControllerAsyncDisposed();
     }
 
+    private void LogAudioControllerAsyncDisposing() =>
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController async disposing");
+
+    private void LogAudioControllerAsyncDisposed() =>
+        _logger.Log(LogLevel.Information, LogPrefix, "AudioController async disposed successfully");
+
     private async Task DisposeCaptureServiceInternalAsync() =>
-        await _logger.SafeAsync(async () =>
-        {
+        await _logger.SafeAsync(async () => {
             await _captureService.StopCaptureAsync();
             await _captureService.DisposeAsync();
         }, LogPrefix, "Error during asynchronous capture service disposal");
