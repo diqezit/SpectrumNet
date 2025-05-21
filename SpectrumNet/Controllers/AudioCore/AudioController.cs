@@ -64,6 +64,8 @@ public class AudioController : AsyncDisposableBase, IAudioController
             else
                 _logger.Safe(() => StopCaptureAsync().GetAwaiter().GetResult(),
                     LogPrefix, "Error stopping capture");
+
+            NotifyCaptureStateChanged();
         }
     }
 
@@ -264,8 +266,14 @@ public class AudioController : AsyncDisposableBase, IAudioController
     private void UpdateLastOperationTime() =>
         _lastOperationTime = DateTime.Now;
 
-    private void NotifyCaptureStateChanged() =>
-        _mainController.OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
+    private void NotifyCaptureStateChanged()
+    {
+        if (_mainController.Dispatcher.CheckAccess())
+            _mainController.OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture));
+        else
+            _mainController.Dispatcher.Invoke(() =>
+                _mainController.OnPropertyChanged(nameof(IsRecording), nameof(CanStartCapture)));
+    }
 
     public async Task StopCaptureAsync()
     {

@@ -189,7 +189,20 @@ public class UIController : AsyncDisposableBase, IUIController
 
     private void ShowControlPanel() => _controlPanelWindow?.Show();
 
-    private void CloseControlPanelWindow() => _controlPanelWindow?.Close();
+    private void CloseControlPanelWindow()
+    {
+        if (_controlPanelWindow is null) return;
+
+        if (_controlPanelWindow.Dispatcher.CheckAccess())
+        {
+            _controlPanelWindow.Close();
+        }
+        else
+        {
+            _controlPanelWindow.Dispatcher.Invoke(() => 
+            _controlPanelWindow.Close());
+        }
+    }
 
     private void NotifyControlPanelClosed()
     {
