@@ -2,12 +2,10 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:SpectrumNet">
-
-
+    
     <!-- =================== -->
     <!-- СТИЛИ СЛАЙДЕРОВ    -->
     <!-- =================== -->
-
     <Style x:Key="ModernSliderStyle" TargetType="Slider" BasedOn="{StaticResource InteractiveControlBaseStyle}">
         <Setter Property="Height" Value="18"/>
         <Setter Property="Foreground" Value="{DynamicResource SliderForegroundBrush}"/>
@@ -22,134 +20,157 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Slider">
                     <Grid x:Name="SliderRoot" UseLayoutRounding="True" SnapsToDevicePixels="True">
-                        <Rectangle 
-                            Fill="Transparent" 
-                            Height="32" 
-                            VerticalAlignment="Center"/>
+                        <!-- дорожка -->
+                        <Rectangle Fill="Transparent" Height="32" VerticalAlignment="Center"/>
+                        <Border x:Name="TrackBaseShadow" Height="4" VerticalAlignment="Center"
+                                Background="{DynamicResource BorderBrush}" CornerRadius="2" Opacity="0.3"/>
+                        <Border x:Name="TrackBase" Height="4" VerticalAlignment="Center"
+                                Background="{DynamicResource SliderBackgroundBrush}"
+                                BorderBrush="{DynamicResource SliderBorderBrush}" BorderThickness="1" CornerRadius="2"/>
+                        <Border x:Name="TrackInner" Height="4" VerticalAlignment="Center"
+                                Background="{DynamicResource SliderBackgroundBrush}" CornerRadius="2"/>
+                        <Canvas x:Name="TickCanvas" Visibility="Collapsed" ClipToBounds="False" Height="14" VerticalAlignment="Center"/>
 
-                        <Border x:Name="TrackBaseShadow"
-                            Height="4" 
-                            VerticalAlignment="Center"
-                            Background="{DynamicResource BorderBrush}"
-                            CornerRadius="4"
-                            Opacity="0.3"
-                            Margin="0,0,0,0"/>
-
-                        <Border x:Name="TrackBase"
-                            Height="4" 
-                            VerticalAlignment="Center"
-                            Background="{DynamicResource SliderBackgroundBrush}"
-                            BorderBrush="{DynamicResource SliderBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="2"/>
-
-                        <Border x:Name="TrackInner"
-                            Height="4" 
-                            VerticalAlignment="Center"
-                            Background="{DynamicResource SliderBackgroundBrush}"
-                            CornerRadius="2"/>
-
-                        <Canvas x:Name="TickCanvas" 
-                            Visibility="Collapsed" 
-                            ClipToBounds="False"
-                            Height="14" 
-                            VerticalAlignment="Center">
-                        </Canvas>
-
+                        <!-- PART_Track -->
                         <Track Name="PART_Track"
-                            Minimum="{TemplateBinding Minimum}"
-                            Maximum="{TemplateBinding Maximum}"
-                            Value="{TemplateBinding Value}">
-
+                               Minimum="{TemplateBinding Minimum}"
+                               Maximum="{TemplateBinding Maximum}"
+                               Value="{TemplateBinding Value}">
                             <Track.DecreaseRepeatButton>
-                                <RepeatButton 
-                                    Style="{x:Null}"
-                                    Command="{x:Static Slider.DecreaseLarge}"
-                                    Focusable="False">
+                                <RepeatButton Style="{x:Null}" Command="{x:Static Slider.DecreaseLarge}" Focusable="False">
                                     <RepeatButton.Template>
                                         <ControlTemplate TargetType="RepeatButton">
                                             <Grid>
-                                                <Border x:Name="TrackFill"
-                                                    Height="4" 
-                                                    CornerRadius="2,0,0,2"
-                                                    Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
+                                                <Border x:Name="TrackFill" Height="4" CornerRadius="2,0,0,2"
+                                                        Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
                                             </Grid>
                                         </ControlTemplate>
                                     </RepeatButton.Template>
                                 </RepeatButton>
                             </Track.DecreaseRepeatButton>
-
                             <Track.IncreaseRepeatButton>
-                                <RepeatButton 
-                                    Style="{x:Null}"
-                                    Command="{x:Static Slider.IncreaseLarge}"
-                                    Focusable="False">
+                                <RepeatButton Style="{x:Null}" Command="{x:Static Slider.IncreaseLarge}" Focusable="False">
                                     <RepeatButton.Template>
                                         <ControlTemplate TargetType="RepeatButton">
-                                            <!-- Видимая темная полоса из ресурсов темы -->
-                                            <Border x:Name="RemainingTrack"
-                                                    Height="4" 
-                                                    CornerRadius="0,2,2,0"
+                                            <Border x:Name="RemainingTrack" Height="4" CornerRadius="0,2,2,0"
                                                     Background="{DynamicResource BorderBrush}"
                                                     BorderBrush="{DynamicResource SliderBorderBrush}"
-                                                    BorderThickness="0,1,0,1"
-                                                    Opacity="0.3"/>
+                                                    BorderThickness="0,1,0,1" Opacity="0.3"/>
                                         </ControlTemplate>
                                     </RepeatButton.Template>
                                 </RepeatButton>
                             </Track.IncreaseRepeatButton>
-
                             <Track.Thumb>
-                                <Thumb 
-                                    x:Name="Thumb" 
-                                    Focusable="False" 
-                                    Width="12" 
-                                    Height="24"
-                                    Cursor="Hand">
+                                <Thumb x:Name="Thumb" Focusable="False" Width="14" Height="14" Cursor="Hand">
                                     <Thumb.Template>
                                         <ControlTemplate TargetType="Thumb">
-                                            <Grid x:Name="ThumbGrid">
+                                            <!-- <ScaleTransform> объявляем ДО триггеров -->
+                                            <Grid x:Name="ThumbGrid" RenderTransformOrigin="0.5,0.5">
+                                                <Grid.RenderTransform>
+                                                    <ScaleTransform x:Name="ThumbScaleTransform" ScaleX="1" ScaleY="1"/>
+                                                </Grid.RenderTransform>
+
+                                                <!-- Контрастная обводка -->
                                                 <Border x:Name="ThumbRing"
-                                                    Width="12" Height="24"
-                                                    BorderThickness="1"
-                                                    BorderBrush="{DynamicResource SliderBorderBrush}"
-                                                    Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"
-                                                    Opacity="0.1"
-                                                    CornerRadius="6"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"/>
-
+                                                        Width="14" Height="14"
+                                                        BorderThickness="1"
+                                                        BorderBrush="{DynamicResource SliderThumbBorderBrush}"
+                                                        Background="Transparent"
+                                                        CornerRadius="7"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"/>
+                                                <!-- Основной кружок -->
                                                 <Border x:Name="ThumbFill"
-                                                    Width="10" Height="22"
-                                                    Background="{DynamicResource SurfaceBrush}"
-                                                    CornerRadius="5"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"/>
-
+                                                        Width="12" Height="12"
+                                                        Background="{DynamicResource SliderThumbFillBrush}"
+                                                        CornerRadius="6"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"/>
+                                                <!-- Центральный акцент -->
                                                 <Border x:Name="ThumbAccent"
-                                                    Width="4" Height="10"
-                                                    Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"
-                                                    CornerRadius="2"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"/>
+                                                        Width="5" Height="5"
+                                                        Background="{DynamicResource SliderThumbAccentBrush}"
+                                                        CornerRadius="2.5"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"/>
                                             </Grid>
 
+                                            <!-- Триггеры внутри шаблона Thumb -->
                                             <ControlTemplate.Triggers>
+                                                <!-- Hover -->
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="ThumbFill" Property="Background" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
-                                                    <Setter TargetName="ThumbAccent" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+                                                    <!-- сначала Setter -->
                                                     <Setter TargetName="ThumbRing" Property="Opacity" Value="0.2"/>
+                                                    <!-- потом EnterActions -->
+                                                    <Trigger.EnterActions>
+                                                        <BeginStoryboard>
+                                                            <Storyboard>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                                 To="1.1"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                                 To="1.1"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                            </Storyboard>
+                                                        </BeginStoryboard>
+                                                    </Trigger.EnterActions>
+                                                    <Trigger.ExitActions>
+                                                        <BeginStoryboard>
+                                                            <Storyboard>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                                 To="1"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                                 To="1"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                            </Storyboard>
+                                                        </BeginStoryboard>
+                                                    </Trigger.ExitActions>
                                                 </Trigger>
 
+                                                <!-- Capture -->
                                                 <Trigger Property="IsMouseCaptured" Value="True">
-                                                    <Setter TargetName="ThumbRing" Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
-                                                    <Setter TargetName="ThumbFill" Property="Background" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}"/>
-                                                    <Setter TargetName="ThumbAccent" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
-                                                    <Setter TargetName="ThumbAccent" Property="Width" Value="4"/>
-                                                    <Setter TargetName="ThumbAccent" Property="Height" Value="14"/>
-                                                    <Setter TargetName="ThumbRing" Property="Width" Value="14"/>
-                                                    <Setter TargetName="ThumbRing" Property="Height" Value="26"/>
                                                     <Setter TargetName="ThumbRing" Property="Opacity" Value="0.3"/>
+                                                    <Trigger.EnterActions>
+                                                        <BeginStoryboard>
+                                                            <Storyboard>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                                 To="1.2"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                                 To="1.2"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                            </Storyboard>
+                                                        </BeginStoryboard>
+                                                    </Trigger.EnterActions>
+                                                    <Trigger.ExitActions>
+                                                        <BeginStoryboard>
+                                                            <Storyboard>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                                 To="1.1"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                                <DoubleAnimation Storyboard.TargetName="ThumbScaleTransform"
+                                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                                 To="1.1"
+                                                                                 Duration="{StaticResource QuickAnimationDuration}"
+                                                                                 EasingFunction="{StaticResource StandardEaseOut}"/>
+                                                            </Storyboard>
+                                                        </BeginStoryboard>
+                                                    </Trigger.ExitActions>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -158,61 +179,49 @@
                             </Track.Thumb>
                         </Track>
 
+                        <!-- Pop-up со значением -->
                         <Border x:Name="ValuePopupBorder"
-                            Background="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
-                            CornerRadius="4"
-                            Padding="6,2"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Top"
-                            Margin="0,-30,0,0"
-                            Opacity="0">
+                                Background="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                CornerRadius="4" Padding="6,2"
+                                HorizontalAlignment="Center" VerticalAlignment="Top"
+                                Margin="0,-30,0,0" Opacity="0" RenderTransformOrigin="0.5,1">
+                            <Border.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform x:Name="ValuePopupScaleTransform" ScaleX="0.9" ScaleY="0.9"/>
+                                    <TranslateTransform x:Name="ValuePopupTranslateTransform" Y="10"/>
+                                </TransformGroup>
+                            </Border.RenderTransform>
                             <Grid>
-                                <Path 
-                                    x:Name="PopupPointer"
-                                    Data="M0,0 L6,0 L3,4 Z"
-                                    Fill="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Bottom"
-                                    Margin="0,0,0,-4"/>
-
-                                <TextBlock 
-                                    x:Name="ValueText"
-                                    Text="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, StringFormat='{}{0:F1}'}"
-                                    Foreground="{DynamicResource SurfaceBrush}"
-                                    FontWeight="SemiBold"
-                                    FontSize="11"/>
+                                <Path x:Name="PopupPointer" Data="M0,0 L6,0 L3,4 Z"
+                                      Fill="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-4"/>
+                                <TextBlock x:Name="ValueText"
+                                           Text="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, StringFormat='{}{0:F1}'}"
+                                           Foreground="{DynamicResource SurfaceBrush}"
+                                           FontWeight="SemiBold" FontSize="11"/>
                             </Grid>
                         </Border>
 
-                        <StackPanel 
-                            Orientation="Horizontal" 
-                            HorizontalAlignment="Stretch" 
-                            VerticalAlignment="Bottom"
-                            Margin="0,0,0,-16">
-
-                            <TextBlock 
-                                x:Name="MinValueMarker"
-                                Text="{TemplateBinding Minimum}"
-                                FontSize="9"
-                                FontWeight="Medium"
-                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                HorizontalAlignment="Left"
-                                Opacity="0"/>
-
-                            <TextBlock HorizontalAlignment="Stretch" Text=" " Margin="0"/>
-
-                            <TextBlock 
-                                x:Name="MaxValueMarker"
-                                Text="{TemplateBinding Maximum}"
-                                FontSize="9"
-                                FontWeight="Medium"
-                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                HorizontalAlignment="Right"
-                                Opacity="0"/>
+                        <!-- Мин/Макс маркеры -->
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Bottom"
+                                    Margin="0,0,0,-16">
+                            <TextBlock x:Name="MinValueMarker" Text="{TemplateBinding Minimum}"
+                                       FontSize="9" FontWeight="Medium"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       HorizontalAlignment="Left" Opacity="0"/>
+                            <TextBlock Text=" " Margin="0"/>
+                            <TextBlock x:Name="MaxValueMarker" Text="{TemplateBinding Maximum}"
+                                       FontSize="9" FontWeight="Medium"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       HorizontalAlignment="Right" Opacity="0"/>
                         </StackPanel>
                     </Grid>
 
+                    <!-- Триггеры всего Slider -->
                     <ControlTemplate.Triggers>
+                        <!-- Hover по дорожке -->
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="TrackBase" Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
                             <Setter TargetName="TrackInner" Property="Background" Value="{DynamicResource SliderBackgroundBrush}"/>
@@ -220,31 +229,49 @@
                             <Setter TargetName="MinValueMarker" Property="Opacity" Value="0.9"/>
                             <Setter TargetName="MaxValueMarker" Property="Opacity" Value="0.9"/>
                         </Trigger>
-
+                        <!-- Фокус -->
                         <Trigger Property="IsFocused" Value="True">
                             <Setter TargetName="Thumb" Property="Focusable" Value="True"/>
                             <Setter TargetName="TrackBase" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                         </Trigger>
-
+                        <!-- Показ Pop-up -->
                         <Trigger Property="IsMouseCaptured" Value="True" SourceName="Thumb">
-                            <Setter TargetName="ValuePopupBorder" Property="Opacity" Value="1"/>
                             <Setter TargetName="TrackInner" Property="Opacity" Value="1"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupBorder" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseOut}"/>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupTranslateTransform" Storyboard.TargetProperty="Y" To="0" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseOut}"/>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupScaleTransform" Storyboard.TargetProperty="ScaleX" To="1" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseOut}"/>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupScaleTransform" Storyboard.TargetProperty="ScaleY" To="1" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseOut}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupBorder" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseIn}"/>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupTranslateTransform" Storyboard.TargetProperty="Y" To="10" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseIn}"/>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupScaleTransform" Storyboard.TargetProperty="ScaleX" To="0.9" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseIn}"/>
+                                        <DoubleAnimation Storyboard.TargetName="ValuePopupScaleTransform" Storyboard.TargetProperty="ScaleY" To="0.9" Duration="{StaticResource QuickAnimationDuration}" EasingFunction="{StaticResource StandardEaseIn}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
 
+                        <!-- TickPlacement -->
                         <Trigger Property="TickPlacement" Value="TopLeft">
                             <Setter TargetName="TickCanvas" Property="Visibility" Value="Visible"/>
                             <Setter TargetName="TickCanvas" Property="Margin" Value="0,-16,0,0"/>
                         </Trigger>
-
                         <Trigger Property="TickPlacement" Value="BottomRight">
                             <Setter TargetName="TickCanvas" Property="Visibility" Value="Visible"/>
                             <Setter TargetName="TickCanvas" Property="Margin" Value="0,16,0,0"/>
                         </Trigger>
-
                         <Trigger Property="TickPlacement" Value="Both">
                             <Setter TargetName="TickCanvas" Property="Visibility" Value="Visible"/>
                         </Trigger>
-
+                        <!-- Disabled -->
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="TrackBase" Property="Opacity" Value="0.5"/>
                             <Setter TargetName="TrackInner" Property="Opacity" Value="0.5"/>
@@ -256,5 +283,4 @@
             </Setter.Value>
         </Setter>
     </Style>
-
 </ResourceDictionary>

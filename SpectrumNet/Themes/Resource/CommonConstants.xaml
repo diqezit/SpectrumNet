@@ -42,5 +42,6 @@
     <Duration x:Key="QuickAnimationDuration">0:0:0.15</Duration>
     <CubicEase x:Key="StandardEaseOut" EasingMode="EaseOut"/>
     <QuadraticEase x:Key="StandardEaseInOut" EasingMode="EaseInOut"/>
+    <CubicEase x:Key="StandardEaseIn" EasingMode="EaseIn"/>
 
 </ResourceDictionary>

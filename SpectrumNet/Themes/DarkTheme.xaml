@@ -21,6 +21,11 @@
     <SolidColorBrush x:Key="LightTextPrimaryBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#2F3436"/>
 
+    <!-- КОНТРАСТНЫЕ КИСТИ ДЛЯ THUMB (ТЕМНАЯ ТЕМА) -->
+    <SolidColorBrush x:Key="SliderThumbFillBrush" Color="#4D7DFE"/>
+    <SolidColorBrush x:Key="SliderThumbAccentBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#3A66D9"/>
+
     <!-- Цвета для кнопок -->
     <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#252A2B"/>
     <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF"/>
