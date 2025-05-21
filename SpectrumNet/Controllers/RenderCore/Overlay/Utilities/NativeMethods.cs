@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.Controllers.RenderCore.Overlay;
+namespace SpectrumNet.Controllers.RenderCore.Overlay.Utilities;
 
 internal static partial class NativeMethods
 {
