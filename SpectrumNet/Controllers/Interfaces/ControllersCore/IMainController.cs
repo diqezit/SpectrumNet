@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Controllers.RenderCore.Overlay.Interface;
+
 namespace SpectrumNet.Controllers.Interfaces.ControllersCore;
 
 public interface IMainController :

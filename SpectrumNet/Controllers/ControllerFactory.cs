@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Controllers.RenderCore.Overlay.Interface;
+
 namespace SpectrumNet.Controllers;
 
 public sealed class ControllerFactory : IControllerProvider, IDisposable

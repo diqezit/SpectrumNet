@@ -24,6 +24,7 @@ global using SpectrumNet.Controllers.Interfaces.UICore;
 global using SpectrumNet.Controllers.Interfaces.ViewCore;
 global using SpectrumNet.Controllers.RenderCore;
 global using SpectrumNet.Controllers.RenderCore.Overlay;
+global using SpectrumNet.Controllers.RenderCore.Overlay.Interface;
 global using SpectrumNet.Controllers.RenderCore.Overlay.Utilities;
 global using SpectrumNet.Controllers.SpectrumCore;
 global using SpectrumNet.Controllers.UICore;
@@ -86,4 +87,3 @@ global using MessageBox = System.Windows.MessageBox;
 global using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 global using Parallel = System.Threading.Tasks.Parallel;
 global using TextBox = System.Windows.Controls.TextBox;
-

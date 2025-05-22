@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.Controllers.RenderCore.Overlay.Interface;
+
 namespace SpectrumNet.Controllers.UICore;
 
 public class UIController : AsyncDisposableBase, IUIController

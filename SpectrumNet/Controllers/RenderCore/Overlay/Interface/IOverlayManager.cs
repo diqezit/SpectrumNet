@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.Controllers.RenderCore.Overlay;
+namespace SpectrumNet.Controllers.RenderCore.Overlay.Interface;
 
 public interface IOverlayManager : IAsyncDisposable
 {
