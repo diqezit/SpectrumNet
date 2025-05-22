@@ -126,8 +126,8 @@ public sealed class ThemeManager : IThemes
                 var newThemeDict = new ResourceDictionary
                 {
                     Source = new Uri(_isDarkTheme ?
-                        "/Themes/DarkTheme.xaml" :
-                        "/Themes/LightTheme.xaml",
+                        "/SN.Themes/Resources/DarkTheme.xaml" :
+                        "/SN.Themes/Resources/LightTheme.xaml",
                         UriKind.RelativeOrAbsolute)
                 };
 
