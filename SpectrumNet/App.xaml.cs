@@ -63,7 +63,7 @@ public partial class App : Application
                 forceLog: true);
     }
 
-    private void LogCriticalStartupError(Exception ex) => 
+    private void LogCriticalStartupError(Exception ex) =>
         _logger.Error(LogPrefix, "Critical error during startup", ex);
 
     protected override void OnExit(ExitEventArgs e)

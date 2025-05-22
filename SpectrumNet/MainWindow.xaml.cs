@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using System.Windows.Navigation;
-
 namespace SpectrumNet;
 
 public partial class MainWindow : Window, IAsyncDisposable
