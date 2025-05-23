@@ -29,7 +29,6 @@ public enum RenderStyle
     Rainbow,
     SphereRenderer,
     TextParticles,
-    Voronoi,
     Waterfall,
     WaterRenderer,
     Waveform,

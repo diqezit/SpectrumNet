@@ -1,35 +1,30 @@
 ﻿#nullable enable
 
+using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.RainbowRenderer.Constants;
-using static SpectrumNet.SN.Visualization.Renderers.RainbowRenderer.Constants.Quality;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class RainbowRenderer : EffectSpectrumRenderer
 {
-    private static readonly Lazy<RainbowRenderer> _instance = new(() => new RainbowRenderer());
-    private const string LOG_PREFIX = nameof(RainbowRenderer);
+    private const string LogPrefix = nameof(RainbowRenderer);
+
+    private static readonly Lazy<RainbowRenderer> _instance =
+        new(() => new RainbowRenderer());
 
     private RainbowRenderer() { }
 
     public static RainbowRenderer GetInstance() => _instance.Value;
 
-    public record Constants
+    public static class Constants
     {
         public const float
             MIN_MAGNITUDE_THRESHOLD = 0.008f,
             ALPHA_MULTIPLIER = 1.7f,
             SMOOTHING_BASE = 0.3f,
-            SMOOTHING_OVERLAY = 0.5f;
-
-        public const int
-            MAX_ALPHA = 255;
-
-        public const float
+            SMOOTHING_OVERLAY = 0.5f,
             CORNER_RADIUS = 8f,
-            GRADIENT_ALPHA_FACTOR = 0.7f;
-
-        public const float
+            GRADIENT_ALPHA_FACTOR = 0.7f,
             GLOW_INTENSITY = 0.45f,
             GLOW_RADIUS = 6f,
             GLOW_LOUDNESS_FACTOR = 0.3f,
@@ -42,65 +37,77 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
             REFLECTION_OPACITY = 0.3f,
             REFLECTION_HEIGHT = 0.15f,
             REFLECTION_FACTOR = 0.4f,
-            REFLECTION_MIN_MAGNITUDE = 0.2f;
-
-        public const float
+            REFLECTION_MIN_MAGNITUDE = 0.2f,
             SUB_BASS_WEIGHT = 1.7f,
             BASS_WEIGHT = 1.4f,
             MID_WEIGHT = 1.1f,
             HIGH_WEIGHT = 0.6f,
             LOUDNESS_SCALE = 4.0f,
-            LOUDNESS_SMOOTH_FACTOR = 0.5f;
-
-        public const float
             HUE_START = 240f,
             HUE_RANGE = 240f,
             SATURATION = 100f,
             BRIGHTNESS_BASE = 90f,
             BRIGHTNESS_RANGE = 10f;
 
-        public static class Quality
+        public const int MAX_ALPHA = 255;
+
+        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
-            public const bool
-                LOW_USE_ANTI_ALIAS = false,
-                MEDIUM_USE_ANTI_ALIAS = true,
-                HIGH_USE_ANTI_ALIAS = true;
+            [RenderQuality.Low] = new(
+                UseAntiAlias: false,
+                UseAdvancedEffects: false,
+                FilterMode: SKFilterMode.Nearest,
+                MipmapMode: SKMipmapMode.None
+            ),
+            [RenderQuality.Medium] = new(
+                UseAntiAlias: true,
+                UseAdvancedEffects: true,
+                FilterMode: SKFilterMode.Linear,
+                MipmapMode: SKMipmapMode.Linear
+            ),
+            [RenderQuality.High] = new(
+                UseAntiAlias: true,
+                UseAdvancedEffects: true,
+                FilterMode: SKFilterMode.Linear,
+                MipmapMode: SKMipmapMode.Linear
+            )
+        };
 
-            public const bool
-                LOW_USE_ADVANCED_EFFECTS = false,
-                MEDIUM_USE_ADVANCED_EFFECTS = true,
-                HIGH_USE_ADVANCED_EFFECTS = true;
-
-            public const SKFilterMode
-                LOW_FILTER_MODE = SKFilterMode.Nearest,
-                MEDIUM_FILTER_MODE = SKFilterMode.Linear,
-                HIGH_FILTER_MODE = SKFilterMode.Linear;
-
-            public const SKMipmapMode
-                LOW_MIPMAP_MODE = SKMipmapMode.None,
-                MEDIUM_MIPMAP_MODE = SKMipmapMode.Linear,
-                HIGH_MIPMAP_MODE = SKMipmapMode.Linear;
-        }
+        public record QualitySettings(
+            bool UseAntiAlias,
+            bool UseAdvancedEffects,
+            SKFilterMode FilterMode,
+            SKMipmapMode MipmapMode
+        );
     }
 
+    private static readonly SKColor[] GradientColors = new SKColor[2];
+    private static readonly float[] GradientPositions = [0f, 1f];
+
+    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
     private SKColor[]? _colorCache;
     private SKPaint? _glowPaint;
     private readonly SKPath _path = new();
     private readonly SKPaint _barPaint = new() { Style = SKPaintStyle.Fill };
-    private readonly SKPaint _highlightPaint = new() { Style = SKPaintStyle.Fill, Color = SKColors.White };
-    private readonly SKPaint _reflectionPaint = new() { Style = SKPaintStyle.Fill, BlendMode = SKBlendMode.SrcOver };
+    private readonly SKPaint _highlightPaint = new()
+    {
+        Style = SKPaintStyle.Fill,
+        Color = SKColors.White
+    };
+    private readonly SKPaint _reflectionPaint = new()
+    {
+        Style = SKPaintStyle.Fill,
+        BlendMode = SKBlendMode.SrcOver
+    };
 
     protected override void OnInitialize()
     {
         base.OnInitialize();
         InitializeResources();
-        _logger.Debug(LOG_PREFIX, "Initialized");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
-    private void InitializeResources() =>
-        _logger.Safe(HandleInitializeResources, LOG_PREFIX, "Failed to initialize resources");
-
-    private void HandleInitializeResources()
+    private void InitializeResources()
     {
         InitializeGlowPaint();
         CreateColorCache();
@@ -111,7 +118,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         _glowPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = UseAntiAlias,
+            IsAntialias = _useAntiAlias,
             ImageFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_RADIUS)
         };
     }
@@ -126,81 +133,31 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         }
     }
 
-    protected override void OnConfigurationChanged()
-    {
-        base.OnConfigurationChanged();
-
+    protected override void OnConfigurationChanged() => 
         _smoothingFactor = _isOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE;
-
-        _logger.Info(LOG_PREFIX, $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
-    }
-
+    
     protected override void OnQualitySettingsApplied()
     {
-        base.OnQualitySettingsApplied();
-
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                LowQualitySettings();
-                break;
-
-            case RenderQuality.Medium:
-                MediumQualitySettings();
-                break;
-
-            case RenderQuality.High:
-                HighQualitySettings();
-                break;
-        }
+        _currentSettings = QualityPresets[Quality];
+        _useAntiAlias = _currentSettings.UseAntiAlias;
+        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
+        _samplingOptions = new SKSamplingOptions(
+            _currentSettings.FilterMode,
+            _currentSettings.MipmapMode
+        );
 
         UpdatePaintProperties();
-
-        _logger.Debug(LOG_PREFIX,
-            $"Quality settings applied. Quality: {Quality}, " +
-            $"AntiAlias: {UseAntiAlias}, AdvancedEffects: {UseAdvancedEffects}");
-    }
-
-    private void LowQualitySettings()
-    {
-        _useAntiAlias = LOW_USE_ANTI_ALIAS;
-        _samplingOptions = new SKSamplingOptions(LOW_FILTER_MODE, LOW_MIPMAP_MODE);
-        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
-    }
-
-    private void MediumQualitySettings()
-    {
-        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
-        _samplingOptions = new SKSamplingOptions(MEDIUM_FILTER_MODE, MEDIUM_MIPMAP_MODE);
-        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
-    }
-
-    private void HighQualitySettings()
-    {
-        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
-        _samplingOptions = new SKSamplingOptions(HIGH_FILTER_MODE, HIGH_MIPMAP_MODE);
-        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
     private void UpdatePaintProperties()
     {
-        UpdateMainPaints();
-        UpdateGlowPaint();
-    }
+        _barPaint.IsAntialias = _useAntiAlias;
+        _highlightPaint.IsAntialias = _useAntiAlias;
+        _reflectionPaint.IsAntialias = _useAntiAlias;
 
-    private void UpdateMainPaints()
-    {
-        _barPaint.IsAntialias = UseAntiAlias;
-        _highlightPaint.IsAntialias = UseAntiAlias;
-        _reflectionPaint.IsAntialias = UseAntiAlias;
-    }
-
-    private void UpdateGlowPaint()
-    {
         if (_glowPaint != null)
-        {
-            _glowPaint.IsAntialias = UseAntiAlias;
-        }
+            _glowPaint.IsAntialias = _useAntiAlias;
     }
 
     protected override void RenderEffect(
@@ -210,75 +167,68 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint) =>
+        SKPaint paint)
+    {
         _logger.Safe(
-            () => HandleRenderEffect(canvas, spectrum, info, barWidth, barSpacing, paint),
-            LOG_PREFIX,
-            "Error during rendering");
+            () => RenderRainbowBars(canvas, spectrum, info, barWidth, barSpacing),
+            LogPrefix,
+            "Error during rendering"
+        );
+    }
 
-    private void HandleRenderEffect(
+    private void RenderRainbowBars(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
         float barWidth,
-        float barSpacing,
-        SKPaint _)
+        float barSpacing)
     {
         float totalBarWidth = barWidth + barSpacing;
-        float canvasHeight = info.Height;
-        float startX = CalculateStartingX(info.Width, spectrum.Length, totalBarWidth, barSpacing);
-        float loudness = CalculateLoudness(spectrum);
-        float reflectionHeight = canvasHeight * REFLECTION_HEIGHT;
-
-        RenderBarElements(
-            canvas,
-            spectrum,
-            canvasHeight,
-            startX,
-            barWidth,
+        float startX = CalculateStartX(
+            info.Width,
+            spectrum.Length,
             totalBarWidth,
-            loudness,
-            reflectionHeight);
+            barSpacing
+        );
+        float loudness = CalculateLoudness(spectrum);
+        float reflectionHeight = info.Height * REFLECTION_HEIGHT;
+
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            float magnitude = Clamp(spectrum[i], 0f, 1f);
+            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
+
+            RenderBar(
+                canvas,
+                i,
+                magnitude,
+                startX,
+                totalBarWidth,
+                barWidth,
+                info.Height,
+                loudness,
+                reflectionHeight
+            );
+        }
 
         _barPaint.Shader = null;
     }
 
-    private static float CalculateStartingX(
+    private static float CalculateStartX(
         float width,
         int spectrumLength,
         float totalBarWidth,
         float barSpacing) =>
         (width - (spectrumLength * totalBarWidth - barSpacing)) / 2f;
 
-    private void RenderBarElements(
+    private void RenderBar(
         SKCanvas canvas,
-        float[] spectrum,
-        float canvasHeight,
-        float startX,
-        float barWidth,
-        float totalBarWidth,
-        float loudness,
-        float reflectionHeight)
-    {
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            float magnitude = Clamp(spectrum[i], 0f, 1f);
-            if (magnitude < MIN_MAGNITUDE_THRESHOLD)
-                continue;
-
-            RenderSingleBar(canvas, canvasHeight, startX, i, totalBarWidth, barWidth, magnitude,
-                loudness, reflectionHeight);
-        }
-    }
-
-    private void RenderSingleBar(
-        SKCanvas canvas,
-        float canvasHeight,
-        float startX,
         int index,
+        float magnitude,
+        float startX,
         float totalBarWidth,
         float barWidth,
-        float magnitude,
+        float canvasHeight,
         float loudness,
         float reflectionHeight)
     {
@@ -287,112 +237,97 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float y = canvasHeight - barHeight;
         var barRect = new SKRect(x, y, x + barWidth, canvasHeight);
 
-        if (canvas.QuickReject(barRect))
-            return;
+        if (canvas.QuickReject(barRect)) return;
 
         SKColor barColor = GetBarColor(magnitude);
-        DrawBar(canvas, barRect, barColor, magnitude, loudness, x, y, barWidth, barHeight,
-            canvasHeight, reflectionHeight);
-    }
 
-    private void DrawBar(
-        SKCanvas canvas,
-        SKRect barRect,
-        SKColor barColor,
-        float magnitude,
-        float loudness,
-        float x,
-        float y,
-        float barWidth,
-        float barHeight,
-        float canvasHeight,
-        float reflectionHeight)
-    {
-        DrawGlowIfNeeded(canvas, barRect, barColor, magnitude, loudness);
-        DrawMainBar(canvas, barRect, barColor, magnitude, x, y, barWidth);
+        if (ShouldDrawGlow(magnitude))
+            DrawGlow(canvas, barRect, barColor, magnitude, loudness);
 
-        if (barHeight <= CORNER_RADIUS * 2)
-            return;
+        DrawMainBar(canvas, barRect, barColor, magnitude);
 
-        DrawHighlight(canvas, x, y, barWidth, barHeight, magnitude);
-        DrawReflectionIfNeeded(canvas, x, canvasHeight, barWidth, barHeight, barColor,
-            magnitude, reflectionHeight);
-    }
+        if (barHeight > CORNER_RADIUS * 2)
+        {
+            DrawHighlight(canvas, x, y, barWidth, barHeight, magnitude);
 
-    private void DrawGlowIfNeeded(
-        SKCanvas canvas,
-        SKRect barRect,
-        SKColor barColor,
-        float magnitude,
-        float loudness)
-    {
-        if (!ShouldDrawGlow(magnitude))
-            return;
-
-        DrawGlowEffect(canvas, barRect, barColor, magnitude, loudness);
+            if (ShouldDrawReflection(magnitude))
+            {
+                DrawReflection(
+                    canvas,
+                    x,
+                    canvasHeight,
+                    barWidth,
+                    barHeight,
+                    barColor,
+                    magnitude,
+                    reflectionHeight
+                );
+            }
+        }
     }
 
     private bool ShouldDrawGlow(float magnitude) =>
-        UseAdvancedEffects && _glowPaint != null &&
+        _useAdvancedEffects && _glowPaint != null &&
         magnitude > GLOW_MIN_MAGNITUDE && magnitude <= GLOW_MAX_MAGNITUDE;
 
-    private void DrawGlowEffect(
+    private bool ShouldDrawReflection(float magnitude) =>
+        _useAdvancedEffects && magnitude > REFLECTION_MIN_MAGNITUDE;
+
+    private void DrawGlow(
         SKCanvas canvas,
         SKRect barRect,
         SKColor barColor,
         float magnitude,
         float loudness)
     {
-        UpdateGlowRadiusIfNeeded(loudness);
-
-        byte glowAlpha = (byte)Clamp(magnitude * MAX_ALPHA * GLOW_INTENSITY, 0, MAX_ALPHA);
-        _glowPaint!.Color = barColor.WithAlpha(glowAlpha);
-        canvas.DrawRoundRect(barRect, CORNER_RADIUS, CORNER_RADIUS, _glowPaint);
-    }
-
-    private void UpdateGlowRadiusIfNeeded(float loudness)
-    {
         if (_glowPaint == null) return;
 
-        float adjustedGlowRadius = GLOW_RADIUS * (1 + loudness * GLOW_LOUDNESS_FACTOR);
-        if (Abs(adjustedGlowRadius - GLOW_RADIUS) > GLOW_RADIUS_THRESHOLD)
+        float adjustedRadius = GLOW_RADIUS * (1 + loudness * GLOW_LOUDNESS_FACTOR);
+        if (MathF.Abs(adjustedRadius - GLOW_RADIUS) > GLOW_RADIUS_THRESHOLD)
         {
-            _glowPaint.ImageFilter = SKImageFilter.CreateBlur(adjustedGlowRadius, adjustedGlowRadius);
+            _glowPaint.ImageFilter = SKImageFilter.CreateBlur(
+                adjustedRadius,
+                adjustedRadius
+            );
         }
+
+        byte glowAlpha = (byte)Clamp(
+            magnitude * MAX_ALPHA * GLOW_INTENSITY,
+            0,
+            MAX_ALPHA
+        );
+        _glowPaint.Color = barColor.WithAlpha(glowAlpha);
+        canvas.DrawRoundRect(barRect, CORNER_RADIUS, CORNER_RADIUS, _glowPaint);
     }
 
     private void DrawMainBar(
         SKCanvas canvas,
         SKRect barRect,
         SKColor barColor,
-        float magnitude,
-        float x,
-        float y,
-        float barWidth)
+        float magnitude)
     {
-        using var shader = CreateBarShader(barColor, x, y, barWidth);
-        byte barAlpha = CalculateBarAlpha(magnitude);
+        GradientColors[0] = barColor;
+        GradientColors[1] = barColor.WithAlpha(
+            (byte)(MAX_ALPHA * GRADIENT_ALPHA_FACTOR)
+        );
 
+        using var shader = SKShader.CreateLinearGradient(
+            new SKPoint(barRect.Left, barRect.Top),
+            new SKPoint(barRect.Right, barRect.Top),
+            GradientColors,
+            GradientPositions,
+            SKShaderTileMode.Clamp
+        );
+
+        byte barAlpha = (byte)Clamp(
+            magnitude * ALPHA_MULTIPLIER * MAX_ALPHA,
+            0,
+            MAX_ALPHA
+        );
         _barPaint.Color = barColor.WithAlpha(barAlpha);
         _barPaint.Shader = shader;
         canvas.DrawRoundRect(barRect, CORNER_RADIUS, CORNER_RADIUS, _barPaint);
     }
-
-    private static SKShader CreateBarShader(SKColor barColor, float x, float y, float barWidth)
-    {
-        SKColor[] colors = [barColor, barColor.WithAlpha((byte)(MAX_ALPHA * GRADIENT_ALPHA_FACTOR))];
-        float[] positions = [0f, 1f];
-
-        return SKShader.CreateLinearGradient(
-            new SKPoint(x, y),
-            new SKPoint(x + barWidth, y),
-            colors,
-            positions,
-            SKShaderTileMode.Clamp);
-    }
-
-    private static byte CalculateBarAlpha(float magnitude) =>
-        (byte)Clamp(magnitude * ALPHA_MULTIPLIER * MAX_ALPHA, 0, MAX_ALPHA);
 
     private void DrawHighlight(
         SKCanvas canvas,
@@ -403,32 +338,24 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float magnitude)
     {
         float highlightWidth = barWidth * HIGHLIGHT_WIDTH_PROP;
-        float highlightHeight = Min(barHeight * HIGHLIGHT_HEIGHT_PROP, CORNER_RADIUS);
-        byte highlightAlpha = (byte)Clamp(magnitude * MAX_ALPHA * HIGHLIGHT_ALPHA, 0, MAX_ALPHA);
+        float highlightHeight = MathF.Min(
+            barHeight * HIGHLIGHT_HEIGHT_PROP,
+            CORNER_RADIUS
+        );
+        byte highlightAlpha = (byte)Clamp(
+            magnitude * MAX_ALPHA * HIGHLIGHT_ALPHA,
+            0,
+            MAX_ALPHA
+        );
 
         _highlightPaint.Color = SKColors.White.WithAlpha(highlightAlpha);
-
-        float highlightX = x + (barWidth - highlightWidth) / 2;
-        canvas.DrawRect(highlightX, y, highlightWidth, highlightHeight, _highlightPaint);
-    }
-
-    private bool ShouldDrawReflection(float magnitude) =>
-        UseAdvancedEffects && magnitude > REFLECTION_MIN_MAGNITUDE;
-
-    private void DrawReflectionIfNeeded(
-        SKCanvas canvas,
-        float x,
-        float canvasHeight,
-        float barWidth,
-        float barHeight,
-        SKColor barColor,
-        float magnitude,
-        float reflectionHeight)
-    {
-        if (!ShouldDrawReflection(magnitude))
-            return;
-
-        DrawReflection(canvas, x, canvasHeight, barWidth, barHeight, barColor, magnitude, reflectionHeight);
+        canvas.DrawRect(
+            x + (barWidth - highlightWidth) / 2,
+            y,
+            highlightWidth,
+            highlightHeight,
+            _highlightPaint
+        );
     }
 
     private void DrawReflection(
@@ -441,15 +368,22 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float magnitude,
         float reflectionHeight)
     {
-        byte reflectionAlpha = (byte)Clamp(magnitude * MAX_ALPHA * REFLECTION_OPACITY, 0, MAX_ALPHA);
+        byte reflectionAlpha = (byte)Clamp(
+            magnitude * MAX_ALPHA * REFLECTION_OPACITY,
+            0,
+            MAX_ALPHA
+        );
         _reflectionPaint.Color = barColor.WithAlpha(reflectionAlpha);
 
-        float reflectHeight = Min(barHeight * REFLECTION_FACTOR, reflectionHeight);
+        float reflectHeight = MathF.Min(
+            barHeight * REFLECTION_FACTOR,
+            reflectionHeight
+        );
         canvas.DrawRect(x, canvasHeight, barWidth, reflectHeight, _reflectionPaint);
     }
 
     private SKColor GetBarColor(float magnitude) =>
-        _colorCache != null ? _colorCache[GetColorIndex(magnitude)] : GetRainbowColor(magnitude);
+        _colorCache?[GetColorIndex(magnitude)] ?? GetRainbowColor(magnitude);
 
     private static int GetColorIndex(float magnitude) =>
         (int)Clamp(magnitude * MAX_ALPHA, 0, MAX_ALPHA);
@@ -473,46 +407,27 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
         for (int i = 0; i < length; i++)
         {
-            float weight = GetFrequencyWeight(i, subBass, bass, mid);
-            sum += Abs(spectrum[i]) * weight;
+            float weight = i < subBass ? SUB_BASS_WEIGHT :
+                          i < bass ? BASS_WEIGHT :
+                          i < mid ? MID_WEIGHT : HIGH_WEIGHT;
+            sum += MathF.Abs(spectrum[i]) * weight;
         }
 
         return Clamp(sum / length * LOUDNESS_SCALE, 0f, 1f);
     }
 
-    private static float GetFrequencyWeight(int index, int subBass, int bass, int mid)
-    {
-        if (index < subBass) return SUB_BASS_WEIGHT;
-        if (index < bass) return BASS_WEIGHT;
-        if (index < mid) return MID_WEIGHT;
-        return HIGH_WEIGHT;
-    }
-
     protected override void OnDispose()
-    {
-        _logger.Safe(DisposeManagedResources, LOG_PREFIX, "Error during disposal");
-        base.OnDispose();
-        _logger.Debug(LOG_PREFIX, "Disposed");
-    }
-
-    private void DisposeManagedResources()
-    {
-        DisposeRenderResources();
-        ClearReferences();
-    }
-
-    private void DisposeRenderResources()
     {
         _path?.Dispose();
         _glowPaint?.Dispose();
         _barPaint?.Dispose();
         _highlightPaint?.Dispose();
         _reflectionPaint?.Dispose();
-    }
 
-    private void ClearReferences()
-    {
         _previousSpectrum = null;
         _colorCache = null;
+
+        base.OnDispose();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

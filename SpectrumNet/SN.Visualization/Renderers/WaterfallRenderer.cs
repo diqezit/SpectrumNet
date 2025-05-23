@@ -1,22 +1,32 @@
 ﻿#nullable enable
 
+using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.WaterfallRenderer.Constants;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class WaterfallRenderer : EffectSpectrumRenderer
 {
-    private static readonly Lazy<WaterfallRenderer> _instance = new(() => new WaterfallRenderer());
     private const string LogPrefix = nameof(WaterfallRenderer);
+
+    private static readonly Lazy<WaterfallRenderer> _instance =
+        new(() => new WaterfallRenderer());
+
+    private WaterfallRenderer() { }
 
     public static WaterfallRenderer GetInstance() => _instance.Value;
 
-    public record Constants
+    public static class Constants
     {
         public const float
             MIN_SIGNAL = 1e-6f,
             DETAIL_SCALE_FACTOR = 0.8f,
-            ZOOM_THRESHOLD = 2.0f;
+            ZOOM_THRESHOLD = 2.0f,
+            BLUE_THRESHOLD = 0.25f,
+            CYAN_THRESHOLD = 0.5f,
+            YELLOW_THRESHOLD = 0.75f,
+            PARAMETER_CHANGE_THRESHOLD = 0.1f,
+            COLOR_ENHANCEMENT_FACTOR = 1.0f;
 
         public const int
             DEFAULT_BUFFER_HEIGHT = 256,
@@ -26,12 +36,40 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             COLOR_PALETTE_SIZE = 256,
             LOW_BAR_COUNT_THRESHOLD = 64,
             HIGH_BAR_COUNT_THRESHOLD = 256,
-            SEMAPHORE_TIMEOUT_MS = 5;
+            SEMAPHORE_TIMEOUT_MS = 5,
+            PARALLEL_THRESHOLD = 32,
+            GRID_DIVISIONS = 10;
 
-        public const float
-            BLUE_THRESHOLD = 0.25f,
-            CYAN_THRESHOLD = 0.5f,
-            YELLOW_THRESHOLD = 0.75f;
+        public const byte GRID_LINE_ALPHA = 40;
+
+        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
+        {
+            [RenderQuality.Low] = new(
+                UseGridLines: false,
+                UseGridMarkers: false,
+                GridLineWidth: 1f,
+                MarkerFontSize: 10f
+            ),
+            [RenderQuality.Medium] = new(
+                UseGridLines: true,
+                UseGridMarkers: false,
+                GridLineWidth: 1f,
+                MarkerFontSize: 10f
+            ),
+            [RenderQuality.High] = new(
+                UseGridLines: true,
+                UseGridMarkers: true,
+                GridLineWidth: 1f,
+                MarkerFontSize: 12f
+            )
+        };
+
+        public record QualitySettings(
+            bool UseGridLines,
+            bool UseGridMarkers,
+            float GridLineWidth,
+            float MarkerFontSize
+        );
     }
 
     private static readonly int[] _colorPalette = InitColorPalette();
@@ -40,53 +78,43 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     private readonly ObjectPool<float[]> _spectrumPool = new(
         () => new float[DEFAULT_SPECTRUM_WIDTH],
         array => Array.Clear(array, 0, array.Length),
-        initialCount: 2);
+        initialCount: 2
+    );
 
     private float[]? _currentSpectrum;
     private float[][]? _spectrogramBuffer;
+    private SKBitmap? _waterfallBitmap;
     private int _bufferHead;
     private bool _needsBufferResize;
-    private SKBitmap? _waterfallBitmap;
-
     private float _lastBarWidth;
     private int _lastBarCount;
     private float _lastBarSpacing;
+    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
 
-    protected override void OnInitialize() =>
-        _logger.Safe(
-            PerformInitialization,
-            LogPrefix,
-            "Failed to initialize renderer"
-        );
-
-    private void PerformInitialization()
+    protected override void OnInitialize()
     {
         base.OnInitialize();
-
         int bufferHeight = _isOverlayActive ?
-            OVERLAY_BUFFER_HEIGHT :
-            DEFAULT_BUFFER_HEIGHT;
-
+            OVERLAY_BUFFER_HEIGHT : DEFAULT_BUFFER_HEIGHT;
         InitializeSpectrogramBuffer(bufferHeight, DEFAULT_SPECTRUM_WIDTH);
-
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
-    protected override void OnConfigurationChanged() =>
-        _logger.Safe(
-            () =>
-            {
-                if (_spectrogramBuffer != null)
-                {
-                    ResizeBufferForOverlayMode(_isOverlayActive);
-                }
+    protected override void OnQualitySettingsApplied()
+    {
+        _currentSettings = QualityPresets[Quality];
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+    }
 
-                _logger.Log(LogLevel.Information, LogPrefix,
-                    $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
-            },
-            LogPrefix,
-            "Failed to handle configuration change"
-        );
+    protected override void OnConfigurationChanged()
+    {
+        if (_spectrogramBuffer != null)
+        {
+            ResizeBufferForOverlayMode(_isOverlayActive);
+        }
+        _logger.Log(LogLevel.Information, LogPrefix,
+            $"Configuration changed. Quality: {Quality}, Overlay: {_isOverlayActive}");
+    }
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -95,48 +123,34 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint) =>
+        SKPaint paint)
+    {
         _logger.Safe(
-            () =>
-            {
-                bool parametersChanged = CheckParametersChanged(barWidth, barSpacing, barCount);
-
-                UpdateState(spectrum, parametersChanged, barCount, barWidth);
-
-                RenderWithOverlay(canvas, () => RenderFrame(canvas, info, barWidth, barSpacing, barCount));
-            },
+            () => RenderWaterfall(canvas, spectrum, info, barWidth, barSpacing, barCount),
             LogPrefix,
             "Error during rendering"
         );
+    }
 
-    private void UpdateState(
+    private void RenderWaterfall(
+        SKCanvas canvas,
         float[] spectrum,
-        bool parametersChanged,
-        int barCount,
-        float barWidth)
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        int barCount)
     {
-        bool semaphoreAcquired = false;
-
-        try
-        {
-            semaphoreAcquired = _renderSemaphore.Wait(SEMAPHORE_TIMEOUT_MS);
-            if (semaphoreAcquired)
-            {
-                ProcessSpectrumData(spectrum, parametersChanged, barCount, barWidth);
-            }
-        }
-        finally
-        {
-            if (semaphoreAcquired)
-                _renderSemaphore.Release();
-        }
+        bool parametersChanged = CheckParametersChanged(barWidth, barSpacing, barCount);
+        UpdateState(spectrum, parametersChanged, barCount, barWidth);
+        RenderWithOverlay(canvas, () =>
+            RenderFrame(canvas, info, barWidth, barSpacing, barCount));
     }
 
     private bool CheckParametersChanged(float barWidth, float barSpacing, int barCount)
     {
-        bool changed = Abs(_lastBarWidth - barWidth) > 0.1f ||
-                       Abs(_lastBarSpacing - barSpacing) > 0.1f ||
-                       _lastBarCount != barCount;
+        bool changed = MathF.Abs(_lastBarWidth - barWidth) > PARAMETER_CHANGE_THRESHOLD ||
+                      MathF.Abs(_lastBarSpacing - barSpacing) > PARAMETER_CHANGE_THRESHOLD ||
+                      _lastBarCount != barCount;
 
         if (changed)
         {
@@ -149,32 +163,49 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         return changed;
     }
 
+    private void UpdateState(
+        float[] spectrum,
+        bool parametersChanged,
+        int barCount,
+        float barWidth)
+    {
+        bool acquired = false;
+        try
+        {
+            acquired = _renderSemaphore.Wait(SEMAPHORE_TIMEOUT_MS);
+            if (acquired)
+            {
+                ProcessSpectrumData(spectrum, parametersChanged, barCount, barWidth);
+            }
+        }
+        finally
+        {
+            if (acquired)
+                _renderSemaphore.Release();
+        }
+    }
+
     private void ProcessSpectrumData(
         float[] spectrum,
         bool parametersChanged,
         int barCount,
-        float barWidth) =>
-        _logger.Safe(
-            () =>
-            {
-                float[]? adjustedSpectrum = spectrum;
+        float barWidth)
+    {
+        float[]? adjustedSpectrum = spectrum;
 
-                if (spectrum != null && parametersChanged)
-                {
-                    adjustedSpectrum = AdjustSpectrumResolution(spectrum, barCount, barWidth);
-                }
+        if (spectrum != null && parametersChanged)
+        {
+            adjustedSpectrum = AdjustSpectrumResolution(spectrum, barCount, barWidth);
+        }
 
-                UpdateSpectrogramBuffer(adjustedSpectrum);
+        UpdateSpectrogramBuffer(adjustedSpectrum);
 
-                if (_needsBufferResize && parametersChanged)
-                {
-                    ResizeBufferForBarParameters(barCount);
-                    _needsBufferResize = false;
-                }
-            },
-            LogPrefix,
-            "Error processing spectrum data"
-        );
+        if (_needsBufferResize && parametersChanged)
+        {
+            ResizeBufferForBarParameters(barCount);
+            _needsBufferResize = false;
+        }
+    }
 
     private void RenderFrame(
         SKCanvas canvas,
@@ -193,21 +224,21 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         int spectrumWidth = _spectrogramBuffer[0].Length;
 
         UpdateWaterfallBitmap(spectrumWidth, bufferHeight);
-
-        RenderQuality renderQuality = CalculateRenderQuality(barCount);
         UpdateBitmapPixels(_waterfallBitmap!, _spectrogramBuffer, _bufferHead,
-                         spectrumWidth, bufferHeight, renderQuality);
-
+                          spectrumWidth, bufferHeight);
         DrawBitmapToCanvas(canvas, info, barWidth, barSpacing, barCount);
 
-        if (barWidth > ZOOM_THRESHOLD && UseAdvancedEffects)
+        if (barWidth > ZOOM_THRESHOLD && _useAdvancedEffects)
         {
             SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
             ApplyZoomEnhancement(canvas, destRect, barWidth, barCount, barSpacing);
         }
     }
 
-    private float[] AdjustSpectrumResolution(float[] spectrum, int barCount, float barWidth)
+    private float[] AdjustSpectrumResolution(
+        float[] spectrum,
+        int barCount,
+        float barWidth)
     {
         if (spectrum == null || barCount <= 0)
             return spectrum ?? [];
@@ -216,7 +247,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             return spectrum;
 
         float[] result = GetSpectrumBuffer(barCount);
-        float detailLevel = Max(0.1f, Min(1.0f, barWidth * DETAIL_SCALE_FACTOR));
+        float detailLevel = MathF.Max(0.1f, MathF.Min(1.0f, barWidth * DETAIL_SCALE_FACTOR));
         float ratio = (float)spectrum.Length / barCount;
 
         if (ratio > 1.0f)
@@ -242,42 +273,48 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         return buffer;
     }
 
-    private void ProcessSpectrumDownsampling(
+    private static void ProcessSpectrumDownsampling(
         float[] spectrum,
         float[] result,
         int barCount,
         float ratio,
-        float detailLevel) =>
-        _logger.Safe(
-            () =>
-            {
-                Parallel.For(0, barCount, i =>
-                {
-                    int startIdx = (int)(i * ratio);
-                    int endIdx = (int)Min((int)((i + 1) * ratio), spectrum.Length);
-                    float sum = 0;
-                    float peak = 0;
-                    int count = endIdx - startIdx;
+        float detailLevel)
+    {
+        Parallel.For(0, barCount, i =>
+        {
+            int startIdx = (int)(i * ratio);
+            int endIdx = Min((int)((i + 1) * ratio), spectrum.Length);
 
-                    if (count <= 0) return;
+            if (endIdx <= startIdx) return;
 
-                    if (IsHardwareAccelerated && count >= Vector<float>.Count)
-                    {
-                        ProcessVectorizedSpectrum(spectrum, startIdx, endIdx, ref sum, ref peak);
-                    }
-                    else
-                    {
-                        ProcessSequentialSpectrum(spectrum, startIdx, endIdx, ref sum, ref peak);
-                    }
+            var (sum, peak) = CalculateSegmentStats(spectrum, startIdx, endIdx);
+            int count = endIdx - startIdx;
+            result[i] = sum / count * (1 - detailLevel) + peak * detailLevel;
+        });
+    }
 
-                    result[i] = sum / count * (1 - detailLevel) + peak * detailLevel;
-                });
-            },
-            LogPrefix,
-            "Failed to process spectrum downsampling"
-        );
+    private static (float sum, float peak) CalculateSegmentStats(
+        float[] spectrum,
+        int startIdx,
+        int endIdx)
+    {
+        float sum = 0;
+        float peak = 0;
+        int count = endIdx - startIdx;
 
-    private static void ProcessVectorizedSpectrum(
+        if (IsHardwareAccelerated && count >= Vector<float>.Count)
+        {
+            ProcessVectorizedSegment(spectrum, startIdx, endIdx, ref sum, ref peak);
+        }
+        else
+        {
+            ProcessSequentialSegment(spectrum, startIdx, endIdx, ref sum, ref peak);
+        }
+
+        return (sum, peak);
+    }
+
+    private static void ProcessVectorizedSegment(
         float[] spectrum,
         int startIdx,
         int endIdx,
@@ -291,17 +328,17 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         {
             Vector<float> values = new(spectrum, startIdx + v * vectorSize);
             sum += VectorSum(values);
-            peak = Max(peak, VectorMax(values));
+            peak = MathF.Max(peak, VectorMax(values));
         }
 
         for (int j = startIdx + vectorCount * vectorSize; j < endIdx; j++)
         {
             sum += spectrum[j];
-            peak = Max(peak, spectrum[j]);
+            peak = MathF.Max(peak, spectrum[j]);
         }
     }
 
-    private static void ProcessSequentialSpectrum(
+    private static void ProcessSequentialSegment(
         float[] spectrum,
         int startIdx,
         int endIdx,
@@ -311,7 +348,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         for (int j = startIdx; j < endIdx; j++)
         {
             sum += spectrum[j];
-            peak = Max(peak, spectrum[j]);
+            peak = MathF.Max(peak, spectrum[j]);
         }
     }
 
@@ -325,50 +362,40 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         {
             float exactIdx = i * ratio;
             int idx1 = (int)exactIdx;
-            int idx2 = (int)Min(idx1 + 1, spectrum.Length - 1);
+            int idx2 = Min(idx1 + 1, spectrum.Length - 1);
             float frac = exactIdx - idx1;
 
             result[i] = spectrum[idx1] * (1 - frac) + spectrum[idx2] * frac;
         }
     }
 
-    private void UpdateSpectrogramBuffer(float[]? spectrum) =>
-        _logger.Safe(
-            () =>
-            {
-                if (_spectrogramBuffer == null) return;
+    private void UpdateSpectrogramBuffer(float[]? spectrum)
+    {
+        if (_spectrogramBuffer == null) return;
 
-                int bufferHeight = _spectrogramBuffer.Length;
-                int spectrumWidth = _spectrogramBuffer[0].Length;
+        int bufferHeight = _spectrogramBuffer.Length;
+        int spectrumWidth = _spectrogramBuffer[0].Length;
 
-                if (spectrum == null)
-                {
-                    Array.Fill(_spectrogramBuffer[_bufferHead], MIN_SIGNAL);
-                }
-                else
-                {
-                    UpdateCurrentSpectrum(spectrum);
-                    UpdateBufferFromSpectrum(spectrum, spectrumWidth);
-                }
+        if (spectrum == null)
+        {
+            Array.Fill(_spectrogramBuffer[_bufferHead], MIN_SIGNAL);
+        }
+        else
+        {
+            UpdateCurrentSpectrum(spectrum);
+            UpdateBufferFromSpectrum(spectrum, spectrumWidth);
+        }
 
-                _bufferHead = (_bufferHead + 1) % bufferHeight;
-            },
-            LogPrefix,
-            "Failed to update spectrogram buffer"
-        );
+        _bufferHead = (_bufferHead + 1) % bufferHeight;
+    }
 
-    private void UpdateCurrentSpectrum(float[] spectrum) =>
-        _logger.Safe(
-            () =>
-            {
-                if (_currentSpectrum == null || _currentSpectrum.Length != spectrum.Length)
-                    _currentSpectrum = new float[spectrum.Length];
+    private void UpdateCurrentSpectrum(float[] spectrum)
+    {
+        if (_currentSpectrum == null || _currentSpectrum.Length != spectrum.Length)
+            _currentSpectrum = new float[spectrum.Length];
 
-                Array.Copy(spectrum, _currentSpectrum, spectrum.Length);
-            },
-            LogPrefix,
-            "Failed to update current spectrum"
-        );
+        Array.Copy(spectrum, _currentSpectrum, spectrum.Length);
+    }
 
     private void UpdateBufferFromSpectrum(float[] spectrum, int spectrumWidth)
     {
@@ -386,51 +413,66 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void ProcessSpectrumDownscaling(float[] spectrum, int spectrumWidth) =>
-        _logger.Safe(
-            () =>
-            {
-                if (_spectrogramBuffer == null) return;
+    private void ProcessSpectrumDownscaling(float[] spectrum, int spectrumWidth)
+    {
+        if (_spectrogramBuffer == null) return;
 
-                float ratio = (float)spectrum.Length / spectrumWidth;
+        float ratio = (float)spectrum.Length / spectrumWidth;
 
-                if (IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
-                {
-                    DownscaleSpectrumParallel(spectrum, spectrumWidth, ratio);
-                }
-                else
-                {
-                    DownscaleSpectrumSequential(spectrum, spectrumWidth, ratio);
-                }
-            },
-            LogPrefix,
-            "Failed to process spectrum downscaling"
-        );
+        if (IsHardwareAccelerated && spectrum.Length >= Vector<float>.Count)
+        {
+            DownscaleSpectrumParallel(spectrum, spectrumWidth, ratio);
+        }
+        else
+        {
+            DownscaleSpectrumSequential(spectrum, spectrumWidth, ratio);
+        }
+    }
 
-    private void DownscaleSpectrumParallel(float[] spectrum, int spectrumWidth, float ratio) =>
-        _logger.Safe(
-            () =>
-            {
-                Parallel.For(0, spectrumWidth, i =>
-                {
-                    int startIdx = (int)(i * ratio);
-                    int endIdx = (int)Min((int)((i + 1) * ratio), spectrum.Length);
+    private void DownscaleSpectrumParallel(
+        float[] spectrum,
+        int spectrumWidth,
+        float ratio)
+    {
+        Parallel.For(0, spectrumWidth, i =>
+        {
+            int startIdx = (int)(i * ratio);
+            int endIdx = Min((int)((i + 1) * ratio), spectrum.Length);
+            _spectrogramBuffer![_bufferHead][i] =
+                CalculateSegmentMax(spectrum, startIdx, endIdx);
+        });
+    }
 
-                    if (endIdx - startIdx >= Vector<float>.Count)
-                    {
-                        DownscaleSpectrumSegmentVectorized(spectrum, i, startIdx, endIdx);
-                    }
-                    else
-                    {
-                        DownscaleSpectrumSegmentSequential(spectrum, i, startIdx, endIdx);
-                    }
-                });
-            },
-            LogPrefix,
-            "Failed to downscale spectrum in parallel"
-        );
+    private void DownscaleSpectrumSequential(
+        float[] spectrum,
+        int spectrumWidth,
+        float ratio)
+    {
+        for (int i = 0; i < spectrumWidth; i++)
+        {
+            int startIdx = (int)(i * ratio);
+            int endIdx = Min((int)((i + 1) * ratio), spectrum.Length);
+            _spectrogramBuffer![_bufferHead][i] =
+                CalculateSegmentMax(spectrum, startIdx, endIdx);
+        }
+    }
 
-    private void DownscaleSpectrumSegmentVectorized(float[] spectrum, int targetIndex, int startIdx, int endIdx)
+    private static float CalculateSegmentMax(float[] spectrum, int startIdx, int endIdx)
+    {
+        if (endIdx - startIdx >= Vector<float>.Count && IsHardwareAccelerated)
+        {
+            return CalculateSegmentMaxVectorized(spectrum, startIdx, endIdx);
+        }
+        else
+        {
+            return CalculateSegmentMaxSequential(spectrum, startIdx, endIdx);
+        }
+    }
+
+    private static float CalculateSegmentMaxVectorized(
+        float[] spectrum,
+        int startIdx,
+        int endIdx)
     {
         int vectorSize = Vector<float>.Count;
         int vectorizedLength = (endIdx - startIdx) / vectorSize * vectorSize;
@@ -439,113 +481,81 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         for (int j = startIdx; j < startIdx + vectorizedLength; j += vectorSize)
         {
             Vector<float> values = new(spectrum, j);
-            maxVal = Max(maxVal, VectorMax(values));
+            maxVal = MathF.Max(maxVal, VectorMax(values));
         }
 
         for (int j = startIdx + vectorizedLength; j < endIdx; j++)
-            maxVal = Max(maxVal, spectrum[j]);
+            maxVal = MathF.Max(maxVal, spectrum[j]);
 
-        _spectrogramBuffer![_bufferHead][targetIndex] = maxVal;
+        return maxVal;
     }
 
-    private void DownscaleSpectrumSegmentSequential(float[] spectrum, int targetIndex, int startIdx, int endIdx)
+    private static float CalculateSegmentMaxSequential(
+        float[] spectrum,
+        int startIdx,
+        int endIdx)
     {
         float maxVal = MIN_SIGNAL;
         for (int j = startIdx; j < endIdx; j++)
-            maxVal = Max(maxVal, spectrum[j]);
-
-        _spectrogramBuffer![_bufferHead][targetIndex] = maxVal;
+            maxVal = MathF.Max(maxVal, spectrum[j]);
+        return maxVal;
     }
 
-    private void DownscaleSpectrumSequential(float[] spectrum, int spectrumWidth, float ratio)
+    private void ProcessSpectrumUpscaling(float[] spectrum, int spectrumWidth)
     {
+        if (_spectrogramBuffer == null) return;
+
+        float ratio = (float)spectrum.Length / spectrumWidth;
+
         for (int i = 0; i < spectrumWidth; i++)
         {
-            int startIdx = (int)(i * ratio);
-            int endIdx = (int)Min((int)((i + 1) * ratio), spectrum.Length);
-            float maxVal = MIN_SIGNAL;
+            float exactIdx = i * ratio;
+            int idx1 = (int)exactIdx;
+            int idx2 = Min(idx1 + 1, spectrum.Length - 1);
+            float frac = exactIdx - idx1;
 
-            for (int j = startIdx; j < endIdx; j++)
-                maxVal = Max(maxVal, spectrum[j]);
-
-            _spectrogramBuffer![_bufferHead][i] = maxVal;
+            _spectrogramBuffer[_bufferHead][i] =
+                spectrum[idx1] * (1 - frac) + spectrum[idx2] * frac;
         }
     }
 
-    private void ProcessSpectrumUpscaling(float[] spectrum, int spectrumWidth) =>
-        _logger.Safe(
-            () =>
-            {
-                if (_spectrogramBuffer == null) return;
+    private void ResizeBufferForOverlayMode(bool isOverlayActive)
+    {
+        int bufferHeight = isOverlayActive ?
+            OVERLAY_BUFFER_HEIGHT :
+            DEFAULT_BUFFER_HEIGHT;
 
-                float ratio = (float)spectrum.Length / spectrumWidth;
+        int currentWidth = _spectrogramBuffer![0].Length;
+        InitializeSpectrogramBuffer(bufferHeight, currentWidth);
+    }
 
-                for (int i = 0; i < spectrumWidth; i++)
-                {
-                    float exactIdx = i * ratio;
-                    int idx1 = (int)exactIdx;
-                    int idx2 = (int)Min(idx1 + 1, spectrum.Length - 1);
-                    float frac = exactIdx - idx1;
+    private void ResizeBufferForBarParameters(int barCount)
+    {
+        if (_spectrogramBuffer == null) return;
 
-                    _spectrogramBuffer[_bufferHead][i] = spectrum[idx1] * (1 - frac) + spectrum[idx2] * frac;
-                }
-            },
-            LogPrefix,
-            "Failed to process spectrum upscaling"
-        );
+        int bufferHeight = _spectrogramBuffer.Length;
+        int newWidth = CalculateOptimalSpectrumWidth(barCount);
 
-    private void ResizeBufferForOverlayMode(bool isOverlayActive) =>
-        _logger.Safe(
-            () =>
-            {
-                int bufferHeight = isOverlayActive ?
-                    OVERLAY_BUFFER_HEIGHT :
-                    DEFAULT_BUFFER_HEIGHT;
+        if (_spectrogramBuffer[0].Length != newWidth)
+        {
+            InitializeSpectrogramBuffer(bufferHeight, newWidth);
+        }
+    }
 
-                int currentWidth = _spectrogramBuffer![0].Length;
-                InitializeSpectrogramBuffer(bufferHeight, currentWidth);
-            },
-            LogPrefix,
-            "Failed to resize buffer for overlay mode"
-        );
+    private void InitializeSpectrogramBuffer(int bufferHeight, int spectrumWidth)
+    {
+        if (bufferHeight <= 0 || spectrumWidth <= 0)
+            throw new ArgumentException("Buffer dimensions must be positive");
 
-    private void ResizeBufferForBarParameters(int barCount) =>
-        _logger.Safe(
-            () =>
-            {
-                if (_spectrogramBuffer == null) return;
-
-                int bufferHeight = _spectrogramBuffer.Length;
-                int newWidth = CalculateOptimalSpectrumWidth(barCount);
-
-                if (_spectrogramBuffer[0].Length != newWidth)
-                {
-                    InitializeSpectrogramBuffer(bufferHeight, newWidth);
-                }
-            },
-            LogPrefix,
-            "Failed to resize buffer for bar parameters"
-        );
-
-    private void InitializeSpectrogramBuffer(int bufferHeight, int spectrumWidth) =>
-        _logger.Safe(
-            () =>
-            {
-                if (bufferHeight <= 0 || spectrumWidth <= 0)
-                    throw new ArgumentException("Buffer dimensions must be positive");
-
-                if (_spectrogramBuffer == null ||
-                    _spectrogramBuffer.Length != bufferHeight ||
-                    _spectrogramBuffer[0].Length != spectrumWidth)
-                {
-                    ReleaseExistingBuffer();
-                    AllocateNewBuffer(bufferHeight, spectrumWidth);
-                    _bufferHead = 0;
-                }
-            },
-            LogPrefix,
-            "Failed to initialize spectrogram buffer"
-        );
+        if (_spectrogramBuffer == null ||
+            _spectrogramBuffer.Length != bufferHeight ||
+            _spectrogramBuffer[0].Length != spectrumWidth)
+        {
+            ReleaseExistingBuffer();
+            AllocateNewBuffer(bufferHeight, spectrumWidth);
+            _bufferHead = 0;
+        }
+    }
 
     private void ReleaseExistingBuffer()
     {
@@ -556,80 +566,65 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void AllocateNewBuffer(int bufferHeight, int spectrumWidth) =>
-        _logger.Safe(
-            () =>
-            {
-                _spectrogramBuffer = new float[bufferHeight][];
+    private void AllocateNewBuffer(int bufferHeight, int spectrumWidth)
+    {
+        _spectrogramBuffer = new float[bufferHeight][];
 
-                if (bufferHeight > 32)
-                {
-                    Parallel.For(0, bufferHeight, i =>
-                    {
-                        _spectrogramBuffer![i] = new float[spectrumWidth];
-                        Array.Fill(_spectrogramBuffer[i], MIN_SIGNAL);
-                    });
-                }
-                else
-                {
-                    for (int i = 0; i < bufferHeight; i++)
-                    {
-                        _spectrogramBuffer![i] = new float[spectrumWidth];
-                        Array.Fill(_spectrogramBuffer[i], MIN_SIGNAL);
-                    }
-                }
-            },
-            LogPrefix,
-            "Failed to allocate new buffer"
-        );
-
-    private void UpdateWaterfallBitmap(int spectrumWidth, int bufferHeight) =>
-        _logger.Safe(
-            () =>
+        if (bufferHeight > PARALLEL_THRESHOLD)
+        {
+            Parallel.For(0, bufferHeight, i =>
             {
-                if (_waterfallBitmap == null ||
-                    _waterfallBitmap.Width != spectrumWidth ||
-                    _waterfallBitmap.Height != bufferHeight)
-                {
-                    _waterfallBitmap?.Dispose();
-                    _waterfallBitmap = new SKBitmap(spectrumWidth, bufferHeight);
-                }
-            },
-            LogPrefix,
-            "Failed to update waterfall bitmap"
-        );
+                _spectrogramBuffer![i] = new float[spectrumWidth];
+                Array.Fill(_spectrogramBuffer[i], MIN_SIGNAL);
+            });
+        }
+        else
+        {
+            for (int i = 0; i < bufferHeight; i++)
+            {
+                _spectrogramBuffer![i] = new float[spectrumWidth];
+                Array.Fill(_spectrogramBuffer[i], MIN_SIGNAL);
+            }
+        }
+    }
+
+    private void UpdateWaterfallBitmap(int spectrumWidth, int bufferHeight)
+    {
+        if (_waterfallBitmap == null ||
+            _waterfallBitmap.Width != spectrumWidth ||
+            _waterfallBitmap.Height != bufferHeight)
+        {
+            _waterfallBitmap?.Dispose();
+            _waterfallBitmap = new SKBitmap(spectrumWidth, bufferHeight);
+        }
+    }
 
     private void UpdateBitmapPixels(
         SKBitmap bitmap,
         float[][] spectrogramBuffer,
         int bufferHead,
         int spectrumWidth,
-        int bufferHeight,
-        RenderQuality _) =>
-        _logger.Safe(
-            () =>
-            {
-                nint pixelsPtr = bitmap.GetPixels();
-                if (pixelsPtr == IntPtr.Zero)
-                {
-                    _logger.Log(LogLevel.Error, LogPrefix, "Invalid bitmap pixels pointer");
-                    return;
-                }
+        int bufferHeight)
+    {
+        nint pixelsPtr = bitmap.GetPixels();
+        if (pixelsPtr == IntPtr.Zero)
+        {
+            _logger.Log(LogLevel.Error, LogPrefix, "Invalid bitmap pixels pointer");
+            return;
+        }
 
-                int[] pixels = ArrayPool<int>.Shared.Rent(spectrumWidth * bufferHeight);
-                try
-                {
-                    UpdatePixelArray(pixels, spectrogramBuffer, bufferHead, spectrumWidth, bufferHeight);
-                    Marshal.Copy(pixels, 0, pixelsPtr, spectrumWidth * bufferHeight);
-                }
-                finally
-                {
-                    ArrayPool<int>.Shared.Return(pixels);
-                }
-            },
-            LogPrefix,
-            "Failed to update bitmap pixels"
-        );
+        int[] pixels = ArrayPool<int>.Shared.Rent(spectrumWidth * bufferHeight);
+        try
+        {
+            UpdatePixelArray(pixels, spectrogramBuffer, bufferHead,
+                           spectrumWidth, bufferHeight);
+            Marshal.Copy(pixels, 0, pixelsPtr, spectrumWidth * bufferHeight);
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(pixels);
+        }
+    }
 
     private static void UpdatePixelArray(
         int[] pixels,
@@ -638,17 +633,15 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         int spectrumWidth,
         int bufferHeight)
     {
-        float colorEnhancementFactor = 1.0f;
-
         if (IsHardwareAccelerated && spectrumWidth >= Vector<float>.Count)
         {
             UpdatePixelsParallel(pixels, spectrogramBuffer, bufferHead,
-                               spectrumWidth, bufferHeight, colorEnhancementFactor);
+                               spectrumWidth, bufferHeight);
         }
         else
         {
             UpdatePixelsSequential(pixels, spectrogramBuffer, bufferHead,
-                                 spectrumWidth, bufferHeight, colorEnhancementFactor);
+                                 spectrumWidth, bufferHeight);
         }
     }
 
@@ -657,38 +650,62 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float[][] spectrogramBuffer,
         int bufferHead,
         int spectrumWidth,
-        int bufferHeight,
-        float colorEnhancementFactor)
+        int bufferHeight)
     {
         Parallel.For(0, bufferHeight, y =>
         {
             int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
             int rowOffset = y * spectrumWidth;
-            int vectorizedWidth = spectrumWidth - spectrumWidth % Vector<float>.Count;
-
-            ProcessRowVectorized(
-                pixels, spectrogramBuffer[bufferIndex],
-                rowOffset, vectorizedWidth, colorEnhancementFactor);
-
-            ProcessRowRemainder(
-                pixels, spectrogramBuffer[bufferIndex],
-                rowOffset, vectorizedWidth, spectrumWidth, colorEnhancementFactor);
+            ProcessPixelRow(pixels, spectrogramBuffer[bufferIndex],
+                          rowOffset, spectrumWidth);
         });
+    }
+
+    private static void UpdatePixelsSequential(
+        int[] pixels,
+        float[][] spectrogramBuffer,
+        int bufferHead,
+        int spectrumWidth,
+        int bufferHeight)
+    {
+        for (int y = 0; y < bufferHeight; y++)
+        {
+            int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
+            int rowOffset = y * spectrumWidth;
+            ProcessPixelRow(pixels, spectrogramBuffer[bufferIndex],
+                          rowOffset, spectrumWidth);
+        }
+    }
+
+    private static void ProcessPixelRow(
+        int[] pixels,
+        float[] spectrumRow,
+        int rowOffset,
+        int spectrumWidth)
+    {
+        int vectorizedWidth = spectrumWidth - spectrumWidth % Vector<float>.Count;
+
+        if (IsHardwareAccelerated && vectorizedWidth > 0)
+        {
+            ProcessRowVectorized(pixels, spectrumRow, rowOffset, vectorizedWidth);
+            ProcessRowRemainder(pixels, spectrumRow, rowOffset,
+                              vectorizedWidth, spectrumWidth);
+        }
+        else
+        {
+            ProcessRowSequential(pixels, spectrumRow, rowOffset, spectrumWidth);
+        }
     }
 
     private static void ProcessRowVectorized(
         int[] pixels,
         float[] spectrumRow,
         int rowOffset,
-        int vectorizedWidth,
-        float colorEnhancementFactor)
+        int vectorizedWidth)
     {
         for (int x = 0; x < vectorizedWidth; x += Vector<float>.Count)
         {
             Vector<float> values = new(spectrumRow, x);
-
-            if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
-                values = Multiply(values, colorEnhancementFactor);
 
             for (int i = 0; i < Vector<float>.Count; i++)
             {
@@ -704,45 +721,28 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float[] spectrumRow,
         int rowOffset,
         int vectorizedWidth,
-        int spectrumWidth,
-        float colorEnhancementFactor)
+        int spectrumWidth)
     {
         for (int x = vectorizedWidth; x < spectrumWidth; x++)
         {
-            float value = spectrumRow[x];
-            if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
-                value *= colorEnhancementFactor;
-
-            float normalized = Clamp(value, 0f, 1f);
+            float normalized = Clamp(spectrumRow[x], 0f, 1f);
             int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
             pixels[rowOffset + x] = _colorPalette[paletteIndex];
         }
     }
 
-    private static void UpdatePixelsSequential(
+    private static void ProcessRowSequential(
         int[] pixels,
-        float[][] spectrogramBuffer,
-        int bufferHead,
-        int spectrumWidth,
-        int bufferHeight,
-        float colorEnhancementFactor)
+        float[] spectrumRow,
+        int rowOffset,
+        int spectrumWidth)
     {
-        Parallel.For(0, bufferHeight, y =>
+        for (int x = 0; x < spectrumWidth; x++)
         {
-            int bufferIndex = (bufferHead + 1 + y) % bufferHeight;
-            int rowOffset = y * spectrumWidth;
-
-            for (int x = 0; x < spectrumWidth; x++)
-            {
-                float value = spectrogramBuffer[bufferIndex][x];
-                if (Abs(colorEnhancementFactor - 1.0f) > float.Epsilon)
-                    value *= colorEnhancementFactor;
-
-                float normalized = Clamp(value, 0f, 1f);
-                int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
-                pixels[rowOffset + x] = _colorPalette[paletteIndex];
-            }
-        });
+            float normalized = Clamp(spectrumRow[x], 0f, 1f);
+            int paletteIndex = (int)(normalized * (COLOR_PALETTE_SIZE - 1));
+            pixels[rowOffset + x] = _colorPalette[paletteIndex];
+        }
     }
 
     private void DrawBitmapToCanvas(
@@ -750,26 +750,22 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         SKImageInfo info,
         float barWidth,
         float barSpacing,
-        int barCount) =>
-        _logger.Safe(
-            () =>
-            {
-                SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
+        int barCount)
+    {
+        SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
 
-                if (canvas.QuickReject(destRect))
-                    return;
+        if (canvas.QuickReject(destRect))
+            return;
 
-                using var renderPaint = new SKPaint
-                {
-                    IsAntialias = UseAntiAlias && barCount > HIGH_BAR_COUNT_THRESHOLD
-                };
-
-                canvas.Clear(SKColors.Black);
-                canvas.DrawBitmap(_waterfallBitmap!, destRect, renderPaint);
-            },
-            LogPrefix,
-            "Failed to draw bitmap to canvas"
+        using var renderPaint = CreatePaint(
+            SKColors.White,
+            SKPaintStyle.Fill,
+            0
         );
+
+        canvas.Clear(SKColors.Black);
+        canvas.DrawBitmap(_waterfallBitmap!, destRect, renderPaint);
+    }
 
     private static SKRect CalculateDestRect(
         SKImageInfo info,
@@ -781,10 +777,11 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float startX = (info.Width - totalBarsWidth) / 2;
 
         return new SKRect(
-            left: Max(startX, 0),
+            left: MathF.Max(startX, 0),
             top: 0,
-            right: Min(startX + totalBarsWidth, info.Width),
-            bottom: info.Height);
+            right: MathF.Min(startX + totalBarsWidth, info.Width),
+            bottom: info.Height
+        );
     }
 
     private void ApplyZoomEnhancement(
@@ -792,47 +789,38 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         SKRect destRect,
         float barWidth,
         int barCount,
-        float barSpacing) =>
-        _logger.Safe(
-            () =>
-            {
-                DrawGridLines(canvas, destRect, barWidth, barCount, barSpacing);
+        float barSpacing)
+    {
+        if (_currentSettings.UseGridLines)
+        {
+            DrawGridLines(canvas, destRect, barWidth, barCount, barSpacing);
+        }
 
-                if (barWidth > ZOOM_THRESHOLD * 1.5f)
-                {
-                    DrawGridMarkers(canvas, destRect, barWidth, barCount, barSpacing);
-                }
-            },
-            LogPrefix,
-            "Failed to apply zoom enhancement"
-        );
+        if (_currentSettings.UseGridMarkers && barWidth > ZOOM_THRESHOLD * 1.5f)
+        {
+            DrawGridMarkers(canvas, destRect, barWidth, barCount, barSpacing);
+        }
+    }
 
     private void DrawGridLines(
         SKCanvas canvas,
         SKRect destRect,
         float barWidth,
         int barCount,
-        float barSpacing) =>
-        _logger.Safe(
-            () =>
-            {
-                using var paint = new SKPaint
-                {
-                    Color = new SKColor(255, 255, 255, 40),
-                    StrokeWidth = 1,
-                    IsAntialias = UseAntiAlias,
-                    Style = SKPaintStyle.Stroke
-                };
-
-                int gridStep = (int)Max(1, barCount / 10);
-                using var path = new SKPath();
-
-                DrawGridLineSegments(path, destRect, barWidth, barSpacing, barCount, gridStep);
-                canvas.DrawPath(path, paint);
-            },
-            LogPrefix,
-            "Failed to draw grid lines"
+        float barSpacing)
+    {
+        using var paint = CreatePaint(
+            new SKColor(255, 255, 255, GRID_LINE_ALPHA),
+            SKPaintStyle.Stroke,
+            _currentSettings.GridLineWidth
         );
+
+        int gridStep = Max(1, barCount / GRID_DIVISIONS);
+        using var path = new SKPath();
+
+        DrawGridLineSegments(path, destRect, barWidth, barSpacing, barCount, gridStep);
+        canvas.DrawPath(path, paint);
+    }
 
     private static void DrawGridLineSegments(
         SKPath path,
@@ -855,23 +843,19 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         SKRect destRect,
         float barWidth,
         int barCount,
-        float barSpacing) =>
-        _logger.Safe(
-            () =>
-            {
-                using var font = new SKFont { Size = 10 };
-                using var textPaint = new SKPaint
-                {
-                    Color = SKColors.White,
-                    IsAntialias = UseAntiAlias
-                };
-
-                int gridStep = (int)Max(1, barCount / 10);
-                DrawMarkerLabels(canvas, destRect, barWidth, barSpacing, barCount, gridStep, font, textPaint);
-            },
-            LogPrefix,
-            "Failed to draw grid markers"
+        float barSpacing)
+    {
+        using var font = new SKFont { Size = _currentSettings.MarkerFontSize };
+        using var textPaint = CreatePaint(
+            SKColors.White,
+            SKPaintStyle.Fill,
+            0
         );
+
+        int gridStep = Max(1, barCount / GRID_DIVISIONS);
+        DrawMarkerLabels(canvas, destRect, barWidth, barSpacing,
+                        barCount, gridStep, font, textPaint);
+    }
 
     private static void DrawMarkerLabels(
         SKCanvas canvas,
@@ -888,32 +872,33 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             float x = destRect.Left + i * (barWidth + barSpacing) + barWidth / 2;
             string marker = $"{i}";
             float textWidth = font.MeasureText(marker, textPaint);
-            canvas.DrawText(marker, x - textWidth / 2, destRect.Bottom - 5, font, textPaint);
+            canvas.DrawText(marker, x - textWidth / 2,
+                          destRect.Bottom - 5, font, textPaint);
         }
+    }
+
+    private SKPaint CreatePaint(
+        SKColor color,
+        SKPaintStyle style,
+        float strokeWidth)
+    {
+        var paint = _paintPool.Get();
+        paint.Color = color;
+        paint.Style = style;
+        paint.IsAntialias = _useAntiAlias;
+        paint.StrokeWidth = strokeWidth;
+        return paint;
     }
 
     private static int CalculateOptimalSpectrumWidth(int barCount)
     {
-        int baseWidth = (int)Max(barCount, MIN_BAR_COUNT);
-
+        int baseWidth = (int)MathF.Max(barCount, MIN_BAR_COUNT);
         int width = 1;
+
         while (width < baseWidth)
-        {
             width *= 2;
-        }
 
-        return (int)Max(width, DEFAULT_SPECTRUM_WIDTH / 4);
-    }
-
-    private static RenderQuality CalculateRenderQuality(int barCount)
-    {
-        if (barCount > HIGH_BAR_COUNT_THRESHOLD)
-            return RenderQuality.High;
-
-        if (barCount < LOW_BAR_COUNT_THRESHOLD)
-            return RenderQuality.Low;
-
-        return RenderQuality.Medium;
+        return Max(width, DEFAULT_SPECTRUM_WIDTH / 4);
     }
 
     private static float VectorSum(Vector<float> vector)
@@ -928,7 +913,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     {
         float max = float.MinValue;
         for (int i = 0; i < Vector<float>.Count; i++)
-            max = Max(max, vector[i]);
+            max = MathF.Max(max, vector[i]);
         return max;
     }
 
@@ -940,7 +925,8 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         {
             float normalized = i / (float)(COLOR_PALETTE_SIZE - 1);
             SKColor color = GetSpectrogramColor(normalized);
-            palette[i] = color.Alpha << 24 | color.Red << 16 | color.Green << 8 | color.Blue;
+            palette[i] = color.Alpha << 24 | color.Red << 16 |
+                        color.Green << 8 | color.Blue;
         }
 
         return palette;
@@ -950,22 +936,13 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     {
         normalized = Clamp(normalized, 0f, 1f);
 
-        if (normalized < BLUE_THRESHOLD)
+        return normalized switch
         {
-            return GetBlueRangeColor(normalized);
-        }
-        else if (normalized < CYAN_THRESHOLD)
-        {
-            return GetCyanRangeColor(normalized);
-        }
-        else if (normalized < YELLOW_THRESHOLD)
-        {
-            return GetYellowRangeColor(normalized);
-        }
-        else
-        {
-            return GetRedRangeColor(normalized);
-        }
+            < BLUE_THRESHOLD => GetBlueRangeColor(normalized),
+            < CYAN_THRESHOLD => GetCyanRangeColor(normalized),
+            < YELLOW_THRESHOLD => GetYellowRangeColor(normalized),
+            _ => GetRedRangeColor(normalized)
+        };
     }
 
     private static SKColor GetBlueRangeColor(float normalized)
@@ -1004,35 +981,22 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
     protected override void OnInvalidateCachedResources()
     {
-        _logger.Safe(
-            () =>
-            {
-                base.OnInvalidateCachedResources();
-                _waterfallBitmap?.Dispose();
-                _waterfallBitmap = null;
-                _needsBufferResize = true;
-                _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
-            },
-            LogPrefix,
-            "Failed to invalidate cached resources"
-        );
+        base.OnInvalidateCachedResources();
+        _waterfallBitmap?.Dispose();
+        _waterfallBitmap = null;
+        _needsBufferResize = true;
+        _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
     }
 
-    protected override void OnDispose() =>
-        _logger.Safe(
-            () =>
-            {
-                _renderSemaphore.Dispose();
-                _waterfallBitmap?.Dispose();
-                _waterfallBitmap = null;
-                _spectrogramBuffer = null;
-                _currentSpectrum = null;
-                _spectrumPool.Dispose();
-
-                base.OnDispose();
-                _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
-            },
-            LogPrefix,
-            "Failed to dispose resources"
-        );
+    protected override void OnDispose()
+    {
+        _renderSemaphore.Dispose();
+        _waterfallBitmap?.Dispose();
+        _waterfallBitmap = null;
+        _spectrogramBuffer = null;
+        _currentSpectrum = null;
+        _spectrumPool.Dispose();
+        base.OnDispose();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+    }
 }

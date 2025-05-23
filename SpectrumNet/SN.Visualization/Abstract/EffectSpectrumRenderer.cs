@@ -238,20 +238,6 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             Fill,
             null);
 
-    protected SKPaint CreateGlowPaint(
-        SKColor color,
-        float radius,
-        byte alpha)
-    {
-        var blur = SKMaskFilter.CreateBlur(
-            SKBlurStyle.Normal,
-            radius);
-        return InitPaint(
-            color.WithAlpha(alpha),
-            Fill,
-            blur);
-    }
-
     protected SKPaint InitPaint(
         SKColor color,
         SKPaintStyle style,

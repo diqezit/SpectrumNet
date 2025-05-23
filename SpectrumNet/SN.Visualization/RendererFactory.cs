@@ -213,7 +213,6 @@ public sealed class RendererFactory : IRendererFactory
         RenderStyle.Rainbow => RainbowRenderer.GetInstance(),
         RenderStyle.SphereRenderer => SphereRenderer.GetInstance(),
         RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
-        RenderStyle.Voronoi => VoronoiRenderer.GetInstance(),
         RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
         RenderStyle.Waveform => WaveformRenderer.GetInstance(),
         RenderStyle.WaterRenderer => WaterRenderer.GetInstance(),
