@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// SN.Controllers/ControllerFactory.cs
+#nullable enable
 
 namespace SpectrumNet.SN.Controllers;
 
@@ -20,6 +21,7 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
     private readonly IResourceCleanupManager _resourceCleanupManager;
     private readonly IFpsLimiter _fpsLimiter;
     private readonly ITransparencyManager _transparencyManager;
+    private readonly IApplicationStateCoordinator _stateCoordinator;
 
     private bool _isDisposed;
 
@@ -37,6 +39,7 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
         _transparencyManager = RendererTransparencyManager.Instance;
 
         _mainController = new MainController(this, ownerWindow);
+        _stateCoordinator = new ApplicationStateCoordinator(_mainController, Settings.Settings.Instance);
 
         _viewController = CreateViewController();
         _audioController = CreateAudioController();
@@ -57,6 +60,7 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
     public IResourceCleanupManager ResourceCleanupManager => _resourceCleanupManager;
     public IFpsLimiter FpsLimiter => _fpsLimiter;
     public IMainController MainController => _mainController;
+    public IApplicationStateCoordinator StateCoordinator => _stateCoordinator;
 
     private IViewController CreateViewController() =>
         ViewControllerFactory.Create(_mainController, _renderElement);
@@ -104,6 +108,7 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
         _ownerWindow.Closed += (_, _) => Dispose();
         _ownerWindow.KeyDown += (s, e) => _inputController.HandleKeyDown(e, Keyboard.FocusedElement);
         _fpsLimiter.LimitChanged += (_, _) => _mainController.OnPropertyChanged(nameof(IMainController.LimitFpsTo60));
+        _stateCoordinator.StateChanged += (_, state) => _logger.Log(LogLevel.Debug, LogPrefix, $"Application state: {state}");
     }
 
     public void Dispose()

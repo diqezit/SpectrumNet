@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// SN.Controllers/Interfaces/IControllerProvider.cs
+#nullable enable
 
 namespace SpectrumNet.SN.Controllers.Interfaces;
 
@@ -13,4 +14,5 @@ public interface IControllerProvider
     IResourceCleanupManager ResourceCleanupManager { get; }
     IFpsLimiter FpsLimiter { get; }
     IMainController MainController { get; }
+    IApplicationStateCoordinator StateCoordinator { get; }
 }

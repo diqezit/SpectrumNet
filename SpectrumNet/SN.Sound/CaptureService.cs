@@ -1,4 +1,4 @@
-﻿// Controllers/AudioCore/CaptureService.cs
+﻿// SN.Sound/CaptureService.cs
 #nullable enable
 
 namespace SpectrumNet.SN.Sound;
@@ -10,7 +10,9 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private const int
         OPERATION_TIMEOUT_MS = 3000,
         STATE_LOCK_TIMEOUT_MS = 3000,
-        DEVICE_CHECK_INTERVAL_MS = 500;
+        DEVICE_CHECK_INTERVAL_MS = 500,
+        MAX_DEVICE_RETRY_ATTEMPTS = 3,
+        DEVICE_RETRY_DELAY_MS = 1000;
 
     private readonly object _stateLock = new();
     private readonly IMainController _controller;
@@ -22,6 +24,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private CaptureState? _state;
     private bool _isCaptureStopping;
     private bool _isReinitializing;
+    private bool _deviceAvailable = true;
 
     private record CaptureState(
         SpectrumAnalyzer Analyzer,
@@ -31,6 +34,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
 
     public bool IsRecording { get; private set; }
     public bool IsInitializing => _isReinitializing;
+    public bool IsDeviceAvailable => _deviceAvailable;
 
     public CaptureService(
         IMainController controller,
@@ -64,10 +68,13 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
         if (device is null)
         {
             _logger.Log(LogLevel.Warning, LogPrefix, "No default audio device available");
+            _deviceAvailable = false;
             StopCaptureIfNeeded();
+            NotifyDeviceUnavailable();
             return;
         }
 
+        _deviceAvailable = true;
         if (IsRecording && !_isReinitializing)
             _ = Task.Run(ReinitializeCaptureAsync);
     }
@@ -109,7 +116,12 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     private async Task ReinitializeCapture()
     {
         var device = _deviceManager.GetDefaultAudioDevice();
-        if (device is null) return;
+        if (device is null)
+        {
+            _deviceAvailable = false;
+            NotifyDeviceUnavailable();
+            return;
+        }
 
         lock (_stateLock)
         {
@@ -117,6 +129,7 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
             _state = null;
         }
 
+        _deviceAvailable = true;
         await InitializeUIComponentsAsync();
         await StartCaptureAsync();
     }
@@ -248,31 +261,69 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
 
     private async Task InitializeAndStartCaptureAsync()
     {
-        var device = _deviceManager.GetDefaultAudioDevice();
-        if (device is null)
-        {
-            _logger.Log(LogLevel.Error, LogPrefix, "No audio device available");
-            return;
-        }
+        int retryCount = 0;
 
-        try
+        while (retryCount < MAX_DEVICE_RETRY_ATTEMPTS)
         {
-            InitializeCapture(device);
-
-            if (_state is null)
+            var device = _deviceManager.GetDefaultAudioDevice();
+            if (device is null)
             {
-                _logger.Log(LogLevel.Error, LogPrefix, "Failed to initialize capture state");
-                return;
+                _logger.Log(LogLevel.Warning, LogPrefix,
+                    $"No audio device, attempt {retryCount + 1}/{MAX_DEVICE_RETRY_ATTEMPTS}");
+
+                retryCount++;
+                _deviceAvailable = false;
+
+                if (retryCount < MAX_DEVICE_RETRY_ATTEMPTS)
+                    await Task.Delay(DEVICE_RETRY_DELAY_MS);
+                continue;
             }
 
-            await StartDeviceMonitoringAsync(_state.CTS.Token);
-            _logger.Log(LogLevel.Debug, LogPrefix, "Audio capture started successfully");
+            try
+            {
+                InitializeCapture(device);
+                _deviceAvailable = true;
+
+                if (_state is null)
+                {
+                    _logger.Log(LogLevel.Error, LogPrefix, "Failed to initialize capture state");
+                    return;
+                }
+
+                if (!_state.CTS.IsCancellationRequested)
+                {
+                    await StartDeviceMonitoringAsync(_state.CTS.Token);
+                    _logger.Log(LogLevel.Debug, LogPrefix, "Audio capture started successfully");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(LogLevel.Error, LogPrefix,
+                    $"Retry {retryCount + 1}: {ex.Message}");
+
+                HandleCaptureInitializationError(ex);
+                retryCount++;
+
+                if (retryCount < MAX_DEVICE_RETRY_ATTEMPTS)
+                    await Task.Delay(DEVICE_RETRY_DELAY_MS);
+            }
         }
-        catch (Exception ex)
+
+        _deviceAvailable = false;
+        NotifyDeviceUnavailable();
+    }
+
+    private void NotifyDeviceUnavailable()
+    {
+        _controller.Dispatcher.Invoke(() =>
         {
-            HandleCaptureInitializationError(ex);
-            throw;
-        }
+            _controller.IsRecording = false;
+            _controller.OnPropertyChanged(
+                nameof(_controller.IsRecording),
+                nameof(_controller.CanStartCapture)
+            );
+        });
     }
 
     private async Task StartDeviceMonitoringAsync(CancellationToken token) =>
@@ -589,7 +640,14 @@ public sealed class CaptureService : AsyncDisposableBase, ICaptureService
     {
         var device = _deviceManager.GetDefaultAudioDevice();
         if (device is null)
+        {
+            _deviceAvailable = false;
             OnDeviceChanged();
+        }
+        else
+        {
+            _deviceAvailable = true;
+        }
     }
 
     private void UpdateStatus(bool isRecording) =>

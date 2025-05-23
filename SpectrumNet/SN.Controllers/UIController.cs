@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// SN.Controllers/UIController.cs
+#nullable enable
 
 using SpectrumNet.SN.Shared.Utils;
 
@@ -88,7 +89,8 @@ public class UIController : AsyncDisposableBase, IUIController
             UnregisterControlPanelEvents();
             CloseControlPanelWindow();
             NotifyControlPanelClosed();
-            ActivateOwnerWindow();
+
+            Task.Run(() => ActivateOwnerWindow());
         },
         LogPrefix, "Error closing control panel");
 
@@ -221,16 +223,39 @@ public class UIController : AsyncDisposableBase, IUIController
 
     private static void ActivateOwnerWindow()
     {
-        var owner = GetOwnerWindow();
-        if (owner is { IsVisible: true })
+        var app = Application.Current;
+        if (app?.Dispatcher == null) return;
+
+        if (app.Dispatcher.CheckAccess())
         {
-            owner.Activate();
-            owner.Focus();
+            var owner = app.MainWindow;
+            if (owner?.IsVisible == true)
+            {
+                owner.Activate();
+                owner.Focus();
+            }
+        }
+        else
+        {
+            app.Dispatcher.BeginInvoke(() =>
+            {
+                var owner = app.MainWindow;
+                if (owner?.IsVisible == true)
+                {
+                    owner.Activate();
+                    owner.Focus();
+                }
+            });
         }
     }
 
-    private static Window? GetOwnerWindow() =>
-        Application.Current?.MainWindow;
+    private static Window? GetOwnerWindow()
+    {
+        if (Application.Current?.Dispatcher.CheckAccess() == false)
+            return null;
+
+        return Application.Current?.MainWindow;
+    }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

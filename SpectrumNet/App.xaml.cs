@@ -6,7 +6,7 @@ public partial class App : Application
 {
     private const string LogPrefix = nameof(App);
     private readonly ISmartLogger _logger = Instance;
-    private const int SHUTDOWN_TIMEOUT_MS = 2000;
+    private const int SHUTDOWN_TIMEOUT_MS = 5000;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -69,16 +69,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         base.OnExit(e);
-        LogApplicationShutdown();
         PerformShutdownCleanup();
-    }
-
-    private void LogApplicationShutdown()
-    {
-        _logger.Log(LogLevel.Information,
-            LogPrefix,
-            "Application is shutting down normally",
-            forceLog: true);
     }
 
     private void PerformShutdownCleanup()

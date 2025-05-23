@@ -1,6 +1,8 @@
-﻿#nullable enable
+﻿// SN.Visualization/Abstract/BaseSpectrumRenderer.cs
+#nullable enable
 
 using static System.MathF;
+using Timer = System.Threading.Timer;
 
 namespace SpectrumNet.SN.Visualization.Abstract;
 
@@ -12,7 +14,10 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         DEFAULT_SMOOTHING_FACTOR = 0.3f,
         OVERLAY_SMOOTHING_FACTOR = 0.5f;
 
-    private const int PARALLEL_BATCH_SIZE = 32;
+    private const int
+        PARALLEL_BATCH_SIZE = 32,
+        CLEANUP_INTERVAL_MS = 30000,
+        HIGH_MEMORY_THRESHOLD_MB = 500;
 
     protected const float MIN_MAGNITUDE_THRESHOLD = 0.01f;
 
@@ -41,12 +46,24 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     protected readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
     protected readonly object _spectrumLock = new();
 
+    private readonly Timer _cleanupTimer;
+
     private static readonly bool _isHardwareAcceleratedCached = IsHardwareAccelerated;
     protected static bool IsHardwareAccelerated => _isHardwareAcceleratedCached;
 
+    protected BaseSpectrumRenderer()
+    {
+        _cleanupTimer = new Timer(
+            PerformPeriodicCleanup,
+            null,
+            CLEANUP_INTERVAL_MS,
+            CLEANUP_INTERVAL_MS
+        );
+    }
+
     public virtual void SetOverlayTransparency(float level)
     {
-        // Базовая реализация пустая, переопределяется в потомках
+        // переопределяем в наследниках
     }
 
     public RenderQuality Quality
@@ -77,7 +94,6 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         {
             _isInitialized = true;
             OnInitialize();
-            _logger.Log(LogLevel.Debug, GetType().Name, "Initialized");
         }
     }
 
@@ -455,6 +471,31 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
         return sum / (end - start);
     }
 
+    private void PerformPeriodicCleanup(object? state)
+    {
+        if (_disposed) return;
+
+        _logger.Safe(() =>
+        {
+            CleanupUnusedResources();
+
+            var memoryMb = GC.GetTotalMemory(false) / 1024 / 1024;
+            if (memoryMb > HIGH_MEMORY_THRESHOLD_MB)
+            {
+                GC.Collect(1, GCCollectionMode.Optimized);
+                _logger.Log(LogLevel.Debug, GetType().Name,
+                    $"Performed GC cleanup, memory was {memoryMb}MB");
+            }
+        },
+        GetType().Name,
+        "Periodic cleanup error");
+    }
+
+    protected virtual void CleanupUnusedResources()
+    {
+        // переопределяем в наследниках
+    }
+
     public virtual void Dispose() =>
         _logger.Safe(() => HandleDispose(),
                   GetType().Name,
@@ -464,6 +505,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer, IDisposable
     {
         if (!_disposed)
         {
+            _cleanupTimer?.Dispose();
             OnDispose();
             _spectrumSemaphore.Dispose();
             _previousSpectrum = null;

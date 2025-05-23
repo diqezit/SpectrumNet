@@ -1,16 +1,23 @@
-﻿#nullable enable
-
-using SpectrumNet.SN.Shared.Utils;
+﻿// SN.Controllers/MainController.cs
+#nullable enable
 
 namespace SpectrumNet.SN.Controllers;
 
-public sealed class MainController : AsyncDisposableBase, IMainController
+public sealed class MainController
+    (IControllerProvider controllerProvider,
+    Window ownerWindow)
+    : AsyncDisposableBase,
+    IMainController
 {
     private const string LogPrefix = nameof(MainController);
     private readonly ISmartLogger _logger = Instance;
 
-    private readonly IControllerProvider _controllerProvider;
-    private readonly Window _ownerWindow;
+    private readonly IControllerProvider _controllerProvider = controllerProvider ??
+            throw new ArgumentNullException(nameof(controllerProvider));
+
+    private readonly Window _ownerWindow = ownerWindow ??
+            throw new ArgumentNullException(nameof(ownerWindow));
+
     private readonly CancellationTokenSource _cleanupCts = new();
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
     private readonly object _disposeLock = new();
@@ -20,15 +27,6 @@ public sealed class MainController : AsyncDisposableBase, IMainController
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public MainController(IControllerProvider controllerProvider, Window ownerWindow)
-    {
-        _controllerProvider = controllerProvider ??
-            throw new ArgumentNullException(nameof(controllerProvider));
-        _ownerWindow = ownerWindow ??
-            throw new ArgumentNullException(nameof(ownerWindow));
-    }
-
-    #region IMainController Properties
     public Dispatcher Dispatcher => Application.Current?.Dispatcher ??
         throw new InvalidOperationException("Application.Current is null");
 
@@ -118,40 +116,64 @@ public sealed class MainController : AsyncDisposableBase, IMainController
             AudioController.AmplificationFactor = value;
         }
     }
-    #endregion
 
-    #region Controller Properties
     public IUIController UIController => _controllerProvider.UIController;
     public IAudioController AudioController => _controllerProvider.AudioController;
     public IViewController ViewController => _controllerProvider.ViewController;
     public IInputController InputController => _controllerProvider.InputController;
     public IOverlayManager OverlayManager => _controllerProvider.OverlayManager;
-    #endregion
 
-    #region Audio Management Methods
     public async Task StartCaptureAsync()
     {
-        if (_isDisposed) return;
-        await AudioController.StartCaptureAsync();
+        ThrowIfDisposed();
+
+        var stateCoordinator = _controllerProvider.StateCoordinator;
+        if (stateCoordinator != null)
+        {
+            await stateCoordinator.TransitionToRecordingAsync();
+        }
+        else
+        {
+            await AudioController.StartCaptureAsync();
+        }
     }
 
     public async Task StopCaptureAsync()
     {
-        if (_isDisposed) return;
-        await AudioController.StopCaptureAsync();
+        ThrowIfDisposed();
+
+        var stateCoordinator = _controllerProvider.StateCoordinator;
+        if (stateCoordinator != null)
+        {
+            await stateCoordinator.TransitionToIdleAsync();
+        }
+        else
+        {
+            await AudioController.StopCaptureAsync();
+        }
     }
 
     public async Task ToggleCaptureAsync()
     {
-        if (_isDisposed) return;
-        await AudioController.ToggleCaptureAsync();
+        ThrowIfDisposed();
+
+        var stateCoordinator = _controllerProvider.StateCoordinator;
+        if (stateCoordinator != null)
+        {
+            if (stateCoordinator.CurrentState == ApplicationState.Recording)
+                await stateCoordinator.TransitionToIdleAsync();
+            else
+                await stateCoordinator.TransitionToRecordingAsync();
+        }
+        else
+        {
+            await AudioController.ToggleCaptureAsync();
+        }
     }
 
     public SpectrumAnalyzer? GetCurrentAnalyzer() =>
         _isDisposed ? null : AudioController.GetCurrentAnalyzer();
-    #endregion
 
-    #region View Controller Properties
     public SKElement SpectrumCanvas => ViewController.SpectrumCanvas;
 
     public SpectrumBrushes SpectrumStyles => SpectrumBrushes.Instance;
@@ -254,9 +276,7 @@ public sealed class MainController : AsyncDisposableBase, IMainController
         get => ViewController.Analyzer;
         set => ViewController.Analyzer = value;
     }
-    #endregion
 
-    #region View Controller Methods
     public void RequestRender()
     {
         if (_isDisposed) return;
@@ -280,9 +300,7 @@ public sealed class MainController : AsyncDisposableBase, IMainController
         if (_isDisposed || e == null) return;
         ViewController.OnPaintSurface(sender, e);
     }
-    #endregion
 
-    #region UI Controller Properties and Methods
     public bool IsOverlayActive
     {
         get => OverlayManager.IsActive;
@@ -357,9 +375,7 @@ public sealed class MainController : AsyncDisposableBase, IMainController
         if (_isDisposed) return;
         _ = OverlayManager.CloseAsync();
     }
-    #endregion
 
-    #region Input Controller Methods
     public void RegisterWindow(Window window)
     {
         if (_isDisposed) return;
@@ -425,7 +441,6 @@ public sealed class MainController : AsyncDisposableBase, IMainController
         if (_isDisposed) return false;
         return InputController.HandleButtonClick(sender, e);
     }
-    #endregion
 
     public void OnPropertyChanged(params string[] propertyNames)
     {
@@ -488,11 +503,34 @@ public sealed class MainController : AsyncDisposableBase, IMainController
 
     private void CloseUIElementsIfNeeded()
     {
-        if (OverlayManager.IsActive)
-            _ = OverlayManager.CloseAsync();
+        if (OverlayManager?.IsActive == true)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await OverlayManager.CloseAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log(LogLevel.Warning, LogPrefix,
+                        $"Error closing overlay during dispose: {ex.Message}");
+                }
+            });
+        }
 
         if (IsControlPanelOpen)
-            UIController.CloseControlPanel();
+        {
+            try
+            {
+                UIController?.CloseControlPanel();
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(LogLevel.Warning, LogPrefix,
+                    $"Error closing control panel during dispose: {ex.Message}");
+            }
+        }
     }
 
     protected override async ValueTask DisposeAsyncManagedResources()
