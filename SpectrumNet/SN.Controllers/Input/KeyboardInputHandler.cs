@@ -37,6 +37,15 @@ public class KeyboardInputHandler : IInputHandler
             return true;
         }
 
+        if (!e.IsRepeat && !ShouldIgnoreKeyPress(focusedElement))
+        {
+            if (TryExecuteGlobalKeyAction(e.Key))
+            {
+                e.Handled = true;
+                return true;
+            }
+        }
+
         return false;
     }
 
