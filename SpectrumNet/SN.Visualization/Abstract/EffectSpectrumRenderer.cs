@@ -52,7 +52,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
     public override void SetOverlayTransparency(float level)
     {
-        if (Abs(_overlayAlphaFactor - level) > float.Epsilon)
+        if (MathF.Abs(_overlayAlphaFactor - level) > float.Epsilon)
         {
             _overlayAlphaFactor = level;
             _overlayStateChanged = true;
@@ -84,7 +84,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         _isOverlayActive = isOverlayActive;
         Quality = quality;
 
-        _smoothingFactor = isOverlayActive ? 0.5f : 0.3f;
+        SetSmoothingFactor(isOverlayActive ? 0.5f : 0.3f);
 
         if (overlayChanged)
         {
@@ -117,12 +117,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             return;
         }
 
-        var (isValid, processed) = PrepareRender(
-            canvas,
+        var (isValid, processed) = PrepareSpectrum(
             spectrum,
-            info,
             barCount,
-            paint);
+            spectrum!.Length);
 
         if (!isValid)
         {
@@ -235,7 +233,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     protected SKPaint CreateStandardPaint(
         SKColor color) => InitPaint(
             color,
-            Fill,
+            SKPaintStyle.Fill,
             null);
 
     protected SKPaint InitPaint(
@@ -322,7 +320,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
                        LogPrefix,
                        "Error during disposal");
 
-            SuppressFinalize(this);
+            GC.SuppressFinalize(this);
         }
     }
 
@@ -334,4 +332,6 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         base.HandleDispose();
         _disposed = true;
     }
+
+    protected override void OnDispose() { }
 }
