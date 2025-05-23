@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
+using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.CubeRenderer.Constants;
-using static SpectrumNet.SN.Visualization.Renderers.CubeRenderer.Constants.Quality;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -9,260 +9,96 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 {
     private const string LogPrefix = nameof(CubeRenderer);
 
-    private static readonly Lazy<CubeRenderer> _instance = new(() => new CubeRenderer());
+    private static readonly Lazy<CubeRenderer> _instance =
+        new(() => new CubeRenderer());
 
     private CubeRenderer()
     {
-        _vertices = CreateCubeVertices();
-        _faces = CreateCubeFaces();
-        _faceNormalVectors = CalculateFaceNormals();
-        _projectedVertices = new ProjectedVertex[_vertices.Length];
-        _faceDepths = new float[_faces.Length];
-        _faceNormals = new float[_faces.Length];
-        _faceLightIntensities = new float[_faces.Length];
-        _facePaints = CreateFacePaints();
-        _edgePaint = CreateEdgePaint();
-        InitializeRotationSpeeds();
+        _vertices = CreateVertices();
+        _faces = CreateFaces();
+        _facePaints = new SKPaint[6];
+        for (int i = 0; i < _facePaints.Length; i++)
+        {
+            _facePaints[i] = new SKPaint { Style = SKPaintStyle.Fill };
+        }
+        _edgePaint = new SKPaint
+        {
+            Color = SKColors.White,
+            Style = SKPaintStyle.Stroke
+        };
     }
 
     public static CubeRenderer GetInstance() => _instance.Value;
 
-    public record Constants
+    public static class Constants
     {
         public const float
-            CUBE_HALF_SIZE = 0.5f,
-            BASE_CUBE_SIZE = 0.5f,
-            MIN_CUBE_SIZE = 0.2f,
-            MAX_CUBE_SIZE = 1.0f,
-            CUBE_SIZE_RESPONSE_FACTOR = 0.5f;
-
-        public const float
-            BASE_ROTATION_SPEED = 0.02f,
-            SPECTRUM_ROTATION_INFLUENCE = 0.015f,
-            MAX_ROTATION_SPEED = 0.05f;
-
-        public const float
+            CUBE_SIZE = 0.5f,
+            BASE_ROTATION = 0.02f,
+            ROTATION_INFLUENCE = 0.015f,
             AMBIENT_LIGHT = 0.4f,
             DIFFUSE_LIGHT = 0.6f,
-            MIN_DIFFUSE_LIGHT = 0f;
-
-        public const float
             BASE_ALPHA = 0.9f,
-            SPECTRUM_ALPHA_INFLUENCE = 0.1f,
-            EDGE_ALPHA_MULTIPLIER = 0.8f;
+            BAR_COUNT_SCALE_FACTOR = 0.01f,
+            BAR_WIDTH_SCALE_FACTOR = 0.05f,
+            MIN_SCALE = 0.5f,
+            MAX_SCALE = 2.5f;
 
-        public const int THREAD_JOIN_TIMEOUT_MS = 100;
-
-        public const float
-            CENTER_PROPORTION = 0.5f,
-            DEFAULT_DELTA_TIME = 1.0f / 60.0f,
-            MIN_SCALE_FACTOR = 1.0f,
-            MAX_SCALE_FACTOR = 2.5f,
-            SCALE_LOG_FACTOR = 0.3f,
-            FACE_DEPTH_AVERAGE_FACTOR = 3.0f,
-            CUBE_SIZE_SMOOTHING = 0.9f,
-            TARGET_SIZE_INFLUENCE = 0.1f,
-            INITIAL_SPEED_X_FACTOR = 0.8f,
-            INITIAL_SPEED_Y_FACTOR = 1.2f,
-            INITIAL_SPEED_Z_FACTOR = 0.6f,
-            MIN_SPECTRUM_FOR_ROTATION = 3,
-            ROTATION_SPEED_SMOOTHING = 0.95f,
-            TARGET_SPEED_INFLUENCE = 0.05f,
-            MID_FREQ_SPEED_FACTOR = 1.2f,
-            HIGH_FREQ_SPEED_FACTOR = 0.8f,
-            BASE_ROTATION_FACTOR = 1f;
-
-        public const byte
-            EDGE_STROKE_WIDTH = 1,
-            EDGE_BLUR_RADIUS = 2,
-            MIN_COLOR_BYTE = 0,
-            MAX_COLOR_BYTE = 255,
-            FACE_COLOR_COMPONENT_LOW = 100;
-
-        public static class Quality
+        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
-            public const bool
-                LOW_USE_ANTIALIASING = false,
-                MEDIUM_USE_ANTIALIASING = true,
-                HIGH_USE_ANTIALIASING = true;
+            [RenderQuality.Low] = new(
+                UseGlow: false,
+                EdgeBlur: 0,
+                EdgeWidth: 1
+            ),
+            [RenderQuality.Medium] = new(
+                UseGlow: true,
+                EdgeBlur: 2,
+                EdgeWidth: 1
+            ),
+            [RenderQuality.High] = new(
+                UseGlow: true,
+                EdgeBlur: 4,
+                EdgeWidth: 2
+            )
+        };
 
-            public const bool
-                LOW_USE_ADVANCED_EFFECTS = false,
-                MEDIUM_USE_ADVANCED_EFFECTS = true,
-                HIGH_USE_ADVANCED_EFFECTS = true;
-
-            public const bool
-                LOW_USE_GLOW_EFFECTS = false,
-                MEDIUM_USE_GLOW_EFFECTS = true,
-                HIGH_USE_GLOW_EFFECTS = true;
-
-            public const byte
-                LOW_EDGE_BLUR_RADIUS = 0,
-                MEDIUM_EDGE_BLUR_RADIUS = 2,
-                HIGH_EDGE_BLUR_RADIUS = 4;
-
-            public const byte
-                LOW_EDGE_STROKE_WIDTH = 1,
-                MEDIUM_EDGE_STROKE_WIDTH = 1,
-                HIGH_EDGE_STROKE_WIDTH = 2;
-        }
+        public record QualitySettings(
+            bool UseGlow,
+            byte EdgeBlur,
+            byte EdgeWidth
+        );
     }
 
-    private static readonly Vector3 LIGHT_DIRECTION = Vector3.Normalize(new Vector3(
-        CENTER_PROPORTION,
-        0.7f,
-        -1.0f));
-
-    private static readonly SKColor[] FACE_COLORS =
-    [
-        new SKColor(MAX_COLOR_BYTE, FACE_COLOR_COMPONENT_LOW, FACE_COLOR_COMPONENT_LOW),
-        new SKColor(FACE_COLOR_COMPONENT_LOW, MAX_COLOR_BYTE, FACE_COLOR_COMPONENT_LOW),
-        new SKColor(FACE_COLOR_COMPONENT_LOW, FACE_COLOR_COMPONENT_LOW, MAX_COLOR_BYTE),
-        new SKColor(MAX_COLOR_BYTE, MAX_COLOR_BYTE, FACE_COLOR_COMPONENT_LOW),
-        new SKColor(MAX_COLOR_BYTE, FACE_COLOR_COMPONENT_LOW, MAX_COLOR_BYTE),
-        new SKColor(FACE_COLOR_COMPONENT_LOW, MAX_COLOR_BYTE, MAX_COLOR_BYTE)
-    ];
+    private static readonly Vector3 LIGHT_DIRECTION = Vector3.Normalize(new(0.5f, 0.7f, -1f));
 
     private readonly record struct Vertex(float X, float Y, float Z);
-    private struct ProjectedVertex { public float X, Y, Depth; }
-    private readonly record struct Face(int V1, int V2, int V3, int FaceIndex);
+    private readonly record struct Face(int V1, int V2, int V3, int V4, int ColorIndex);
 
-    private readonly record struct RenderData(
-        float MaxSpectrum,
-        float CubeSize,
-        int BarCount);
-
+    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
     private readonly Vertex[] _vertices;
-    private readonly Vector3[] _faceNormalVectors;
-    private Face[] _faces;
-    private readonly ProjectedVertex[] _projectedVertices;
-    private float[] _faceDepths;
-    private float[] _faceNormals;
-    private float[] _faceLightIntensities;
+    private readonly Face[] _faces;
     private readonly SKPaint[] _facePaints;
     private readonly SKPaint _edgePaint;
 
-    private float _rotationAngleX;
-    private float _rotationAngleY;
-    private float _rotationAngleZ;
-    private Matrix4x4 _rotationMatrix = Matrix4x4.Identity;
-    private DateTime _lastRenderTime;
-    private float _deltaTime;
-    private SKImageInfo _lastImageInfo;
-    private float _rotationSpeedX;
-    private float _rotationSpeedY;
-    private float _rotationSpeedZ;
-    private float _currentCubeSize = BASE_CUBE_SIZE;
-
-    private Thread? _processingThread;
-    private CancellationTokenSource? _cts;
-    private AutoResetEvent? _spectrumDataAvailable;
-    private AutoResetEvent? _processingComplete;
-    private readonly object _renderDataLock = new();
-    private volatile bool _processingRunning;
-    private bool _dataReady;
-    private float[]? _spectrumToProcess;
-    private int _barCountToProcess;
-    private RenderData? _currentRenderData;
-
-    private bool _useGlowEffects;
-    private byte _edgeBlurRadius;
-    private byte _edgeStrokeWidth;
+    private float _rotationX, _rotationY, _rotationZ;
+    private float _speedX = BASE_ROTATION;
+    private float _speedY = BASE_ROTATION * 1.2f;
+    private float _speedZ = BASE_ROTATION * 0.8f;
+    private float _cubeScale = 1f;
+    private SKColor _baseColor = SKColors.White;
 
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        InitializeThreading();
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
-    }
-
-    protected override void OnConfigurationChanged()
-    {
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Configuration changed. New Quality: {Quality}");
     }
 
     protected override void OnQualitySettingsApplied()
     {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                LowQualitySettings();
-                break;
-            case RenderQuality.Medium:
-                MediumQualitySettings();
-                break;
-            case RenderQuality.High:
-                HighQualitySettings();
-                break;
-        }
-
-        UpdatePaintsQualitySettings();
-        _logger.Log(LogLevel.Debug, LogPrefix,
-            $"Quality settings applied. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
-            $"AdvancedEffects: {_useAdvancedEffects}, GlowEffects: {_useGlowEffects}, " +
-            $"BlurRadius: {_edgeBlurRadius}, StrokeWidth: {_edgeStrokeWidth}");
-    }
-
-    private void LowQualitySettings()
-    {
-        _useAntiAlias = LOW_USE_ANTIALIASING;
-        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
-        _useGlowEffects = LOW_USE_GLOW_EFFECTS;
-        _edgeBlurRadius = LOW_EDGE_BLUR_RADIUS;
-        _edgeStrokeWidth = LOW_EDGE_STROKE_WIDTH;
-    }
-
-    private void MediumQualitySettings()
-    {
-        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
-        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
-        _useGlowEffects = MEDIUM_USE_GLOW_EFFECTS;
-        _edgeBlurRadius = MEDIUM_EDGE_BLUR_RADIUS;
-        _edgeStrokeWidth = MEDIUM_EDGE_STROKE_WIDTH;
-    }
-
-    private void HighQualitySettings()
-    {
-        _useAntiAlias = HIGH_USE_ANTIALIASING;
-        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
-        _useGlowEffects = HIGH_USE_GLOW_EFFECTS;
-        _edgeBlurRadius = HIGH_EDGE_BLUR_RADIUS;
-        _edgeStrokeWidth = HIGH_EDGE_STROKE_WIDTH;
-    }
-
-    private void UpdatePaintsQualitySettings()
-    {
-        foreach (var paint in _facePaints)
-        {
-            paint.IsAntialias = _useAntiAlias;
-        }
-
-        _edgePaint.IsAntialias = _useAntiAlias;
-        _edgePaint.StrokeWidth = _edgeStrokeWidth;
-    }
-
-    protected override void BeforeRender(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint? paint)
-    {
-        UpdateDeltaTime();
-        _lastImageInfo = info;
-        SubmitSpectrumForProcessing(spectrum, barCount);
-        base.BeforeRender(canvas, spectrum, info, barWidth, barSpacing, barCount, paint);
-    }
-
-    private void UpdateDeltaTime()
-    {
-        var currentTime = DateTime.Now;
-        _deltaTime = _lastRenderTime != default
-            ? (float)(currentTime - _lastRenderTime).TotalSeconds
-            : DEFAULT_DELTA_TIME;
-        _lastRenderTime = currentTime;
+        _currentSettings = QualityPresets[Quality];
+        UpdatePaintSettings();
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -275,607 +111,238 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         SKPaint paint)
     {
         _logger.Safe(
-            () =>
-            {
-                RenderData? dataToUse = null;
-                lock (_renderDataLock)
-                {
-                    if (_currentRenderData != null)
-                    {
-                        dataToUse = _currentRenderData.Value;
-                        _dataReady = false;
-                    }
-                }
-                if (dataToUse.HasValue)
-                {
-                    PerformFrameCalculations(_lastImageInfo, dataToUse.Value);
-                    DrawCubeFaces(canvas, dataToUse.Value);
-                }
-            },
+            () => RenderCube(canvas, spectrum, info, barWidth, barCount, paint),
             LogPrefix,
-            "Error rendering cube effect"
+            "Error during rendering"
         );
     }
 
-    private void InitializeThreading()
-    {
-        StopProcessingThread();
-        _cts = new CancellationTokenSource();
-        _spectrumDataAvailable = new AutoResetEvent(false);
-        _processingComplete = new AutoResetEvent(false);
-        _processingRunning = true;
-        _dataReady = false;
-        _currentRenderData = null;
-        _processingThread = new Thread(ProcessSpectrumThreadEntry)
-        {
-            IsBackground = true,
-            Name = "CubeProcessor"
-        };
-        _processingThread.Start();
-
-        _logger.Log(LogLevel.Debug, LogPrefix, "Processing thread started.");
-    }
-
-    private void StopProcessingThread()
-    {
-        if (_processingThread == null || !_processingRunning) return;
-        _processingRunning = false;
-        _cts?.Cancel();
-        _spectrumDataAvailable?.Set();
-        _processingThread?.Join(THREAD_JOIN_TIMEOUT_MS);
-        _cts?.Dispose();
-        _spectrumDataAvailable?.Dispose();
-        _processingComplete?.Dispose();
-        _cts = null;
-        _spectrumDataAvailable = null;
-        _processingComplete = null;
-        _processingThread = null;
-
-        _logger.Log(LogLevel.Debug, LogPrefix, "Processing thread stopped.");
-    }
-
-    protected override void OnDispose()
-    {
-        StopProcessingThread();
-        foreach (var paint in _facePaints) paint?.Dispose();
-        _edgePaint?.Dispose();
-        _currentRenderData = null;
-        base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Renderer disposed");
-    }
-
-    private static Vertex[] CreateCubeVertices() =>
-    [
-        new Vertex(-CUBE_HALF_SIZE, -CUBE_HALF_SIZE, CUBE_HALF_SIZE),
-        new Vertex(CUBE_HALF_SIZE, -CUBE_HALF_SIZE, CUBE_HALF_SIZE),
-        new Vertex(CUBE_HALF_SIZE, CUBE_HALF_SIZE, CUBE_HALF_SIZE),
-        new Vertex(-CUBE_HALF_SIZE, CUBE_HALF_SIZE, CUBE_HALF_SIZE),
-        new Vertex(-CUBE_HALF_SIZE, -CUBE_HALF_SIZE, -CUBE_HALF_SIZE),
-        new Vertex(CUBE_HALF_SIZE, -CUBE_HALF_SIZE, -CUBE_HALF_SIZE),
-        new Vertex(CUBE_HALF_SIZE, CUBE_HALF_SIZE, -CUBE_HALF_SIZE),
-        new Vertex(-CUBE_HALF_SIZE, CUBE_HALF_SIZE, -CUBE_HALF_SIZE)
-    ];
-
-    private static Face[] CreateCubeFaces() =>
-    [
-        new Face(0, 1, 2, 0), new Face(0, 2, 3, 0),
-        new Face(4, 6, 5, 1), new Face(4, 7, 6, 1),
-        new Face(3, 2, 6, 2), new Face(3, 6, 7, 2),
-        new Face(0, 5, 1, 3), new Face(0, 4, 5, 3),
-        new Face(1, 5, 6, 4), new Face(1, 6, 2, 4),
-        new Face(0, 3, 7, 5), new Face(0, 7, 4, 5)
-    ];
-
-    private static Vector3[] CalculateFaceNormals() =>
-    [
-        new Vector3(0, 0, 1), new Vector3(0, 0, -1), new Vector3(0, 1, 0),
-        new Vector3(0, -1, 0), new Vector3(1, 0, 0), new Vector3(-1, 0, 0)
-    ];
-
-    private SKPaint[] CreateFacePaints() =>
-        [.. FACE_COLORS.Select(color => new SKPaint
-        {
-            Color = color,
-            IsAntialias = _useAntiAlias,
-            Style = SKPaintStyle.Fill
-        })];
-
-    private SKPaint CreateEdgePaint() => new()
-    {
-        Color = SKColors.White.WithAlpha(0),
-        IsAntialias = _useAntiAlias,
-        Style = SKPaintStyle.Stroke,
-        StrokeWidth = _edgeStrokeWidth,
-        MaskFilter = null
-    };
-
-    private void PerformFrameCalculations(
-        SKImageInfo info,
-        RenderData renderData)
-    {
-        _logger.Safe(
-            () =>
-            {
-                UpdateRotationAngles();
-                _rotationMatrix = CreateRotationMatrix();
-                ProjectVertices(info, renderData);
-                CalculateFaceDepthsAndNormals();
-                SortFacesByDepth();
-            },
-            LogPrefix,
-            "Error during frame calculations"
-        );
-    }
-
-    private void UpdateRotationAngles()
-    {
-        _rotationAngleX = (_rotationAngleX + _rotationSpeedX * _deltaTime) % MathF.Tau;
-        _rotationAngleY = (_rotationAngleY + _rotationSpeedY * _deltaTime) % MathF.Tau;
-        _rotationAngleZ = (_rotationAngleZ + _rotationSpeedZ * _deltaTime) % MathF.Tau;
-    }
-
-    private Matrix4x4 CreateRotationMatrix() =>
-        Matrix4x4.CreateRotationX(_rotationAngleX) *
-        Matrix4x4.CreateRotationY(_rotationAngleY) *
-        Matrix4x4.CreateRotationZ(_rotationAngleZ);
-
-    private void ProjectVertices(
-        SKImageInfo info,
-        RenderData renderData)
-    {
-        _logger.Safe(
-            () =>
-            {
-                CalculateProjectionParameters(
-                    info,
-                    renderData,
-                    out float centerX,
-                    out float centerY,
-                    out float scale);
-                for (int i = 0; i < _vertices.Length; i++)
-                {
-                    _projectedVertices[i] = ProjectSingleVertex(
-                        _vertices[i],
-                        _rotationMatrix,
-                        scale,
-                        centerX,
-                        centerY);
-                }
-            },
-            LogPrefix,
-            "Error projecting vertices"
-        );
-    }
-
-    private static void CalculateProjectionParameters(
-        SKImageInfo info,
-        RenderData renderData,
-        out float centerX,
-        out float centerY,
-        out float scale)
-    {
-        centerX = info.Width * CENTER_PROPORTION;
-        centerY = info.Height * CENTER_PROPORTION;
-        scale = CalculateProjectionScale(info, renderData);
-    }
-
-    private static ProjectedVertex ProjectSingleVertex(
-        Vertex vertex,
-        Matrix4x4 rotationMatrix,
-        float scale,
-        float centerX,
-        float centerY)
-    {
-        float rx = vertex.X * rotationMatrix.M11 + vertex.Y * rotationMatrix.M21 + vertex.Z * rotationMatrix.M31;
-        float ry = vertex.X * rotationMatrix.M12 + vertex.Y * rotationMatrix.M22 + vertex.Z * rotationMatrix.M32;
-        float rz = vertex.X * rotationMatrix.M13 + vertex.Y * rotationMatrix.M23 + vertex.Z * rotationMatrix.M33;
-        return new ProjectedVertex
-        {
-            X = rx * scale + centerX,
-            Y = ry * scale + centerY,
-            Depth = rz
-        };
-    }
-
-    private static float CalculateProjectionScale(
-        SKImageInfo info,
-        RenderData renderData)
-    {
-        float baseScale = Min(info.Width * CENTER_PROPORTION, info.Height * CENTER_PROPORTION);
-
-        float barCountFactor = BASE_ROTATION_FACTOR
-                               + MathF.Log10(MathF.Max(BASE_ROTATION_FACTOR, renderData.BarCount))
-                               * SCALE_LOG_FACTOR;
-
-        barCountFactor = Clamp(barCountFactor, MIN_SCALE_FACTOR, MAX_SCALE_FACTOR);
-        return baseScale * renderData.CubeSize * barCountFactor;
-    }
-
-    private void CalculateFaceDepthsAndNormals()
-    {
-        _logger.Safe(
-            () =>
-            {
-                for (int i = 0; i < _faces.Length; i++)
-                {
-                    CalculateFaceProperties(i);
-                }
-            },
-            LogPrefix,
-            "Error calculating face depths and normals"
-        );
-    }
-
-    private void CalculateFaceProperties(int faceIndex)
-    {
-        var face = _faces[faceIndex];
-        _faceDepths[faceIndex] = (_projectedVertices[face.V1].Depth +
-                                  _projectedVertices[face.V2].Depth +
-                                  _projectedVertices[face.V3].Depth) / FACE_DEPTH_AVERAGE_FACTOR;
-
-        Vector3 worldNormal = _faceNormalVectors[face.FaceIndex];
-        Vector3 rotatedNormal = Vector3.TransformNormal(worldNormal, _rotationMatrix);
-
-        rotatedNormal = Vector3.Normalize(rotatedNormal);
-
-        _faceNormals[faceIndex] = Vector3.Dot(rotatedNormal, Vector3.UnitZ);
-        _faceLightIntensities[faceIndex] = CalculateLightIntensity(rotatedNormal);
-    }
-
-    private static float CalculateLightIntensity(Vector3 rotatedNormal)
-    {
-        float diffuse = Max(MIN_DIFFUSE_LIGHT, Vector3.Dot(rotatedNormal, LIGHT_DIRECTION));
-        return AMBIENT_LIGHT + DIFFUSE_LIGHT * diffuse;
-    }
-
-    private void SortFacesByDepth()
-    {
-        _logger.Safe(
-            () =>
-            {
-                int[] indices = [.. Enumerable.Range(0, _faces.Length)];
-
-                Array.Sort(indices, (a, b) => _faceDepths[b].CompareTo(_faceDepths[a]));
-                Face[] sortedFaces = new Face[_faces.Length];
-
-                float[] sortedDepths = new float[_faceDepths.Length];
-                float[] sortedNormals = new float[_faceNormals.Length];
-                float[] sortedLightIntensities = new float[_faceLightIntensities.Length];
-
-                for (int i = 0; i < indices.Length; i++)
-                {
-                    int originalIndex = indices[i];
-                    sortedFaces[i] = _faces[originalIndex];
-                    sortedDepths[i] = _faceDepths[originalIndex];
-                    sortedNormals[i] = _faceNormals[originalIndex];
-                    sortedLightIntensities[i] = _faceLightIntensities[originalIndex];
-                }
-                _faces = sortedFaces;
-                _faceDepths = sortedDepths;
-                _faceNormals = sortedNormals;
-                _faceLightIntensities = sortedLightIntensities;
-            },
-            LogPrefix,
-            "Error sorting faces by depth"
-        );
-    }
-
-    private void DrawCubeFaces(
+    private void RenderCube(
         SKCanvas canvas,
-        RenderData renderData)
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        int barCount,
+        SKPaint basePaint)
     {
+        _baseColor = basePaint.Color;
+        UpdateRotation(spectrum);
+
+        var center = new SKPoint(info.Width * 0.5f, info.Height * 0.5f);
+
+        float barCountScale = 1f + (barCount - 50) * BAR_COUNT_SCALE_FACTOR;
+        float barWidthScale = 1f + (barWidth - 5) * BAR_WIDTH_SCALE_FACTOR;
+        float totalScale = Clamp(barCountScale * barWidthScale * _cubeScale, MIN_SCALE, MAX_SCALE);
+
+        float scale = Min(info.Width, info.Height) * 0.3f * totalScale;
+
+        var rotation = Matrix4x4.CreateRotationX(_rotationX) *
+                      Matrix4x4.CreateRotationY(_rotationY) *
+                      Matrix4x4.CreateRotationZ(_rotationZ);
+
+        var projected = ProjectVertices(rotation, scale, center);
+        var facesWithDepth = CalculateFaceDepths(projected, rotation);
+
+        DrawFaces(canvas, projected, facesWithDepth, spectrum);
+    }
+
+    private void UpdateRotation(float[] spectrum)
+    {
+        float deltaTime = 0.016f;
+
+        if (spectrum.Length >= 3)
+        {
+            _speedX = BASE_ROTATION + spectrum[0] * ROTATION_INFLUENCE;
+            _speedY = BASE_ROTATION + spectrum[spectrum.Length / 2] * ROTATION_INFLUENCE;
+            _speedZ = BASE_ROTATION + spectrum[^1] * ROTATION_INFLUENCE;
+
+            float avgIntensity = spectrum.Average();
+            _cubeScale = Lerp(_cubeScale, 0.8f + avgIntensity * 0.4f, 0.1f);
+        }
+
+        _rotationX = (_rotationX + _speedX * deltaTime) % MathF.Tau;
+        _rotationY = (_rotationY + _speedY * deltaTime) % MathF.Tau;
+        _rotationZ = (_rotationZ + _speedZ * deltaTime) % MathF.Tau;
+    }
+
+    private static float Lerp(
+        float current,
+        float target,
+        float amount) =>
+        current * (1f - amount) + target * amount;
+
+    private SKPoint[] ProjectVertices(
+        Matrix4x4 rotation,
+        float scale,
+        SKPoint center)
+    {
+        var projected = new SKPoint[_vertices.Length];
+
+        for (int i = 0; i < _vertices.Length; i++)
+        {
+            var v = _vertices[i];
+            var rotated = Vector3.Transform(new Vector3(v.X, v.Y, v.Z), rotation);
+
+            projected[i] = new SKPoint(
+                rotated.X * scale + center.X,
+                rotated.Y * scale + center.Y
+            );
+        }
+
+        return projected;
+    }
+
+    private (Face face, float depth, float light)[] CalculateFaceDepths(
+        SKPoint[] _,
+        Matrix4x4 rotation)
+    {
+        var result = new (Face face, float depth, float light)[_faces.Length];
+
         for (int i = 0; i < _faces.Length; i++)
         {
-            if (_faceNormals[i] <= 0) continue;
-
             var face = _faces[i];
-            var v1 = _projectedVertices[face.V1];
-            var v2 = _projectedVertices[face.V2];
-            var v3 = _projectedVertices[face.V3];
+            var normal = GetFaceNormal(face.ColorIndex);
+            var rotatedNormal = Vector3.TransformNormal(normal, rotation);
 
-            DrawFace(canvas, face, v1, v2, v3, renderData, i);
+            float depth = rotatedNormal.Z;
+            float light = AMBIENT_LIGHT + DIFFUSE_LIGHT *
+                         MathF.Max(0, Vector3.Dot(Vector3.Normalize(rotatedNormal), LIGHT_DIRECTION));
+
+            result[i] = (face, depth, light);
         }
+
+        return [.. result.OrderBy(f => f.depth)];
     }
 
-    private void DrawFace(
+    private void DrawFaces(
         SKCanvas canvas,
-        Face face,
-        ProjectedVertex v1,
-        ProjectedVertex v2,
-        ProjectedVertex v3,
-        RenderData renderData,
-        int sortedFaceIndex)
+        SKPoint[] projected,
+        (Face face, float depth, float light)[] faces,
+        float[] spectrum)
     {
-        using var path = CreateFacePath(v1, v2, v3);
-        DrawSingleFace(canvas, path, face, renderData, sortedFaceIndex);
-    }
+        float maxSpectrum = spectrum.Length > 0 ? spectrum.Max() : 0f;
 
-    private static SKPath CreateFacePath(
-        ProjectedVertex v1,
-        ProjectedVertex v2,
-        ProjectedVertex v3)
-    {
-        var path = new SKPath();
-        path.MoveTo(v1.X, v1.Y);
-        path.LineTo(v2.X, v2.Y);
-        path.LineTo(v3.X, v3.Y);
-        path.Close();
-        return path;
-    }
-
-    private void DrawSingleFace(
-        SKCanvas canvas,
-        SKPath path,
-        Face face,
-        RenderData renderData,
-        int sortedFaceIndex)
-    {
-        float lightIntensity = _faceLightIntensities[sortedFaceIndex];
-        float normalZ = _faceNormals[sortedFaceIndex];
-
-        (SKColor litColor, byte alphaByte) = CalculateLitFaceColorAndAlpha(
-            renderData, face.FaceIndex, lightIntensity, normalZ);
-
-        var facePaint = _facePaints[face.FaceIndex];
-
-        facePaint.Color = litColor;
-        facePaint.IsAntialias = _useAntiAlias;
-
-        canvas.DrawPath(path, facePaint);
-
-        if (_useGlowEffects && _useAdvancedEffects)
+        foreach (var (face, depth, light) in faces)
         {
-            ApplyGlowEffect(canvas, path, alphaByte);
+            if (depth >= 0) continue;
+
+            using var path = CreateFacePath(projected, face);
+
+            var paint = _facePaints[face.ColorIndex];
+
+            var faceColor = GetFaceColor(face.ColorIndex);
+
+            byte r = (byte)(faceColor.Red * light);
+            byte g = (byte)(faceColor.Green * light);
+            byte b = (byte)(faceColor.Blue * light);
+            byte a = (byte)((BASE_ALPHA + maxSpectrum * 0.1f) * 255f);
+
+            paint.Color = new SKColor(r, g, b, a);
+            paint.IsAntialias = _useAntiAlias;
+
+            canvas.DrawPath(path, paint);
+
+            if (_useAdvancedEffects && _currentSettings.UseGlow)
+            {
+                DrawGlow(canvas, path, a);
+            }
         }
     }
 
-    private static (SKColor color, byte alpha) CalculateLitFaceColorAndAlpha(
-        RenderData renderData,
-        int faceColorIndex,
-        float lightIntensity,
-        float normalZ)
+    private SKColor GetFaceColor(int faceIndex)
     {
-        var baseColor = FACE_COLORS[faceColorIndex];
+        _baseColor.ToHsl(out float hue, out float saturation, out float lightness);
 
-        SKColor litColor = ApplyLightToColor(baseColor, lightIntensity);
-        byte alpha = CalculateFaceAlpha(renderData.MaxSpectrum, normalZ);
+        float hueShift = faceIndex * 60f;
+        hue = (hue + hueShift) % 360f;
 
-        return (new SKColor(litColor.Red, litColor.Green, litColor.Blue, alpha), alpha);
+        lightness = Clamp(lightness + (faceIndex % 2 == 0 ? 0.1f : -0.1f), 0.2f, 0.8f);
+
+        return SKColor.FromHsl(hue, saturation * 100f, lightness * 100f);
     }
 
-    private static SKColor ApplyLightToColor(
-        SKColor baseColor,
-        float lightIntensity)
-    {
-        byte r = (byte)Clamp((int)(baseColor.Red * lightIntensity), MIN_COLOR_BYTE, MAX_COLOR_BYTE);
-        byte g = (byte)Clamp((int)(baseColor.Green * lightIntensity), MIN_COLOR_BYTE, MAX_COLOR_BYTE);
-        byte b = (byte)Clamp((int)(baseColor.Blue * lightIntensity), MIN_COLOR_BYTE, MAX_COLOR_BYTE);
-        return new SKColor(r, g, b);
-    }
-
-    private static byte CalculateFaceAlpha(
-        float maxSpectrum,
-        float normalZ)
-    {
-        float alphaFactor = BASE_ALPHA + maxSpectrum * SPECTRUM_ALPHA_INFLUENCE;
-        return (byte)Clamp(alphaFactor * normalZ * MAX_COLOR_BYTE, MIN_COLOR_BYTE, MAX_COLOR_BYTE);
-    }
-
-    private void ApplyGlowEffect(
+    private void DrawGlow(
         SKCanvas canvas,
         SKPath path,
         byte alpha)
     {
-        _edgePaint.Color = SKColors.White.WithAlpha((byte)(alpha * EDGE_ALPHA_MULTIPLIER));
+        _edgePaint.Color = SKColors.White.WithAlpha((byte)(alpha * 0.8f));
+        _edgePaint.StrokeWidth = _currentSettings.EdgeWidth;
         _edgePaint.IsAntialias = _useAntiAlias;
-        _edgePaint.StrokeWidth = _edgeStrokeWidth;
 
-        _edgePaint.MaskFilter = _useAdvancedEffects && _edgeBlurRadius > 0
-            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _edgeBlurRadius)
-            : null;
+        if (_currentSettings.EdgeBlur > 0)
+        {
+            _edgePaint.MaskFilter = SKMaskFilter.CreateBlur(
+                SKBlurStyle.Normal,
+                _currentSettings.EdgeBlur);
+        }
 
         canvas.DrawPath(path, _edgePaint);
     }
 
-    private void SubmitSpectrumForProcessing(
-        float[]? spectrum,
-        int barCount)
+    private static SKPath CreateFacePath(
+        SKPoint[] projected,
+        Face face)
     {
-        _logger.Safe(
-            () =>
-            {
-                if (spectrum == null
-                    || _spectrumDataAvailable == null
-                    || !_processingRunning)
-                {
-                    return;
-                }
-                lock (_renderDataLock)
-                {
-                    if (!_dataReady)
-                    {
-                        _spectrumToProcess = (float[])spectrum.Clone();
-                        _barCountToProcess = barCount;
-                        _spectrumDataAvailable.Set();
-                    }
-                }
-            },
-            LogPrefix,
-            "Failed to submit spectrum for processing"
-        );
+        var path = new SKPath();
+        path.MoveTo(projected[face.V1]);
+        path.LineTo(projected[face.V2]);
+        path.LineTo(projected[face.V3]);
+        path.LineTo(projected[face.V4]);
+        path.Close();
+        return path;
     }
 
-    private void ProcessSpectrumThreadEntry()
+    private void UpdatePaintSettings()
     {
-        _logger.Log(LogLevel.Debug, LogPrefix, "Processing thread loop started.");
-        try
+        foreach (var paint in _facePaints)
         {
-            while (_processingRunning
-                && _cts != null
-                && !_cts.Token.IsCancellationRequested
-                && _spectrumDataAvailable != null
-                && _processingComplete != null)
-            {
-                bool signaled = _spectrumDataAvailable.WaitOne();
-
-                if (!signaled
-                    || _cts.Token.IsCancellationRequested
-                    || !_processingRunning)
-                {
-                    break;
-                }
-                if (!_cts.Token.IsCancellationRequested)
-                {
-                    ProcessLatestSpectrumData();
-                }
-            }
+            paint.IsAntialias = _useAntiAlias;
         }
-        catch (OperationCanceledException)
-        {
-            _logger.Log(LogLevel.Debug, LogPrefix, "Processing thread cancelled.");
-        }
-        catch (ObjectDisposedException)
-        {
-            _logger.Log(LogLevel.Debug, LogPrefix, "Processing thread synchronization object disposed.");
-        }
-        catch (Exception ex)
-        {
-            _logger.Log(LogLevel.Error, LogPrefix,
-                $"Unhandled error in cube processing thread: {ex.Message}\n{ex.StackTrace}");
-        }
-        finally
-        {
-            _processingRunning = false;
-            _logger.Log(LogLevel.Debug, LogPrefix, "Processing thread loop stopped.");
-        }
+        _edgePaint.IsAntialias = _useAntiAlias;
     }
 
-    private void ProcessLatestSpectrumData()
+    private static Vertex[] CreateVertices() =>
+    [
+        new(-CUBE_SIZE, -CUBE_SIZE,  CUBE_SIZE),
+        new( CUBE_SIZE, -CUBE_SIZE,  CUBE_SIZE),
+        new( CUBE_SIZE,  CUBE_SIZE,  CUBE_SIZE),
+        new(-CUBE_SIZE,  CUBE_SIZE,  CUBE_SIZE),
+        new(-CUBE_SIZE, -CUBE_SIZE, -CUBE_SIZE),
+        new( CUBE_SIZE, -CUBE_SIZE, -CUBE_SIZE),
+        new( CUBE_SIZE,  CUBE_SIZE, -CUBE_SIZE),
+        new(-CUBE_SIZE,  CUBE_SIZE, -CUBE_SIZE)
+    ];
+
+    private static Face[] CreateFaces() =>
+    [
+        new(0, 1, 2, 3, 0),
+        new(5, 4, 7, 6, 1),
+        new(3, 2, 6, 7, 2),
+        new(4, 5, 1, 0, 3),
+        new(1, 5, 6, 2, 4),
+        new(4, 0, 3, 7, 5)
+    ];
+
+    private static Vector3 GetFaceNormal(int faceIndex) => faceIndex switch
     {
-        if (TryGetSpectrumToProcess(out var spectrumCopy, out int barCountCopy))
+        0 => Vector3.UnitZ,
+        1 => -Vector3.UnitZ,
+        2 => Vector3.UnitY,
+        3 => -Vector3.UnitY,
+        4 => Vector3.UnitX,
+        5 => -Vector3.UnitX,
+        _ => Vector3.Zero
+    };
+
+    protected override void OnDispose()
+    {
+        foreach (var paint in _facePaints)
         {
-            ComputeAndStoreRenderData(spectrumCopy, barCountCopy);
+            paint?.Dispose();
         }
+        _edgePaint?.Dispose();
+        base.OnDispose();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
-
-    private bool TryGetSpectrumToProcess(
-        [MaybeNullWhen(false)] out float[] spectrum,
-        out int barCount)
-    {
-        lock (_renderDataLock)
-        {
-            if (_spectrumToProcess == null)
-            {
-                spectrum = null;
-                barCount = 0;
-                return false;
-            }
-            spectrum = _spectrumToProcess;
-            barCount = _barCountToProcess;
-            _spectrumToProcess = null;
-            return true;
-        }
-    }
-
-    private void ComputeAndStoreRenderData(
-        float[] spectrum,
-        int barCount)
-    {
-        _logger.Safe(
-            () =>
-            {
-                if (_cts == null || _cts.Token.IsCancellationRequested) return;
-
-                UpdateCurrentCubeSize(spectrum);
-                UpdateRotationSpeeds(spectrum);
-
-                float maxSpectrumValue = spectrum.Length > 0 ? spectrum.Max() : 0f;
-                RenderData computedData = new(
-                    maxSpectrumValue,
-                    _currentCubeSize,
-                    barCount);
-
-                lock (_renderDataLock)
-                {
-                    _currentRenderData = computedData;
-                    _dataReady = true;
-                }
-            },
-            LogPrefix,
-            "Error computing cube data"
-        );
-    }
-
-    private void UpdateCurrentCubeSize(float[] spectrum)
-    {
-        _logger.Safe(
-            () =>
-            {
-                if (spectrum.Length == 0) return;
-
-                float avgIntensity = spectrum.Average();
-                float targetSize = BASE_CUBE_SIZE + avgIntensity * CUBE_SIZE_RESPONSE_FACTOR;
-                targetSize = Clamp(targetSize, MIN_CUBE_SIZE, MAX_CUBE_SIZE);
-                _currentCubeSize = SmoothValue(_currentCubeSize, targetSize, CUBE_SIZE_SMOOTHING);
-            },
-            LogPrefix,
-            "Error updating cube size"
-        );
-    }
-
-    private void InitializeRotationSpeeds()
-    {
-        _rotationSpeedX = BASE_ROTATION_SPEED * INITIAL_SPEED_X_FACTOR;
-        _rotationSpeedY = BASE_ROTATION_SPEED * INITIAL_SPEED_Y_FACTOR;
-        _rotationSpeedZ = BASE_ROTATION_SPEED * INITIAL_SPEED_Z_FACTOR;
-    }
-
-    private void UpdateRotationSpeeds(float[] spectrum)
-    {
-        _logger.Safe(
-            () =>
-            {
-                if (spectrum.Length < MIN_SPECTRUM_FOR_ROTATION)
-                {
-                    InitializeRotationSpeeds();
-                    return;
-                }
-
-                int midIndex = spectrum.Length / 2;
-                int highIndex = spectrum.Length - 1;
-
-                float lowFreq = spectrum[0];
-                float midFreq = spectrum[midIndex];
-                float highFreq = spectrum[highIndex];
-
-                float targetSpeedX = BASE_ROTATION_SPEED + lowFreq * SPECTRUM_ROTATION_INFLUENCE;
-
-                float targetSpeedY = BASE_ROTATION_SPEED
-                                     * MID_FREQ_SPEED_FACTOR
-                                     + midFreq
-                                     * SPECTRUM_ROTATION_INFLUENCE;
-
-                float targetSpeedZ = BASE_ROTATION_SPEED
-                                     * HIGH_FREQ_SPEED_FACTOR
-                                     + highFreq
-                                     * SPECTRUM_ROTATION_INFLUENCE;
-
-                targetSpeedX = Min(targetSpeedX, MAX_ROTATION_SPEED);
-                targetSpeedY = Min(targetSpeedY, MAX_ROTATION_SPEED);
-                targetSpeedZ = Min(targetSpeedZ, MAX_ROTATION_SPEED);
-
-                _rotationSpeedX = SmoothValue(_rotationSpeedX, targetSpeedX, ROTATION_SPEED_SMOOTHING);
-                _rotationSpeedY = SmoothValue(_rotationSpeedY, targetSpeedY, ROTATION_SPEED_SMOOTHING);
-                _rotationSpeedZ = SmoothValue(_rotationSpeedZ, targetSpeedZ, ROTATION_SPEED_SMOOTHING);
-            },
-            LogPrefix,
-            "Error updating rotation speeds"
-        );
-    }
-
-    private static float SmoothValue(
-        float currentValue,
-        float targetValue,
-        float smoothingFactor) =>
-        currentValue * smoothingFactor + targetValue * (1.0f - smoothingFactor);
 }

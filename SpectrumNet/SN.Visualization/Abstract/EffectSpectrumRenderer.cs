@@ -303,7 +303,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         }
     }
 
-    private void RenderNormalMode(Action renderAction) =>
+    private static void RenderNormalMode(Action renderAction) =>
         renderAction();
 
     protected override void ApplyQualitySettings() =>

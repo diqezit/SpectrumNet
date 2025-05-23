@@ -1,19 +1,16 @@
 ﻿#nullable enable
 
-using static SpectrumNet.SN.Visualization.Renderers.HackerTextRenderer.Constants;
-using static SpectrumNet.SN.Visualization.Renderers.HackerTextRenderer.Constants.Physics;
-using static SpectrumNet.SN.Visualization.Renderers.HackerTextRenderer.Constants.QualitySettings;
-using static SpectrumNet.SN.Visualization.Renderers.HackerTextRenderer.Constants.Style;
 using static System.MathF;
+using static SpectrumNet.SN.Visualization.Renderers.HackerTextRenderer.Constants;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class HackerTextRenderer : EffectSpectrumRenderer
 {
+    private const string LogPrefix = nameof(HackerTextRenderer);
+
     private static readonly Lazy<HackerTextRenderer> _instance =
         new(() => new HackerTextRenderer());
-
-    private const string LogPrefix = nameof(HackerTextRenderer);
 
     private HackerTextRenderer() { }
 
@@ -21,102 +18,87 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 
     public float SensitivityScale { get; set; } = 1.0f;
 
-    public record Constants
+    public static class Constants
     {
-        public const string
-            STATIC_TEXT = "Haker2550";
+        public const string STATIC_TEXT = "Haker2550";
 
         public const float
             BASE_TEXT_SIZE = 64f,
             TEXT_Y_POSITION_RATIO = 0.5f,
-
             DEFAULT_BAR_COUNT = 100f,
             TEXT_SIZE_BAR_COUNT_SCALE = 0.2f,
             MIN_TEXT_SIZE_RATIO = 0.5f,
             MAX_TEXT_SIZE_RATIO = 3.0f,
-            BASE_EXTRUSION_SCALE_FACTOR = 0.5f;
+            BASE_EXTRUSION_SCALE_FACTOR = 0.5f,
+            JUMP_STRENGTH_MULTIPLIER = 80f,
+            RETURN_FORCE_FACTOR = 0.1f,
+            DAMPING_FACTOR = 0.85f,
+            MIN_SPECTRUM_FOR_JUMP = 0.02f,
+            LETTER_MAGNITUDE_SMOOTHING_FACTOR = 0.6f,
+            TARGET_FPS_FOR_PHYSICS_SCALING = 60f,
+            MAX_DELTA_TIME = 0.1f,
+            MIN_DELTA_TIME = 0f,
+            BASE_EXTRUSION_OFFSET_X = 1.0f,
+            BASE_EXTRUSION_OFFSET_Y = 1.0f;
 
-        public static class Physics
+        public const int EXTRUSION_LAYERS = 5;
+
+        public static readonly SKColor
+            EXTRUSION_COLOR_DARKEN_FACTOR = new(0, 0, 0, 100),
+            GRADIENT_START_COLOR_OFFSET = new(25, 25, 25, 0),
+            GRADIENT_END_COLOR_OFFSET = new(25, 25, 25, 0);
+
+        public static readonly float[] GradientColorPositions = [0f, 1f];
+
+        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
-            public const float
-                JUMP_STRENGTH_MULTIPLIER = 80f,
-                RETURN_FORCE_FACTOR = 0.1f,
-                DAMPING_FACTOR = 0.85f,
-                MIN_SPECTRUM_FOR_JUMP = 0.02f,
-                LETTER_MAGNITUDE_SMOOTHING_FACTOR = 0.6f,
-                TARGET_FPS_FOR_PHYSICS_SCALING = 60f,
-                MAX_DELTA_TIME = 0.1f,
-                MIN_DELTA_TIME = 0f;
-        }
+            [RenderQuality.Low] = new(
+                JumpStrengthMultiplier: JUMP_STRENGTH_MULTIPLIER * 0.7f,
+                DampingFactor: DAMPING_FACTOR * 1.05f,
+                ReturnForceFactor: RETURN_FORCE_FACTOR * 0.8f,
+                ExtrusionLayers: 2,
+                TextScaleFactor: 0.5f,
+                ExtrusionScaleFactor: 0.7f
+            ),
+            [RenderQuality.Medium] = new(
+                JumpStrengthMultiplier: JUMP_STRENGTH_MULTIPLIER,
+                DampingFactor: DAMPING_FACTOR,
+                ReturnForceFactor: RETURN_FORCE_FACTOR,
+                ExtrusionLayers: EXTRUSION_LAYERS,
+                TextScaleFactor: 1.0f,
+                ExtrusionScaleFactor: 1.0f
+            ),
+            [RenderQuality.High] = new(
+                JumpStrengthMultiplier: JUMP_STRENGTH_MULTIPLIER * 1.3f,
+                DampingFactor: DAMPING_FACTOR * 0.95f,
+                ReturnForceFactor: RETURN_FORCE_FACTOR * 1.2f,
+                ExtrusionLayers: EXTRUSION_LAYERS + 2,
+                TextScaleFactor: 2.0f,
+                ExtrusionScaleFactor: 1.3f
+            )
+        };
 
-        public static class Style
-        {
-            public const int EXTRUSION_LAYERS = 5;
-
-            public const float
-                BASE_EXTRUSION_OFFSET_X = 1.0f,
-                BASE_EXTRUSION_OFFSET_Y = 1.0f;
-
-            public static readonly SKColor
-                EXTRUSION_COLOR_DARKEN_FACTOR = new(0, 0, 0, 100),
-                GRADIENT_START_COLOR_OFFSET = new(25, 25, 25, 0),
-                GRADIENT_END_COLOR_OFFSET = new(25, 25, 25, 0);
-        }
-
-        public static class QualitySettings
-        {
-            public const float
-                LOW_JUMP_STRENGTH_MULTIPLIER = JUMP_STRENGTH_MULTIPLIER * 0.7f,
-                MEDIUM_JUMP_STRENGTH_MULTIPLIER = JUMP_STRENGTH_MULTIPLIER,
-                HIGH_JUMP_STRENGTH_MULTIPLIER = JUMP_STRENGTH_MULTIPLIER * 1.3f,
-                LOW_DAMPING_FACTOR = DAMPING_FACTOR * 1.05f,
-                MEDIUM_DAMPING_FACTOR = DAMPING_FACTOR,
-                HIGH_DAMPING_FACTOR = DAMPING_FACTOR * 0.95f,
-                LOW_RETURN_FORCE_FACTOR_SCALE = 0.8f,
-                HIGH_RETURN_FORCE_FACTOR_SCALE = 1.2f,
-
-                LOW_TEXT_SCALE_FACTOR = 0.5f,
-                MEDIUM_TEXT_SCALE_FACTOR = 1.0f,
-                HIGH_TEXT_SCALE_FACTOR = 2.0f,
-
-                LOW_EXTRUSION_SCALE_FACTOR = 0.7f,
-                MEDIUM_EXTRUSION_SCALE_FACTOR = 1.0f,
-                HIGH_EXTRUSION_SCALE_FACTOR = 1.3f;
-
-
-            public const int
-                LOW_EXTRUSION_LAYERS = 2,
-                MEDIUM_EXTRUSION_LAYERS = EXTRUSION_LAYERS,
-                HIGH_EXTRUSION_LAYERS = EXTRUSION_LAYERS + 2;
-        }
+        public record QualitySettings(
+            float JumpStrengthMultiplier,
+            float DampingFactor,
+            float ReturnForceFactor,
+            int ExtrusionLayers,
+            float TextScaleFactor,
+            float ExtrusionScaleFactor
+        );
     }
 
-    private static readonly float[] GradientColorPositions = [0f, 1f];
-
     private DateTime _lastFrameTimeForEffect = DateTime.UtcNow;
-
     private SKFont? _font;
     private readonly List<HackerLetter> _letters = [];
     private bool _staticTextInitialized;
-
-    private float
-        _currentJumpStrengthMultiplier,
-        _currentDampingFactor,
-        _currentReturnForceFactor,
-        _currentTextScaleFactor,
-        _currentExtrusionScaleFactor,
-        _currentExtrusionOffsetX,
-        _currentExtrusionOffsetY;
-
-    private int _currentExtrusionLayers;
+    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
+    private float _currentExtrusionOffsetX;
+    private float _currentExtrusionOffsetY;
 
     private struct HackerLetter
     {
-        public float
-            X, BaseY, CurrentY,
-            VelocityY,
-            SmoothedMagnitude,
-            CharWidth;
+        public float X, BaseY, CurrentY, VelocityY, SmoothedMagnitude, CharWidth;
         public char Character;
         public SKPath? Path;
     }
@@ -126,88 +108,26 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         InitializeFont();
         _lastFrameTimeForEffect = DateTime.UtcNow;
-        _logger.Debug(LogPrefix, "Initialized");
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
-    private void InitializeFont() =>
-        _logger.Safe(() => HandleInitializeFont(),
-                     LogPrefix,
-                     "Error initializing font");
-
-    private void HandleInitializeFont()
+    private void InitializeFont()
     {
         _font = new()
         {
             Size = BASE_TEXT_SIZE,
-            Edging = UseAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias
+            Edging = _useAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias
         };
     }
 
-    protected override void OnQualitySettingsApplied() =>
-        _logger.Safe(() => HandleQualitySettingsApplied(),
-                     LogPrefix,
-                     "Error applying quality settings");
-
-    private void HandleQualitySettingsApplied()
+    protected override void OnQualitySettingsApplied()
     {
-        base.OnQualitySettingsApplied();
-        SetCurrentQualityParameters(Quality);
+        _currentSettings = QualityPresets[Quality];
         InvalidateLetterPaths();
         _staticTextInitialized = false;
-
-        _logger.Debug(LogPrefix,
-            $"Quality settings applied. Quality: {Quality}, " +
-            $"JumpStrength: {_currentJumpStrengthMultiplier}, " +
-            $"Damping: {_currentDampingFactor}, " +
-            $"ExtrusionLayers: {_currentExtrusionLayers}");
     }
 
-    private void SetCurrentQualityParameters(RenderQuality quality)
-    {
-        switch (quality)
-        {
-            case RenderQuality.Low: LowSettings(); break;
-            case RenderQuality.Medium: MediumSettings(); break;
-            case RenderQuality.High: HighSettings(); break;
-        }
-    }
-
-    private void HighSettings()
-    {
-        _currentJumpStrengthMultiplier = HIGH_JUMP_STRENGTH_MULTIPLIER;
-        _currentDampingFactor = HIGH_DAMPING_FACTOR;
-        _currentReturnForceFactor = RETURN_FORCE_FACTOR * HIGH_RETURN_FORCE_FACTOR_SCALE;
-        _currentExtrusionLayers = HIGH_EXTRUSION_LAYERS;
-        _currentTextScaleFactor = HIGH_TEXT_SCALE_FACTOR;
-        _currentExtrusionScaleFactor = HIGH_EXTRUSION_SCALE_FACTOR;
-    }
-
-    private void MediumSettings()
-    {
-        _currentJumpStrengthMultiplier = MEDIUM_JUMP_STRENGTH_MULTIPLIER;
-        _currentDampingFactor = MEDIUM_DAMPING_FACTOR;
-        _currentReturnForceFactor = RETURN_FORCE_FACTOR;
-        _currentExtrusionLayers = MEDIUM_EXTRUSION_LAYERS;
-        _currentTextScaleFactor = MEDIUM_TEXT_SCALE_FACTOR;
-        _currentExtrusionScaleFactor = MEDIUM_EXTRUSION_SCALE_FACTOR;
-    }
-
-    private void LowSettings()
-    {
-        _currentJumpStrengthMultiplier = LOW_JUMP_STRENGTH_MULTIPLIER;
-        _currentDampingFactor = LOW_DAMPING_FACTOR;
-        _currentReturnForceFactor = RETURN_FORCE_FACTOR * LOW_RETURN_FORCE_FACTOR_SCALE;
-        _currentExtrusionLayers = LOW_EXTRUSION_LAYERS;
-        _currentTextScaleFactor = LOW_TEXT_SCALE_FACTOR;
-        _currentExtrusionScaleFactor = LOW_EXTRUSION_SCALE_FACTOR;
-    }
-
-    private void InvalidateLetterPaths() =>
-        _logger.Safe(() => HandleInvalidateLetterPaths(),
-                     LogPrefix,
-                     "Error invalidating letter paths");
-
-    private void HandleInvalidateLetterPaths()
+    private void InvalidateLetterPaths()
     {
         for (int i = 0; i < _letters.Count; i++)
         {
@@ -218,137 +138,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float CalculateTotalTextWidth(SKFont font, string text)
-        => string.IsNullOrEmpty(text) ? 0f : font.MeasureText(text);
-
-    private void PopulateHackerLetters(
-        SKFont font,
-        float startX,
-        float baseY) =>
-        _logger.Safe(() => HandlePopulateHackerLetters(font, startX, baseY),
-                     LogPrefix,
-                     "Error populating hacker letters");
-
-    private void HandlePopulateHackerLetters(
-        SKFont font,
-        float startX,
-        float baseY)
-    {
-        float currentX = startX;
-        for (int i = 0; i < STATIC_TEXT.Length; i++)
-        {
-            char character = STATIC_TEXT[i];
-            string charStr = character.ToString();
-            float charWidth = font.MeasureText(charStr);
-
-            SKPath? path = font.GetTextPath(charStr, new SKPoint(0f, 0f));
-
-            _letters.Add(new HackerLetter
-            {
-                Character = character,
-                X = currentX,
-                BaseY = baseY,
-                CurrentY = baseY,
-                VelocityY = 0f,
-                SmoothedMagnitude = 0f,
-                CharWidth = charWidth,
-                Path = path
-            });
-
-            currentX += charWidth;
-        }
-    }
-
-    private void InitializeStaticTextLayout(SKImageInfo info) =>
-        _logger.Safe(() => HandleInitializeStaticTextLayout(info),
-                     LogPrefix,
-                     "Error initializing static text layout");
-
-    private void HandleInitializeStaticTextLayout(SKImageInfo info)
-    {
-        if (_font == null) InitializeFont();
-        SKFont currentFont = _font!;
-
-        InvalidateLetterPaths();
-        _letters.Clear();
-
-        float totalTextWidth = CalculateTotalTextWidth(currentFont, STATIC_TEXT);
-        float currentX = (info.Width - totalTextWidth) / 2f;
-        float baseY = info.Height * TEXT_Y_POSITION_RATIO;
-
-        PopulateHackerLetters(currentFont, currentX, baseY);
-        _staticTextInitialized = true;
-    }
-
-    private void ApplyBarParameters(
-            int barCount,
-            float barWidth,
-            float barSpacing,
-            SKImageInfo info,
-            SKPaint paint,
-            float[] spectrum) =>
-        _logger.Safe(() => HandleApplyBarParameters(barCount, barWidth, barSpacing, info, paint, spectrum),
-                     LogPrefix,
-                     "Error applying bar parameters");
-
-    private void HandleApplyBarParameters(
-            int barCount,
-            float barWidth,
-            float barSpacing,
-            SKImageInfo info,
-            SKPaint paint,
-            float[] spectrum)
-    {
-        if (_font == null) InitializeFont();
-
-        float averageMagnitude = CalculateAverageMagnitude(spectrum) * SensitivityScale;
-        float normalizedBarFactor = barCount / DEFAULT_BAR_COUNT - 1f;
-
-        float targetSizeFromBars = BASE_TEXT_SIZE * (1f + normalizedBarFactor * _currentTextScaleFactor);
-        float targetSizeFromSpectrum = BASE_TEXT_SIZE * (1f + averageMagnitude * TEXT_SIZE_BAR_COUNT_SCALE);
-        float targetTextSize = MathF.Max(targetSizeFromBars, targetSizeFromSpectrum);
-
-        float minAllowed = BASE_TEXT_SIZE * MIN_TEXT_SIZE_RATIO;
-        float maxAllowed = BASE_TEXT_SIZE * MAX_TEXT_SIZE_RATIO;
-        float newSize = Clamp(targetTextSize, minAllowed, maxAllowed);
-
-        if (MathF.Abs(newSize - _font!.Size) > 0.1f)
-        {
-            _font.Size = newSize;
-            _staticTextInitialized = false;
-        }
-
-        _currentExtrusionOffsetX = Clamp(
-            barWidth * BASE_EXTRUSION_SCALE_FACTOR * _currentExtrusionScaleFactor,
-            -2f, 2f);
-        _currentExtrusionOffsetY = Clamp(
-            barSpacing * BASE_EXTRUSION_SCALE_FACTOR * _currentExtrusionScaleFactor,
-            -2f, 2f);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float CalculateAverageMagnitude(float[] spectrum)
-    {
-        if (spectrum == null || spectrum.Length == 0) return 0f;
-        float sum = 0f;
-        foreach (float v in spectrum) sum += v;
-        return sum / spectrum.Length;
-    }
-
     protected override void RenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint paint) =>
-        _logger.Safe(() => HandleRenderEffect(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
-                     LogPrefix,
-                     "Error rendering hacker text effect");
-
-    private void HandleRenderEffect(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
@@ -357,14 +147,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (_currentJumpStrengthMultiplier == 0f
-            && _currentDampingFactor == 0f
-            && _currentReturnForceFactor == 0f)
-        {
-            OnQualitySettingsApplied();
-        }
-
-        ApplyBarParameters(barCount, barWidth, barSpacing, info, paint, spectrum);
+        ApplyBarParameters(barCount, barWidth, barSpacing, info, spectrum);
 
         if (!_staticTextInitialized)
         {
@@ -384,65 +167,93 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void UpdateSingleLetterPhysics(
-        ref HackerLetter letter,
-        float[] spectrumData,
-        float canvasWidth,
-        int spectrumBarCount,
-        float deltaTime)
+    private void ApplyBarParameters(
+        int barCount,
+        float barWidth,
+        float barSpacing,
+        SKImageInfo info,
+        float[] spectrum)
     {
-        if (spectrumBarCount == 0 || spectrumData.Length == 0) return;
+        if (_font == null) InitializeFont();
 
-        float letterCenterX = letter.X + letter.CharWidth / 2f;
-        int spectrumIndex = MapLetterXToSpectrumIndex(
-            letterCenterX,
-            canvasWidth,
-            spectrumBarCount);
+        float averageMagnitude = CalculateAverageMagnitude(spectrum) * SensitivityScale;
+        float normalizedBarFactor = barCount / DEFAULT_BAR_COUNT - 1f;
 
-        spectrumIndex = Clamp(spectrumIndex, 0, spectrumData.Length - 1);
+        float targetSizeFromBars = BASE_TEXT_SIZE *
+            (1f + normalizedBarFactor * _currentSettings.TextScaleFactor);
+        float targetSizeFromSpectrum = BASE_TEXT_SIZE *
+            (1f + averageMagnitude * TEXT_SIZE_BAR_COUNT_SCALE);
+        float targetTextSize = MathF.Max(targetSizeFromBars, targetSizeFromSpectrum);
 
-        float magnitude = spectrumData[spectrumIndex];
+        float minAllowed = BASE_TEXT_SIZE * MIN_TEXT_SIZE_RATIO;
+        float maxAllowed = BASE_TEXT_SIZE * MAX_TEXT_SIZE_RATIO;
+        float newSize = Clamp(targetTextSize, minAllowed, maxAllowed);
 
-        letter.SmoothedMagnitude = ApplySmoothing(
-            letter.SmoothedMagnitude,
-            magnitude,
-            LETTER_MAGNITUDE_SMOOTHING_FACTOR);
-
-        if (letter.SmoothedMagnitude > MIN_SPECTRUM_FOR_JUMP)
+        if (MathF.Abs(newSize - _font!.Size) > 0.1f)
         {
-            letter.VelocityY -= letter.SmoothedMagnitude
-                * _currentJumpStrengthMultiplier
-                * deltaTime
-                * SensitivityScale;
+            _font.Size = newSize;
+            _staticTextInitialized = false;
         }
 
-        float displacement = letter.CurrentY - letter.BaseY;
-        float physicsScale = deltaTime * TARGET_FPS_FOR_PHYSICS_SCALING;
+        _currentExtrusionOffsetX = Clamp(
+            barWidth * BASE_EXTRUSION_SCALE_FACTOR * _currentSettings.ExtrusionScaleFactor,
+            -2f, 2f);
+        _currentExtrusionOffsetY = Clamp(
+            barSpacing * BASE_EXTRUSION_SCALE_FACTOR * _currentSettings.ExtrusionScaleFactor,
+            -2f, 2f);
+    }
 
-        letter.VelocityY -= displacement * _currentReturnForceFactor * physicsScale;
-        letter.VelocityY *= Pow(_currentDampingFactor, physicsScale);
-        letter.CurrentY += letter.VelocityY * physicsScale;
+    private static float CalculateAverageMagnitude(float[] spectrum)
+    {
+        if (spectrum == null || spectrum.Length == 0) return 0f;
+        float sum = 0f;
+        foreach (float v in spectrum) sum += v;
+        return sum / spectrum.Length;
+    }
+
+    private void InitializeStaticTextLayout(SKImageInfo info)
+    {
+        if (_font == null) InitializeFont();
+
+        InvalidateLetterPaths();
+        _letters.Clear();
+
+        float totalTextWidth = _font!.MeasureText(STATIC_TEXT);
+        float currentX = (info.Width - totalTextWidth) / 2f;
+        float baseY = info.Height * TEXT_Y_POSITION_RATIO;
+
+        for (int i = 0; i < STATIC_TEXT.Length; i++)
+        {
+            char character = STATIC_TEXT[i];
+            string charStr = character.ToString();
+            float charWidth = _font.MeasureText(charStr);
+            SKPath? path = _font.GetTextPath(charStr, new SKPoint(0f, 0f));
+
+            _letters.Add(new HackerLetter
+            {
+                Character = character,
+                X = currentX,
+                BaseY = baseY,
+                CurrentY = baseY,
+                VelocityY = 0f,
+                SmoothedMagnitude = 0f,
+                CharWidth = charWidth,
+                Path = path
+            });
+
+            currentX += charWidth;
+        }
+
+        _staticTextInitialized = true;
     }
 
     private void UpdateLetterPhysics(
         float[] spectrumData,
         SKImageInfo info,
         int spectrumBarCount,
-        float deltaTime) =>
-        _logger.Safe(() => HandleUpdateLetterPhysics(spectrumData, info, spectrumBarCount, deltaTime),
-                     LogPrefix,
-                     "Error updating letter physics");
-
-    private void HandleUpdateLetterPhysics(
-        float[] spectrumData,
-        SKImageInfo info,
-        int spectrumBarCount,
         float deltaTime)
     {
-        if (_letters.Count == 0
-            || spectrumBarCount == 0
-            || deltaTime <= MIN_DELTA_TIME)
+        if (_letters.Count == 0 || spectrumBarCount == 0 || deltaTime <= MIN_DELTA_TIME)
             return;
 
         for (int i = 0; i < _letters.Count; i++)
@@ -458,85 +269,82 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int MapLetterXToSpectrumIndex(
-        float letterX,
+    private void UpdateSingleLetterPhysics(
+        ref HackerLetter letter,
+        float[] spectrumData,
         float canvasWidth,
-        int spectrumBarCount)
+        int spectrumBarCount,
+        float deltaTime)
     {
-        if (canvasWidth <= 0 || spectrumBarCount <= 0) return 0;
+        if (spectrumBarCount == 0 || spectrumData.Length == 0) return;
 
-        float normalizedX = letterX / canvasWidth;
-        int index = (int)(normalizedX * spectrumBarCount);
-        return Clamp(index, 0, spectrumBarCount - 1);
+        float letterCenterX = letter.X + letter.CharWidth / 2f;
+        int spectrumIndex = (int)((letterCenterX / canvasWidth) * spectrumBarCount);
+        spectrumIndex = Clamp(spectrumIndex, 0, spectrumData.Length - 1);
+
+        float magnitude = spectrumData[spectrumIndex];
+        letter.SmoothedMagnitude = letter.SmoothedMagnitude * (1f - LETTER_MAGNITUDE_SMOOTHING_FACTOR) +
+            magnitude * LETTER_MAGNITUDE_SMOOTHING_FACTOR;
+
+        if (letter.SmoothedMagnitude > MIN_SPECTRUM_FOR_JUMP)
+        {
+            letter.VelocityY -= letter.SmoothedMagnitude *
+                _currentSettings.JumpStrengthMultiplier *
+                deltaTime *
+                SensitivityScale;
+        }
+
+        float displacement = letter.CurrentY - letter.BaseY;
+        float physicsScale = deltaTime * TARGET_FPS_FOR_PHYSICS_SCALING;
+
+        letter.VelocityY -= displacement * _currentSettings.ReturnForceFactor * physicsScale;
+        letter.VelocityY *= Pow(_currentSettings.DampingFactor, physicsScale);
+        letter.CurrentY += letter.VelocityY * physicsScale;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float ApplySmoothing(
-        float previousValue,
-        float currentValue,
-        float smoothingFactor) =>
-        previousValue * (1f - smoothingFactor) + currentValue * smoothingFactor;
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static SKColor CalculateExtrusionRenderColor(SKColor baseColor)
+    private void DrawLetters3D(SKCanvas canvas, SKColor baseColor)
     {
-        return new SKColor(
-            (byte)Max(0, baseColor.Red - EXTRUSION_COLOR_DARKEN_FACTOR.Red),
-            (byte)Max(0, baseColor.Green - EXTRUSION_COLOR_DARKEN_FACTOR.Green),
-            (byte)Max(0, baseColor.Blue - EXTRUSION_COLOR_DARKEN_FACTOR.Blue),
-            baseColor.Alpha
-        );
-    }
+        if (_font == null || _letters.Count == 0) return;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void CalculateGradientColors(
-        SKColor baseColor,
-        out SKColor startColor,
-        out SKColor endColor)
-    {
-        startColor = new SKColor(
-            (byte)Min(255, baseColor.Red + GRADIENT_START_COLOR_OFFSET.Red),
-            (byte)Min(255, baseColor.Green + GRADIENT_START_COLOR_OFFSET.Green),
-            (byte)Min(255, baseColor.Blue + GRADIENT_START_COLOR_OFFSET.Blue),
-            baseColor.Alpha);
+        using var extrusionPaint = CreatePaint(
+            CalculateExtrusionColor(baseColor),
+            SKPaintStyle.Fill,
+            0);
 
-        endColor = new SKColor(
-            (byte)Max(0, baseColor.Red - GRADIENT_END_COLOR_OFFSET.Red),
-            (byte)Max(0, baseColor.Green - GRADIENT_END_COLOR_OFFSET.Green),
-            (byte)Max(0, baseColor.Blue - GRADIENT_END_COLOR_OFFSET.Blue),
-            baseColor.Alpha);
+        using var facePaint = _paintPool.Get();
+        facePaint.IsAntialias = _useAntiAlias;
+        facePaint.Style = SKPaintStyle.Fill;
+
+        var (gradStart, gradEnd) = CalculateGradientColors(baseColor);
+
+        foreach (var letter in _letters)
+        {
+            if (letter.Path == null) continue;
+
+            canvas.Save();
+            canvas.Translate(letter.X, letter.CurrentY);
+
+            DrawLetterExtrusion(canvas, letter.Path, extrusionPaint);
+            DrawLetterFace(canvas, letter.Path, facePaint, gradStart, gradEnd);
+
+            canvas.Restore();
+        }
     }
 
     private void DrawLetterExtrusion(
         SKCanvas canvas,
         SKPath letterPath,
-        SKPaint extrusionPaint) =>
-        _logger.Safe(() => HandleDrawLetterExtrusion(canvas, letterPath, extrusionPaint),
-                     LogPrefix,
-                     "Error drawing letter extrusion");
-
-    private void HandleDrawLetterExtrusion(
-        SKCanvas canvas,
-        SKPath letterPath,
         SKPaint extrusionPaint)
     {
-        if (canvas == null
-            || letterPath == null
-            || extrusionPaint == null)
-            return;
-
-        int layers = Max(0, _currentExtrusionLayers);
-        if (layers == 0)
-            return;
+        int layers = Max(0, _currentSettings.ExtrusionLayers);
+        if (layers == 0) return;
 
         for (int layer = 1; layer <= layers; layer++)
         {
             canvas.Save();
             canvas.Translate(
                 layer * _currentExtrusionOffsetX,
-                layer * _currentExtrusionOffsetY
-            );
+                layer * _currentExtrusionOffsetY);
             canvas.DrawPath(letterPath, extrusionPaint);
             canvas.Restore();
         }
@@ -562,68 +370,53 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         facePaint.Shader = null;
     }
 
-    private void DrawLetters3D(SKCanvas canvas, SKColor baseColor) =>
-        _logger.Safe(() => HandleDrawLetters3D(canvas, baseColor),
-                     LogPrefix,
-                     "Error drawing 3D letters");
-
-    private void HandleDrawLetters3D(SKCanvas canvas, SKColor baseColor)
+    private static SKColor CalculateExtrusionColor(SKColor baseColor)
     {
-        if (_font == null || _letters.Count == 0) return;
+        return new SKColor(
+            (byte)Max(0, baseColor.Red - EXTRUSION_COLOR_DARKEN_FACTOR.Red),
+            (byte)Max(0, baseColor.Green - EXTRUSION_COLOR_DARKEN_FACTOR.Green),
+            (byte)Max(0, baseColor.Blue - EXTRUSION_COLOR_DARKEN_FACTOR.Blue),
+            baseColor.Alpha);
+    }
 
-        SKPaint? extrusionPaint = null;
-        SKPaint? facePaint = null;
+    private static (SKColor start, SKColor end) CalculateGradientColors(SKColor baseColor)
+    {
+        var start = new SKColor(
+            (byte)Min(255, baseColor.Red + GRADIENT_START_COLOR_OFFSET.Red),
+            (byte)Min(255, baseColor.Green + GRADIENT_START_COLOR_OFFSET.Green),
+            (byte)Min(255, baseColor.Blue + GRADIENT_START_COLOR_OFFSET.Blue),
+            baseColor.Alpha);
 
-        try
-        {
-            extrusionPaint = _paintPool.Get();
-            extrusionPaint.IsAntialias = UseAntiAlias;
-            extrusionPaint.Style = SKPaintStyle.Fill;
-            extrusionPaint.Color = CalculateExtrusionRenderColor(baseColor);
+        var end = new SKColor(
+            (byte)Max(0, baseColor.Red - GRADIENT_END_COLOR_OFFSET.Red),
+            (byte)Max(0, baseColor.Green - GRADIENT_END_COLOR_OFFSET.Green),
+            (byte)Max(0, baseColor.Blue - GRADIENT_END_COLOR_OFFSET.Blue),
+            baseColor.Alpha);
 
+        return (start, end);
+    }
 
-            facePaint = _paintPool.Get();
-            facePaint.IsAntialias = UseAntiAlias;
-            facePaint.Style = SKPaintStyle.Fill;
-            CalculateGradientColors(baseColor, out SKColor gradStart, out SKColor gradEnd);
-
-            foreach (var letter in _letters)
-            {
-                if (letter.Path == null) continue;
-
-                canvas.Save();
-                canvas.Translate(letter.X, letter.CurrentY);
-
-                DrawLetterExtrusion(canvas, letter.Path, extrusionPaint);
-
-                DrawLetterFace(canvas, letter.Path, facePaint, gradStart, gradEnd);
-
-                canvas.Restore();
-            }
-        }
-        finally
-        {
-            if (extrusionPaint != null) _paintPool.Return(extrusionPaint);
-            if (facePaint != null) _paintPool.Return(facePaint);
-        }
+    private SKPaint CreatePaint(
+        SKColor color,
+        SKPaintStyle style,
+        float strokeWidth)
+    {
+        var paint = _paintPool.Get();
+        paint.Color = color;
+        paint.Style = style;
+        paint.IsAntialias = _useAntiAlias;
+        paint.StrokeWidth = strokeWidth;
+        return paint;
     }
 
     protected override void OnDispose()
-    {
-        _logger.Safe(() => HandleDisposeResources(),
-                     LogPrefix,
-                     "Error disposing hacker text renderer resources");
-
-        base.OnDispose();
-        _logger.Debug(LogPrefix, "Disposed");
-    }
-
-    private void HandleDisposeResources()
     {
         InvalidateLetterPaths();
         _font?.Dispose();
         _font = null;
         _letters.Clear();
         _staticTextInitialized = false;
+        base.OnDispose();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

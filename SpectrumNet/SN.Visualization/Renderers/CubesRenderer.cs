@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
+using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.CubesRenderer.Constants;
-using static SpectrumNet.SN.Visualization.Renderers.CubesRenderer.Constants.Quality;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -15,72 +15,57 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
 
     public static CubesRenderer GetInstance() => _instance.Value;
 
-    public record Constants
+    public static class Constants
     {
         public const float
             CUBE_TOP_WIDTH_PROPORTION = 0.75f,
-            CUBE_TOP_HEIGHT_PROPORTION = 0.25f;
-
-        public const float
+            CUBE_TOP_HEIGHT_PROPORTION = 0.25f,
             ALPHA_MULTIPLIER = 255f,
             TOP_ALPHA_FACTOR = 0.8f,
             SIDE_FACE_ALPHA_FACTOR = 0.6f;
 
-        public const int
-            BATCH_SIZE = 32;
-
+        public const int CUBE_BATCH_SIZE = 32;
         public const byte MAX_ALPHA_BYTE = 255;
 
-        public static class Quality
+        public static readonly Dictionary<RenderQuality, CubeQualitySettings> QualityPresets = new()
         {
-            public const bool
-                LOW_USE_ADVANCED_EFFECTS = false,
-                MEDIUM_USE_ADVANCED_EFFECTS = true,
-                HIGH_USE_ADVANCED_EFFECTS = true;
+            [RenderQuality.Low] = new(
+                UseTopFaceEffect: false,
+                UseSideFaceEffect: false,
+                TopAlphaFactor: 0.7f,
+                SideFaceAlphaFactor: 0.5f,
+                TopWidthProportion: 0.7f,
+                TopHeightProportion: 0.2f
+            ),
+            [RenderQuality.Medium] = new(
+                UseTopFaceEffect: true,
+                UseSideFaceEffect: true,
+                TopAlphaFactor: TOP_ALPHA_FACTOR,
+                SideFaceAlphaFactor: SIDE_FACE_ALPHA_FACTOR,
+                TopWidthProportion: CUBE_TOP_WIDTH_PROPORTION,
+                TopHeightProportion: CUBE_TOP_HEIGHT_PROPORTION
+            ),
+            [RenderQuality.High] = new(
+                UseTopFaceEffect: true,
+                UseSideFaceEffect: true,
+                TopAlphaFactor: 0.9f,
+                SideFaceAlphaFactor: 0.7f,
+                TopWidthProportion: 0.8f,
+                TopHeightProportion: 0.3f
+            )
+        };
 
-            public const bool
-                LOW_USE_ANTIALIASING = false,
-                MEDIUM_USE_ANTIALIASING = true,
-                HIGH_USE_ANTIALIASING = true;
-
-            public const bool
-                LOW_USE_TOP_FACE_EFFECT = false,
-                MEDIUM_USE_TOP_FACE_EFFECT = true,
-                HIGH_USE_TOP_FACE_EFFECT = true;
-
-            public const bool
-                LOW_USE_SIDE_FACE_EFFECT = false,
-                MEDIUM_USE_SIDE_FACE_EFFECT = true,
-                HIGH_USE_SIDE_FACE_EFFECT = true;
-
-            public const float
-                LOW_TOP_ALPHA_FACTOR = 0.7f,
-                MEDIUM_TOP_ALPHA_FACTOR = 0.8f,
-                HIGH_TOP_ALPHA_FACTOR = 0.9f;
-
-            public const float
-                LOW_SIDE_FACE_ALPHA_FACTOR = 0.5f,
-                MEDIUM_SIDE_FACE_ALPHA_FACTOR = 0.6f,
-                HIGH_SIDE_FACE_ALPHA_FACTOR = 0.7f;
-
-            public const float
-                LOW_TOP_WIDTH_PROPORTION = 0.7f,
-                MEDIUM_TOP_WIDTH_PROPORTION = 0.75f,
-                HIGH_TOP_WIDTH_PROPORTION = 0.8f;
-
-            public const float
-                LOW_TOP_HEIGHT_PROPORTION = 0.2f,
-                MEDIUM_TOP_HEIGHT_PROPORTION = 0.25f,
-                HIGH_TOP_HEIGHT_PROPORTION = 0.3f;
-        }
+        public record CubeQualitySettings(
+            bool UseTopFaceEffect,
+            bool UseSideFaceEffect,
+            float TopAlphaFactor,
+            float SideFaceAlphaFactor,
+            float TopWidthProportion,
+            float TopHeightProportion
+        );
     }
 
-    private bool _useTopFaceEffect = true;
-    private bool _useSideFaceEffect = true;
-    private float _topAlphaFactor = TOP_ALPHA_FACTOR;
-    private float _sideFaceAlphaFactor = SIDE_FACE_ALPHA_FACTOR;
-    private float _topWidthProportion = CUBE_TOP_WIDTH_PROPORTION;
-    private float _topHeightProportion = CUBE_TOP_HEIGHT_PROPORTION;
+    private CubeQualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
 
     protected override void OnInitialize()
     {
@@ -88,64 +73,10 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
-    protected override void OnConfigurationChanged() =>
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Configuration changed. New Quality: {Quality}");
-
     protected override void OnQualitySettingsApplied()
     {
-        switch (Quality)
-        {
-            case RenderQuality.Low:
-                LowQualitySettings();
-                break;
-            case RenderQuality.Medium:
-                MediumQualitySettings();
-                break;
-            case RenderQuality.High:
-                HighQualitySettings();
-                break;
-        }
-
-        _logger.Log(LogLevel.Debug, LogPrefix,
-            $"Quality settings applied. New Quality: {Quality}, AntiAlias: {_useAntiAlias}, " +
-            $"AdvancedEffects: {_useAdvancedEffects}, TopFace: {_useTopFaceEffect}, " +
-            $"SideFace: {_useSideFaceEffect}");
-    }
-
-    private void LowQualitySettings()
-    {
-        _useAntiAlias = LOW_USE_ANTIALIASING;
-        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
-        _useTopFaceEffect = LOW_USE_TOP_FACE_EFFECT;
-        _useSideFaceEffect = LOW_USE_SIDE_FACE_EFFECT;
-        _topAlphaFactor = LOW_TOP_ALPHA_FACTOR;
-        _sideFaceAlphaFactor = LOW_SIDE_FACE_ALPHA_FACTOR;
-        _topWidthProportion = LOW_TOP_WIDTH_PROPORTION;
-        _topHeightProportion = LOW_TOP_HEIGHT_PROPORTION;
-    }
-
-    private void MediumQualitySettings()
-    {
-        _useAntiAlias = MEDIUM_USE_ANTIALIASING;
-        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
-        _useTopFaceEffect = MEDIUM_USE_TOP_FACE_EFFECT;
-        _useSideFaceEffect = MEDIUM_USE_SIDE_FACE_EFFECT;
-        _topAlphaFactor = MEDIUM_TOP_ALPHA_FACTOR;
-        _sideFaceAlphaFactor = MEDIUM_SIDE_FACE_ALPHA_FACTOR;
-        _topWidthProportion = MEDIUM_TOP_WIDTH_PROPORTION;
-        _topHeightProportion = MEDIUM_TOP_HEIGHT_PROPORTION;
-    }
-
-    private void HighQualitySettings()
-    {
-        _useAntiAlias = HIGH_USE_ANTIALIASING;
-        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
-        _useTopFaceEffect = HIGH_USE_TOP_FACE_EFFECT;
-        _useSideFaceEffect = HIGH_USE_SIDE_FACE_EFFECT;
-        _topAlphaFactor = HIGH_TOP_ALPHA_FACTOR;
-        _sideFaceAlphaFactor = HIGH_SIDE_FACE_ALPHA_FACTOR;
-        _topWidthProportion = HIGH_TOP_WIDTH_PROPORTION;
-        _topHeightProportion = HIGH_TOP_HEIGHT_PROPORTION;
+        _currentSettings = QualityPresets[Quality];
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -158,73 +89,110 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         SKPaint paint)
     {
         _logger.Safe(
-            () =>
-            {
-                float canvasHeight = info.Height;
-
-                using var cubePaint = _paintPool.Get();
-                cubePaint.Color = paint.Color;
-                cubePaint.IsAntialias = _useAntiAlias;
-
-                for (int i = 0; i < spectrum.Length; i++)
-                {
-                    float magnitude = spectrum[i];
-                    if (magnitude < MIN_MAGNITUDE_THRESHOLD)
-                        continue;
-
-                    float height = magnitude * canvasHeight;
-                    float x = i * (barWidth + barSpacing);
-                    float y = canvasHeight - height;
-
-                    if (IsCubeOutsideViewport(canvas, x, y, barWidth, height)) continue;
-
-                    cubePaint.Color = paint.Color.WithAlpha(CalculateCubeAlpha(magnitude));
-
-                    RenderCube(canvas, x, y, barWidth, height, magnitude, cubePaint);
-                }
-            },
+            () => RenderCubes(
+                canvas,
+                spectrum,
+                info,
+                barWidth,
+                barSpacing,
+                paint),
             LogPrefix,
             "Error during rendering"
         );
     }
 
-    private bool IsCubeOutsideViewport(
+    private void RenderCubes(
         SKCanvas canvas,
-        float x,
-        float y,
+        float[] spectrum,
+        SKImageInfo info,
         float barWidth,
-        float height) =>
-        canvas.QuickReject(new SKRect(
-            x,
-            y - barWidth * _topHeightProportion,
-            x + barWidth + barWidth * _topWidthProportion,
-            y + height));
+        float barSpacing,
+        SKPaint basePaint)
+    {
+        float canvasHeight = info.Height;
+        int spectrumLength = (int)MathF.Min(
+            spectrum.Length,
+            info.Width / (barWidth + barSpacing));
 
-    private static byte CalculateCubeAlpha(float magnitude) =>
-        (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER, MAX_ALPHA_BYTE);
+        for (int i = 0; i < spectrumLength; i += CUBE_BATCH_SIZE)
+        {
+            int batchEnd = (int)Min(i + CUBE_BATCH_SIZE, spectrumLength);
+            RenderBatch(
+                canvas,
+                spectrum,
+                i,
+                batchEnd,
+                basePaint,
+                barWidth,
+                barSpacing,
+                canvasHeight);
+        }
+    }
 
-    private void RenderCube(
+    private void RenderBatch(
+        SKCanvas canvas,
+        float[] spectrum,
+        int start,
+        int end,
+        SKPaint basePaint,
+        float barWidth,
+        float barSpacing,
+        float canvasHeight)
+    {
+        for (int i = start; i < end; i++)
+        {
+            float magnitude = spectrum[i];
+            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
+
+            float x = i * (barWidth + barSpacing);
+            float height = magnitude * canvasHeight;
+            float y = canvasHeight - height;
+
+            if (!IsRenderAreaVisible(
+                canvas,
+                x,
+                y - barWidth * _currentSettings.TopHeightProportion,
+                barWidth + barWidth * _currentSettings.TopWidthProportion,
+                height + barWidth * _currentSettings.TopHeightProportion)) continue;
+
+            RenderSingleCube(
+                canvas,
+                x,
+                y,
+                barWidth,
+                height,
+                magnitude,
+                basePaint);
+        }
+    }
+
+    private void RenderSingleCube(
         SKCanvas canvas,
         float x,
         float y,
         float barWidth,
         float height,
         float magnitude,
-        SKPaint paint)
+        SKPaint basePaint)
     {
-        canvas.DrawRect(x, y, barWidth, height, paint);
+        byte alpha = (byte)MathF.Min(
+            magnitude * ALPHA_MULTIPLIER,
+            MAX_ALPHA_BYTE);
 
-        if (_useAdvancedEffects)
+        using var cubePaint = CreateStandardPaint(
+            basePaint.Color.WithAlpha(alpha));
+        canvas.DrawRect(x, y, barWidth, height, cubePaint);
+
+        if (!_useAdvancedEffects) return;
+
+        if (_currentSettings.UseTopFaceEffect)
         {
-            if (_useTopFaceEffect)
-            {
-                RenderCubeTopFace(canvas, x, y, barWidth, magnitude, paint);
-            }
+            RenderCubeTopFace(canvas, x, y, barWidth, magnitude);
+        }
 
-            if (_useSideFaceEffect)
-            {
-                RenderCubeSideFace(canvas, x, y, barWidth, height, magnitude, paint);
-            }
+        if (_currentSettings.UseSideFaceEffect)
+        {
+            RenderCubeSideFace(canvas, x, y, barWidth, height, magnitude);
         }
     }
 
@@ -233,26 +201,24 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         float x,
         float y,
         float barWidth,
-        float magnitude,
-        SKPaint basePaint)
+        float magnitude)
     {
-        float topRightX = x + barWidth;
-        float topOffsetX = barWidth * _topWidthProportion;
-        float topOffsetY = barWidth * _topHeightProportion;
-        float topXLeft = x - (barWidth - topOffsetX);
+        float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
+        float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
         using var topPath = _pathPool.Get();
         topPath.MoveTo(x, y);
-        topPath.LineTo(topRightX, y);
+        topPath.LineTo(x + barWidth, y);
         topPath.LineTo(x + topOffsetX, y - topOffsetY);
-        topPath.LineTo(topXLeft, y - topOffsetY);
+        topPath.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
         topPath.Close();
 
-        using var topPaint = _paintPool.Get();
-        topPaint.Color = basePaint.Color.WithAlpha(
-            (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * _topAlphaFactor, MAX_ALPHA_BYTE));
-        topPaint.IsAntialias = _useAntiAlias;
-        topPaint.Style = basePaint.Style;
+        byte alpha = (byte)MathF.Min(
+            magnitude * ALPHA_MULTIPLIER * _currentSettings.TopAlphaFactor,
+            MAX_ALPHA_BYTE);
+        using var topPaint = CreateStandardPaint(
+            SKColors.White.WithAlpha(alpha));
+
         canvas.DrawPath(topPath, topPaint);
     }
 
@@ -262,25 +228,24 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         float y,
         float barWidth,
         float height,
-        float magnitude,
-        SKPaint basePaint)
+        float magnitude)
     {
-        float topRightX = x + barWidth;
-        float topOffsetX = barWidth * _topWidthProportion;
-        float topOffsetY = barWidth * _topHeightProportion;
+        float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
+        float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
         using var sidePath = _pathPool.Get();
-        sidePath.MoveTo(topRightX, y);
-        sidePath.LineTo(topRightX, y + height);
+        sidePath.MoveTo(x + barWidth, y);
+        sidePath.LineTo(x + barWidth, y + height);
         sidePath.LineTo(x + topOffsetX, y - topOffsetY + height);
         sidePath.LineTo(x + topOffsetX, y - topOffsetY);
         sidePath.Close();
 
-        using var sidePaint = _paintPool.Get();
-        sidePaint.Color = basePaint.Color.WithAlpha(
-            (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * _sideFaceAlphaFactor, MAX_ALPHA_BYTE));
-        sidePaint.IsAntialias = _useAntiAlias;
-        sidePaint.Style = basePaint.Style;
+        byte alpha = (byte)MathF.Min(
+            magnitude * ALPHA_MULTIPLIER * _currentSettings.SideFaceAlphaFactor,
+            MAX_ALPHA_BYTE);
+        using var sidePaint = CreateStandardPaint(
+            SKColors.Gray.WithAlpha(alpha));
+
         canvas.DrawPath(sidePath, sidePaint);
     }
 

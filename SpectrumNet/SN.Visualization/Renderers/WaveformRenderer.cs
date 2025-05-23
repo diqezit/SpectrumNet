@@ -1,142 +1,99 @@
 ﻿#nullable enable
 
+using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.WaveformRenderer.Constants;
-using static SpectrumNet.SN.Visualization.Renderers.WaveformRenderer.Constants.Quality;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class WaveformRenderer : EffectSpectrumRenderer
 {
+    private const string LogPrefix = nameof(WaveformRenderer);
+
     private static readonly Lazy<WaveformRenderer> _instance =
         new(() => new WaveformRenderer());
 
-    private const string LOG_PREFIX = nameof(WaveformRenderer);
+    private WaveformRenderer() { }
 
     public static WaveformRenderer GetInstance() => _instance.Value;
 
-    public record Constants
+    public static class Constants
     {
-        public const string LOG_PREFIX = "WaveformRenderer";
-
         public const float
             SMOOTHING_FACTOR_NORMAL = 0.3f,
             SMOOTHING_FACTOR_OVERLAY = 0.5f,
             MAX_SPECTRUM_VALUE = 1.5f,
             MIN_STROKE_WIDTH = 2.0f,
             GLOW_INTENSITY = 0.4f,
-            GLOW_RADIUS_LOW = 1.5f,
-            GLOW_RADIUS_MEDIUM = 3.0f,
-            GLOW_RADIUS_HIGH = 4.5f,
             HIGHLIGHT_ALPHA = 0.7f,
             HIGH_AMPLITUDE_THRESHOLD = 0.6f,
-            FILL_OPACITY = 0.25f;
+            FILL_OPACITY = 0.25f,
+            GLOW_STROKE_MULTIPLIER = 1.5f,
+            HIGHLIGHT_STROKE_MULTIPLIER = 0.6f,
+            STROKE_WIDTH_DIVISOR = 50f,
+            CENTER_PROPORTION = 0.5f,
+            CONTROL_POINT_FACTOR = 0.5f;
 
         public const int BATCH_SIZE = 64;
 
-        public static class Quality
+        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
-            public const bool
-                LOW_USE_ANTI_ALIAS = false,
-                MEDIUM_USE_ANTI_ALIAS = true,
-                HIGH_USE_ANTI_ALIAS = true;
+            [RenderQuality.Low] = new(
+                UseAntiAlias: false,
+                UseAdvancedEffects: false,
+                GlowRadius: 1.5f,
+                SmoothingPasses: 1,
+                UseCubicCurves: false
+            ),
+            [RenderQuality.Medium] = new(
+                UseAntiAlias: true,
+                UseAdvancedEffects: true,
+                GlowRadius: 3.0f,
+                SmoothingPasses: 2,
+                UseCubicCurves: true
+            ),
+            [RenderQuality.High] = new(
+                UseAntiAlias: true,
+                UseAdvancedEffects: true,
+                GlowRadius: 4.5f,
+                SmoothingPasses: 3,
+                UseCubicCurves: true
+            )
+        };
 
-            public const bool
-                LOW_USE_ADVANCED_EFFECTS = false,
-                MEDIUM_USE_ADVANCED_EFFECTS = true,
-                HIGH_USE_ADVANCED_EFFECTS = true;
-
-            public const float
-                LOW_GLOW_RADIUS = GLOW_RADIUS_LOW,
-                MEDIUM_GLOW_RADIUS = GLOW_RADIUS_MEDIUM,
-                HIGH_GLOW_RADIUS = GLOW_RADIUS_HIGH;
-
-            public const int
-                LOW_SMOOTHING_PASSES = 1,
-                MEDIUM_SMOOTHING_PASSES = 2,
-                HIGH_SMOOTHING_PASSES = 3;
-        }
+        public record QualitySettings(
+            bool UseAntiAlias,
+            bool UseAdvancedEffects,
+            float GlowRadius,
+            int SmoothingPasses,
+            bool UseCubicCurves
+        );
     }
 
     private readonly SKPath _topPath = new();
     private readonly SKPath _bottomPath = new();
     private readonly SKPath _fillPath = new();
 
-    private float _glowRadius;
+    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
 
-    private WaveformRenderer() { }
-
-    protected override void OnInitialize() =>
-        _logger.Safe(
-            () =>
-            {
-                base.OnInitialize();
-                _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
-                _logger.Debug(LOG_PREFIX, "Initialized");
-            },
-            LOG_PREFIX,
-            "Failed to initialize renderer"
-        );
-
-    protected override void OnConfigurationChanged() =>
-        _logger.Safe(
-            () =>
-            {
-                _smoothingFactor = _isOverlayActive ?
-                    SMOOTHING_FACTOR_OVERLAY :
-                    SMOOTHING_FACTOR_NORMAL;
-
-                _logger.Debug(
-                    LOG_PREFIX,
-                    $"Configuration changed. New Quality: {Quality}");
-            },
-            LOG_PREFIX,
-            "Failed to handle configuration change"
-        );
-
-    protected override void OnQualitySettingsApplied() =>
-        _logger.Safe(
-            () =>
-            {
-                switch (Quality)
-                {
-                    case RenderQuality.Low:
-                        ApplyLowQualitySettings();
-                        break;
-                    case RenderQuality.Medium:
-                        ApplyMediumQualitySettings();
-                        break;
-                    case RenderQuality.High:
-                        ApplyHighQualitySettings();
-                        break;
-                }
-
-                _logger.Debug(
-                    LOG_PREFIX,
-                    $"Quality changed to {Quality}");
-            },
-            LOG_PREFIX,
-            "Failed to apply quality settings"
-        );
-
-    private void ApplyLowQualitySettings()
+    protected override void OnInitialize()
     {
-        _useAntiAlias = LOW_USE_ANTI_ALIAS;
-        _useAdvancedEffects = LOW_USE_ADVANCED_EFFECTS;
-        _glowRadius = LOW_GLOW_RADIUS;
+        base.OnInitialize();
+        _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
-    private void ApplyMediumQualitySettings()
+    protected override void OnConfigurationChanged()
     {
-        _useAntiAlias = MEDIUM_USE_ANTI_ALIAS;
-        _useAdvancedEffects = MEDIUM_USE_ADVANCED_EFFECTS;
-        _glowRadius = MEDIUM_GLOW_RADIUS;
+        _smoothingFactor = _isOverlayActive
+            ? SMOOTHING_FACTOR_OVERLAY
+            : SMOOTHING_FACTOR_NORMAL;
     }
 
-    private void ApplyHighQualitySettings()
+    protected override void OnQualitySettingsApplied()
     {
-        _useAntiAlias = HIGH_USE_ANTI_ALIAS;
-        _useAdvancedEffects = HIGH_USE_ADVANCED_EFFECTS;
-        _glowRadius = HIGH_GLOW_RADIUS;
+        _currentSettings = QualityPresets[Quality];
+        _useAntiAlias = _currentSettings.UseAntiAlias;
+        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
     }
 
     protected override void RenderEffect(
@@ -146,38 +103,25 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint) =>
-        _logger.Safe(
-            () => HandleRenderEffect(canvas, spectrum, info, paint),
-            LOG_PREFIX,
-            "Error during rendering"
-        );
-
-    private void HandleRenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
         SKPaint paint)
     {
-        float midY = info.Height / 2;
+        float midY = info.Height * CENTER_PROPORTION;
         float xStep = info.Width / (float)spectrum.Length;
 
         UpdateWavePaths(spectrum, midY, xStep);
         RenderWaveform(canvas, spectrum, info, paint);
     }
 
-    private void UpdateWavePaths(float[] spectrum, float midY, float xStep) =>
-        _logger.Safe(
-            () => HandleUpdateWavePaths(spectrum, midY, xStep),
-            LOG_PREFIX,
-            "Failed to update wave paths"
-        );
-
-    private void HandleUpdateWavePaths(float[] spectrum, float midY, float xStep)
+    private void UpdateWavePaths(
+        float[] spectrum,
+        float midY,
+        float xStep)
     {
         _topPath.Reset();
         _bottomPath.Reset();
         _fillPath.Reset();
+
+        if (spectrum.Length == 0) return;
 
         float startX = 0;
         float startTopY = midY - spectrum[0] * midY;
@@ -187,6 +131,23 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         _bottomPath.MoveTo(startX, startBottomY);
         _fillPath.MoveTo(startX, startTopY);
 
+        if (_currentSettings.UseCubicCurves)
+        {
+            BuildCubicPaths(spectrum, midY, xStep);
+        }
+        else
+        {
+            BuildLinearPaths(spectrum, midY, xStep);
+        }
+
+        CompleteFillPath(spectrum, midY, xStep);
+    }
+
+    private void BuildCubicPaths(
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
         for (int i = 1; i < spectrum.Length; i++)
         {
             float prevX = (i - 1) * xStep;
@@ -197,44 +158,77 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
             float topY = midY - spectrum[i] * midY;
             float bottomY = midY + spectrum[i] * midY;
 
-            float controlX = (prevX + x) / 2;
+            float controlX = (prevX + x) * CONTROL_POINT_FACTOR;
 
-            if (Quality == RenderQuality.Low)
-            {
-                _topPath.LineTo(x, topY);
-                _bottomPath.LineTo(x, bottomY);
-                _fillPath.LineTo(x, topY);
-            }
-            else
-            {
-                _topPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
-                _bottomPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
-                _fillPath.CubicTo(controlX, prevTopY, controlX, topY, x, topY);
-            }
+            _topPath.CubicTo(
+                controlX, prevTopY,
+                controlX, topY,
+                x, topY);
+
+            _bottomPath.CubicTo(
+                controlX, prevBottomY,
+                controlX, bottomY,
+                x, bottomY);
+
+            _fillPath.CubicTo(
+                controlX, prevTopY,
+                controlX, topY,
+                x, topY);
         }
+    }
 
+    private void BuildLinearPaths(
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
+        for (int i = 1; i < spectrum.Length; i++)
+        {
+            float x = i * xStep;
+            float topY = midY - spectrum[i] * midY;
+            float bottomY = midY + spectrum[i] * midY;
+
+            _topPath.LineTo(x, topY);
+            _bottomPath.LineTo(x, bottomY);
+            _fillPath.LineTo(x, topY);
+        }
+    }
+
+    private void CompleteFillPath(
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
         float endX = (spectrum.Length - 1) * xStep;
         float endBottomY = midY + spectrum[^1] * midY;
 
         _fillPath.LineTo(endX, endBottomY);
 
-        for (int i = spectrum.Length - 2; i >= 0; i--)
+        if (_currentSettings.UseCubicCurves)
         {
-            float prevX = (i + 1) * xStep;
-            float prevBottomY = midY + spectrum[i + 1] * midY;
-
-            float x = i * xStep;
-            float bottomY = midY + spectrum[i] * midY;
-
-            float controlX = (prevX + x) / 2;
-
-            if (Quality == RenderQuality.Low)
+            for (int i = spectrum.Length - 2; i >= 0; i--)
             {
-                _fillPath.LineTo(x, bottomY);
+                float prevX = (i + 1) * xStep;
+                float prevBottomY = midY + spectrum[i + 1] * midY;
+
+                float x = i * xStep;
+                float bottomY = midY + spectrum[i] * midY;
+
+                float controlX = (prevX + x) * CONTROL_POINT_FACTOR;
+
+                _fillPath.CubicTo(
+                    controlX, prevBottomY,
+                    controlX, bottomY,
+                    x, bottomY);
             }
-            else
+        }
+        else
+        {
+            for (int i = spectrum.Length - 2; i >= 0; i--)
             {
-                _fillPath.CubicTo(controlX, prevBottomY, controlX, bottomY, x, bottomY);
+                float x = i * xStep;
+                float bottomY = midY + spectrum[i] * midY;
+                _fillPath.LineTo(x, bottomY);
             }
         }
 
@@ -242,17 +236,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
     }
 
     private void RenderWaveform(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        SKPaint basePaint) =>
-        _logger.Safe(
-            () => HandleRenderWaveform(canvas, spectrum, info, basePaint),
-            LOG_PREFIX,
-            "Failed to render waveform"
-        );
-
-    private void HandleRenderWaveform(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
@@ -267,27 +250,39 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
         if (_useAdvancedEffects && HasHighAmplitude(spectrum))
         {
-            using var glowPaint = CreateGlowPaint(basePaint, spectrum.Length);
-            canvas.DrawPath(_topPath, glowPaint);
-            canvas.DrawPath(_bottomPath, glowPaint);
-
-            using var highlightPaint = CreateHighlightPaint(spectrum.Length);
-
-            RenderHighlights(
-                canvas,
-                spectrum,
-                info.Height / 2,
-                info.Width / (float)spectrum.Length,
-                highlightPaint);
+            RenderAdvancedEffects(canvas, spectrum, info, basePaint);
         }
     }
 
-    private SKPaint CreateWaveformPaint(SKPaint basePaint, int spectrumLength)
+    private void RenderAdvancedEffects(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        SKPaint basePaint)
+    {
+        using var glowPaint = CreateGlowPaint(basePaint, spectrum.Length);
+        canvas.DrawPath(_topPath, glowPaint);
+        canvas.DrawPath(_bottomPath, glowPaint);
+
+        using var highlightPaint = CreateHighlightPaint(spectrum.Length);
+
+        RenderHighlights(
+            canvas,
+            spectrum,
+            info.Height * CENTER_PROPORTION,
+            info.Width / (float)spectrum.Length,
+            highlightPaint);
+    }
+
+    private SKPaint CreateWaveformPaint(
+        SKPaint basePaint,
+        int spectrumLength)
     {
         var paint = _paintPool.Get();
-        paint.Reset();
         paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = Max(MIN_STROKE_WIDTH, 50f / spectrumLength);
+        paint.StrokeWidth = MathF.Max(
+            MIN_STROKE_WIDTH,
+            STROKE_WIDTH_DIVISOR / spectrumLength);
         paint.IsAntialias = _useAntiAlias;
         paint.StrokeCap = SKStrokeCap.Round;
         paint.StrokeJoin = SKStrokeJoin.Round;
@@ -298,32 +293,40 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
     private SKPaint CreateFillPaint(SKPaint basePaint)
     {
         var paint = _paintPool.Get();
-        paint.Reset();
         paint.Style = SKPaintStyle.Fill;
-        paint.Color = basePaint.Color.WithAlpha((byte)(255 * FILL_OPACITY));
+        paint.Color = basePaint.Color.WithAlpha(
+            (byte)(255 * FILL_OPACITY));
         paint.IsAntialias = _useAntiAlias;
         return paint;
     }
 
-    private SKPaint CreateGlowPaint(SKPaint basePaint, int spectrumLength)
+    private SKPaint CreateGlowPaint(
+        SKPaint basePaint,
+        int spectrumLength)
     {
         var paint = _paintPool.Get();
-        paint.Reset();
         paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 1.5f;
-        paint.Color = basePaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY));
+        paint.StrokeWidth = MathF.Max(
+            MIN_STROKE_WIDTH,
+            STROKE_WIDTH_DIVISOR / spectrumLength) * GLOW_STROKE_MULTIPLIER;
+        paint.Color = basePaint.Color.WithAlpha(
+            (byte)(255 * GLOW_INTENSITY));
         paint.IsAntialias = _useAntiAlias;
-        paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _glowRadius);
+        paint.MaskFilter = SKMaskFilter.CreateBlur(
+            SKBlurStyle.Normal,
+            _currentSettings.GlowRadius);
         return paint;
     }
 
     private SKPaint CreateHighlightPaint(int spectrumLength)
     {
         var paint = _paintPool.Get();
-        paint.Reset();
         paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = Max(MIN_STROKE_WIDTH, 50f / spectrumLength) * 0.6f;
-        paint.Color = SKColors.White.WithAlpha((byte)(255 * HIGHLIGHT_ALPHA));
+        paint.StrokeWidth = MathF.Max(
+            MIN_STROKE_WIDTH,
+            STROKE_WIDTH_DIVISOR / spectrumLength) * HIGHLIGHT_STROKE_MULTIPLIER;
+        paint.Color = SKColors.White.WithAlpha(
+            (byte)(255 * HIGHLIGHT_ALPHA));
         paint.IsAntialias = _useAntiAlias;
         return paint;
     }
@@ -333,9 +336,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         for (int i = 0; i < spectrum.Length; i++)
         {
             if (spectrum[i] > HIGH_AMPLITUDE_THRESHOLD)
-            {
                 return true;
-            }
         }
         return false;
     }
@@ -361,29 +362,20 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         }
     }
 
-    protected override void OnInvalidateCachedResources() =>
-        _logger.Safe(
-            () =>
-            {
-                base.OnInvalidateCachedResources();
-                _logger.Debug(LOG_PREFIX, "Cached resources invalidated");
-            },
-            LOG_PREFIX,
-            "Failed to invalidate cached resources"
-        );
+    protected override void OnInvalidateCachedResources()
+    {
+        base.OnInvalidateCachedResources();
+        _topPath.Reset();
+        _bottomPath.Reset();
+        _fillPath.Reset();
+    }
 
-    protected override void OnDispose() =>
-        _logger.Safe(
-            () =>
-            {
-                _topPath?.Dispose();
-                _bottomPath?.Dispose();
-                _fillPath?.Dispose();
-
-                base.OnDispose();
-                _logger.Debug(LOG_PREFIX, "Disposed");
-            },
-            LOG_PREFIX,
-            "Error during specific disposal"
-        );
+    protected override void OnDispose()
+    {
+        _topPath?.Dispose();
+        _bottomPath?.Dispose();
+        _fillPath?.Dispose();
+        base.OnDispose();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+    }
 }
