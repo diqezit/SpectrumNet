@@ -1,5 +1,4 @@
-﻿// SN.Controllers/MainController.cs
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet.SN.Controllers;
 
@@ -125,50 +124,20 @@ public sealed class MainController
 
     public async Task StartCaptureAsync()
     {
-        ThrowIfDisposed();
-
-        var stateCoordinator = _controllerProvider.StateCoordinator;
-        if (stateCoordinator != null)
-        {
-            await stateCoordinator.TransitionToRecordingAsync();
-        }
-        else
-        {
-            await AudioController.StartCaptureAsync();
-        }
+        if (_isDisposed) return;
+        await AudioController.StartCaptureAsync();
     }
 
     public async Task StopCaptureAsync()
     {
-        ThrowIfDisposed();
-
-        var stateCoordinator = _controllerProvider.StateCoordinator;
-        if (stateCoordinator != null)
-        {
-            await stateCoordinator.TransitionToIdleAsync();
-        }
-        else
-        {
-            await AudioController.StopCaptureAsync();
-        }
+        if (_isDisposed) return;
+        await AudioController.StopCaptureAsync();
     }
 
     public async Task ToggleCaptureAsync()
     {
-        ThrowIfDisposed();
-
-        var stateCoordinator = _controllerProvider.StateCoordinator;
-        if (stateCoordinator != null)
-        {
-            if (stateCoordinator.CurrentState == ApplicationState.Recording)
-                await stateCoordinator.TransitionToIdleAsync();
-            else
-                await stateCoordinator.TransitionToRecordingAsync();
-        }
-        else
-        {
-            await AudioController.ToggleCaptureAsync();
-        }
+        if (_isDisposed) return;
+        await AudioController.ToggleCaptureAsync();
     }
 
     public SpectrumAnalyzer? GetCurrentAnalyzer() =>

@@ -14,5 +14,4 @@ public interface IControllerProvider
     IResourceCleanupManager ResourceCleanupManager { get; }
     IFpsLimiter FpsLimiter { get; }
     IMainController MainController { get; }
-    IApplicationStateCoordinator StateCoordinator { get; }
 }

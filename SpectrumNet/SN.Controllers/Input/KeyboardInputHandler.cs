@@ -21,17 +21,18 @@ public class KeyboardInputHandler : IInputHandler
             && !e.IsRepeat
             && !IsTextInputElement(focusedElement))
         {
-            _logger.Safe(() => _controller.ToggleCaptureAsync(),
-                LogPrefix, "Error toggling capture");
-            e.Handled = true;
-            return true;
-        }
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _controller.ToggleCaptureAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error(LogPrefix, "Error toggling capture", ex);
+                }
+            });
 
-        if (ShouldIgnoreKeyPress(focusedElement))
-            return false;
-
-        if (TryExecuteGlobalKeyAction(e.Key))
-        {
             e.Handled = true;
             return true;
         }

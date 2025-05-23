@@ -58,6 +58,9 @@ public partial class MainWindow : Window, IAsyncDisposable
     {
         if (e.Key == Key.Space && !e.IsRepeat)
         {
+            _logger.Log(LogLevel.Debug, LogPrefix,
+                $"Space pressed. IsRecording: {_controller.IsRecording}");
+
             bool handled = _controller.InputController.HandleKeyDown(e, Keyboard.FocusedElement);
             if (handled)
             {
