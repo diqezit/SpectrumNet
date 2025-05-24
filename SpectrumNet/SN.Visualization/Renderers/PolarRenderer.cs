@@ -131,6 +131,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     private SKRect _centerCircleBounds;
     private SKRect _clipBounds;
     private float[]? _tempSpectrum;
+    private float[]? _processedSpectrum;
+    private float[]? _previousSpectrum;
 
     private float _rotation;
     private float _pulseEffect = 1.0f;
@@ -153,8 +155,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _processedSpectrum = new float[MAX_POINT_COUNT];
         _previousSpectrum = new float[MAX_POINT_COUNT];
 
-        _outerPath = _pathPool.Get();
-        _innerPath = _pathPool.Get();
+        _outerPath = _resourceManager.GetPath();
+        _innerPath = _resourceManager.GetPath();
 
         InitializePaints();
 
@@ -173,13 +175,13 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         _fillPaint = new SKPaint
         {
-            IsAntialias = _useAntiAlias,
+            IsAntialias = UseAntiAlias,
             Style = SKPaintStyle.Fill
         };
 
         _strokePaint = new SKPaint
         {
-            IsAntialias = _useAntiAlias,
+            IsAntialias = UseAntiAlias,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = DEFAULT_STROKE_WIDTH,
             StrokeJoin = SKStrokeJoin.Round,
@@ -188,13 +190,13 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
         _centerPaint = new SKPaint
         {
-            IsAntialias = _useAntiAlias,
+            IsAntialias = UseAntiAlias,
             Style = SKPaintStyle.Fill
         };
 
         _glowPaint = new SKPaint
         {
-            IsAntialias = _useAntiAlias,
+            IsAntialias = UseAntiAlias,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = DEFAULT_STROKE_WIDTH * 1.5f,
             BlendMode = SKBlendMode.SrcOver
@@ -202,7 +204,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
         _highlightPaint = new SKPaint
         {
-            IsAntialias = _useAntiAlias,
+            IsAntialias = UseAntiAlias,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = DEFAULT_STROKE_WIDTH * 0.5f,
             StrokeCap = SKStrokeCap.Round
@@ -211,7 +213,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     protected override void OnConfigurationChanged()
     {
-        _currentPointCount = _isOverlayActive ?
+        _currentPointCount = IsOverlayActive ?
             POINT_COUNT_OVERLAY :
             (int)MathF.Min(_currentSettings.MaxPoints, MAX_POINT_COUNT);
         _pathsNeedUpdate = true;
@@ -220,12 +222,11 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _useAntiAlias = _currentSettings.UseGlow || _currentSettings.UseHighlight;
 
         UpdatePaintSettings();
         InvalidateCachedResources();
 
-        _currentPointCount = _isOverlayActive ?
+        _currentPointCount = IsOverlayActive ?
             POINT_COUNT_OVERLAY :
             (int)MathF.Min(_currentSettings.MaxPoints, MAX_POINT_COUNT);
         _pathsNeedUpdate = true;
@@ -235,7 +236,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
     private void UpdatePaintSettings()
     {
-        var antiAlias = _useAntiAlias;
+        var antiAlias = UseAntiAlias;
         var strokeWidth = DEFAULT_STROKE_WIDTH * _currentSettings.StrokeMultiplier;
 
         if (_fillPaint != null) _fillPaint.IsAntialias = antiAlias;
@@ -359,8 +360,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             _innerPath == null || _outerPoints == null ||
             _innerPoints == null) return;
 
-        _time += TIME_STEP;
-        _rotation += ROTATION_SPEED * _time * TIME_MODIFIER;
+        _rotation += ROTATION_SPEED * _animationTimer.DeltaTime * TIME_MODIFIER;
 
         int effectivePointCount = (int)MathF.Min(barCount, _currentPointCount);
         int skipFactor = _currentSettings.PathSimplification > 0 ?
@@ -382,11 +382,11 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
             float modulation = Quality == RenderQuality.Low ? 1.0f :
                 1 + MODULATION_FACTOR * Sin(
-                    pointIndex * angleStep * MODULATION_FREQ * DEG_TO_RAD + _time * 2
+                    pointIndex * angleStep * MODULATION_FREQ * DEG_TO_RAD + _animationTimer.Time * 2
                 );
 
             if (_currentSettings.UsePulseEffect)
-                modulation += PULSE_AMPLITUDE * 0.5f * Sin(_time * 0.5f + pointIndex * 0.1f);
+                modulation += PULSE_AMPLITUDE * 0.5f * Sin(_animationTimer.Time * 0.5f + pointIndex * 0.1f);
 
             float outerRadius = MIN_RADIUS + spectrumValue * modulation * RADIUS_MULTIPLIER;
             _outerPoints[pointIndex] = new SKPoint(
@@ -461,7 +461,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             _dashEffect?.Dispose();
             _dashEffect = SKPathEffect.CreateDash(
                 DashIntervals,
-                _time * DASH_PHASE_SPEED % (DASH_LENGTH * 3)
+                _animationTimer.Time * DASH_PHASE_SPEED % (DASH_LENGTH * 3)
             );
         }
 
@@ -473,7 +473,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         float safeBarWidth = Clamp(barWidth, MIN_BAR_WIDTH, MAX_BAR_WIDTH);
 
         _pulseEffect = _currentSettings.UsePulseEffect ?
-            Sin(_time * PULSE_SPEED) * PULSE_AMPLITUDE + 1.0f : 1.0f;
+            Sin(_animationTimer.Time * PULSE_SPEED) * PULSE_AMPLITUDE + 1.0f : 1.0f;
 
         if (_strokePaint != null)
             _strokePaint.StrokeWidth = safeBarWidth * _pulseEffect * _currentSettings.StrokeMultiplier;
@@ -528,7 +528,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         if (_cachedCenterCircle == null) return;
 
         float pulseScale = _currentSettings.UsePulseEffect ?
-            1.0f + Sin(_time * PULSE_SPEED * 0.5f) * PULSE_SCALE_MULTIPLIER : 1.0f;
+            1.0f + Sin(_animationTimer.Time * PULSE_SPEED * 0.5f) * PULSE_SCALE_MULTIPLIER : 1.0f;
 
         canvas.Save();
         canvas.Scale(pulseScale, pulseScale);
@@ -547,7 +547,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         {
             using var glowPaint = new SKPaint
             {
-                IsAntialias = _useAntiAlias,
+                IsAntialias = UseAntiAlias,
                 Style = SKPaintStyle.Fill,
                 Color = baseColor.WithAlpha(GLOW_ALPHA),
                 ImageFilter = SKImageFilter.CreateBlur(
@@ -576,7 +576,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         {
             using var highlightPaint = new SKPaint
             {
-                IsAntialias = _useAntiAlias,
+                IsAntialias = UseAntiAlias,
                 Style = SKPaintStyle.Fill,
                 Color = SKColors.White.WithAlpha(HIGHLIGHT_ALPHA)
             };
@@ -592,10 +592,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _cachedCenterCircle = recorder.EndRecording();
     }
 
-    protected override void OnInvalidateCachedResources()
+    private void InvalidateCachedResources()
     {
-        base.OnInvalidateCachedResources();
-
         _cachedCenterCircle?.Dispose();
         _cachedCenterCircle = null;
         _dashEffect?.Dispose();
@@ -611,8 +609,18 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         _pathUpdateSemaphore?.Dispose();
 
-        _outerPath?.Dispose();
-        _innerPath?.Dispose();
+        if (_outerPath != null)
+        {
+            _resourceManager.ReturnPath(_outerPath);
+            _outerPath = null;
+        }
+
+        if (_innerPath != null)
+        {
+            _resourceManager.ReturnPath(_innerPath);
+            _innerPath = null;
+        }
+
         _fillPaint?.Dispose();
         _strokePaint?.Dispose();
         _centerPaint?.Dispose();
@@ -623,8 +631,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _dashEffect?.Dispose();
         _glowFilter?.Dispose();
 
-        _outerPath = null;
-        _innerPath = null;
         _fillPaint = null;
         _strokePaint = null;
         _centerPaint = null;
@@ -637,6 +643,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _gradientShader = null;
         _dashEffect = null;
         _glowFilter = null;
+        _processedSpectrum = null;
+        _previousSpectrum = null;
 
         base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");

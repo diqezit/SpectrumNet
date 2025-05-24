@@ -1,6 +1,5 @@
 ﻿#nullable enable
 
-using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.CubesRenderer.Constants;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
@@ -116,7 +115,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
 
         for (int i = 0; i < spectrumLength; i += CUBE_BATCH_SIZE)
         {
-            int batchEnd = (int)Min(i + CUBE_BATCH_SIZE, spectrumLength);
+            int batchEnd = (int)MathF.Min(i + CUBE_BATCH_SIZE, spectrumLength);
             RenderBatch(
                 canvas,
                 spectrum,
@@ -183,7 +182,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
             basePaint.Color.WithAlpha(alpha));
         canvas.DrawRect(x, y, barWidth, height, cubePaint);
 
-        if (!_useAdvancedEffects) return;
+        if (!UseAdvancedEffects) return;
 
         if (_currentSettings.UseTopFaceEffect)
         {
@@ -206,20 +205,27 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
         float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
-        using var topPath = _pathPool.Get();
-        topPath.MoveTo(x, y);
-        topPath.LineTo(x + barWidth, y);
-        topPath.LineTo(x + topOffsetX, y - topOffsetY);
-        topPath.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
-        topPath.Close();
+        var topPath = _resourceManager.GetPath();
+        try
+        {
+            topPath.MoveTo(x, y);
+            topPath.LineTo(x + barWidth, y);
+            topPath.LineTo(x + topOffsetX, y - topOffsetY);
+            topPath.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
+            topPath.Close();
 
-        byte alpha = (byte)MathF.Min(
-            magnitude * ALPHA_MULTIPLIER * _currentSettings.TopAlphaFactor,
-            MAX_ALPHA_BYTE);
-        using var topPaint = CreateStandardPaint(
-            SKColors.White.WithAlpha(alpha));
+            byte alpha = (byte)MathF.Min(
+                magnitude * ALPHA_MULTIPLIER * _currentSettings.TopAlphaFactor,
+                MAX_ALPHA_BYTE);
+            using var topPaint = CreateStandardPaint(
+                SKColors.White.WithAlpha(alpha));
 
-        canvas.DrawPath(topPath, topPaint);
+            canvas.DrawPath(topPath, topPaint);
+        }
+        finally
+        {
+            _resourceManager.ReturnPath(topPath);
+        }
     }
 
     private void RenderCubeSideFace(
@@ -233,20 +239,27 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
         float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
-        using var sidePath = _pathPool.Get();
-        sidePath.MoveTo(x + barWidth, y);
-        sidePath.LineTo(x + barWidth, y + height);
-        sidePath.LineTo(x + topOffsetX, y - topOffsetY + height);
-        sidePath.LineTo(x + topOffsetX, y - topOffsetY);
-        sidePath.Close();
+        var sidePath = _resourceManager.GetPath();
+        try
+        {
+            sidePath.MoveTo(x + barWidth, y);
+            sidePath.LineTo(x + barWidth, y + height);
+            sidePath.LineTo(x + topOffsetX, y - topOffsetY + height);
+            sidePath.LineTo(x + topOffsetX, y - topOffsetY);
+            sidePath.Close();
 
-        byte alpha = (byte)MathF.Min(
-            magnitude * ALPHA_MULTIPLIER * _currentSettings.SideFaceAlphaFactor,
-            MAX_ALPHA_BYTE);
-        using var sidePaint = CreateStandardPaint(
-            SKColors.Gray.WithAlpha(alpha));
+            byte alpha = (byte)MathF.Min(
+                magnitude * ALPHA_MULTIPLIER * _currentSettings.SideFaceAlphaFactor,
+                MAX_ALPHA_BYTE);
+            using var sidePaint = CreateStandardPaint(
+                SKColors.Gray.WithAlpha(alpha));
 
-        canvas.DrawPath(sidePath, sidePaint);
+            canvas.DrawPath(sidePath, sidePaint);
+        }
+        finally
+        {
+            _resourceManager.ReturnPath(sidePath);
+        }
     }
 
     protected override void OnDispose()

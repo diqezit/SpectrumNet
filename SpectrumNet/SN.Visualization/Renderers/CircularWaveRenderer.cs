@@ -114,9 +114,9 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         float maxRadius = Min(info.Width, info.Height) * MAX_RADIUS_FACTOR;
         float ringStep = barWidth + barSpacing;
 
-        using var paint = _paintPool.Get();
+        using var paint = _resourceManager.GetPaint();
         paint.Color = basePaint.Color;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         paint.Style = SKPaintStyle.Stroke;
 
         for (int i = ringCount - 1; i >= 0; i--)
@@ -145,7 +145,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         if (magnitude < MIN_MAGNITUDE_THRESHOLD) return;
 
         float baseRadius = CENTER_RADIUS + index * ringStep;
-        float waveOffset = Sin(_time * WAVE_SPEED + index * 0.1f + _angle) *
+        float waveOffset = Sin(_animationTimer.Time * WAVE_SPEED + index * 0.1f + _angle) *
                           magnitude * ringStep * WAVE_INFLUENCE;
         float radius = baseRadius + waveOffset;
 
@@ -157,7 +157,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         paint.Color = paint.Color.WithAlpha(alpha);
         paint.StrokeWidth = strokeWidth;
 
-        if (_useAdvancedEffects && _currentSettings.UseGlow && magnitude > GLOW_THRESHOLD)
+        if (UseAdvancedEffects && _currentSettings.UseGlow && magnitude > GLOW_THRESHOLD)
         {
             RenderGlowRing(canvas, radius, magnitude, paint);
         }
@@ -171,7 +171,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         float magnitude,
         SKPaint paint)
     {
-        using var glowPaint = _paintPool.Get();
+        using var glowPaint = _resourceManager.GetPaint();
         glowPaint.Color = paint.Color.WithAlpha((byte)(paint.Color.Alpha * 0.7f));
         glowPaint.IsAntialias = paint.IsAntialias;
         glowPaint.Style = paint.Style;
@@ -190,34 +190,40 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         if (_circlePoints == null) return;
 
-        using var path = _pathPool.Get();
-        bool first = true;
-
-        foreach (var point in _circlePoints)
+        var path = _resourceManager.GetPath();
+        try
         {
-            float x = _center.X + point.X * radius;
-            float y = _center.Y + point.Y * radius;
+            bool first = true;
 
-            if (first)
+            foreach (var point in _circlePoints)
             {
-                path.MoveTo(x, y);
-                first = false;
+                float x = _center.X + point.X * radius;
+                float y = _center.Y + point.Y * radius;
+
+                if (first)
+                {
+                    path.MoveTo(x, y);
+                    first = false;
+                }
+                else
+                {
+                    path.LineTo(x, y);
+                }
             }
-            else
-            {
-                path.LineTo(x, y);
-            }
+
+            path.Close();
+            canvas.DrawPath(path, paint);
         }
-
-        path.Close();
-        canvas.DrawPath(path, paint);
+        finally
+        {
+            _resourceManager.ReturnPath(path);
+        }
     }
 
     private void UpdateRotation(float[] spectrum)
     {
         float avgIntensity = spectrum.Length > 0 ? spectrum.Average() : 0f;
-        float deltaTime = MathF.Max(0, (float)(Now - _lastUpdateTime).TotalSeconds);
-        _angle = (_angle + ROTATION_SPEED * (1f + avgIntensity * 0.3f) * deltaTime) % MathF.Tau;
+        _angle = (_angle + ROTATION_SPEED * (1f + avgIntensity * 0.3f) * _animationTimer.DeltaTime) % MathF.Tau;
     }
 
     private static float GetRingMagnitude(

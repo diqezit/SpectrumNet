@@ -25,10 +25,6 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
             ALPHA_MULTIPLIER = 1.5f,
             PULSE_FREQUENCY = 6f,
             HEART_BASE_SCALE = 0.6f,
-            ANIMATION_TIME_INCREMENT = 0.016f,
-            RADIANS_PER_DEGREE = MathF.PI / 180f,
-            SMOOTHING_FACTOR_NORMAL = 0.3f,
-            SMOOTHING_FACTOR_OVERLAY = 0.7f,
             HEART_SIZE_REDUCTION_FACTOR = 0.3f,
             HEART_SPACING_REDUCTION_FACTOR = 0.1f,
             HEART_SIZE_SPACING_FACTOR = 0.5f,
@@ -79,17 +75,12 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         );
     }
 
-    private readonly object _renderDataLock = new();
     private float _heartSize;
     private float _heartSpacing;
     private int _heartCount;
     private float[] _cosValues = [];
     private float[] _sinValues = [];
     private SKPicture? _cachedHeartPicture;
-    private float[]? _cachedScaledSpectrum;
-    private float[]? _cachedSmoothedSpectrum;
-    private Task? _spectrumProcessingTask;
-    private bool _dataReady;
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
 
     protected override void OnInitialize()
@@ -102,10 +93,10 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
 
     protected override void OnConfigurationChanged()
     {
-        _smoothingFactor = _isOverlayActive ?
-            SMOOTHING_FACTOR_OVERLAY :
-            SMOOTHING_FACTOR_NORMAL;
-        UpdateConfiguration(_isOverlayActive ? OVERLAY_CONFIG : DEFAULT_CONFIG);
+        base.OnConfigurationChanged();
+        _processingCoordinator.SetSmoothingFactor(
+            IsOverlayActive ? 0.7f : 0.3f);
+        UpdateConfiguration(IsOverlayActive ? OVERLAY_CONFIG : DEFAULT_CONFIG);
         InvalidateCachedResources();
     }
 
@@ -113,6 +104,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
     {
         _currentSettings = QualityPresets[Quality];
         InvalidateCachedResources();
+        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -124,37 +116,16 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _time = (_time + ANIMATION_TIME_INCREMENT) % 1000f;
-
-        UpdateState(spectrum, barCount, info, barSpacing);
-
-        if (_dataReady)
-        {
-            RenderFrame(canvas, info, paint);
-        }
-    }
-
-    private void UpdateState(
-        float[] spectrum,
-        int barCount,
-        SKImageInfo info,
-        float barSpacing)
-    {
         AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
         int actualHeartCount = Min(spectrum.Length, _heartCount);
-        ProcessSpectrumData(spectrum, actualHeartCount);
 
-        if (_cachedSmoothedSpectrum != null)
-        {
-            _dataReady = true;
-        }
+        RenderFrame(canvas, spectrum, info, paint, actualHeartCount);
     }
 
     private void UpdateConfiguration(
         (float Size, float Spacing, int Count) config)
     {
         (_heartSize, _heartSpacing, _heartCount) = config;
-        _previousSpectrum = _cachedScaledSpectrum = _cachedSmoothedSpectrum = null;
         PrecomputeTrigValues();
         InvalidateCachedResources();
     }
@@ -196,7 +167,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
     {
         _cosValues = new float[_heartCount];
         _sinValues = new float[_heartCount];
-        float angleStep = 360f / _heartCount * RADIANS_PER_DEGREE;
+        float angleStep = 2 * MathF.PI / _heartCount;
 
         for (int i = 0; i < _heartCount; i++)
         {
@@ -206,123 +177,42 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void ProcessSpectrumData(float[] spectrum, int actualHeartCount)
-    {
-        if (Quality == RenderQuality.High && _spectrumProcessingTask == null)
-        {
-            ProcessSpectrumAsync(spectrum, actualHeartCount);
-        }
-        else
-        {
-            ProcessSpectrum(spectrum, actualHeartCount);
-        }
-    }
-
-    private void ProcessSpectrumAsync(float[] spectrum, int targetCount)
-    {
-        if (_spectrumProcessingTask != null && !_spectrumProcessingTask.IsCompleted)
-            return;
-
-        _spectrumProcessingTask = Task.Run(() =>
-        {
-            lock (_renderDataLock)
-            {
-                ProcessSpectrum(spectrum, targetCount);
-            }
-        });
-    }
-
-    private void ProcessSpectrum(float[] spectrum, int targetCount)
-    {
-        _cachedScaledSpectrum ??= new float[targetCount];
-        if (_cachedScaledSpectrum.Length != targetCount)
-            _cachedScaledSpectrum = new float[targetCount];
-
-        ScaleSpectrumSimple(spectrum, _cachedScaledSpectrum, targetCount);
-
-        _cachedSmoothedSpectrum ??= new float[targetCount];
-        if (_cachedSmoothedSpectrum.Length != targetCount)
-            _cachedSmoothedSpectrum = new float[targetCount];
-
-        SmoothSpectrumSimple(_cachedScaledSpectrum, _cachedSmoothedSpectrum, targetCount);
-    }
-
-    private static void ScaleSpectrumSimple(
-        float[] source,
-        float[] target,
-        int targetCount)
-    {
-        float blockSize = source.Length / (float)targetCount;
-
-        for (int i = 0; i < targetCount; i++)
-        {
-            float sum = 0;
-            int startIdx = (int)(i * blockSize);
-            int endIdx = Min(source.Length, (int)((i + 1) * blockSize));
-
-            for (int j = startIdx; j < endIdx; j++)
-            {
-                sum += source[j];
-            }
-
-            target[i] = sum / Max(1, endIdx - startIdx);
-        }
-    }
-
-    private void SmoothSpectrumSimple(
-        float[] source,
-        float[] target,
-        int count)
-    {
-        if (_previousSpectrum == null || _previousSpectrum.Length != count)
-        {
-            _previousSpectrum = new float[count];
-            Array.Copy(source, _previousSpectrum, count);
-        }
-
-        for (int i = 0; i < count; i++)
-        {
-            target[i] = _previousSpectrum[i] +
-                (source[i] - _previousSpectrum[i]) * _smoothingFactor;
-            _previousSpectrum[i] = target[i];
-        }
-    }
-
     private void RenderFrame(
         SKCanvas canvas,
+        float[] spectrum,
         SKImageInfo info,
-        SKPaint basePaint)
+        SKPaint basePaint,
+        int actualHeartCount)
     {
-        if (_cachedSmoothedSpectrum == null) return;
-
         float centerX = info.Width * CENTER_PROPORTION;
         float centerY = info.Height * CENTER_PROPORTION;
         float radius = Min(info.Width, info.Height) * RADIUS_PROPORTION;
 
-        using var heartPath = _pathPool.Get();
-        EnsureCachedHeartPicture(heartPath, basePaint);
-
-        using var heartPaint = CreatePaint(
-            basePaint.Color,
-            SKPaintStyle.Fill,
-            0);
-
-        using var glowPaint = _useAdvancedEffects && _currentSettings.UseGlow
-            ? CreatePaint(basePaint.Color, SKPaintStyle.Fill, 0)
-            : null;
-
-        lock (_renderDataLock)
+        var heartPath = _resourceManager.GetPath();
+        try
         {
+            EnsureCachedHeartPicture(heartPath, basePaint);
+
+            using var heartPaint = CreateStandardPaint(basePaint.Color);
+            using var glowPaint = UseAdvancedEffects && _currentSettings.UseGlow
+                ? CreateStandardPaint(basePaint.Color)
+                : null;
+
             DrawHearts(
                 canvas,
-                _cachedSmoothedSpectrum,
+                spectrum,
                 centerX,
                 centerY,
                 radius,
                 heartPath,
                 heartPaint,
                 glowPaint,
-                basePaint);
+                basePaint,
+                actualHeartCount);
+        }
+        finally
+        {
+            _resourceManager.ReturnPath(heartPath);
         }
     }
 
@@ -362,9 +252,12 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         SKPath heartPath,
         SKPaint heartPaint,
         SKPaint? glowPaint,
-        SKPaint basePaint)
+        SKPaint basePaint,
+        int actualHeartCount)
     {
-        for (int i = 0; i < spectrum.Length; i++)
+        float time = _animationTimer.Time;
+
+        for (int i = 0; i < actualHeartCount && i < spectrum.Length; i++)
         {
             float magnitude = spectrum[i];
             if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
@@ -379,7 +272,8 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
                 heartPath,
                 heartPaint,
                 glowPaint,
-                basePaint);
+                basePaint,
+                time);
         }
     }
 
@@ -393,7 +287,8 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         SKPath heartPath,
         SKPaint heartPaint,
         SKPaint? glowPaint,
-        SKPaint basePaint)
+        SKPaint basePaint,
+        float time)
     {
         if (index >= _cosValues.Length || index >= _sinValues.Length) return;
 
@@ -402,7 +297,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         float y = centerY + _sinValues[index] * radius *
             (1 - magnitude * HEART_RADIUS_FACTOR);
         float heartSize = _heartSize * magnitude * HEART_BASE_SCALE *
-            (Sin(_time * PULSE_FREQUENCY) * HEART_PULSE_AMPLITUDE + 1f);
+            (Sin(time * PULSE_FREQUENCY) * HEART_PULSE_AMPLITUDE + 1f);
 
         SKRect heartBounds = new(
             x - heartSize,
@@ -410,7 +305,8 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
             x + heartSize,
             y + heartSize);
 
-        if (canvas.QuickReject(heartBounds)) return;
+        if (!IsRenderAreaVisible(canvas, heartBounds.Left, heartBounds.Top,
+            heartBounds.Width, heartBounds.Height)) return;
 
         byte alpha = (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * 255f, 255f);
         heartPaint.Color = basePaint.Color.WithAlpha(alpha);
@@ -472,7 +368,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         float size)
     {
         path.Reset();
-        float angleStep = 360f / _currentSettings.HeartSides * RADIANS_PER_DEGREE;
+        float angleStep = 2 * MathF.PI / _currentSettings.HeartSides;
         path.MoveTo(x, y + size / 2);
 
         for (int i = 0; i < _currentSettings.HeartSides; i++)
@@ -523,33 +419,26 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         }
     }
 
-    private SKPaint CreatePaint(
-        SKColor color,
-        SKPaintStyle style,
-        float strokeWidth)
+    private void InvalidateCachedResources()
     {
-        var paint = _paintPool.Get();
-        paint.Color = color;
-        paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
-        paint.StrokeWidth = strokeWidth;
-        return paint;
-    }
-
-    protected override void OnInvalidateCachedResources()
-    {
-        base.OnInvalidateCachedResources();
         _cachedHeartPicture?.Dispose();
         _cachedHeartPicture = null;
-        _dataReady = false;
+        RequestRedraw();
+    }
+
+    protected override void CleanupUnusedResources()
+    {
+        if (_cachedHeartPicture != null && !RequiresRedraw())
+        {
+            _cachedHeartPicture.Dispose();
+            _cachedHeartPicture = null;
+        }
     }
 
     protected override void OnDispose()
     {
-        _spectrumProcessingTask?.Wait(100);
         _cachedHeartPicture?.Dispose();
         _cachedHeartPicture = null;
-        _previousSpectrum = _cachedScaledSpectrum = _cachedSmoothedSpectrum = null;
         _cosValues = _sinValues = [];
         base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");

@@ -75,7 +75,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     protected override void OnConfigurationChanged()
     {
-        int count = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
+        int count = IsOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
         if (_stars.Length != count)
         {
             InitializeStars();
@@ -148,7 +148,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void UpdateStars(SKImageInfo info)
     {
-        float deltaTime = 0.016f;
+        float deltaTime = _animationTimer.DeltaTime;
         _spawnAccumulator += _energy * SPAWN_RATE * deltaTime;
 
         for (int i = 0; i < _stars.Length; i++)
@@ -177,7 +177,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         if (_energy < MIN_MAGNITUDE_THRESHOLD) return;
 
-        float angle = _time * star.Speed;
+        float angle = _animationTimer.Time * star.Speed;
         float velocityX = (_lowSpectrum * Sin(angle) +
                           _midSpectrum * Cos(angle * 1.3f) +
                           _highSpectrum * Sin(angle * 1.8f)) * SPECTRUM_SENSITIVITY;
@@ -194,7 +194,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         float lifetimeRatio = star.Lifetime / star.MaxLifetime;
         star.Opacity = lifetimeRatio < 0.2f ? lifetimeRatio * 5f : 1f;
 
-        float twinkle = Sin(_time * TWINKLE_SPEED * star.TwinkleSpeed + star.Phase) * 0.3f;
+        float twinkle = Sin(_animationTimer.Time * TWINKLE_SPEED * star.TwinkleSpeed + star.Phase) * 0.3f;
         star.Brightness = Clamp(0.8f + twinkle + _energy * 0.5f, MIN_BRIGHTNESS, 1.5f);
     }
 
@@ -256,8 +256,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         SKCanvas canvas,
         SKPaint basePaint)
     {
-        using var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
+        using var paint = _resourceManager.GetPaint();
+        paint.IsAntialias = UseAntiAlias;
         paint.Style = SKPaintStyle.Fill;
 
         foreach (ref readonly var star in _stars.AsSpan())
@@ -272,7 +272,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
             canvas.DrawCircle(star.X, star.Y, size, paint);
 
-            if (_useAdvancedEffects && _currentSettings.UseGlow && alpha > 180)
+            if (UseAdvancedEffects && _currentSettings.UseGlow && alpha > 180)
             {
                 paint.Color = star.Color.WithAlpha((byte)(alpha / 5));
                 canvas.DrawCircle(star.X, star.Y, size * _currentSettings.GlowSize, paint);
@@ -282,7 +282,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void InitializeStars()
     {
-        int count = _isOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
+        int count = IsOverlayActive ? OVERLAY_STAR_COUNT : DEFAULT_STAR_COUNT;
         _stars = new Star[count];
     }
 

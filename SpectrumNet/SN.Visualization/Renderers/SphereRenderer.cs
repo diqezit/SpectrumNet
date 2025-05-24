@@ -88,24 +88,24 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
     private float[]? _cosValues;
     private float[]? _sinValues;
     private float[]? _currentAlphas;
+    private float[]? _processedSpectrum;
 
     protected override void OnInitialize()
     {
-        base.OnInitialize();
         UpdateConfiguration(ConfigPresets[false]);
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        UpdateConfiguration(ConfigPresets[_isOverlayActive]);
+        UpdateConfiguration(ConfigPresets[IsOverlayActive]);
+        RequestRedraw();
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _useAntiAlias = _currentSettings.UseAntialiasing;
-        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
+        _processingCoordinator.SetSmoothingFactor(_currentSettings.SmoothingFactor);
         _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
@@ -125,11 +125,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
-            () => RenderSphereEffect(canvas, spectrum, info, barSpacing, barCount, paint),
-            LogPrefix,
-            "Error during rendering"
-        );
+        RenderSphereEffect(canvas, spectrum, info, barSpacing, barCount, paint);
     }
 
     private void RenderSphereEffect(
@@ -189,7 +185,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
 
         var alphaGroups = GetAlphaGroups(sphereCount);
 
-        if (_currentSettings.SphereSegments > 0)
+        if (_currentSettings.SphereSegments > 0 && UseAdvancedEffects)
             RenderHighQualitySpheres(canvas, _processedSpectrum, alphaGroups, paint, centerX, centerY, maxRadius);
         else
             RenderSimpleSpheres(canvas, _processedSpectrum, alphaGroups, paint, centerX, centerY, maxRadius);
@@ -222,7 +218,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         float centerY,
         float maxRadius)
     {
-        using var spherePaint = CreateSimplePaint();
+        using var spherePaint = CreateStandardPaint(paint.Color);
 
         foreach (var group in alphaGroups)
         {
@@ -249,7 +245,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
             var position = CalculateSpherePosition(i, centerX, centerY, maxRadius);
             float size = CalculateSphereSize(spectrum[i]);
 
-            if (IsInViewport(canvas, position, size))
+            if (IsRenderAreaVisible(canvas, position.x, position.y, size * 2, size * 2))
                 DrawSphere(canvas, position, size, paint);
         }
     }
@@ -266,17 +262,6 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
 
     private float CalculateSphereSize(float magnitude) =>
         MathF.Max(magnitude * _currentConfig.Radius, MIN_CIRCLE_SIZE) + _currentConfig.Spacing * SPACING_FACTOR;
-
-    private static bool IsInViewport(SKCanvas canvas, (float x, float y) position, float size)
-    {
-        var bounds = new SKRect(
-            position.x - size,
-            position.y - size,
-            position.x + size,
-            position.y + size
-        );
-        return !canvas.QuickReject(bounds);
-    }
 
     private static void DrawSphere(
         SKCanvas canvas,
@@ -305,7 +290,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
 
         var colors = new[] { centerColor, edgeColor };
 
-        using var shader = SKShader.CreateRadialGradient(
+        var shader = SKShader.CreateRadialGradient(
             new SKPoint(0, 0),
             1.0f,
             colors,
@@ -313,16 +298,9 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
             SKShaderTileMode.Clamp
         );
 
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Shader = shader;
-        paint.IsAntialias = _useAntiAlias;
-        return paint;
-    }
-
-    private SKPaint CreateSimplePaint()
-    {
-        var paint = _paintPool.Get();
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         return paint;
     }
 
@@ -421,6 +399,15 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         return sum / (end - start);
     }
 
+    protected override void CleanupUnusedResources()
+    {
+        if (_processedSpectrum != null && _processedSpectrum.All(v => v < MIN_MAGNITUDE))
+        {
+            ArrayPool<float>.Shared.Return(_processedSpectrum);
+            _processedSpectrum = null;
+        }
+    }
+
     protected override void OnDispose()
     {
         if (_processedSpectrum != null)
@@ -431,7 +418,6 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         _currentAlphas = null;
         _processedSpectrum = null;
 
-        base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 

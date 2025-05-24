@@ -204,7 +204,7 @@ public sealed class RendererFactory : IRendererFactory
         RenderStyle.Glitch => GlitchRenderer.GetInstance(),
         RenderStyle.GradientWave => GradientWaveRenderer.GetInstance(),
         RenderStyle.Heartbeat => HeartbeatRenderer.GetInstance(),
-        RenderStyle.Kenwood => KenwoodRenderer.GetInstance(),
+        RenderStyle.Kenwood => KenwoodBarsRenderer.GetInstance(),
         RenderStyle.LedMeter => LedMeterRenderer.GetInstance(),
         RenderStyle.Loudness => LoudnessMeterRenderer.GetInstance(),
         RenderStyle.Particles => ParticlesRenderer.GetInstance(),

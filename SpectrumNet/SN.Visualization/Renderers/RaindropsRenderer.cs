@@ -105,7 +105,6 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        base.OnInitialize();
         InitializeArrays();
         _particleBuffer = new ParticleBuffer(_settings.MaxParticles, 1);
         _settings.PropertyChanged += OnSettingsChanged;
@@ -122,7 +121,6 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
         _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
@@ -135,11 +133,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
-            () => RenderRainEffect(canvas, spectrum, info, barCount, paint),
-            LogPrefix,
-            "Error during rendering"
-        );
+        RenderRainEffect(canvas, spectrum, info, barCount, paint);
     }
 
     private void RenderRainEffect(
@@ -175,7 +169,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             _renderCache.Width == info.Width &&
             _renderCache.Height == info.Height) return;
 
-        _renderCache = new RenderCache(info.Width, info.Height, _isOverlayActive);
+        _renderCache = new RenderCache(info.Width, info.Height, IsOverlayActive);
         _particleBuffer.UpdateLowerBound(_renderCache.LowerBound);
         _cacheNeedsUpdate = false;
     }
@@ -284,7 +278,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         if (barCount <= 0 || spectrum.Length == 0) return;
 
         float stepWidth = _renderCache.Width / barCount;
-        float threshold = _isOverlayActive ?
+        float threshold = IsOverlayActive ?
             _settings.SpawnThresholdOverlay : _settings.SpawnThresholdNormal;
         float spawnBoost = 1.0f + _averageLoudness * 2.0f;
         int spawns = 0;
@@ -369,13 +363,13 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateTrailPaint(SKPaint basePaint)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeCap = SKStrokeCap.Round;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         paint.Color = basePaint.Color;
 
-        if (_useAdvancedEffects)
+        if (UseAdvancedEffects)
         {
             TrailGradientColors[0] = basePaint.Color;
             TrailGradientColors[1] = basePaint.Color.WithAlpha(0);
@@ -397,9 +391,9 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     private void RenderDrops(SKCanvas canvas, float[] spectrum, SKPaint basePaint)
     {
-        using var dropPaint = CreateDropPaint(basePaint);
+        using var dropPaint = CreateStandardPaint(basePaint.Color);
         using var highlightPaint = _currentSettings.EffectsThreshold < 2 ?
-            CreateHighlightPaint() : null;
+            CreateStandardPaint(SKColors.White) : null;
 
         for (int i = 0; i < _raindropCount; i++)
         {
@@ -441,23 +435,6 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         }
     }
 
-    private SKPaint CreateDropPaint(SKPaint basePaint)
-    {
-        var paint = _paintPool.Get();
-        paint.Style = SKPaintStyle.Fill;
-        paint.IsAntialias = _useAntiAlias;
-        paint.Color = basePaint.Color;
-        return paint;
-    }
-
-    private SKPaint CreateHighlightPaint()
-    {
-        var paint = _paintPool.Get();
-        paint.Style = SKPaintStyle.Fill;
-        paint.IsAntialias = _useAntiAlias;
-        return paint;
-    }
-
     private bool ShouldRenderHighlight(Raindrop drop, float intensity) =>
         drop.Size > _settings.RaindropSize * RAINDROP_SIZE_HIGHLIGHT_THRESHOLD &&
         intensity > INTENSITY_HIGHLIGHT_THRESHOLD;
@@ -493,17 +470,24 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _cacheNeedsUpdate = true;
     }
 
-    protected override void OnInvalidateCachedResources()
+    protected override void OnConfigurationChanged()
     {
-        base.OnInvalidateCachedResources();
         _cacheNeedsUpdate = true;
+        RequestRedraw();
+    }
+
+    protected override void CleanupUnusedResources()
+    {
+        if (_raindropCount == 0 && _particleBuffer._count == 0)
+        {
+            _firstRender = true;
+        }
     }
 
     protected override void OnDispose()
     {
         _settings.PropertyChanged -= OnSettingsChanged;
         _trailPath?.Dispose();
-        base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 
@@ -536,12 +520,12 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         float size,
         bool isSplash)
     {
-        public float 
-            X = x, 
-            Y = y, 
-            VelocityX = velocityX, 
-            VelocityY = velocityY, 
-            Lifetime = 1.0f, 
+        public float
+            X = x,
+            Y = y,
+            VelocityX = velocityX,
+            VelocityY = velocityY,
+            Lifetime = 1.0f,
             Size = size;
 
         public bool IsSplash = isSplash;
@@ -568,7 +552,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private sealed class ParticleBuffer(int capacity, float lowerBound)
     {
         private Particle[] _particles = new Particle[capacity];
-        private int _count = 0;
+        internal int _count = 0;
         private float _lowerBound = lowerBound;
 
         public void UpdateLowerBound(float lowerBound) => _lowerBound = lowerBound;

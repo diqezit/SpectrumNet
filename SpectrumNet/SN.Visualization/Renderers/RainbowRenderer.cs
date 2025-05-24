@@ -102,7 +102,6 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        base.OnInitialize();
         InitializeResources();
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
@@ -118,7 +117,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         _glowPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            IsAntialias = _useAntiAlias,
+            IsAntialias = UseAntiAlias,
             ImageFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_RADIUS)
         };
     }
@@ -133,31 +132,27 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         }
     }
 
-    protected override void OnConfigurationChanged() => 
-        _smoothingFactor = _isOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE;
-    
+    protected override void OnConfigurationChanged()
+    {
+        _processingCoordinator.SetSmoothingFactor(IsOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE);
+        RequestRedraw();
+    }
+
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _useAntiAlias = _currentSettings.UseAntiAlias;
-        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
-        _samplingOptions = new SKSamplingOptions(
-            _currentSettings.FilterMode,
-            _currentSettings.MipmapMode
-        );
-
         UpdatePaintProperties();
         _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
     private void UpdatePaintProperties()
     {
-        _barPaint.IsAntialias = _useAntiAlias;
-        _highlightPaint.IsAntialias = _useAntiAlias;
-        _reflectionPaint.IsAntialias = _useAntiAlias;
+        _barPaint.IsAntialias = UseAntiAlias;
+        _highlightPaint.IsAntialias = UseAntiAlias;
+        _reflectionPaint.IsAntialias = UseAntiAlias;
 
         if (_glowPaint != null)
-            _glowPaint.IsAntialias = _useAntiAlias;
+            _glowPaint.IsAntialias = UseAntiAlias;
     }
 
     protected override void RenderEffect(
@@ -169,11 +164,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
-            () => RenderRainbowBars(canvas, spectrum, info, barWidth, barSpacing),
-            LogPrefix,
-            "Error during rendering"
-        );
+        RenderRainbowBars(canvas, spectrum, info, barWidth, barSpacing);
     }
 
     private void RenderRainbowBars(
@@ -267,11 +258,11 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
     }
 
     private bool ShouldDrawGlow(float magnitude) =>
-        _useAdvancedEffects && _glowPaint != null &&
+        UseAdvancedEffects && _glowPaint != null &&
         magnitude > GLOW_MIN_MAGNITUDE && magnitude <= GLOW_MAX_MAGNITUDE;
 
     private bool ShouldDrawReflection(float magnitude) =>
-        _useAdvancedEffects && magnitude > REFLECTION_MIN_MAGNITUDE;
+        UseAdvancedEffects && magnitude > REFLECTION_MIN_MAGNITUDE;
 
     private void DrawGlow(
         SKCanvas canvas,
@@ -416,6 +407,19 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         return Clamp(sum / length * LOUDNESS_SCALE, 0f, 1f);
     }
 
+    protected override void CleanupUnusedResources()
+    {
+        if (_glowPaint?.ImageFilter != null)
+        {
+            var currentRadius = GLOW_RADIUS;
+            if (MathF.Abs(currentRadius - GLOW_RADIUS) < float.Epsilon)
+            {
+                _glowPaint.ImageFilter?.Dispose();
+                _glowPaint.ImageFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_RADIUS);
+            }
+        }
+    }
+
     protected override void OnDispose()
     {
         _path?.Dispose();
@@ -424,10 +428,8 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         _highlightPaint?.Dispose();
         _reflectionPaint?.Dispose();
 
-        _previousSpectrum = null;
         _colorCache = null;
 
-        base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

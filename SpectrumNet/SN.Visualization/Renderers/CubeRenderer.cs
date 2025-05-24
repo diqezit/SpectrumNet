@@ -16,16 +16,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     {
         _vertices = CreateVertices();
         _faces = CreateFaces();
-        _facePaints = new SKPaint[6];
-        for (int i = 0; i < _facePaints.Length; i++)
-        {
-            _facePaints[i] = new SKPaint { Style = SKPaintStyle.Fill };
-        }
-        _edgePaint = new SKPaint
-        {
-            Color = SKColors.White,
-            Style = SKPaintStyle.Stroke
-        };
     }
 
     public static CubeRenderer GetInstance() => _instance.Value;
@@ -78,8 +68,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
     private readonly Vertex[] _vertices;
     private readonly Face[] _faces;
-    private readonly SKPaint[] _facePaints;
-    private readonly SKPaint _edgePaint;
 
     private float _rotationX, _rotationY, _rotationZ;
     private float _speedX = BASE_ROTATION;
@@ -97,7 +85,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        UpdatePaintSettings();
         _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
@@ -110,22 +97,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
-            () => RenderCube(canvas, spectrum, info, barWidth, barCount, paint),
-            LogPrefix,
-            "Error during rendering"
-        );
-    }
-
-    private void RenderCube(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        int barCount,
-        SKPaint basePaint)
-    {
-        _baseColor = basePaint.Color;
+        _baseColor = paint.Color;
         UpdateRotation(spectrum);
 
         var center = new SKPoint(info.Width * 0.5f, info.Height * 0.5f);
@@ -148,7 +120,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
     private void UpdateRotation(float[] spectrum)
     {
-        float deltaTime = 0.016f;
+        float deltaTime = _animationTimer.DeltaTime;
 
         if (spectrum.Length >= 3)
         {
@@ -226,25 +198,29 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         {
             if (depth >= 0) continue;
 
-            using var path = CreateFacePath(projected, face);
-
-            var paint = _facePaints[face.ColorIndex];
-
-            var faceColor = GetFaceColor(face.ColorIndex);
-
-            byte r = (byte)(faceColor.Red * light);
-            byte g = (byte)(faceColor.Green * light);
-            byte b = (byte)(faceColor.Blue * light);
-            byte a = (byte)((BASE_ALPHA + maxSpectrum * 0.1f) * 255f);
-
-            paint.Color = new SKColor(r, g, b, a);
-            paint.IsAntialias = _useAntiAlias;
-
-            canvas.DrawPath(path, paint);
-
-            if (_useAdvancedEffects && _currentSettings.UseGlow)
+            var path = _resourceManager.GetPath();
+            try
             {
-                DrawGlow(canvas, path, a);
+                CreateFacePath(path, projected, face);
+
+                var faceColor = GetFaceColor(face.ColorIndex);
+
+                byte r = (byte)(faceColor.Red * light);
+                byte g = (byte)(faceColor.Green * light);
+                byte b = (byte)(faceColor.Blue * light);
+                byte a = (byte)((BASE_ALPHA + maxSpectrum * 0.1f) * 255f);
+
+                using var facePaint = CreateStandardPaint(new SKColor(r, g, b, a));
+                canvas.DrawPath(path, facePaint);
+
+                if (UseAdvancedEffects && _currentSettings.UseGlow)
+                {
+                    DrawGlow(canvas, path, a);
+                }
+            }
+            finally
+            {
+                _resourceManager.ReturnPath(path);
             }
         }
     }
@@ -266,40 +242,30 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         SKPath path,
         byte alpha)
     {
-        _edgePaint.Color = SKColors.White.WithAlpha((byte)(alpha * 0.8f));
-        _edgePaint.StrokeWidth = _currentSettings.EdgeWidth;
-        _edgePaint.IsAntialias = _useAntiAlias;
+        using var edgePaint = CreateStandardPaint(SKColors.White.WithAlpha((byte)(alpha * 0.8f)));
+        edgePaint.Style = SKPaintStyle.Stroke;
+        edgePaint.StrokeWidth = _currentSettings.EdgeWidth;
 
         if (_currentSettings.EdgeBlur > 0)
         {
-            _edgePaint.MaskFilter = SKMaskFilter.CreateBlur(
+            edgePaint.MaskFilter = SKMaskFilter.CreateBlur(
                 SKBlurStyle.Normal,
                 _currentSettings.EdgeBlur);
         }
 
-        canvas.DrawPath(path, _edgePaint);
+        canvas.DrawPath(path, edgePaint);
     }
 
-    private static SKPath CreateFacePath(
+    private static void CreateFacePath(
+        SKPath path,
         SKPoint[] projected,
         Face face)
     {
-        var path = new SKPath();
         path.MoveTo(projected[face.V1]);
         path.LineTo(projected[face.V2]);
         path.LineTo(projected[face.V3]);
         path.LineTo(projected[face.V4]);
         path.Close();
-        return path;
-    }
-
-    private void UpdatePaintSettings()
-    {
-        foreach (var paint in _facePaints)
-        {
-            paint.IsAntialias = _useAntiAlias;
-        }
-        _edgePaint.IsAntialias = _useAntiAlias;
     }
 
     private static Vertex[] CreateVertices() =>
@@ -337,11 +303,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
     protected override void OnDispose()
     {
-        foreach (var paint in _facePaints)
-        {
-            paint?.Dispose();
-        }
-        _edgePaint?.Dispose();
         base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }

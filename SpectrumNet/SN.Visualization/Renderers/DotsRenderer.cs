@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
-using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.DotsRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -177,10 +177,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             0.5f,
             2.0f);
 
-        float deltaTime = Clamp(
-            (float)(DateTime.Now - _lastUpdateTime).TotalSeconds,
-            0.001f,
-            0.1f);
+        float deltaTime = _animationTimer.DeltaTime;
 
         for (int i = 0; i < _dots.Length; i++)
         {
@@ -281,7 +278,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             var dot = dots[i];
             if (dot.Radius < 0.5f) continue;
 
-            if (_useAdvancedEffects && _currentSettings.UseGlow)
+            if (UseAdvancedEffects && _currentSettings.UseGlow)
             {
                 using var glowPaint = CreateEffectPaint(
                     dot.Color.WithAlpha((byte)(_currentSettings.GlowAlpha * alpha)),
@@ -308,10 +305,10 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Color = color;
         paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
 
         if (createBlur && blurRadius > 0)
         {

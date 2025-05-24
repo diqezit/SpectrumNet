@@ -4,33 +4,37 @@ using Timer = System.Threading.Timer;
 
 namespace SpectrumNet.SN.Visualization.Abstract;
 
-public abstract class BaseSpectrumRenderer : SpectrumProcessor, ISpectrumRenderer
+public abstract class BaseSpectrumRenderer : ISpectrumRenderer
 {
     private const string LogPrefix = nameof(BaseSpectrumRenderer);
 
-    private const int
+    private const int 
         CLEANUP_INTERVAL_MS = 30000,
         HIGH_MEMORY_THRESHOLD_MB = 500;
 
-    protected bool
-        _isInitialized,
-        _isOverlayActive,
-        _overlayStateChanged,
-        _needsRedraw;
+    protected const float MIN_MAGNITUDE_THRESHOLD = 0.01f;
 
-    protected bool _useAntiAlias = true;
-    protected bool _useAdvancedEffects = true;
-    protected SKSamplingOptions _samplingOptions = new(
-        SKFilterMode.Linear,
-        SKMipmapMode.Linear);
-
-    protected RenderQuality _quality;
-    protected volatile bool _isApplyingQuality;
+    protected readonly ISmartLogger _logger = Instance;
+    protected readonly ISpectrumProcessingCoordinator _processingCoordinator;
+    protected readonly IQualityManager _qualityManager;
+    protected readonly IOverlayStateManager _overlayStateManager;
 
     private readonly Timer _cleanupTimer;
 
-    protected BaseSpectrumRenderer() : base()
+    protected bool 
+        _isInitialized,
+        _needsRedraw,
+        _disposed;
+
+    protected BaseSpectrumRenderer(
+        ISpectrumProcessingCoordinator? processingCoordinator = null,
+        IQualityManager? qualityManager = null,
+        IOverlayStateManager? overlayStateManager = null)
     {
+        _processingCoordinator = processingCoordinator ?? new SpectrumProcessingCoordinator();
+        _qualityManager = qualityManager ?? new QualityManager();
+        _overlayStateManager = overlayStateManager ?? new OverlayStateManager();
+
         _cleanupTimer = new Timer(
             PerformPeriodicCleanup,
             null,
@@ -39,32 +43,24 @@ public abstract class BaseSpectrumRenderer : SpectrumProcessor, ISpectrumRendere
         );
     }
 
+    public RenderQuality Quality => _qualityManager.Quality;
+    public bool IsOverlayActive => _overlayStateManager.IsOverlayActive;
+    protected bool UseAntiAlias => _qualityManager.UseAntiAlias;
+    protected bool UseAdvancedEffects => _qualityManager.UseAdvancedEffects;
+    protected SKSamplingOptions SamplingOptions => _qualityManager.SamplingOptions;
+
     public virtual void SetOverlayTransparency(float level)
     {
-        // переопределяем в наследниках
+        _overlayStateManager.SetOverlayTransparency(level);
+        _needsRedraw = true;
     }
 
-    public RenderQuality Quality
+    public virtual void Initialize()
     {
-        get => _quality;
-        set
-        {
-            if (_quality == value)
-                return;
-
-            _quality = value;
-        }
-    }
-
-    public bool IsOverlayActive => _isOverlayActive;
-    protected bool UseAntiAlias => _useAntiAlias;
-    protected bool UseAdvancedEffects => _useAdvancedEffects;
-    protected SKSamplingOptions SamplingOptions => _samplingOptions;
-
-    public virtual void Initialize() =>
         _logger.Safe(() => HandleInitialize(),
                   GetType().Name,
                   "Failed to initialize renderer");
+    }
 
     protected virtual void HandleInitialize()
     {
@@ -79,33 +75,31 @@ public abstract class BaseSpectrumRenderer : SpectrumProcessor, ISpectrumRendere
 
     public virtual void Configure(
         bool isOverlayActive,
-        RenderQuality quality = RenderQuality.Medium) =>
+        RenderQuality quality = RenderQuality.Medium)
+    {
         _logger.Safe(() => HandleConfigure(isOverlayActive, quality),
                   GetType().Name,
                   "Failed to configure renderer");
+    }
 
     protected virtual void HandleConfigure(
         bool isOverlayActive,
         RenderQuality quality = RenderQuality.Medium)
     {
-        bool overlayChanged = _isOverlayActive != isOverlayActive;
-        bool qualityChanged = _quality != quality;
+        bool overlayChanged = _overlayStateManager.IsOverlayActive != isOverlayActive;
+        bool qualityChanged = _qualityManager.Quality != quality;
 
-        _isOverlayActive = isOverlayActive;
-        Quality = quality;
+        _overlayStateManager.SetOverlayActive(isOverlayActive);
+        _qualityManager.ApplyQuality(quality);
 
-        SetSmoothingFactor(isOverlayActive
-            ? OVERLAY_SMOOTHING_FACTOR
-            : DEFAULT_SMOOTHING_FACTOR);
+        _processingCoordinator.SetSmoothingFactor(isOverlayActive ? 0.5f : 0.3f);
 
         if (overlayChanged || qualityChanged)
         {
-            _logger.Log(LogLevel.Debug, GetType().Name, $"Configuration changed. New Quality: {Quality}");
+            _logger.Log(LogLevel.Debug, GetType().Name,
+                $"Configuration changed. New Quality: {quality}");
 
-            ApplyQualitySettings();
-            _overlayStateChanged = overlayChanged;
             _needsRedraw = true;
-
             OnConfigurationChanged();
         }
     }
@@ -122,65 +116,10 @@ public abstract class BaseSpectrumRenderer : SpectrumProcessor, ISpectrumRendere
         SKPaint? paint,
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo);
 
-    public virtual bool RequiresRedraw() => _needsRedraw || _overlayStateChanged || _isOverlayActive;
-
-    protected virtual void ApplyQualitySettings() =>
-        _logger.Safe(() => HandleApplyQualitySettings(),
-                  GetType().Name,
-                  "Failed to apply base quality settings");
-
-    protected virtual void HandleApplyQualitySettings()
-    {
-        if (_isApplyingQuality)
-            return;
-
-        try
-        {
-            _isApplyingQuality = true;
-
-            (_useAntiAlias, _useAdvancedEffects) = QualityBasedSettings();
-            _samplingOptions = QualityBasedSamplingOptions();
-
-            OnQualitySettingsApplied();
-        }
-        finally
-        {
-            _isApplyingQuality = false;
-        }
-    }
-
-    protected virtual void OnQualitySettingsApplied() { }
-
-    protected virtual (bool useAntiAlias, bool useAdvancedEffects) QualityBasedSettings() =>
-        _quality switch
-        {
-            RenderQuality.Low => (false, false),
-            RenderQuality.Medium => (true, true),
-            RenderQuality.High => (true, true),
-            _ => (true, true)
-        };
-
-    protected virtual SKSamplingOptions QualityBasedSamplingOptions() =>
-        _quality switch
-        {
-            RenderQuality.Low => new(SKFilterMode.Nearest, SKMipmapMode.None),
-            RenderQuality.Medium => new(SKFilterMode.Linear, SKMipmapMode.Linear),
-            RenderQuality.High => new(SKFilterMode.Linear, SKMipmapMode.Linear),
-            _ => new(SKFilterMode.Linear, SKMipmapMode.Linear)
-        };
-
-    protected bool QuickValidate(
-        SKCanvas? canvas,
-        float[]? spectrum,
-        SKImageInfo info,
-        SKPaint? paint) =>
-        _isInitialized
-        && canvas != null
-        && spectrum != null
-        && spectrum.Length > 0
-        && paint != null
-        && info.Width > 0
-        && info.Height > 0;
+    public virtual bool RequiresRedraw() =>
+        _needsRedraw ||
+        _overlayStateManager.StateChanged ||
+        _overlayStateManager.IsOverlayActive;
 
     protected bool ValidateRenderParameters(
         SKCanvas? canvas,
@@ -197,33 +136,13 @@ public abstract class BaseSpectrumRenderer : SpectrumProcessor, ISpectrumRendere
             return false;
         }
 
-        if (canvas == null)
+        if (canvas == null || spectrum == null || spectrum.Length == 0 || paint == null)
         {
-            _logger.Log(LogLevel.Error, GetType().Name, "Canvas is null");
             return false;
         }
 
-        if (spectrum == null || spectrum.Length == 0)
+        if (info.Width <= 0 || info.Height <= 0 || barCount <= 0)
         {
-            _logger.Log(LogLevel.Error, GetType().Name, "Spectrum is null or empty");
-            return false;
-        }
-
-        if (paint == null)
-        {
-            _logger.Log(LogLevel.Error, GetType().Name, "Paint is null");
-            return false;
-        }
-
-        if (info.Width <= 0 || info.Height <= 0)
-        {
-            _logger.Log(LogLevel.Error, GetType().Name, $"Invalid image dimensions: {info.Width}x{info.Height}");
-            return false;
-        }
-
-        if (barCount <= 0)
-        {
-            _logger.Log(LogLevel.Error, GetType().Name, "Bar count must be greater than zero");
             return false;
         }
 
@@ -265,24 +184,26 @@ public abstract class BaseSpectrumRenderer : SpectrumProcessor, ISpectrumRendere
         "Periodic cleanup error");
     }
 
-    protected virtual void CleanupUnusedResources()
-    {
-        // переопределяем в наследниках
-    }
+    protected virtual void CleanupUnusedResources() { }
 
-    public override void Dispose() =>
+    public virtual void Dispose()
+    {
         _logger.Safe(() => HandleDispose(),
                   GetType().Name,
                   "Error during base disposal");
+    }
 
-    protected override void HandleDispose()
+    protected virtual void HandleDispose()
     {
         if (!_disposed)
         {
             _cleanupTimer?.Dispose();
+            _processingCoordinator?.Dispose();
             OnDispose();
-            base.HandleDispose();
+            _disposed = true;
             _logger.Log(LogLevel.Debug, GetType().Name, "Disposed");
         }
     }
+
+    protected virtual void OnDispose() { }
 }

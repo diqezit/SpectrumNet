@@ -93,8 +93,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        base.OnInitialize();
-        int bufferHeight = _isOverlayActive ?
+        int bufferHeight = IsOverlayActive ?
             OVERLAY_BUFFER_HEIGHT : DEFAULT_BUFFER_HEIGHT;
         InitializeSpectrogramBuffer(bufferHeight, DEFAULT_SPECTRUM_WIDTH);
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
@@ -110,10 +109,10 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     {
         if (_spectrogramBuffer != null)
         {
-            ResizeBufferForOverlayMode(_isOverlayActive);
+            ResizeBufferForOverlayMode(IsOverlayActive);
         }
         _logger.Log(LogLevel.Information, LogPrefix,
-            $"Configuration changed. Quality: {Quality}, Overlay: {_isOverlayActive}");
+            $"Configuration changed. Quality: {Quality}, Overlay: {IsOverlayActive}");
     }
 
     protected override void RenderEffect(
@@ -142,8 +141,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     {
         bool parametersChanged = CheckParametersChanged(barWidth, barSpacing, barCount);
         UpdateState(spectrum, parametersChanged, barCount, barWidth);
-        RenderWithOverlay(canvas, () =>
-            RenderFrame(canvas, info, barWidth, barSpacing, barCount));
+        RenderFrame(canvas, info, barWidth, barSpacing, barCount);
     }
 
     private bool CheckParametersChanged(float barWidth, float barSpacing, int barCount)
@@ -228,7 +226,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
                           spectrumWidth, bufferHeight);
         DrawBitmapToCanvas(canvas, info, barWidth, barSpacing, barCount);
 
-        if (barWidth > ZOOM_THRESHOLD && _useAdvancedEffects)
+        if (barWidth > ZOOM_THRESHOLD && UseAdvancedEffects)
         {
             SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
             ApplyZoomEnhancement(canvas, destRect, barWidth, barCount, barSpacing);
@@ -754,17 +752,17 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     {
         SKRect destRect = CalculateDestRect(info, barWidth, barSpacing, barCount);
 
-        if (canvas.QuickReject(destRect))
-            return;
-
-        using var renderPaint = CreatePaint(
-            SKColors.White,
-            SKPaintStyle.Fill,
-            0
-        );
-
-        canvas.Clear(SKColors.Black);
-        canvas.DrawBitmap(_waterfallBitmap!, destRect, renderPaint);
+        if (IsRenderAreaVisible(canvas, destRect.Left, destRect.Top, destRect.Width, destRect.Height))
+        {
+            using var renderPaint = new SKPaint
+            {
+                Color = SKColors.White,
+                Style = SKPaintStyle.Fill,
+                IsAntialias = UseAntiAlias
+            };
+            canvas.Clear(SKColors.Black);
+            canvas.DrawBitmap(_waterfallBitmap!, destRect, renderPaint);
+        }
     }
 
     private static SKRect CalculateDestRect(
@@ -809,11 +807,13 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         int barCount,
         float barSpacing)
     {
-        using var paint = CreatePaint(
-            new SKColor(255, 255, 255, GRID_LINE_ALPHA),
-            SKPaintStyle.Stroke,
-            _currentSettings.GridLineWidth
-        );
+        using var paint = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, GRID_LINE_ALPHA),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = _currentSettings.GridLineWidth,
+            IsAntialias = UseAntiAlias
+        };
 
         int gridStep = Max(1, barCount / GRID_DIVISIONS);
         using var path = new SKPath();
@@ -846,11 +846,12 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         float barSpacing)
     {
         using var font = new SKFont { Size = _currentSettings.MarkerFontSize };
-        using var textPaint = CreatePaint(
-            SKColors.White,
-            SKPaintStyle.Fill,
-            0
-        );
+        using var textPaint = new SKPaint
+        {
+            Color = SKColors.White,
+            Style = SKPaintStyle.Fill,
+            IsAntialias = UseAntiAlias
+        };
 
         int gridStep = Max(1, barCount / GRID_DIVISIONS);
         DrawMarkerLabels(canvas, destRect, barWidth, barSpacing,
@@ -875,19 +876,6 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
             canvas.DrawText(marker, x - textWidth / 2,
                           destRect.Bottom - 5, font, textPaint);
         }
-    }
-
-    private SKPaint CreatePaint(
-        SKColor color,
-        SKPaintStyle style,
-        float strokeWidth)
-    {
-        var paint = _paintPool.Get();
-        paint.Color = color;
-        paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
-        paint.StrokeWidth = strokeWidth;
-        return paint;
     }
 
     private static int CalculateOptimalSpectrumWidth(int barCount)
@@ -972,31 +960,25 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         return new SKColor(255, (byte)(255 - t * 255), 0, 255);
     }
 
-    public override bool RequiresRedraw()
+    protected override void CleanupUnusedResources()
     {
-        return _overlayStateChanged ||
-               _overlayStateChangeRequested ||
-               _isOverlayActive;
-    }
+        if (_spectrumPool != null)
+        {
+            var memoryMb = GC.GetTotalMemory(false) / 1024 / 1024;
 
-    protected override void OnInvalidateCachedResources()
-    {
-        base.OnInvalidateCachedResources();
-        _waterfallBitmap?.Dispose();
-        _waterfallBitmap = null;
-        _needsBufferResize = true;
-        _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
+            if (memoryMb > 300)
+                _spectrumPool.Dispose();
+        }
     }
 
     protected override void OnDispose()
     {
-        _renderSemaphore.Dispose();
+        _renderSemaphore?.Dispose();
         _waterfallBitmap?.Dispose();
         _waterfallBitmap = null;
         _spectrogramBuffer = null;
         _currentSpectrum = null;
-        _spectrumPool.Dispose();
-        base.OnDispose();
+        _spectrumPool?.Dispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

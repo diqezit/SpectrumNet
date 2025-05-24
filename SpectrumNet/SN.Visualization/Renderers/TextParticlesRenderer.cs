@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
-using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.TextParticlesRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -109,7 +109,6 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        base.OnInitialize();
         InitializeComponents();
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
@@ -147,6 +146,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
             _velocityMultiplier,
             this
         );
+        _spectrumBuffer = ArrayPool<float>.Shared.Rent(SPECTRUM_BUFFER_SIZE);
     }
 
     private void InitializeFont()
@@ -154,7 +154,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         _font = new SKFont
         {
             Size = BASE_TEXT_SIZE,
-            Edging = _useAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias
+            Edging = _currentSettings.UseAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias
         };
     }
 
@@ -185,21 +185,16 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _useAntiAlias = _currentSettings.UseAntiAlias;
-        _samplingOptions = new SKSamplingOptions(
-            _currentSettings.FilterMode,
-            _currentSettings.MipmapMode
-        );
-
         UpdateFontQuality();
         InvalidateCachedBackground();
+        RequestRedraw();
         _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
 
     private void UpdateFontQuality()
     {
         if (_font != null)
-            _font.Edging = _useAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias;
+            _font.Edging = _currentSettings.UseAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias;
     }
 
     protected override void RenderEffect(
@@ -211,11 +206,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
-            () => RenderParticleEffect(canvas, spectrum, info, barWidth, barCount, paint),
-            LogPrefix,
-            "Error during rendering"
-        );
+        RenderParticleEffect(canvas, spectrum, info, barWidth, barCount, paint);
     }
 
     private void RenderParticleEffect(
@@ -255,8 +246,8 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         _renderCache.StepSize = barCount > 0 ? info.Width / (float)barCount : 0f;
 
         float overlayHeight = info.Height * _settings.OverlayHeightMultiplier;
-        _renderCache.OverlayHeight = _isOverlayActive ? overlayHeight : 0f;
-        _renderCache.UpperBound = _isOverlayActive ? info.Height - overlayHeight : 0f;
+        _renderCache.OverlayHeight = IsOverlayActive ? overlayHeight : 0f;
+        _renderCache.UpperBound = IsOverlayActive ? info.Height - overlayHeight : 0f;
         _renderCache.LowerBound = info.Height;
         _renderCache.BarCount = barCount;
     }
@@ -282,8 +273,8 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     {
         if (_particleBuffer == null || spectrum.Length == 0) return;
 
-        float threshold = _isOverlayActive ? _spawnThresholdOverlay : _spawnThresholdNormal;
-        float baseSize = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
+        float threshold = IsOverlayActive ? _spawnThresholdOverlay : _spawnThresholdNormal;
+        float baseSize = IsOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
 
         for (int i = 0; i < spectrum.Length; i++)
         {
@@ -349,7 +340,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
 
     private void DrawCachedBackground(SKCanvas canvas, SKImageInfo info)
     {
-        if (!_useAdvancedEffects || Quality == RenderQuality.Low) return;
+        if (!UseAdvancedEffects || Quality == RenderQuality.Low) return;
 
         if (_cachedBackground == null)
             CreateCachedBackground(info);
@@ -374,7 +365,9 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         var particles = _particleBuffer.GetActiveParticles();
         if (particles.Count == 0) return;
 
-        using var particlePaint = CreateParticlePaint(paint);
+        using var particlePaint = CreateStandardPaint(paint.Color);
+        particlePaint.IsAntialias = _currentSettings.UseAntiAlias;
+
         var center = new Vector2(_renderCache.Width / 2f, _renderCache.Height / 2f);
 
         foreach (var particle in particles)
@@ -412,7 +405,9 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         var particles = _particleBuffer.GetActiveParticles();
         if (particles.Count == 0) return;
 
-        using var particlePaint = CreateParticlePaint(paint);
+        using var particlePaint = CreateStandardPaint(paint.Color);
+        particlePaint.IsAntialias = _currentSettings.UseAntiAlias;
+
         var center = new Vector2(_renderCache.Width / 2f, _renderCache.Height / 2f);
         var batches = new Dictionary<char, List<(Vector2 position, byte alpha)>>();
 
@@ -475,14 +470,6 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         return (screenPos, alpha);
     }
 
-    private SKPaint CreateParticlePaint(SKPaint basePaint) =>
-        new()
-        {
-            Style = SKPaintStyle.Fill,
-            IsAntialias = _useAntiAlias,
-            Color = basePaint.Color
-        };
-
     private bool ShouldRenderParticle(Particle p)
     {
         if (!p.IsActive) return false;
@@ -501,14 +488,15 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     {
         UpdateParticleSizes();
         InvalidateCachedBackground();
+        RequestRedraw();
     }
 
     private void UpdateParticleSizes()
     {
         if (_particleBuffer == null) return;
 
-        float newSize = _isOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
-        float oldSize = _isOverlayActive ? _particleSizeNormal : _particleSizeOverlay;
+        float newSize = IsOverlayActive ? _particleSizeOverlay : _particleSizeNormal;
+        float oldSize = IsOverlayActive ? _particleSizeNormal : _particleSizeOverlay;
         float sizeRatio = newSize / oldSize;
 
         lock (_particleLock)
@@ -532,30 +520,49 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         _cachedBackground = null;
     }
 
-    protected override void OnInvalidateCachedResources()
+    protected override void CleanupUnusedResources()
     {
-        base.OnInvalidateCachedResources();
-        InvalidateCachedBackground();
+        if (_particleBuffer != null)
+        {
+            var activeCount = _particleBuffer.GetActiveParticles().Count(p => p.IsActive);
+            if (activeCount == 0)
+            {
+                _particleBuffer.Clear();
+            }
+        }
+
+        if (!UseAdvancedEffects && _cachedBackground != null)
+        {
+            InvalidateCachedBackground();
+        }
     }
 
     protected override void OnDispose()
     {
         ReleaseArrayPools();
         DisposeResources();
-        base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 
     private void ReleaseArrayPools()
     {
         if (_spectrumBuffer != null)
+        {
             ArrayPool<float>.Shared.Return(_spectrumBuffer);
+            _spectrumBuffer = null;
+        }
 
         if (_velocityLookup != null)
+        {
             ArrayPool<float>.Shared.Return(_velocityLookup);
+            _velocityLookup = null;
+        }
 
         if (_alphaCurve != null)
+        {
             ArrayPool<float>.Shared.Return(_alphaCurve);
+            _alphaCurve = null;
+        }
     }
 
     private void DisposeResources()
@@ -564,9 +571,6 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         _font?.Dispose();
         _cachedBackground?.Dispose();
         _particleBuffer = null;
-        _spectrumBuffer = null;
-        _velocityLookup = null;
-        _alphaCurve = null;
         _font = null;
         _cachedBackground = null;
     }
@@ -593,12 +597,19 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         public void Add(Particle particle)
         {
             if (_particles.Count >= _capacity)
-                _capacity += PARTICLE_BUFFER_GROWTH;
+            {
+                _particles.RemoveAll(p => !p.IsActive);
+
+                if (_particles.Count >= _capacity)
+                    _capacity += PARTICLE_BUFFER_GROWTH;
+            }
 
             _particles.Add(particle);
         }
 
         public List<Particle> GetActiveParticles() => _particles;
+
+        public void Clear() => _particles.Clear();
 
         public void Update(float upperBound, float lowerBound, float alphaDecayExponent)
         {
@@ -672,7 +683,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
             if (lifeRatio >= 1f) return 1f;
 
             var alphaCurve = renderer._alphaCurve;
-            if (alphaCurve != null)
+            if (alphaCurve != null && alphaCurve.Length > 0)
             {
                 int index = (int)(lifeRatio * 100);
                 if (index < alphaCurve.Length)

@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
-using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.BarsRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -26,7 +26,11 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
             ALPHA_MULTIPLIER = 1.5f,
             HIGH_INTENSITY_THRESHOLD = 0.6f;
 
-        public const int BATCH_SIZE = 32;
+        public const int
+            BATCH_SIZE = 32,
+            MAX_BARS_LOW = 200,
+            MAX_BARS_MEDIUM = 100,
+            MAX_BARS_HIGH = 100;
 
         public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
@@ -75,6 +79,14 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     }
 
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
+
+    protected override int GetMaxBarsForQuality() => Quality switch
+    {
+        RenderQuality.Low => MAX_BARS_LOW,
+        RenderQuality.Medium => MAX_BARS_MEDIUM,
+        RenderQuality.High => MAX_BARS_HIGH,
+        _ => MAX_BARS_MEDIUM
+    };
 
     protected override void OnInitialize()
     {
@@ -168,7 +180,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         byte alpha = (byte)MathF.Min(
             magnitude * _currentSettings.AlphaMultiplier * 255f, 255f);
 
-        if (_useAdvancedEffects && _currentSettings.UseGlow &&
+        if (UseAdvancedEffects && _currentSettings.UseGlow &&
             magnitude > _currentSettings.IntensityThreshold)
         {
             using var glowPaint = CreateEffectPaint(
@@ -184,7 +196,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
             basePaint.Color.WithAlpha(alpha), SKPaintStyle.Fill);
         canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, barPaint);
 
-        if (_useAdvancedEffects && _currentSettings.UseEdge &&
+        if (UseAdvancedEffects && _currentSettings.UseEdge &&
             _currentSettings.EdgeStrokeWidth > 0)
         {
             using var edgePaint = CreateEffectPaint(
@@ -205,10 +217,10 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Color = color;
         paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
 
         if (style == SKPaintStyle.Stroke)
         {

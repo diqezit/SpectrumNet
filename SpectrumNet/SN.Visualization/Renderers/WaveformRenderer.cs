@@ -78,22 +78,20 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
+        _processingCoordinator.SetSmoothingFactor(SMOOTHING_FACTOR_NORMAL);
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        _smoothingFactor = _isOverlayActive
+        _processingCoordinator.SetSmoothingFactor(IsOverlayActive
             ? SMOOTHING_FACTOR_OVERLAY
-            : SMOOTHING_FACTOR_NORMAL;
+            : SMOOTHING_FACTOR_NORMAL);
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _useAntiAlias = _currentSettings.UseAntiAlias;
-        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
     }
 
     protected override void RenderEffect(
@@ -248,7 +246,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         canvas.DrawPath(_topPath, wavePaint);
         canvas.DrawPath(_bottomPath, wavePaint);
 
-        if (_useAdvancedEffects && HasHighAmplitude(spectrum))
+        if (UseAdvancedEffects && HasHighAmplitude(spectrum))
         {
             RenderAdvancedEffects(canvas, spectrum, info, basePaint);
         }
@@ -278,12 +276,12 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         SKPaint basePaint,
         int spectrumLength)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeWidth = MathF.Max(
             MIN_STROKE_WIDTH,
             STROKE_WIDTH_DIVISOR / spectrumLength);
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         paint.StrokeCap = SKStrokeCap.Round;
         paint.StrokeJoin = SKStrokeJoin.Round;
         paint.Color = basePaint.Color;
@@ -292,11 +290,11 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateFillPaint(SKPaint basePaint)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Style = SKPaintStyle.Fill;
         paint.Color = basePaint.Color.WithAlpha(
             (byte)(255 * FILL_OPACITY));
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         return paint;
     }
 
@@ -304,14 +302,14 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         SKPaint basePaint,
         int spectrumLength)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeWidth = MathF.Max(
             MIN_STROKE_WIDTH,
             STROKE_WIDTH_DIVISOR / spectrumLength) * GLOW_STROKE_MULTIPLIER;
         paint.Color = basePaint.Color.WithAlpha(
             (byte)(255 * GLOW_INTENSITY));
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         paint.MaskFilter = SKMaskFilter.CreateBlur(
             SKBlurStyle.Normal,
             _currentSettings.GlowRadius);
@@ -320,14 +318,14 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateHighlightPaint(int spectrumLength)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeWidth = MathF.Max(
             MIN_STROKE_WIDTH,
             STROKE_WIDTH_DIVISOR / spectrumLength) * HIGHLIGHT_STROKE_MULTIPLIER;
         paint.Color = SKColors.White.WithAlpha(
             (byte)(255 * HIGHLIGHT_ALPHA));
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         return paint;
     }
 
@@ -360,14 +358,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
                 canvas.DrawPoint(x, bottomY, highlightPaint);
             }
         }
-    }
-
-    protected override void OnInvalidateCachedResources()
-    {
-        base.OnInvalidateCachedResources();
-        _topPath.Reset();
-        _bottomPath.Reset();
-        _fillPath.Reset();
     }
 
     protected override void OnDispose()

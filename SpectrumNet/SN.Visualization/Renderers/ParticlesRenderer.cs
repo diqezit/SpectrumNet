@@ -305,21 +305,21 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
     protected override void OnConfigurationChanged()
     {
-        _smoothingFactor = _isOverlayActive ?
+        base.OnConfigurationChanged();
+        _processingCoordinator.SetSmoothingFactor(IsOverlayActive ?
             SMOOTHING_FACTOR_OVERLAY :
-            SMOOTHING_FACTOR_NORMAL;
+            SMOOTHING_FACTOR_NORMAL);
 
         InvalidateCachedPicture();
         _logger.Info(LogPrefix,
-            $"Configuration changed. New Quality: {Quality}, Overlay: {_isOverlayActive}");
+            $"Configuration changed. New Quality: {Quality}, Overlay: {IsOverlayActive}");
     }
 
     protected override void OnQualitySettingsApplied()
     {
+        base.OnQualitySettingsApplied();
+
         _currentSettings = QualityPresets[Quality];
-        _useAntiAlias = _currentSettings.UseAntiAlias;
-        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
-        _samplingOptions = _currentSettings.SamplingOptions;
         _sampleCount = _currentSettings.SampleCount;
 
         InvalidateCachedPicture();
@@ -375,7 +375,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         _renderCache.Height = info.Height;
         _renderCache.UpdateBounds(
             info.Height,
-            _isOverlayActive,
+            IsOverlayActive,
             _settings.OverlayHeightMultiplier);
         _renderCache.StepSize = barCount > 0 ? info.Width / barCount : 0f;
         _barWidth = barWidth;
@@ -469,11 +469,11 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     {
         if (_particleBuffer == null) return;
 
-        float threshold = _isOverlayActive ?
+        float threshold = IsOverlayActive ?
             _settings.SpawnThresholdOverlay :
             _settings.SpawnThresholdNormal;
 
-        float baseSize = _isOverlayActive ?
+        float baseSize = IsOverlayActive ?
             _settings.ParticleSizeOverlay :
             _settings.ParticleSizeNormal;
 
@@ -484,7 +484,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
         ScaleSpectrum(
             spectrum.AsSpan(0, safeLength),
-                        _spectrumBuffer.AsSpan(0, safeLength));
+            _spectrumBuffer.AsSpan(0, safeLength));
 
         float xStep = _renderCache.StepSize;
         var rnd = GetThreadLocalRandom();
@@ -579,7 +579,15 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
             if (particle.Y < upperBound || particle.Y > lowerBound) continue;
 
             paint.Color = originalColor.WithAlpha((byte)(particle.Alpha * 255));
-            canvas.DrawCircle(particle.X, particle.Y, particle.Size / 2, paint);
+
+            if (IsRenderAreaVisible(canvas,
+                particle.X - particle.Size / 2,
+                particle.Y - particle.Size / 2,
+                particle.Size,
+                particle.Size))
+            {
+                canvas.DrawCircle(particle.X, particle.Y, particle.Size / 2, paint);
+            }
         }
 
         paint.Color = originalColor;
@@ -624,11 +632,10 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
             dest[i] = source[(int)(i * scale)];
     }
 
-    protected override void OnInvalidateCachedResources()
+    protected override void CleanupUnusedResources()
     {
-        base.OnInvalidateCachedResources();
+        base.CleanupUnusedResources();
         InvalidateCachedPicture();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Cached resources invalidated");
     }
 
     protected override void OnDispose()

@@ -86,7 +86,6 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
 
     protected override void OnInitialize()
     {
-        base.OnInitialize();
         ResetState();
         InitializePaints();
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
@@ -95,8 +94,6 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _useAntiAlias = _currentSettings.UseAntialiasing;
-        _useAdvancedEffects = _currentSettings.UseAdvancedEffects;
         UpdatePaintsForQuality();
         _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
     }
@@ -137,6 +134,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         {
             _currentWidth = info.Width;
             _currentHeight = info.Height;
+            RequestRedraw();
         }
     }
 
@@ -178,7 +176,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             float meterHeight = info.Height * loudness;
             DrawLoudnessFill(canvas, info, loudness, meterHeight);
 
-            if (_useAdvancedEffects && _currentSettings.GlowIntensity > 0 &&
+            if (UseAdvancedEffects && _currentSettings.GlowIntensity > 0 &&
                 loudness > MEDIUM_LOUDNESS_THRESHOLD)
             {
                 DrawGlowEffect(canvas, info, loudness, meterHeight);
@@ -219,7 +217,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
             SKColors.Red.WithAlpha(alpha)
         };
 
-        float[] colorPositions = _useAdvancedEffects
+        float[] colorPositions = UseAdvancedEffects
             ? [0f, Clamp(loudness * _currentSettings.DynamicGradientFactor, 0.2f, 0.8f), 1.0f]
             : _defaultColorPositions;
 
@@ -271,8 +269,8 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         float rawLoudness = CalculateLoudness(spectrum.AsSpan());
 
         float effectiveSmoothingFactor = rawLoudness > _previousLoudness
-            ? (_isOverlayActive ? SMOOTHING_FACTOR_ATTACK_OVERLAY : SMOOTHING_FACTOR_ATTACK_NORMAL)
-            : (_isOverlayActive ? SMOOTHING_FACTOR_RELEASE_OVERLAY : SMOOTHING_FACTOR_RELEASE_NORMAL);
+            ? (IsOverlayActive ? SMOOTHING_FACTOR_ATTACK_OVERLAY : SMOOTHING_FACTOR_ATTACK_NORMAL)
+            : (IsOverlayActive ? SMOOTHING_FACTOR_RELEASE_OVERLAY : SMOOTHING_FACTOR_RELEASE_NORMAL);
 
         float smoothedLoudness = _previousLoudness +
             (rawLoudness - _previousLoudness) * effectiveSmoothingFactor;
@@ -289,7 +287,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
 
         float sum = 0f;
 
-        if (_useAdvancedEffects && spectrum.Length >= Vector<float>.Count)
+        if (UseAdvancedEffects && spectrum.Length >= Vector<float>.Count)
         {
             sum = CalculateLoudnessVectorized(spectrum);
         }
@@ -346,11 +344,11 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
     private void UpdatePaintsForQuality()
     {
         if (_fillPaint != null)
-            _fillPaint.IsAntialias = _useAntiAlias;
+            _fillPaint.IsAntialias = UseAntiAlias;
 
         if (_glowPaint != null)
         {
-            _glowPaint.IsAntialias = _useAntiAlias;
+            _glowPaint.IsAntialias = UseAntiAlias;
             _glowPaint.MaskFilter?.Dispose();
             _glowPaint.MaskFilter = _currentSettings.BlurSigma > 0
                 ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, _currentSettings.BlurSigma)
@@ -366,10 +364,10 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Color = color;
         paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         paint.StrokeWidth = strokeWidth;
         paint.StrokeCap = strokeCap;
 
@@ -381,25 +379,34 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         return paint;
     }
 
+    protected override void CleanupUnusedResources()
+    {
+        if (_fillPaint?.Shader != null)
+        {
+            _fillPaint.Shader.Dispose();
+            _fillPaint.Shader = null;
+        }
+    }
+
     protected override void OnDispose()
     {
         _loudnessSemaphore?.Dispose();
 
         if (_fillPaint != null)
         {
-            _paintPool.Return(_fillPaint);
+            _fillPaint.Shader?.Dispose();
+            _resourceManager.ReturnPaint(_fillPaint);
             _fillPaint = null;
         }
 
         if (_glowPaint != null)
         {
             _glowPaint.MaskFilter?.Dispose();
-            _paintPool.Return(_glowPaint);
+            _resourceManager.ReturnPaint(_glowPaint);
             _glowPaint = null;
         }
 
         _cachedLoudness = null;
-        base.OnDispose();
         _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
-using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.HackerTextRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -9,7 +9,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 {
     private const string LogPrefix = nameof(HackerTextRenderer);
 
-    private static readonly Lazy<HackerTextRenderer> _instance =
+    private static readonly Lazy<HackerTextRenderer> _instance = 
         new(() => new HackerTextRenderer());
 
     private HackerTextRenderer() { }
@@ -20,26 +20,25 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 
     public static class Constants
     {
-        public const string STATIC_TEXT = "Haker2550";
-
+        public const string STATIC_TEXT = "HAKER2550";
         public const float
-            BASE_TEXT_SIZE = 64f,
+            BASE_TEXT_SIZE = 96f,
             TEXT_Y_POSITION_RATIO = 0.5f,
             DEFAULT_BAR_COUNT = 100f,
-            TEXT_SIZE_BAR_COUNT_SCALE = 0.2f,
-            MIN_TEXT_SIZE_RATIO = 0.5f,
-            MAX_TEXT_SIZE_RATIO = 3.0f,
+            TEXT_SIZE_BAR_COUNT_SCALE = 0.3f,
+            MIN_TEXT_SIZE_RATIO = 0.6f,
+            MAX_TEXT_SIZE_RATIO = 3.5f,
             BASE_EXTRUSION_SCALE_FACTOR = 0.5f,
             JUMP_STRENGTH_MULTIPLIER = 80f,
             RETURN_FORCE_FACTOR = 0.1f,
             DAMPING_FACTOR = 0.85f,
             MIN_SPECTRUM_FOR_JUMP = 0.02f,
             LETTER_MAGNITUDE_SMOOTHING_FACTOR = 0.6f,
-            TARGET_FPS_FOR_PHYSICS_SCALING = 60f,
-            MAX_DELTA_TIME = 0.1f,
-            MIN_DELTA_TIME = 0f,
+            TEXT_SIZE_SMOOTHING_FACTOR = 0.08f,
             BASE_EXTRUSION_OFFSET_X = 1.0f,
-            BASE_EXTRUSION_OFFSET_Y = 1.0f;
+            BASE_EXTRUSION_OFFSET_Y = 1.0f,
+            MIN_DELTA_TIME = 0f,
+            TARGET_FPS_FOR_PHYSICS_SCALING = 60f;
 
         public const int EXTRUSION_LAYERS = 5;
 
@@ -53,28 +52,28 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
             [RenderQuality.Low] = new(
-                JumpStrengthMultiplier: JUMP_STRENGTH_MULTIPLIER * 0.7f,
-                DampingFactor: DAMPING_FACTOR * 1.05f,
-                ReturnForceFactor: RETURN_FORCE_FACTOR * 0.8f,
-                ExtrusionLayers: 2,
-                TextScaleFactor: 0.5f,
-                ExtrusionScaleFactor: 0.7f
+                JUMP_STRENGTH_MULTIPLIER * 0.7f,
+                DAMPING_FACTOR * 1.05f,
+                RETURN_FORCE_FACTOR * 0.8f,
+                2,
+                0.5f,
+                0.7f
             ),
             [RenderQuality.Medium] = new(
-                JumpStrengthMultiplier: JUMP_STRENGTH_MULTIPLIER,
-                DampingFactor: DAMPING_FACTOR,
-                ReturnForceFactor: RETURN_FORCE_FACTOR,
-                ExtrusionLayers: EXTRUSION_LAYERS,
-                TextScaleFactor: 1.0f,
-                ExtrusionScaleFactor: 1.0f
+                JUMP_STRENGTH_MULTIPLIER,
+                DAMPING_FACTOR,
+                RETURN_FORCE_FACTOR,
+                EXTRUSION_LAYERS,
+                1.0f,
+                1.0f
             ),
             [RenderQuality.High] = new(
-                JumpStrengthMultiplier: JUMP_STRENGTH_MULTIPLIER * 1.3f,
-                DampingFactor: DAMPING_FACTOR * 0.95f,
-                ReturnForceFactor: RETURN_FORCE_FACTOR * 1.2f,
-                ExtrusionLayers: EXTRUSION_LAYERS + 2,
-                TextScaleFactor: 2.0f,
-                ExtrusionScaleFactor: 1.3f
+                JUMP_STRENGTH_MULTIPLIER * 1.3f,
+                DAMPING_FACTOR * 0.95f,
+                RETURN_FORCE_FACTOR * 1.2f,
+                EXTRUSION_LAYERS + 2,
+                2.0f,
+                1.3f
             )
         };
 
@@ -88,17 +87,26 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         );
     }
 
-    private DateTime _lastFrameTimeForEffect = DateTime.UtcNow;
     private SKFont? _font;
     private readonly List<HackerLetter> _letters = [];
     private bool _staticTextInitialized;
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
     private float _currentExtrusionOffsetX;
     private float _currentExtrusionOffsetY;
+    private float _smoothedTextSize = BASE_TEXT_SIZE;
+    private float _lastBarCount;
+    private float _barCountFactor;
+    private SKPaint? _reusableExtrusionPaint;
+    private SKPaint? _reusableFacePaint;
 
     private struct HackerLetter
     {
-        public float X, BaseY, CurrentY, VelocityY, SmoothedMagnitude, CharWidth;
+        public float X;
+        public float BaseY;
+        public float CurrentY;
+        public float VelocityY;
+        public float SmoothedMagnitude;
+        public float CharWidth;
         public char Character;
         public SKPath? Path;
     }
@@ -107,24 +115,46 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeFont();
-        _lastFrameTimeForEffect = DateTime.UtcNow;
+        InitializeReusablePaints();
         _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     private void InitializeFont()
     {
-        _font = new()
+        _font = new SKFont
         {
             Size = BASE_TEXT_SIZE,
-            Edging = _useAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias
+            Edging = UseAntiAlias ? SKFontEdging.SubpixelAntialias : SKFontEdging.Alias
         };
+        _smoothedTextSize = BASE_TEXT_SIZE;
+    }
+
+    private void InitializeReusablePaints()
+    {
+        _reusableExtrusionPaint = _resourceManager.GetPaint();
+        _reusableExtrusionPaint.Style = SKPaintStyle.Fill;
+        _reusableExtrusionPaint.IsAntialias = UseAntiAlias;
+
+        _reusableFacePaint = _resourceManager.GetPaint();
+        _reusableFacePaint.Style = SKPaintStyle.Fill;
+        _reusableFacePaint.IsAntialias = UseAntiAlias;
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
         InvalidateLetterPaths();
+        UpdatePaintSettings();
         _staticTextInitialized = false;
+    }
+
+    private void UpdatePaintSettings()
+    {
+        if (_reusableExtrusionPaint != null)
+            _reusableExtrusionPaint.IsAntialias = UseAntiAlias;
+
+        if (_reusableFacePaint != null)
+            _reusableFacePaint.IsAntialias = UseAntiAlias;
     }
 
     private void InvalidateLetterPaths()
@@ -132,8 +162,11 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         for (int i = 0; i < _letters.Count; i++)
         {
             var letter = _letters[i];
-            letter.Path?.Dispose();
-            letter.Path = null;
+            if (letter.Path != null)
+            {
+                _resourceManager.ReturnPath(letter.Path);
+                letter.Path = null;
+            }
             _letters[i] = letter;
         }
     }
@@ -147,276 +180,364 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        ApplyBarParameters(barCount, barWidth, barSpacing, info, spectrum);
+        if (canvas == null || spectrum == null || paint == null)
+            return;
+
+        ApplyRenderParameters(barCount, barWidth, barSpacing, spectrum);
 
         if (!_staticTextInitialized)
-        {
             InitializeStaticTextLayout(info);
-            _lastFrameTimeForEffect = DateTime.UtcNow;
-        }
 
         if (_staticTextInitialized)
         {
-            DateTime now = DateTime.UtcNow;
-            float deltaTime = (float)(now - _lastFrameTimeForEffect).TotalSeconds;
-            _lastFrameTimeForEffect = now;
-            deltaTime = Clamp(deltaTime, MIN_DELTA_TIME, MAX_DELTA_TIME);
-
-            UpdateLetterPhysics(spectrum, info, barCount, deltaTime);
+            UpdateLetterPhysics(spectrum, info, barCount, _animationTimer.DeltaTime);
             DrawLetters3D(canvas, paint.Color);
         }
     }
 
-    private void ApplyBarParameters(
+    private void ApplyRenderParameters(
         int barCount,
         float barWidth,
         float barSpacing,
-        SKImageInfo info,
         float[] spectrum)
     {
-        if (_font == null) InitializeFont();
-
-        float averageMagnitude = CalculateAverageMagnitude(spectrum) * SensitivityScale;
-        float normalizedBarFactor = barCount / DEFAULT_BAR_COUNT - 1f;
-
-        float targetSizeFromBars = BASE_TEXT_SIZE *
-            (1f + normalizedBarFactor * _currentSettings.TextScaleFactor);
-        float targetSizeFromSpectrum = BASE_TEXT_SIZE *
-            (1f + averageMagnitude * TEXT_SIZE_BAR_COUNT_SCALE);
-        float targetTextSize = MathF.Max(targetSizeFromBars, targetSizeFromSpectrum);
-
-        float minAllowed = BASE_TEXT_SIZE * MIN_TEXT_SIZE_RATIO;
-        float maxAllowed = BASE_TEXT_SIZE * MAX_TEXT_SIZE_RATIO;
-        float newSize = Clamp(targetTextSize, minAllowed, maxAllowed);
-
-        if (MathF.Abs(newSize - _font!.Size) > 0.1f)
+        if (_font == null)
         {
-            _font.Size = newSize;
-            _staticTextInitialized = false;
+            InitializeFont();
+            if (_font == null) return;
         }
 
-        _currentExtrusionOffsetX = Clamp(
-            barWidth * BASE_EXTRUSION_SCALE_FACTOR * _currentSettings.ExtrusionScaleFactor,
-            -2f, 2f);
-        _currentExtrusionOffsetY = Clamp(
-            barSpacing * BASE_EXTRUSION_SCALE_FACTOR * _currentSettings.ExtrusionScaleFactor,
-            -2f, 2f);
+        UpdateBarCountFactor(barCount);
+        UpdateTextSize(spectrum);
+        UpdateExtrusionOffsets(barWidth, barSpacing);
     }
+
+    private void UpdateBarCountFactor(int barCount)
+    {
+        if (_lastBarCount != barCount)
+        {
+            _lastBarCount = barCount;
+            float rawFactor = Log10(MathF.Max(1, barCount) / DEFAULT_BAR_COUNT + 0.9f) * 0.5f;
+            _barCountFactor = Lerp(_barCountFactor, rawFactor, TEXT_SIZE_SMOOTHING_FACTOR);
+        }
+    }
+
+    private void UpdateTextSize(float[] spectrum)
+    {
+        float avgMagnitude = CalculateAverageMagnitude(spectrum) * SensitivityScale;
+        float sizeFromBars = CalculateBarBasedTextSize();
+        float sizeFromSpectrum = CalculateSpectrumBasedTextSize(avgMagnitude);
+        float targetSize = MathF.Max(sizeFromBars, sizeFromSpectrum);
+
+        ApplySmoothTextSizeTransition(targetSize);
+    }
+
+    private float CalculateBarBasedTextSize() =>
+        BASE_TEXT_SIZE * (1f + _barCountFactor * _currentSettings.TextScaleFactor);
+
+    private static float CalculateSpectrumBasedTextSize(float magnitude) =>
+        BASE_TEXT_SIZE * (1f + Pow(magnitude, 0.8f) * TEXT_SIZE_BAR_COUNT_SCALE);
+
+    private void ApplySmoothTextSizeTransition(float targetSize)
+    {
+        float minSize = BASE_TEXT_SIZE * MIN_TEXT_SIZE_RATIO;
+        float maxSize = BASE_TEXT_SIZE * MAX_TEXT_SIZE_RATIO;
+        targetSize = Clamp(targetSize, minSize, maxSize);
+
+        _smoothedTextSize = Lerp(_smoothedTextSize, targetSize, TEXT_SIZE_SMOOTHING_FACTOR);
+
+        if (MathF.Abs(_smoothedTextSize - _font!.Size) > 0.05f)
+        {
+            _font.Size = _smoothedTextSize;
+            _staticTextInitialized = false;
+        }
+    }
+
+    private void UpdateExtrusionOffsets(float barWidth, float barSpacing)
+    {
+        float targetX = CalculateExtrusionOffset(barWidth, BASE_EXTRUSION_OFFSET_X);
+        float targetY = CalculateExtrusionOffset(barSpacing, BASE_EXTRUSION_OFFSET_Y);
+
+        _currentExtrusionOffsetX = Lerp(_currentExtrusionOffsetX, targetX, 0.1f);
+        _currentExtrusionOffsetY = Lerp(_currentExtrusionOffsetY, targetY, 0.1f);
+    }
+
+    private float CalculateExtrusionOffset(float baseValue, float _) =>
+        Clamp(baseValue * BASE_EXTRUSION_SCALE_FACTOR * _currentSettings.ExtrusionScaleFactor, -2f, 2f);
+
+    private static float Lerp(float start, float end, float amount) =>
+        start + (end - start) * Clamp(amount, 0f, 1f);
 
     private static float CalculateAverageMagnitude(float[] spectrum)
     {
         if (spectrum == null || spectrum.Length == 0) return 0f;
+
         float sum = 0f;
-        foreach (float v in spectrum) sum += v;
+        for (int i = 0; i < spectrum.Length; i++)
+            sum += spectrum[i];
+
         return sum / spectrum.Length;
     }
 
     private void InitializeStaticTextLayout(SKImageInfo info)
     {
-        if (_font == null) InitializeFont();
+        if (_font == null)
+        {
+            InitializeFont();
+            if (_font == null) return;
+        }
 
         InvalidateLetterPaths();
         _letters.Clear();
 
-        float totalTextWidth = _font!.MeasureText(STATIC_TEXT);
-        float currentX = (info.Width - totalTextWidth) / 2f;
+        float totalWidth = _font.MeasureText(STATIC_TEXT);
+        float startX = (info.Width - totalWidth) / 2f;
         float baseY = info.Height * TEXT_Y_POSITION_RATIO;
+
+        CreateLetterObjects(startX, baseY);
+        _staticTextInitialized = true;
+    }
+
+    private void CreateLetterObjects(float startX, float baseY)
+    {
+        float x = startX;
 
         for (int i = 0; i < STATIC_TEXT.Length; i++)
         {
-            char character = STATIC_TEXT[i];
-            string charStr = character.ToString();
-            float charWidth = _font.MeasureText(charStr);
-            SKPath? path = _font.GetTextPath(charStr, new SKPoint(0f, 0f));
+            char c = STATIC_TEXT[i];
+            string charStr = c.ToString();
+            float width = _font!.MeasureText(charStr);
+
+            SKPath path = _resourceManager.GetPath();
+            SKPath textPath = _font.GetTextPath(charStr, new SKPoint(0, 0));
+
+            path.AddPath(textPath);
+            textPath.Dispose();
 
             _letters.Add(new HackerLetter
             {
-                Character = character,
-                X = currentX,
+                Character = c,
+                X = x,
                 BaseY = baseY,
                 CurrentY = baseY,
                 VelocityY = 0f,
                 SmoothedMagnitude = 0f,
-                CharWidth = charWidth,
+                CharWidth = width,
                 Path = path
             });
 
-            currentX += charWidth;
+            x += width;
         }
-
-        _staticTextInitialized = true;
     }
 
     private void UpdateLetterPhysics(
-        float[] spectrumData,
+        float[] spectrum,
         SKImageInfo info,
-        int spectrumBarCount,
+        int barCount,
         float deltaTime)
     {
-        if (_letters.Count == 0 || spectrumBarCount == 0 || deltaTime <= MIN_DELTA_TIME)
+        if (_letters.Count == 0 || barCount == 0 || deltaTime <= MIN_DELTA_TIME)
             return;
 
         for (int i = 0; i < _letters.Count; i++)
         {
             HackerLetter letter = _letters[i];
-            UpdateSingleLetterPhysics(
-                ref letter,
-                spectrumData,
-                info.Width,
-                spectrumBarCount,
-                deltaTime);
+            UpdateSingleLetterPhysics(ref letter, spectrum, info.Width, barCount, deltaTime);
             _letters[i] = letter;
         }
     }
 
     private void UpdateSingleLetterPhysics(
         ref HackerLetter letter,
-        float[] spectrumData,
-        float canvasWidth,
-        int spectrumBarCount,
+        float[] spectrum,
+        float width,
+        int barCount,
         float deltaTime)
     {
-        if (spectrumBarCount == 0 || spectrumData.Length == 0) return;
+        if (barCount == 0 || spectrum.Length == 0)
+            return;
 
-        float letterCenterX = letter.X + letter.CharWidth / 2f;
-        int spectrumIndex = (int)((letterCenterX / canvasWidth) * spectrumBarCount);
-        spectrumIndex = Clamp(spectrumIndex, 0, spectrumData.Length - 1);
+        int idx = MapLetterToSpectrumIndex(letter, width, barCount, spectrum.Length);
+        UpdateLetterMagnitude(ref letter, spectrum[idx]);
+        ApplyJumpForce(ref letter, deltaTime);
+        ApplyPhysics(ref letter, deltaTime);
+    }
 
-        float magnitude = spectrumData[spectrumIndex];
+    private static int MapLetterToSpectrumIndex(
+        in HackerLetter letter,
+        float width,
+        int barCount,
+        int dataLength)
+    {
+        float centerX = letter.X + letter.CharWidth / 2f;
+        int idx = (int)((centerX / width) * barCount);
+        return Clamp(idx, 0, dataLength - 1);
+    }
+
+    private static void UpdateLetterMagnitude(ref HackerLetter letter, float magnitude)
+    {
         letter.SmoothedMagnitude = letter.SmoothedMagnitude * (1f - LETTER_MAGNITUDE_SMOOTHING_FACTOR) +
             magnitude * LETTER_MAGNITUDE_SMOOTHING_FACTOR;
+    }
 
+    private void ApplyJumpForce(ref HackerLetter letter, float deltaTime)
+    {
         if (letter.SmoothedMagnitude > MIN_SPECTRUM_FOR_JUMP)
-        {
             letter.VelocityY -= letter.SmoothedMagnitude *
                 _currentSettings.JumpStrengthMultiplier *
                 deltaTime *
                 SensitivityScale;
-        }
+    }
 
+    private static void ApplyPhysics(ref HackerLetter letter, float deltaTime)
+    {
         float displacement = letter.CurrentY - letter.BaseY;
         float physicsScale = deltaTime * TARGET_FPS_FOR_PHYSICS_SCALING;
 
-        letter.VelocityY -= displacement * _currentSettings.ReturnForceFactor * physicsScale;
-        letter.VelocityY *= Pow(_currentSettings.DampingFactor, physicsScale);
+        letter.VelocityY -= displacement * RETURN_FORCE_FACTOR * physicsScale;
+        letter.VelocityY *= Pow(DAMPING_FACTOR, physicsScale);
         letter.CurrentY += letter.VelocityY * physicsScale;
     }
 
     private void DrawLetters3D(SKCanvas canvas, SKColor baseColor)
     {
-        if (_font == null || _letters.Count == 0) return;
+        if (_font == null || _letters.Count == 0 || canvas == null)
+            return;
 
-        using var extrusionPaint = CreatePaint(
-            CalculateExtrusionColor(baseColor),
-            SKPaintStyle.Fill,
-            0);
+        PrepareExtrusionPaint(baseColor);
+        PrepareFacePaint();
 
-        using var facePaint = _paintPool.Get();
-        facePaint.IsAntialias = _useAntiAlias;
-        facePaint.Style = SKPaintStyle.Fill;
+        var (start, end) = CalculateGradientColors(baseColor);
+        DrawAllLetters(canvas, start, end);
+    }
 
-        var (gradStart, gradEnd) = CalculateGradientColors(baseColor);
+    private void PrepareExtrusionPaint(SKColor color)
+    {
+        if (_reusableExtrusionPaint == null)
+        {
+            _reusableExtrusionPaint = _resourceManager.GetPaint();
+            _reusableExtrusionPaint.Style = SKPaintStyle.Fill;
+            _reusableExtrusionPaint.IsAntialias = UseAntiAlias;
+        }
 
+        _reusableExtrusionPaint.Color = CalculateExtrusionColor(color);
+    }
+
+    private void PrepareFacePaint()
+    {
+        if (_reusableFacePaint == null)
+        {
+            _reusableFacePaint = _resourceManager.GetPaint();
+            _reusableFacePaint.Style = SKPaintStyle.Fill;
+            _reusableFacePaint.IsAntialias = UseAntiAlias;
+        }
+    }
+
+    private void DrawAllLetters(SKCanvas canvas, SKColor gradStart, SKColor gradEnd)
+    {
         foreach (var letter in _letters)
         {
-            if (letter.Path == null) continue;
+            if (letter.Path == null)
+                continue;
 
             canvas.Save();
             canvas.Translate(letter.X, letter.CurrentY);
-
-            DrawLetterExtrusion(canvas, letter.Path, extrusionPaint);
-            DrawLetterFace(canvas, letter.Path, facePaint, gradStart, gradEnd);
-
+            DrawLetterExtrusion(canvas, letter.Path);
+            DrawLetterFace(canvas, letter.Path, gradStart, gradEnd);
             canvas.Restore();
         }
     }
 
-    private void DrawLetterExtrusion(
-        SKCanvas canvas,
-        SKPath letterPath,
-        SKPaint extrusionPaint)
+    private void DrawLetterExtrusion(SKCanvas canvas, SKPath path)
     {
-        int layers = Max(0, _currentSettings.ExtrusionLayers);
-        if (layers == 0) return;
+        if (canvas == null || path == null || _reusableExtrusionPaint == null)
+            return;
+
+        int layers = (int)MathF.Max(0, _currentSettings.ExtrusionLayers);
+        if (layers == 0)
+            return;
 
         for (int layer = 1; layer <= layers; layer++)
         {
             canvas.Save();
-            canvas.Translate(
-                layer * _currentExtrusionOffsetX,
-                layer * _currentExtrusionOffsetY);
-            canvas.DrawPath(letterPath, extrusionPaint);
+            canvas.Translate(layer * _currentExtrusionOffsetX, layer * _currentExtrusionOffsetY);
+            canvas.DrawPath(path, _reusableExtrusionPaint);
             canvas.Restore();
         }
     }
 
-    private static void DrawLetterFace(
-        SKCanvas canvas,
-        SKPath letterPath,
-        SKPaint facePaint,
-        SKColor gradStartColor,
-        SKColor gradEndColor)
+    private void DrawLetterFace(SKCanvas canvas, SKPath path, SKColor start, SKColor end)
     {
-        SKRect pathBounds = letterPath.Bounds;
-        using var shader = SKShader.CreateLinearGradient(
-            new SKPoint(pathBounds.Left, pathBounds.Top),
-            new SKPoint(pathBounds.Left, pathBounds.Bottom),
-            [gradStartColor, gradEndColor],
+        if (canvas == null || path == null || _reusableFacePaint == null)
+            return;
+
+        using var shader = CreateLetterGradient(path, start, end);
+        _reusableFacePaint.Shader = shader;
+        canvas.DrawPath(path, _reusableFacePaint);
+        _reusableFacePaint.Shader = null;
+    }
+
+    private static SKShader CreateLetterGradient(SKPath path, SKColor start, SKColor end) =>
+        SKShader.CreateLinearGradient(
+            new SKPoint(path.Bounds.Left, path.Bounds.Top),
+            new SKPoint(path.Bounds.Left, path.Bounds.Bottom),
+            [start, end],
             GradientColorPositions,
             SKShaderTileMode.Clamp);
 
-        facePaint.Shader = shader;
-        canvas.DrawPath(letterPath, facePaint);
-        facePaint.Shader = null;
-    }
+    private static SKColor CalculateExtrusionColor(SKColor color) =>
+        new(
+            (byte)MathF.Max(0, color.Red - EXTRUSION_COLOR_DARKEN_FACTOR.Red),
+            (byte)MathF.Max(0, color.Green - EXTRUSION_COLOR_DARKEN_FACTOR.Green),
+            (byte)MathF.Max(0, color.Blue - EXTRUSION_COLOR_DARKEN_FACTOR.Blue),
+            color.Alpha);
 
-    private static SKColor CalculateExtrusionColor(SKColor baseColor)
+    private static (SKColor start, SKColor end) CalculateGradientColors(SKColor color) =>
+        (
+            new SKColor(
+                (byte)MathF.Min(255, color.Red + GRADIENT_START_COLOR_OFFSET.Red),
+                (byte)MathF.Min(255, color.Green + GRADIENT_START_COLOR_OFFSET.Green),
+                (byte)MathF.Min(255, color.Blue + GRADIENT_START_COLOR_OFFSET.Blue),
+                color.Alpha),
+            new SKColor(
+                (byte)MathF.Max(0, color.Red - GRADIENT_END_COLOR_OFFSET.Red),
+                (byte)MathF.Max(0, color.Green - GRADIENT_END_COLOR_OFFSET.Green),
+                (byte)MathF.Max(0, color.Blue - GRADIENT_END_COLOR_OFFSET.Blue),
+                color.Alpha)
+        );
+
+    protected override void CleanupUnusedResources()
     {
-        return new SKColor(
-            (byte)Max(0, baseColor.Red - EXTRUSION_COLOR_DARKEN_FACTOR.Red),
-            (byte)Max(0, baseColor.Green - EXTRUSION_COLOR_DARKEN_FACTOR.Green),
-            (byte)Max(0, baseColor.Blue - EXTRUSION_COLOR_DARKEN_FACTOR.Blue),
-            baseColor.Alpha);
-    }
+        base.CleanupUnusedResources();
 
-    private static (SKColor start, SKColor end) CalculateGradientColors(SKColor baseColor)
-    {
-        var start = new SKColor(
-            (byte)Min(255, baseColor.Red + GRADIENT_START_COLOR_OFFSET.Red),
-            (byte)Min(255, baseColor.Green + GRADIENT_START_COLOR_OFFSET.Green),
-            (byte)Min(255, baseColor.Blue + GRADIENT_START_COLOR_OFFSET.Blue),
-            baseColor.Alpha);
-
-        var end = new SKColor(
-            (byte)Max(0, baseColor.Red - GRADIENT_END_COLOR_OFFSET.Red),
-            (byte)Max(0, baseColor.Green - GRADIENT_END_COLOR_OFFSET.Green),
-            (byte)Max(0, baseColor.Blue - GRADIENT_END_COLOR_OFFSET.Blue),
-            baseColor.Alpha);
-
-        return (start, end);
-    }
-
-    private SKPaint CreatePaint(
-        SKColor color,
-        SKPaintStyle style,
-        float strokeWidth)
-    {
-        var paint = _paintPool.Get();
-        paint.Color = color;
-        paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
-        paint.StrokeWidth = strokeWidth;
-        return paint;
+        if (!_staticTextInitialized && _letters.Count > 0)
+        {
+            InvalidateLetterPaths();
+            _letters.Clear();
+        }
     }
 
     protected override void OnDispose()
     {
         InvalidateLetterPaths();
+
+        if (_reusableExtrusionPaint != null)
+        {
+            _resourceManager.ReturnPaint(_reusableExtrusionPaint);
+            _reusableExtrusionPaint = null;
+        }
+
+        if (_reusableFacePaint != null)
+        {
+            _resourceManager.ReturnPaint(_reusableFacePaint);
+            _reusableFacePaint = null;
+        }
+
         _font?.Dispose();
         _font = null;
         _letters.Clear();
         _staticTextInitialized = false;
+
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }

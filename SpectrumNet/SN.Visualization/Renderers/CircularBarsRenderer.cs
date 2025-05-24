@@ -118,7 +118,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
 
         RenderInnerCircle(canvas, centerX, centerY, mainRadius, adjustedBarWidth, basePaint);
 
-        if (_useAdvancedEffects && _currentSettings.UseGlow)
+        if (UseAdvancedEffects && _currentSettings.UseGlow)
         {
             RenderGlowEffects(
                 canvas, spectrum, barCount, centerX, centerY, mainRadius,
@@ -129,7 +129,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
             canvas, spectrum, barCount, centerX, centerY, mainRadius,
             adjustedBarWidth, basePaint);
 
-        if (_useAdvancedEffects && _currentSettings.UseHighlight)
+        if (UseAdvancedEffects && _currentSettings.UseHighlight)
         {
             RenderHighlights(
                 canvas, spectrum, barCount, centerX, centerY, mainRadius,
@@ -188,25 +188,31 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        using var batchPath = new SKPath();
-
-        for (int i = 0; i < barCount; i++)
+        var batchPath = _resourceManager.GetPath();
+        try
         {
-            if (spectrum[i] <= GLOW_THRESHOLD) continue;
-            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-            AddBarToPath(batchPath, i, centerX, centerY, mainRadius, radius);
+            for (int i = 0; i < barCount; i++)
+            {
+                if (spectrum[i] <= GLOW_THRESHOLD) continue;
+                float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+                AddBarToPath(batchPath, i, centerX, centerY, mainRadius, radius);
+            }
+
+            if (!batchPath.IsEmpty)
+            {
+                using var glowPaint = CreatePaint(
+                    basePaint.Color.WithAlpha((byte)(255 * _currentSettings.GlowIntensity)),
+                    SKPaintStyle.Stroke,
+                    barWidth * 1.2f,
+                    createBlur: true,
+                    blurRadius: _currentSettings.GlowRadius
+                );
+                canvas.DrawPath(batchPath, glowPaint);
+            }
         }
-
-        if (!batchPath.IsEmpty)
+        finally
         {
-            using var glowPaint = CreatePaint(
-                basePaint.Color.WithAlpha((byte)(255 * _currentSettings.GlowIntensity)),
-                SKPaintStyle.Stroke,
-                barWidth * 1.2f,
-                createBlur: true,
-                blurRadius: _currentSettings.GlowRadius
-            );
-            canvas.DrawPath(batchPath, glowPaint);
+            _resourceManager.ReturnPath(batchPath);
         }
     }
 
@@ -220,24 +226,30 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        using var batchPath = new SKPath();
-
-        for (int i = 0; i < barCount; i++)
+        var batchPath = _resourceManager.GetPath();
+        try
         {
-            if (spectrum[i] < MIN_MAGNITUDE_THRESHOLD_BAR) continue;
-            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-            AddBarToPath(batchPath, i, centerX, centerY, mainRadius, radius);
+            for (int i = 0; i < barCount; i++)
+            {
+                if (spectrum[i] < MIN_MAGNITUDE_THRESHOLD_BAR) continue;
+                float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+                AddBarToPath(batchPath, i, centerX, centerY, mainRadius, radius);
+            }
+
+            if (!batchPath.IsEmpty)
+            {
+                using var barPaint = CreatePaint(
+                    basePaint.Color,
+                    SKPaintStyle.Stroke,
+                    barWidth,
+                    strokeCap: SKStrokeCap.Round
+                );
+                canvas.DrawPath(batchPath, barPaint);
+            }
         }
-
-        if (!batchPath.IsEmpty)
+        finally
         {
-            using var barPaint = CreatePaint(
-                basePaint.Color,
-                SKPaintStyle.Stroke,
-                barWidth,
-                strokeCap: SKStrokeCap.Round
-            );
-            canvas.DrawPath(batchPath, barPaint);
+            _resourceManager.ReturnPath(batchPath);
         }
     }
 
@@ -250,24 +262,30 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float mainRadius,
         float barWidth)
     {
-        using var batchPath = new SKPath();
-
-        for (int i = 0; i < barCount; i++)
+        var batchPath = _resourceManager.GetPath();
+        try
         {
-            if (spectrum[i] <= HIGHLIGHT_THRESHOLD) continue;
-            float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-            float innerPoint = mainRadius + (radius - mainRadius) * HIGHLIGHT_POSITION;
-            AddBarToPath(batchPath, i, centerX, centerY, innerPoint, radius);
+            for (int i = 0; i < barCount; i++)
+            {
+                if (spectrum[i] <= HIGHLIGHT_THRESHOLD) continue;
+                float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
+                float innerPoint = mainRadius + (radius - mainRadius) * HIGHLIGHT_POSITION;
+                AddBarToPath(batchPath, i, centerX, centerY, innerPoint, radius);
+            }
+
+            if (!batchPath.IsEmpty)
+            {
+                using var highlightPaint = CreatePaint(
+                    SKColors.White.WithAlpha((byte)(255 * _currentSettings.HighlightIntensity)),
+                    SKPaintStyle.Stroke,
+                    barWidth * 0.6f
+                );
+                canvas.DrawPath(batchPath, highlightPaint);
+            }
         }
-
-        if (!batchPath.IsEmpty)
+        finally
         {
-            using var highlightPaint = CreatePaint(
-                SKColors.White.WithAlpha((byte)(255 * _currentSettings.HighlightIntensity)),
-                SKPaintStyle.Stroke,
-                barWidth * 0.6f
-            );
-            canvas.DrawPath(batchPath, highlightPaint);
+            _resourceManager.ReturnPath(batchPath);
         }
     }
 
@@ -279,10 +297,10 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Color = color;
         paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
         paint.StrokeWidth = strokeWidth;
         paint.StrokeCap = strokeCap;
 
@@ -307,13 +325,6 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         Vector2 vector = _barVectors[index];
         path.MoveTo(centerX + innerRadius * vector.X, centerY + innerRadius * vector.Y);
         path.LineTo(centerX + outerRadius * vector.X, centerY + outerRadius * vector.Y);
-    }
-
-    protected override void OnInvalidateCachedResources()
-    {
-        base.OnInvalidateCachedResources();
-        _barVectors = null;
-        _previousBarCount = 0;
     }
 
     protected override void OnDispose()

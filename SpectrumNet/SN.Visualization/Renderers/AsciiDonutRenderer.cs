@@ -180,7 +180,7 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
     {
         if (_font == null) return;
 
-        basePaint.IsAntialias = _useAntiAlias;
+        basePaint.IsAntialias = UseAntiAlias;
         var chars = ASCII_CHARS.ToCharArray();
 
         foreach (var (x, y, depth, light) in vertices)

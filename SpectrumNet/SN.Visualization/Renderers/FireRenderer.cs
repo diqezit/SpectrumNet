@@ -1,7 +1,7 @@
 ﻿#nullable enable
 
-using static System.MathF;
 using static SpectrumNet.SN.Visualization.Renderers.FireRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -111,7 +111,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         float barSpacing,
         SKPaint paint)
     {
-        _time += TIME_STEP;
         UpdateFlameHeights(spectrum);
 
         float totalBarWidth = barWidth + barSpacing;
@@ -183,7 +182,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
     {
         float x = index * totalBarWidth;
         float waveOffset = Sin(
-            _time * WAVE_SPEED +
+            _animationTimer.Time * WAVE_SPEED +
             index * POSITION_PHASE_SHIFT);
 
         float currentHeight = spectrumValue *
@@ -199,31 +198,38 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 
         x += waveOffset * barWidth * HORIZONTAL_WAVE_FACTOR;
 
-        using var flamePath = _pathPool.Get();
-        CreateFlamePath(
-            flamePath,
-            x,
-            flameTop,
-            flameBottom,
-            barWidth);
-
-        if (_useAdvancedEffects &&
-            _currentSettings.UseGlow &&
-            flameHeight / info.Height > HIGH_INTENSITY_THRESHOLD)
+        var flamePath = _resourceManager.GetPath();
+        try
         {
-            RenderFlameGlow(
+            CreateFlamePath(
+                flamePath,
+                x,
+                flameTop,
+                flameBottom,
+                barWidth);
+
+            if (UseAdvancedEffects &&
+                _currentSettings.UseGlow &&
+                flameHeight / info.Height > HIGH_INTENSITY_THRESHOLD)
+            {
+                RenderFlameGlow(
+                    canvas,
+                    flamePath,
+                    basePaint,
+                    flameHeight / info.Height);
+            }
+
+            RenderFlameBody(
                 canvas,
                 flamePath,
                 basePaint,
+                index,
                 flameHeight / info.Height);
         }
-
-        RenderFlameBody(
-            canvas,
-            flamePath,
-            basePaint,
-            index,
-            flameHeight / info.Height);
+        finally
+        {
+            _resourceManager.ReturnPath(flamePath);
+        }
     }
 
     private void CreateFlamePath(
@@ -270,14 +276,21 @@ public sealed class FireRenderer : EffectSpectrumRenderer
     {
         byte glowAlpha = (byte)(255 * intensity * GLOW_INTENSITY);
 
-        using var glowPaint = CreateEffectPaint(
+        var glowPaint = CreateEffectPaint(
             basePaint.Color.WithAlpha(glowAlpha),
             SKPaintStyle.Fill,
             createBlur: true,
             blurRadius: _currentSettings.GlowRadius
         );
 
-        canvas.DrawPath(path, glowPaint);
+        try
+        {
+            canvas.DrawPath(path, glowPaint);
+        }
+        finally
+        {
+            _resourceManager.ReturnPaint(glowPaint);
+        }
     }
 
     private void RenderFlameBody(
@@ -288,7 +301,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         float intensity)
     {
         float opacityWave = Sin(
-            _time * OPACITY_WAVE_SPEED +
+            _animationTimer.Time * OPACITY_WAVE_SPEED +
             index * OPACITY_PHASE_SHIFT) *
             OPACITY_WAVE_AMPLITUDE +
             OPACITY_BASE;
@@ -296,12 +309,19 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         byte alpha = (byte)(255 *
             MathF.Min(intensity * opacityWave, 1.0f));
 
-        using var flamePaint = CreateEffectPaint(
+        var flamePaint = CreateEffectPaint(
             basePaint.Color.WithAlpha(alpha),
             SKPaintStyle.Fill
         );
 
-        canvas.DrawPath(path, flamePaint);
+        try
+        {
+            canvas.DrawPath(path, flamePaint);
+        }
+        finally
+        {
+            _resourceManager.ReturnPaint(flamePaint);
+        }
     }
 
     private SKPaint CreateEffectPaint(
@@ -311,10 +331,10 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _paintPool.Get();
+        var paint = _resourceManager.GetPaint();
         paint.Color = color;
         paint.Style = style;
-        paint.IsAntialias = _useAntiAlias;
+        paint.IsAntialias = UseAntiAlias;
 
         if (createBlur && blurRadius > 0)
         {
