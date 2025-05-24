@@ -33,4 +33,8 @@ public interface IViewController
     IEnumerable<SpectrumScale> AvailableScaleTypes { get; }
     IEnumerable<RenderQuality> AvailableRenderQualities { get; }
     IEnumerable<RenderStyle> OrderedDrawingTypes { get; }
+
+    //  для переключения рендеров
+    void SelectNextRenderer();
+    void SelectPreviousRenderer();
 }

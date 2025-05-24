@@ -16,11 +16,12 @@ public static class ViewControllerFactory
 
         var renderingManager = new RenderingManager(mainController, rendererFactory);
         var analyzerManager = new AnalyzerManager();
+        var stylesProvider = new StylesProvider(mainController, settings, brushProvider);
         var settingsManager = new VisualizationSettingsManager(
             mainController,
             rendererFactory,
-            settings);
-        var stylesProvider = new StylesProvider(mainController, settings, brushProvider);
+            settings,
+            stylesProvider);
 
         return new VisualizationController(
             mainController,

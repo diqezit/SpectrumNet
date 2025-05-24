@@ -75,6 +75,8 @@ public class KeyboardInputHandler : IInputHandler
         { Key.Q, () => _controller.RenderQuality = RenderQuality.Low },
         { Key.W, () => _controller.RenderQuality = RenderQuality.Medium },
         { Key.E, () => _controller.RenderQuality = RenderQuality.High },
+        { Key.Z, () => _controller.SelectPreviousRenderer() },
+        { Key.X, () => _controller.SelectNextRenderer() },
         { Key.Escape, () => HandleEscapeKey() }
     };
 

@@ -116,6 +116,16 @@ public class VisualizationController(
     public IEnumerable<RenderQuality> AvailableRenderQualities => _stylesProvider.AvailableRenderQualities;
     public IEnumerable<RenderStyle> OrderedDrawingTypes => _stylesProvider.OrderedDrawingTypes;
 
+    public void SelectNextRenderer() =>
+        _logger.Safe(() => 
+        _settingsManager.HandleSelectNextRenderer(), 
+            LogPrefix, "Error selecting next renderer");
+
+    public void SelectPreviousRenderer() =>
+        _logger.Safe(() => 
+        _settingsManager.HandleSelectPreviousRenderer(), 
+            LogPrefix, "Error selecting previous renderer");
+
     public void Dispose()
     {
         if (_isDisposed) return;
@@ -133,6 +143,8 @@ public class VisualizationController(
 
             if (_stylesProvider is IDisposable stylesProviderDisposable)
                 stylesProviderDisposable.Dispose();
+
+            GC.SuppressFinalize(this);
 
             _isDisposed = true;
         }, LogPrefix, "Error during view controller disposal");

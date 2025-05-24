@@ -345,6 +345,18 @@ public sealed class MainController
         _ = OverlayManager.CloseAsync();
     }
 
+    public void SelectNextRenderer()
+    {
+        if (_isDisposed) return;
+        ViewController.SelectNextRenderer();
+    }
+
+    public void SelectPreviousRenderer()
+    {
+        if (_isDisposed) return;
+        ViewController.SelectPreviousRenderer();
+    }
+
     public void RegisterWindow(Window window)
     {
         if (_isDisposed) return;

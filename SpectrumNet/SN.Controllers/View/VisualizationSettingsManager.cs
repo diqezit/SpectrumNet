@@ -10,6 +10,7 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
     private readonly IMainController _mainController;
     private readonly IRendererFactory _rendererFactory;
     private readonly ISettings _settings;
+    private readonly IStylesProvider _stylesProvider;
 
     private RenderStyle _selectedDrawingType;
     private SpectrumScale _selectedScaleType;
@@ -22,11 +23,13 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
     public VisualizationSettingsManager(
         IMainController mainController,
         IRendererFactory rendererFactory,
-        ISettings settings)
+        ISettings settings,
+        IStylesProvider stylesProvider)
     {
         _mainController = mainController ?? throw new ArgumentNullException(nameof(mainController));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _stylesProvider = stylesProvider ?? throw new ArgumentNullException(nameof(stylesProvider));
 
         _selectedDrawingType = _settings.SelectedRenderStyle;
         _selectedScaleType = _settings.SelectedScaleType;
@@ -75,8 +78,7 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
                 _mainController.OnPropertyChanged(nameof(RenderQuality));
 
                 _rendererFactory.GlobalQuality = value;
-                if (_mainController.Renderer != null)
-                    _mainController.Renderer.UpdateRenderQuality(value);
+                _mainController.Renderer?.UpdateRenderQuality(value);
 
                 _logger.Log(LogLevel.Information,
                     LogPrefix,
@@ -157,18 +159,25 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
         }
     }
 
-    public void LoadAndApplySettings() =>
-        _logger.Safe(() => HandleLoadAndApplySettings(), LogPrefix, "Error loading and applying settings");
-
-    private void HandleLoadAndApplySettings()
+    public void HandleSelectPreviousRenderer()
     {
-        ShowPerformanceInfo = _settings.ShowPerformanceInfo;
-        SelectedDrawingType = _settings.SelectedRenderStyle;
-        ScaleType = _settings.SelectedScaleType;
-        RenderQuality = _settings.SelectedRenderQuality;
-        SelectedStyle = _settings.SelectedPalette;
+        var renderers = _stylesProvider.OrderedDrawingTypes.ToList();
+        if (renderers.Count <= 1) return;
 
-        _logger.Log(LogLevel.Information, LogPrefix, "View settings loaded and applied successfully");
+        var currentIndex = renderers.IndexOf(SelectedDrawingType);
+        var previousIndex = currentIndex - 1;
+        if (previousIndex < 0) previousIndex = renderers.Count - 1;
+        SelectedDrawingType = renderers[previousIndex];
+    }
+
+    public void HandleSelectNextRenderer()
+    {
+        var renderers = _stylesProvider.OrderedDrawingTypes.ToList();
+        if (renderers.Count <= 1) return;
+
+        var currentIndex = renderers.IndexOf(SelectedDrawingType);
+        var nextIndex = (currentIndex + 1) % renderers.Count;
+        SelectedDrawingType = renderers[nextIndex];
     }
 
     public void InitializeAfterRendererCreated()

@@ -12,4 +12,6 @@ public interface IVisualizationSettingsManager
     string SelectedStyle { get; set; }
     bool ShowPerformanceInfo { get; set; }
     void InitializeAfterRendererCreated();
+    void HandleSelectNextRenderer();
+    void HandleSelectPreviousRenderer();
 }
