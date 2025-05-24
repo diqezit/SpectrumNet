@@ -30,7 +30,7 @@ public enum RenderStyle
     SphereRenderer,
     TextParticles,
     Waterfall,
-    WaterRenderer,
+    RippleRenderer,
     Waveform,
     HackerTextRenderer
 }

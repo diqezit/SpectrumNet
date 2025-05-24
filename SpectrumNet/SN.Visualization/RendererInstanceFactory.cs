@@ -30,7 +30,7 @@ internal static class RendererInstanceFactory
         RenderStyle.TextParticles => TextParticlesRenderer.GetInstance(),
         RenderStyle.Waterfall => WaterfallRenderer.GetInstance(),
         RenderStyle.Waveform => WaveformRenderer.GetInstance(),
-        RenderStyle.WaterRenderer => WaterRenderer.GetInstance(),
+        RenderStyle.RippleRenderer => RippleRenderer.GetInstance(),
         RenderStyle.HackerTextRenderer => HackerTextRenderer.GetInstance(),
         _ => throw new ArgumentException($"Unknown render style: {style}")
     };
