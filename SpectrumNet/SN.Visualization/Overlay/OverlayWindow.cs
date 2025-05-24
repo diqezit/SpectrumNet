@@ -76,7 +76,26 @@ public sealed class OverlayWindow : Window, IDisposable
         Content = _renderElement;
         _controller.InputController.RegisterWindow(this);
 
+        PreviewKeyDown += OnPreviewKeyDown;
+        Focusable = true;
         IsInitialized = true;
+    }
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            if (_configuration.EnableEscapeToClose)
+            {
+                e.Handled = true;
+                Close();
+                return;
+            }
+        }
+        bool handled = _controller.InputController.HandleKeyDown(e, 
+            Keyboard.FocusedElement);
+
+        e.Handled = handled;
     }
 
     private SKElement CreateRenderElement() =>
@@ -129,10 +148,11 @@ public sealed class OverlayWindow : Window, IDisposable
 
     private void HandleDispose()
     {
+        PreviewKeyDown -= OnPreviewKeyDown;
         _transparencyManager.TransparencyChanged -= OnTransparencyChanged;
         _controller.PropertyChanged -= OnControllerPropertyChanged;
         _eventHandler.UnregisterEvents(this, _renderElement);
-
+        _controller.InputController.UnregisterWindow(this);
         _eventHandler.Dispose();
         _renderManager.Dispose();
         _performanceManager.Dispose();

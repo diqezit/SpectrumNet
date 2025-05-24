@@ -34,7 +34,9 @@ public sealed class OverlayWindowConfigurator : IOverlayWindowConfigurator
         window.Background = null;
         window.Topmost = configuration.IsTopmost;
         window.ShowInTaskbar = configuration.ShowInTaskbar;
-        window.IsHitTestVisible = true;
+        window.IsHitTestVisible = false;
+        window.Focusable = true;
+        window.FocusVisualStyle = null;
     }
 
     private static void HandleApplyTransparency(Window window)

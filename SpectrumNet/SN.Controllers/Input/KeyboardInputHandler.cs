@@ -66,9 +66,7 @@ public class KeyboardInputHandler : IInputHandler
     }
 
     private void ExecuteAction(Action action, string context) =>
-        _logger.Safe(() => action(),
-            LogPrefix,
-            $"Error executing {context}");
+        _logger.Safe(() => action(), LogPrefix, $"Error executing {context}");
 
     private Dictionary<Key, Action> CreateGlobalKeyActionsMap() => new()
     {
@@ -84,8 +82,6 @@ public class KeyboardInputHandler : IInputHandler
     {
         if (_controller.IsPopupOpen)
             _controller.IsPopupOpen = false;
-        else if (_controller.IsOverlayActive)
-            _controller.CloseOverlay();
     }
 
     private void ToggleOverlay()

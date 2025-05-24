@@ -1,29 +1,49 @@
-﻿#nullable enable
-
-using SpectrumNet.SN.Visualization.Performance.Interfaces;
+﻿// SN.Visualization/Overlay/OverlayPerformanceManager.cs
+#nullable enable
 
 namespace SpectrumNet.SN.Visualization.Overlay;
 
 public sealed class OverlayPerformanceManager : IOverlayPerformanceManager
 {
     private const string LogPrefix = nameof(OverlayPerformanceManager);
+    private const double TARGET_FPS = 60.0;
+    private const double TARGET_FRAME_TIME_MS = 1000.0 / TARGET_FPS;
 
     private readonly ISmartLogger _logger = Instance;
-    private readonly FpsLimiter _fpsLimiter = FpsLimiter.Instance;
     private readonly IPerformanceMetricsManager _performanceMetricsManager = PerformanceMetricsManager.Instance;
+    private readonly Stopwatch _frameTimer = new();
 
     private IMainController? _controller;
     private bool _disposed;
+    private long _lastFrameTime;
 
-    public void Initialize(IMainController controller) =>
+    public OverlayPerformanceManager()
+    {
+        _frameTimer.Start();
+        _lastFrameTime = _frameTimer.ElapsedMilliseconds;
+    }
+
+    public void Initialize(IMainController controller) => 
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
-
+    
     public bool ShouldRender()
     {
-        if (_controller == null)
+        if (_controller == null || _disposed)
             return false;
 
-        return !_controller.LimitFpsTo60 || _fpsLimiter.ShouldRenderFrame();
+        if (!_controller.LimitFpsTo60)
+            return true;
+
+        var currentTime = _frameTimer.ElapsedMilliseconds;
+        var elapsedTime = currentTime - _lastFrameTime;
+
+        if (elapsedTime >= TARGET_FRAME_TIME_MS)
+        {
+            _lastFrameTime = currentTime;
+            return true;
+        }
+
+        return false;
     }
 
     public void RecordFrame()
@@ -36,14 +56,8 @@ public sealed class OverlayPerformanceManager : IOverlayPerformanceManager
 
     public void UpdateFpsLimit(bool isEnabled)
     {
-        _logger.Safe(() => HandleUpdateFpsLimit(isEnabled),
-            LogPrefix, "Error updating FPS limit");
-    }
-
-    private void HandleUpdateFpsLimit(bool isEnabled)
-    {
-        _fpsLimiter.IsEnabled = isEnabled;
-        _fpsLimiter.Reset();
+        if (!isEnabled)
+            _lastFrameTime = _frameTimer.ElapsedMilliseconds;
     }
 
     public void Dispose()
@@ -51,6 +65,7 @@ public sealed class OverlayPerformanceManager : IOverlayPerformanceManager
         if (_disposed)
             return;
 
+        _frameTimer.Stop();
         _disposed = true;
     }
 }

@@ -54,9 +54,6 @@ public sealed class OverlayEventHandler(
         window.MouseEnter += OnMouseEnter;
         window.MouseLeave += OnMouseLeave;
 
-        if (_configuration.EnableEscapeToClose)
-            window.KeyDown += OnKeyDown;
-
         CompositionTarget.Rendering += OnRendering;
     }
 
@@ -69,9 +66,6 @@ public sealed class OverlayEventHandler(
         window.MouseMove -= OnMouseMove;
         window.MouseEnter -= OnMouseEnter;
         window.MouseLeave -= OnMouseLeave;
-
-        if (_configuration.EnableEscapeToClose)
-            window.KeyDown -= OnKeyDown;
 
         CompositionTarget.Rendering -= OnRendering;
     }
@@ -91,10 +85,6 @@ public sealed class OverlayEventHandler(
     private void OnIsVisibleChanged(object? sender, DependencyPropertyChangedEventArgs e) =>
         _logger.Safe(() => HandleVisibilityChanged(sender),
             LogPrefix, "Error handling visibility changed");
-
-    private void OnKeyDown(object sender, KeyEventArgs e) =>
-        _logger.Safe(() => HandleKeyDown(sender, e),
-            LogPrefix, "Error handling key down");
 
     private void OnRendering(object? sender, EventArgs e) =>
         _logger.Safe(() => HandleRendering(),
@@ -128,16 +118,6 @@ public sealed class OverlayEventHandler(
         {
             _transparencyManager.ActivateTransparency();
             _renderManager.RequestRender();
-        }
-    }
-
-    private void HandleKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            if (sender is Window window)
-                window.Close();
         }
     }
 
@@ -181,7 +161,7 @@ public sealed class OverlayEventHandler(
         _ = NativeMethods.SetWindowLong(
             handle,
             NativeMethods.GWL_EXSTYLE,
-            extendedStyle | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT
+            extendedStyle | NativeMethods.WS_EX_LAYERED
         );
 
         if (_configuration.DisableWindowAnimations)
