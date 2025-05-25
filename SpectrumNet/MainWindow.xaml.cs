@@ -232,8 +232,8 @@ public partial class MainWindow : Window, IAsyncDisposable
 
         if (WindowState == WindowState.Normal)
         {
-            _settings.WindowWidth = Width;
-            _settings.WindowHeight = Height;
+            _settings.Window.Width = Width;
+            _settings.Window.Height = Height;
         }
     }
 
@@ -249,7 +249,7 @@ public partial class MainWindow : Window, IAsyncDisposable
                 ? "M0,0 L20,0 L20,20 L0,20 Z"
                 : "M2,2 H18 V18 H2 Z");
 
-        _settings.WindowState = WindowState;
+        _settings.Window.State = WindowState;
     }
 
     private void OnWindowLocationChanged(object? sender, EventArgs e) =>
@@ -263,8 +263,8 @@ public partial class MainWindow : Window, IAsyncDisposable
 
     private void SaveWindowPosition()
     {
-        _settings.WindowLeft = Left;
-        _settings.WindowTop = Top;
+        _settings.Window.Left = Left;
+        _settings.Window.Top = Top;
     }
 
     private static bool IsCheckBoxOrChild(DependencyObject? element)
@@ -416,7 +416,7 @@ public partial class MainWindow : Window, IAsyncDisposable
         if (_isDisposed || _isClosing || e.PropertyName != nameof(IThemes.IsDarkTheme))
             return;
 
-        _settings.IsDarkTheme = _themeManager.IsDarkTheme;
+        _settings.General.IsDarkTheme = _themeManager.IsDarkTheme;
         UpdateThemeToggleButtonState();
     }
 

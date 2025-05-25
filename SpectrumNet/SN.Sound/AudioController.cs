@@ -95,7 +95,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
     }
 
     private void SaveWindowTypeToSettings(FftWindowType value) =>
-        _settings.SelectedFftWindowType = value;
+        _settings.Visualization.SelectedFftWindowType = value;
 
     private void NotifyWindowTypeChanged() =>
         _mainController.OnPropertyChanged(nameof(WindowType));
@@ -180,8 +180,8 @@ public class AudioController : AsyncDisposableBase, IAudioController
 
     private void SaveDbLevelsToSettings(float minDbValue, float maxDbValue)
     {
-        _settings.UIMinDbLevel = minDbValue;
-        _settings.UIMaxDbLevel = maxDbValue;
+        _settings.Audio.MinDbLevel = minDbValue;
+        _settings.Audio.MaxDbLevel = maxDbValue;
     }
 
     private void LogGainParametersNotInitialized() =>
@@ -222,7 +222,7 @@ public class AudioController : AsyncDisposableBase, IAudioController
             $"Amplification factor cannot be negative: {value}");
 
     private void SaveAmplificationFactorToSettings(float value) =>
-        _settings.UIAmplificationFactor = value;
+        _settings.Audio.AmplificationFactor = value;
 
     public async Task StartCaptureAsync()
     {

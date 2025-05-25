@@ -59,7 +59,7 @@ public sealed class OverlayManager : AsyncDisposableBase, IOverlayManager
         _logger.Safe(() => HandleConfigure(configuration), LogPrefix, "Error configuring overlay");
 
     private OverlayConfiguration CreateConfiguration() =>
-        new(IsTopmost: _settings.IsOverlayTopmost, EnableHardwareAcceleration: true);
+        new(IsTopmost: _settings.General.IsOverlayTopmost, EnableHardwareAcceleration: true);
 
     private void HandleSetIsTopmost(bool value)
     {
@@ -67,7 +67,7 @@ public sealed class OverlayManager : AsyncDisposableBase, IOverlayManager
             return;
 
         _configuration = _configuration with { IsTopmost = value };
-        _settings.IsOverlayTopmost = value;
+        _settings.General.IsOverlayTopmost = value;
 
         if (_overlayWindow is { IsInitialized: true })
             _overlayWindow.Topmost = value;

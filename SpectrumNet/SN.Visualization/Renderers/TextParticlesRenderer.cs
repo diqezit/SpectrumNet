@@ -123,7 +123,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
 
     private void InitializeSettings()
     {
-        var s = _settings;
+        var s = _settings.Particles;
         _velocityRange = s.ParticleVelocityMax - s.ParticleVelocityMin;
         _particleLife = s.ParticleLife;
         _particleLifeDecay = s.ParticleLifeDecay;
@@ -140,7 +140,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     private void InitializeBuffers()
     {
         _particleBuffer = new CircularParticleBuffer(
-            _settings.MaxParticles,
+            _settings.Particles.MaxParticles,
             _particleLife,
             _particleLifeDecay,
             _velocityMultiplier,
@@ -176,7 +176,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     private void InitializeVelocityLookup()
     {
         _velocityLookup = ArrayPool<float>.Shared.Rent(VELOCITY_LOOKUP_SIZE);
-        float minVelocity = _settings.ParticleVelocityMin;
+        float minVelocity = _settings.Particles.ParticleVelocityMin;
 
         for (int i = 0; i < _velocityLookup.Length; i++)
             _velocityLookup[i] = minVelocity + _velocityRange * i / VELOCITY_LOOKUP_SIZE;
@@ -245,7 +245,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         _renderCache.Height = info.Height;
         _renderCache.StepSize = barCount > 0 ? info.Width / (float)barCount : 0f;
 
-        float overlayHeight = info.Height * _settings.OverlayHeightMultiplier;
+        float overlayHeight = info.Height * _settings.Particles.OverlayHeightMultiplier;
         _renderCache.OverlayHeight = IsOverlayActive ? overlayHeight : 0f;
         _renderCache.UpperBound = IsOverlayActive ? info.Height - overlayHeight : 0f;
         _renderCache.LowerBound = info.Height;
@@ -302,7 +302,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     {
         float x = index * _renderCache.StepSize + (float)_random.NextDouble() * barWidth;
         float y = spawnY + (float)_random.NextDouble() * SPAWN_VARIANCE - SPAWN_HALF_VARIANCE;
-        float z = _settings.MinZDepth + (float)_random.NextDouble() * _zRange;
+        float z = _settings.Particles.MinZDepth + (float)_random.NextDouble() * _zRange;
         float lifeVariance = LIFE_VARIANCE_MIN +
             (float)_random.NextDouble() * (LIFE_VARIANCE_MAX - LIFE_VARIANCE_MIN);
 
@@ -324,7 +324,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     private float GetRandomVelocity()
     {
         if (_velocityLookup == null || _velocityLookup.Length == 0)
-            return _settings.ParticleVelocityMin;
+            return _settings.Particles.ParticleVelocityMin;
         return _velocityLookup[_random.Next(VELOCITY_LOOKUP_SIZE)];
     }
 

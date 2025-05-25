@@ -10,7 +10,7 @@ public class IsFavoriteConverter : IValueConverter
     {
         if (value is RenderStyle style)
         {
-            return Settings.Settings.Instance.FavoriteRenderers.Contains(style);
+            return Settings.Settings.Instance.General.FavoriteRenderers.Contains(style);
         }
         return false;
     }

@@ -155,7 +155,7 @@ public partial class ControlPanelWindow : Window, IDisposable
     {
         if (sender is Button button && button.Tag is RenderStyle style)
         {
-            var favorites = Settings.Instance.FavoriteRenderers;
+            var favorites = Settings.Instance.General.FavoriteRenderers;
             bool isFavorite = favorites.Contains(style);
 
             if (isFavorite)

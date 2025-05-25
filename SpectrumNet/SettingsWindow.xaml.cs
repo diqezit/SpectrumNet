@@ -32,7 +32,7 @@ public partial class SettingsWindow : Window
     {
         if (action is "LoadSettings" or "ResetToDefaults")
         {
-            _themeManager.SetTheme(_settings.IsDarkTheme);
+            _themeManager.SetTheme(_settings.General.IsDarkTheme);
             UpdateAllRenderers();
         }
     }
@@ -93,23 +93,57 @@ public partial class SettingsWindow : Window
         LogPrefix,
         "Error applying settings");
 
-    private void OnResetButton_Click(object sender, RoutedEventArgs e) => ResetToDefaults();
+    private void OnResetButton_Click(object sender, RoutedEventArgs e) =>
+        ResetToDefaults();
 
-    private void BackupCurrentSettings() =>
-        _originalValues = _settings.GetType()
-            .GetProperties()
-            .Where(p => p.CanRead && p.CanWrite)
-            .ToDictionary(p => p.Name, p => p.GetValue(_settings));
+    private void BackupCurrentSettings()
+    {
+        var settingsToBackup = new (string, object?)[]
+        {
+        ("Particles", _settings.Particles),
+        ("Raindrops", _settings.Raindrops),
+        ("Window", _settings.Window),
+        ("Visualization", _settings.Visualization),
+        ("Audio", _settings.Audio),
+        ("General", _settings.General)
+        };
+
+        _originalValues = CreateBackupDictionary(settingsToBackup);
+    }
+
+    private static Dictionary<string, object?> CreateBackupDictionary(
+        (string, object?)[] settingsToBackup)
+    {
+        return settingsToBackup
+            .ToDictionary(
+                item => item.Item1,
+                item => (object?)JsonConvert.DeserializeObject(
+                    JsonConvert.SerializeObject(item.Item2),
+                    item.Item2?.GetType() ?? typeof(object)));
+    }
 
     private void RestoreBackupSettings()
     {
         if (_originalValues == null)
             return;
 
-        foreach (var (key, value) in _originalValues)
-            _settings.GetType().GetProperty(key)?.SetValue(_settings, value);
+        RestoreSettingsFromBackup();
+        ApplyRestoredSettings();
+    }
 
-        _themeManager.SetTheme(_settings.IsDarkTheme);
+    private void RestoreSettingsFromBackup()
+    {
+        _settings.Particles = (ParticleSettings)_originalValues!["Particles"]!;
+        _settings.Raindrops = (RaindropSettings)_originalValues!["Raindrops"]!;
+        _settings.Window = (WindowSettings)_originalValues!["Window"]!;
+        _settings.Visualization = (VisualizationSettings)_originalValues!["Visualization"]!;
+        _settings.Audio = (AudioSettings)_originalValues!["Audio"]!;
+        _settings.General = (GeneralSettings)_originalValues!["General"]!;
+    }
+
+    private void ApplyRestoredSettings()
+    {
+        _themeManager.SetTheme(_settings.General.IsDarkTheme);
         UpdateAllRenderers();
     }
 
@@ -133,7 +167,9 @@ public partial class SettingsWindow : Window
             foreach (var renderer in _rendererFactory.GetAllRenderers())
             {
                 var isOverlayActive = renderer.IsOverlayActive;
-                renderer.Configure(isOverlayActive, _settings.SelectedRenderQuality);
+                renderer.Configure(
+                    isOverlayActive,
+                    _settings.Visualization.SelectedRenderQuality);
             }
         },
         LogPrefix,

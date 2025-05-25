@@ -10,21 +10,26 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="SN.Themes/Resources/CommonConstants.xaml"/>
+
                 <ResourceDictionary Source="SN.Themes/Resources/BaseStyles.xaml"/>
+
                 <ResourceDictionary Source="SN.Themes/Resources/Animations.xaml"/>
 
                 <ResourceDictionary Source="SN.Themes/Resources/Converters.xaml"/>
 
                 <ResourceDictionary Source="SN.Themes/Resources/DarkTheme.xaml"/>
-                <ResourceDictionary Source="SN.Themes/Resources/ButtonStyles.xaml"/>
+
                 <ResourceDictionary Source="SN.Themes/Resources/TextStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/ButtonStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/ComboboxStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/SliderStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/CheckBoxStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/ScrollBarStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/WindowStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/GroupBoxStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/TabControlStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/SpecialStyles.xaml"/>
-
+                
             </ResourceDictionary.MergedDictionaries>
 
             <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
@@ -41,7 +46,7 @@
                 <Setter Property="SnapsToDevicePixels" Value="True"/>
                 <Setter Property="UseLayoutRounding" Value="True"/>
             </Style>
-
+            
         </ResourceDictionary>
     </Application.Resources>
 </Application>

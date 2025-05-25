@@ -10,19 +10,19 @@ public class SettingsGainParametersProvider(
 
     public float AmplificationFactor
     {
-        get => _settings.UIAmplificationFactor;
-        set => _settings.UIAmplificationFactor = value;
+        get => _settings.Audio.AmplificationFactor;
+        set => _settings.Audio.AmplificationFactor = value;
     }
 
     public float MaxDbValue
     {
-        get => _settings.UIMaxDbLevel;
-        set => _settings.UIMaxDbLevel = value;
+        get => _settings.Audio.MaxDbLevel;
+        set => _settings.Audio.MaxDbLevel = value;
     }
 
     public float MinDbValue
     {
-        get => _settings.UIMinDbLevel;
-        set => _settings.UIMinDbLevel = value;
+        get => _settings.Audio.MinDbLevel;
+        set => _settings.Audio.MinDbLevel = value;
     }
 }

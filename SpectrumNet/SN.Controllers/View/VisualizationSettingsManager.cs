@@ -31,19 +31,19 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _stylesProvider = stylesProvider ?? throw new ArgumentNullException(nameof(stylesProvider));
 
-        _selectedDrawingType = _settings.SelectedRenderStyle;
-        _selectedScaleType = _settings.SelectedScaleType;
-        _renderQuality = _settings.SelectedRenderQuality;
-        _selectedStyle = _settings.SelectedPalette;
-        _showPerformanceInfo = _settings.ShowPerformanceInfo;
+        _selectedDrawingType = _settings.Visualization.SelectedRenderStyle;
+        _selectedScaleType = _settings.Visualization.SelectedScaleType;
+        _renderQuality = _settings.Visualization.SelectedRenderQuality;
+        _selectedStyle = _settings.Visualization.SelectedPalette;
+        _showPerformanceInfo = _settings.Visualization.ShowPerformanceInfo;
     }
 
     public int BarCount
     {
-        get => _settings.UIBarCount;
+        get => _settings.Visualization.BarCount;
         set => UpdateSetting(
             value,
-            v => _settings.UIBarCount = v,
+            v => _settings.Visualization.BarCount = v,
             nameof(BarCount),
             v => v > 0,
             DefaultSettings.UIBarCount,
@@ -52,10 +52,10 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
 
     public double BarSpacing
     {
-        get => _settings.UIBarSpacing;
+        get => _settings.Visualization.BarSpacing;
         set => UpdateSetting(
             value,
-            v => _settings.UIBarSpacing = v,
+            v => _settings.Visualization.BarSpacing = v,
             nameof(BarSpacing),
             v => v >= 0,
             DefaultSettings.UIBarSpacing,
@@ -74,7 +74,7 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
             {
                 _updatingQuality = true;
                 _renderQuality = value;
-                _settings.SelectedRenderQuality = value;
+                _settings.Visualization.SelectedRenderQuality = value;
                 _mainController.OnPropertyChanged(nameof(RenderQuality));
 
                 _rendererFactory.GlobalQuality = value;
@@ -97,7 +97,7 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
         set => UpdateEnumProperty(
             ref _selectedDrawingType,
             value,
-            v => _settings.SelectedRenderStyle = v,
+            v => _settings.Visualization.SelectedRenderStyle = v,
             nameof(SelectedDrawingType));
     }
 
@@ -112,7 +112,7 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
         if (_selectedScaleType == value) return;
 
         _selectedScaleType = value;
-        _settings.SelectedScaleType = value;
+        _settings.Visualization.SelectedScaleType = value;
         _mainController.OnPropertyChanged(nameof(ScaleType));
         UpdateAnalyzerSettings(value);
     }
@@ -134,7 +134,7 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
         if (_selectedStyle == value) return;
 
         _selectedStyle = value;
-        _settings.SelectedPalette = value;
+        _settings.Visualization.SelectedPalette = value;
         _mainController.OnPropertyChanged(nameof(SelectedStyle));
 
         if (_mainController.Renderer != null)
@@ -154,7 +154,7 @@ public class VisualizationSettingsManager : IVisualizationSettingsManager
             if (_showPerformanceInfo == value) return;
 
             _showPerformanceInfo = value;
-            _settings.ShowPerformanceInfo = value;
+            _settings.Visualization.ShowPerformanceInfo = value;
             _mainController.OnPropertyChanged(nameof(ShowPerformanceInfo));
         }
     }

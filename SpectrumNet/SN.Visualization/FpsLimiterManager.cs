@@ -16,19 +16,19 @@ public sealed class FpsLimiterManager : IFpsLimiter
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _fpsLimiter = FpsLimiter.Instance;
-        _fpsLimiter.IsEnabled = _settings.LimitFpsTo60;
+        _fpsLimiter.IsEnabled = _settings.General.LimitFpsTo60;
     }
 
-    public bool IsLimited => _settings.LimitFpsTo60;
+    public bool IsLimited => _settings.General.LimitFpsTo60;
 
     public void SetLimit(bool enabled)
     {
-        if (_settings.LimitFpsTo60 == enabled)
+        if (_settings.General.LimitFpsTo60 == enabled)
             return;
 
         _logger.Safe(() =>
         {
-            _settings.LimitFpsTo60 = enabled;
+            _settings.General.LimitFpsTo60 = enabled;
             _fpsLimiter.IsEnabled = enabled;
             if (enabled)
                 _fpsLimiter.Reset();

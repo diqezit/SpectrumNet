@@ -28,7 +28,7 @@ public class StylesProvider(
 
     public IEnumerable<RenderStyle> OrderedDrawingTypes =>
         AvailableDrawingTypes.OrderBy(x =>
-            _settings.FavoriteRenderers.Contains(x) ? 0 : 1).ThenBy(x => x.ToString());
+            _settings.General.FavoriteRenderers.Contains(x) ? 0 : 1).ThenBy(x => x.ToString());
 
     public Palette? SelectedPalette
     {

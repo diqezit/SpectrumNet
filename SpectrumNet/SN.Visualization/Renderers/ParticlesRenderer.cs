@@ -271,7 +271,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     private void InitializeResources()
     {
         PrecomputeAlphaCurve();
-        InitializeVelocityLookup(_settings.ParticleVelocityMin);
+        InitializeVelocityLookup(_settings.Particles.ParticleVelocityMin);
         InitializeParticleBuffer();
         InitializeSynchronizationObjects();
     }
@@ -279,10 +279,10 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     private void InitializeParticleBuffer()
     {
         _particleBuffer = new CircularParticleBuffer(
-            _settings.MaxParticles,
-            _settings.ParticleLife,
-            _settings.ParticleLifeDecay,
-            _settings.VelocityMultiplier);
+            _settings.Particles.MaxParticles,
+            _settings.Particles.ParticleLife,
+            _settings.Particles.ParticleLifeDecay,
+            _settings.Particles.VelocityMultiplier);
     }
 
     private void InitializeSynchronizationObjects()
@@ -376,7 +376,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         _renderCache.UpdateBounds(
             info.Height,
             IsOverlayActive,
-            _settings.OverlayHeightMultiplier);
+            _settings.Particles.OverlayHeightMultiplier);
         _renderCache.StepSize = barCount > 0 ? info.Width / barCount : 0f;
         _barWidth = barWidth;
     }
@@ -470,12 +470,12 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         if (_particleBuffer == null) return;
 
         float threshold = IsOverlayActive ?
-            _settings.SpawnThresholdOverlay :
-            _settings.SpawnThresholdNormal;
+            _settings.Particles.SpawnThresholdOverlay :
+            _settings.Particles.SpawnThresholdNormal;
 
         float baseSize = IsOverlayActive ?
-            _settings.ParticleSizeOverlay :
-            _settings.ParticleSizeNormal;
+            _settings.Particles.ParticleSizeOverlay :
+            _settings.Particles.ParticleSizeNormal;
 
         int safeLength = Min(spectrumLength, SAFE_SPECTRUM_LENGTH);
         PrepareSpectrumBuffer(safeLength);
@@ -519,7 +519,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
             if (spectrumBuffer[i] <= threshold) continue;
 
             float densityFactor = MathF.Min(spectrumBuffer[i] / threshold, MAX_DENSITY_FACTOR);
-            if (rnd.NextDouble() >= densityFactor * _settings.SpawnProbability) continue;
+            if (rnd.NextDouble() >= densityFactor * _settings.Particles.SpawnProbability) continue;
 
             CreateParticle(
                 i,
@@ -548,7 +548,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
             Y: spawnY,
             Velocity: GetRandomVelocity(rnd) * densityFactor,
             Size: baseSize * densityFactor,
-            Life: _settings.ParticleLife,
+            Life: _settings.Particles.ParticleLife,
             Alpha: 1f,
             IsActive: true));
     }
@@ -599,14 +599,14 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
 
         float step = 1f / (_alphaCurve.Length - 1);
         for (int i = 0; i < _alphaCurve.Length; i++)
-            _alphaCurve[i] = (float)Pow(i * step, _settings.AlphaDecayExponent);
+            _alphaCurve[i] = (float)Pow(i * step, _settings.Particles.AlphaDecayExponent);
     }
 
     private void InitializeVelocityLookup(float minVelocity)
     {
         _velocityLookup ??= ArrayPool<float>.Shared.Rent(VELOCITY_LOOKUP_SIZE);
 
-        float velocityRange = _settings.ParticleVelocityMax - _settings.ParticleVelocityMin;
+        float velocityRange = _settings.Particles.ParticleVelocityMax - _settings.Particles.ParticleVelocityMin;
         for (int i = 0; i < VELOCITY_LOOKUP_SIZE; i++)
             _velocityLookup[i] = minVelocity + velocityRange * i / VELOCITY_LOOKUP_SIZE;
     }
@@ -614,9 +614,9 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     private float GetRandomVelocity(Random rnd)
     {
         if (_velocityLookup == null)
-            return _settings.ParticleVelocityMin * _settings.VelocityMultiplier;
+            return _settings.Particles.ParticleVelocityMin * _settings.Particles.VelocityMultiplier;
 
-        return _velocityLookup[rnd.Next(VELOCITY_LOOKUP_SIZE)] * _settings.VelocityMultiplier;
+        return _velocityLookup[rnd.Next(VELOCITY_LOOKUP_SIZE)] * _settings.Particles.VelocityMultiplier;
     }
 
     private static Random GetThreadLocalRandom() =>

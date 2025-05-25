@@ -66,7 +66,7 @@ public sealed class ThemeManager : IThemes
 
             IsDarkTheme = isDark;
             ApplyThemeToAllWindows();
-            _settings.IsDarkTheme = isDark;
+            _settings.General.IsDarkTheme = isDark;
         },
         LogPrefix,
         "Error setting theme");
