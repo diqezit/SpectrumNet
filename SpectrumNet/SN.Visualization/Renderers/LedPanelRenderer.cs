@@ -1,6 +1,7 @@
 ﻿#nullable enable
 
 using static SpectrumNet.SN.Visualization.Renderers.LedPanelRenderer.Constants;
+using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
@@ -15,7 +16,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
 
     public static LedPanelRenderer GetInstance() => _instance.Value;
 
-    public record Constants
+    public static class Constants
     {
         public const float
             LED_RADIUS = 6f,
@@ -26,7 +27,8 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
             DECAY_RATE = 0.85f,
             ATTACK_RATE = 0.4f,
             PEAK_HOLD_TIME = 0.5f,
-            INNER_GLOW_SIZE = 0.7f;
+            INNER_GLOW_SIZE = 0.7f,
+            OVERLAY_PADDING_FACTOR = 0.95f;
 
         public const int
             MIN_GRID_SIZE = 10,
@@ -62,7 +64,8 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
             float StartY,
             bool UseGlow,
             bool UsePeakHold,
-            float GlowStrength
+            float GlowStrength,
+            bool IsOverlay
         );
 
         public static readonly Dictionary<RenderQuality, (int maxRows, bool effects)> QualityConfig = new()
@@ -79,9 +82,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     private readonly float[] _peakTimers = new float[MAX_COLUMNS];
     private readonly SKPoint[,] _ledPositions = new SKPoint[MAX_COLUMNS, 32];
     private readonly SKColor[] _rowColors = new SKColor[32];
-    private SKBitmap? _inactiveLedLayer;
-    private int _currentBarCount = 0;
-    private bool _useExternalColors = false;
+    private bool _useExternalColors;
     private SKColor _externalBaseColor = SKColors.White;
 
     protected override int GetMaxBarsForQuality() => Quality switch
@@ -96,6 +97,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeColorGradient();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
     }
 
     private void InitializeColorGradient()
@@ -135,14 +137,13 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     protected override void OnConfigurationChanged()
     {
         base.OnConfigurationChanged();
-        InvalidateInactiveLayer();
+        InvalidateGrid();
     }
 
-    private void InvalidateInactiveLayer()
+    private void InvalidateGrid()
     {
-        _needsRedraw = true;
-        _inactiveLedLayer?.Dispose();
-        _inactiveLedLayer = null;
+        _grid = null;
+        RequestRedraw();
     }
 
     protected override RenderParameters CalculateRenderParameters(
@@ -150,9 +151,9 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         int requestedBarCount)
     {
         int maxBars = GetMaxBarsForQuality();
-        int effectiveBarCount = Math.Min(requestedBarCount, maxBars);
+        int effectiveBarCount = Min(requestedBarCount, maxBars);
 
-        UpdateGridSettings(info, effectiveBarCount);
+        UpdateGridIfNeeded(info, effectiveBarCount);
 
         if (_grid == null)
             return new RenderParameters(
@@ -165,54 +166,74 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
             _grid.Columns,
             _grid.CellSize,
             0f,
-            _grid.StartX
-        );
+            _grid.StartX);
     }
 
-    private void UpdateGridSettings(
+    private void UpdateGridIfNeeded(
         SKImageInfo info,
         int requestedBarCount)
     {
-        var dimensions = CalculateGridDimensions(info, requestedBarCount);
-        var layout = CalculateGridLayout(
-            info,
-            dimensions.columns,
-            dimensions.rows);
+        if (!NeedsGridUpdate(info, requestedBarCount))
+            return;
 
-        if (ShouldUpdateGrid(
-            dimensions.columns,
-            dimensions.rows,
-            requestedBarCount))
-        {
-            CreateNewGrid(dimensions, layout);
-        }
+        var (columns, rows) = CalculateGridSize(info, requestedBarCount);
+        var (cellSize, startX, startY) = CalculateLayout(info, columns, rows);
+
+        CreateGrid(columns, rows, cellSize, startX, startY);
     }
 
-    private (int columns, int rows) CalculateGridDimensions(
+    private bool NeedsGridUpdate(
+        SKImageInfo info,
+        int requestedBarCount)
+    {
+        if (_grid == null) return true;
+
+        var (columns, rows) = CalculateGridSize(info, requestedBarCount);
+        var (cellSize, startX, startY) = CalculateLayout(info, columns, rows);
+
+        bool gridSizeChanged = _grid.Columns != columns || _grid.Rows != rows;
+        bool positionChanged = MathF.Abs(_grid.StartX - startX) > 0.1f ||
+                              MathF.Abs(_grid.StartY - startY) > 0.1f;
+        bool cellSizeChanged = MathF.Abs(_grid.CellSize - cellSize) > 0.1f;
+        bool overlayChanged = _grid.IsOverlay != IsOverlayActive;
+
+        return gridSizeChanged || positionChanged || cellSizeChanged || overlayChanged;
+    }
+
+    private (int columns, int rows) CalculateGridSize(
         SKImageInfo info,
         int requestedBarCount)
     {
         var (maxRows, _) = QualityConfig[Quality];
-        float totalLedSize = LED_RADIUS * 2 + LED_MARGIN;
+        float ledSize = LED_RADIUS * 2 + LED_MARGIN;
 
-        int maxAllowedColumns = Math.Min(MAX_COLUMNS, GetMaxBarsForQuality());
-        int columns = Math.Min(
-            Math.Min(maxAllowedColumns, requestedBarCount),
-            (int)(info.Width / totalLedSize));
-        int rows = Math.Min(maxRows, (int)(info.Height / totalLedSize));
+        float availableWidth = IsOverlayActive
+            ? info.Width * OVERLAY_PADDING_FACTOR
+            : info.Width;
+        float availableHeight = IsOverlayActive
+            ? info.Height * OVERLAY_PADDING_FACTOR
+            : info.Height;
+
+        int maxAllowed = Min(MAX_COLUMNS, GetMaxBarsForQuality());
+        int columns = Min(
+            Min(maxAllowed, requestedBarCount),
+            (int)(availableWidth / ledSize));
+        int rows = Min(
+            maxRows,
+            (int)(availableHeight / ledSize));
 
         return (
-            Math.Max(MIN_GRID_SIZE, columns),
-            Math.Max(MIN_GRID_SIZE, rows)
+            Max(MIN_GRID_SIZE, columns),
+            Max(MIN_GRID_SIZE, rows)
         );
     }
 
-    private (float cellSize, float startX, float startY) CalculateGridLayout(
+    private static (float cellSize, float startX, float startY) CalculateLayout(
         SKImageInfo info,
         int columns,
         int rows)
     {
-        float cellSize = Math.Min(
+        float cellSize = MathF.Min(
             info.Width / (float)columns,
             info.Height / (float)rows
         );
@@ -225,35 +246,31 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         return (cellSize, startX, startY);
     }
 
-    private bool ShouldUpdateGrid(
+    private void CreateGrid(
         int columns,
         int rows,
-        int requestedBarCount) =>
-        _grid == null ||
-        _grid.Columns != columns ||
-        _grid.Rows != rows ||
-        _currentBarCount != requestedBarCount;
-
-    private void CreateNewGrid(
-        (int columns, int rows) dimensions,
-        (float cellSize, float startX, float startY) layout)
+        float cellSize,
+        float startX,
+        float startY)
     {
         var (_, useEffects) = QualityConfig[Quality];
 
+        float glowStrength = useEffects ? (IsOverlayActive ? 0.5f : 1f) : 0f;
+
         _grid = new GridSettings(
-            dimensions.rows,
-            dimensions.columns,
-            layout.cellSize,
-            layout.startX,
-            layout.startY,
+            rows,
+            columns,
+            cellSize,
+            startX,
+            startY,
             useEffects && UseAdvancedEffects,
             useEffects,
-            useEffects ? 1f : 0f
+            glowStrength,
+            IsOverlayActive
         );
 
-        _currentBarCount = dimensions.columns;
         CacheLedPositions();
-        _needsRedraw = true;
+        RequestRedraw();
     }
 
     private void CacheLedPositions()
@@ -263,10 +280,14 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         float halfCell = _grid.CellSize * 0.5f;
 
         for (int col = 0; col < _grid.Columns; col++)
+        {
             CacheLedColumnPositions(col, halfCell);
+        }
     }
 
-    private void CacheLedColumnPositions(int col, float halfCell)
+    private void CacheLedColumnPositions(
+        int col,
+        float halfCell)
     {
         if (_grid == null) return;
 
@@ -289,107 +310,22 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint? paint)
     {
-        if (!ShouldRenderInactiveLayer(canvas)) return;
+        if (!ValidateBeforeRender(canvas, paint))
+            return;
 
-        UpdateColorSettings(paint);
-        EnsureInactiveLayerExists(info, paint);
-        DrawInactiveLayer(canvas);
+        UpdateColorSettings(paint!);
     }
 
-    private void UpdateColorSettings(SKPaint? paint)
-    {
-        if (paint == null) return;
+    private bool ValidateBeforeRender(
+        SKCanvas? canvas,
+        SKPaint? paint) =>
+        canvas != null && _grid != null && paint != null;
 
+    private void UpdateColorSettings(SKPaint paint)
+    {
         _useExternalColors = paint.Color != SKColors.White;
         if (_useExternalColors)
             _externalBaseColor = paint.Color;
-    }
-
-    private bool ShouldRenderInactiveLayer(SKCanvas? canvas) =>
-        canvas != null && _grid != null;
-
-    private void EnsureInactiveLayerExists(
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        if (_needsRedraw || _inactiveLedLayer == null)
-        {
-            CreateInactiveLedLayer(info, paint);
-            _needsRedraw = false;
-        }
-    }
-
-    private void DrawInactiveLayer(SKCanvas? canvas)
-    {
-        if (canvas != null && _inactiveLedLayer != null)
-            canvas.DrawBitmap(_inactiveLedLayer, 0, 0);
-    }
-
-    private void CreateInactiveLedLayer(
-        SKImageInfo info,
-        SKPaint? paint)
-    {
-        _inactiveLedLayer?.Dispose();
-        _inactiveLedLayer = new SKBitmap(info.Width, info.Height);
-
-        using var surface = SKSurface.Create(
-            new SKImageInfo(info.Width, info.Height));
-        var layerCanvas = surface.Canvas;
-
-        layerCanvas.Clear(BackgroundTint);
-        DrawInactiveLeds(layerCanvas, paint);
-
-        SaveLayerToBitmap(surface);
-    }
-
-    private void SaveLayerToBitmap(SKSurface surface)
-    {
-        if (_inactiveLedLayer == null) return;
-
-        using var snapshot = surface.Snapshot();
-        snapshot.ReadPixels(
-            _inactiveLedLayer.Info,
-            _inactiveLedLayer.GetPixels());
-    }
-
-    private void DrawInactiveLeds(
-        SKCanvas canvas,
-        SKPaint? paint)
-    {
-        if (_grid == null || paint == null) return;
-
-        var savedColor = paint.Color;
-        var savedStyle = paint.Style;
-
-        ConfigurePaintForInactiveLeds(paint);
-
-        for (int col = 0; col < _grid.Columns; col++)
-            DrawInactiveLedColumn(canvas, paint, col);
-
-        paint.Color = savedColor;
-        paint.Style = savedStyle;
-    }
-
-    private void ConfigurePaintForInactiveLeds(SKPaint paint)
-    {
-        paint.Color = InactiveColor.WithAlpha(
-            (byte)(INACTIVE_ALPHA * 255));
-        paint.Style = SKPaintStyle.Fill;
-        paint.IsAntialias = UseAntiAlias;
-    }
-
-    private void DrawInactiveLedColumn(
-        SKCanvas canvas,
-        SKPaint paint,
-        int col)
-    {
-        if (_grid == null) return;
-
-        for (int row = 0; row < _grid.Rows; row++)
-        {
-            var pos = _ledPositions[col, row];
-            canvas.DrawCircle(pos, LED_RADIUS, paint);
-        }
     }
 
     protected override void RenderEffect(
@@ -403,59 +339,94 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     {
         if (_grid == null) return;
 
-        UpdateSmoothingAndPeaks(spectrum);
-        ProcessColumnsInParallel(spectrum);
-        RenderActiveLeds(canvas, spectrum, paint);
+        if (IsOverlayActive)
+        {
+            using var bgPaint = new SKPaint
+            {
+                Color = BackgroundTint.WithAlpha(
+                    (byte)(BackgroundTint.Alpha * _overlayStateManager.OverlayAlphaFactor))
+            };
+            canvas.DrawRect(0, 0, info.Width, info.Height, bgPaint);
+        }
+        else
+        {
+            canvas.Clear(BackgroundTint);
+        }
+
+        UpdateValues(spectrum);
+        RenderInactiveLeds(canvas);
+        RenderActiveLeds(canvas);
     }
 
-    private void ProcessColumnsInParallel(float[] spectrum)
+    private void RenderInactiveLeds(SKCanvas canvas)
     {
         if (_grid == null) return;
 
-        int columnsToProcess = Math.Min(_grid.Columns, spectrum.Length);
+        using var paint = CreateInactiveLedPaint();
 
-        Parallel.For(0, columnsToProcess, new ParallelOptions
+        for (int col = 0; col < _grid.Columns; col++)
         {
-            MaxDegreeOfParallelism = Environment.ProcessorCount
-        },
-        col => ProcessColumn(col));
+            DrawInactiveLedColumn(canvas, paint, col);
+        }
     }
 
-    private void UpdateSmoothingAndPeaks(float[] spectrum)
+    private SKPaint CreateInactiveLedPaint()
+    {
+        var alpha = IsOverlayActive
+            ? (byte)(INACTIVE_ALPHA * 255 * _overlayStateManager.OverlayAlphaFactor)
+            : (byte)(INACTIVE_ALPHA * 255);
+
+        return CreateStandardPaint(
+            InactiveColor.WithAlpha(alpha));
+    }
+
+    private void DrawInactiveLedColumn(
+        SKCanvas canvas,
+        SKPaint paint,
+        int col)
+    {
+        if (_grid == null) return;
+
+        for (int row = 0; row < _grid.Rows; row++)
+        {
+            canvas.DrawCircle(_ledPositions[col, row], LED_RADIUS, paint);
+        }
+    }
+
+    private void UpdateValues(float[] spectrum)
     {
         if (_grid == null) return;
 
         float deltaTime = _animationTimer.DeltaTime;
-        int length = Math.Min(_grid.Columns, spectrum.Length);
+        int count = Min(_grid.Columns, spectrum.Length);
 
-        for (int i = 0; i < length; i++)
+        Parallel.For(0, count, i =>
         {
-            UpdateSmoothingForColumn(i, spectrum[i]);
-            UpdatePeakForColumn(i, deltaTime);
-        }
+            UpdateSmoothing(i, spectrum[i]);
+            UpdatePeak(i, deltaTime);
+        });
     }
 
-    private void UpdateSmoothingForColumn(
+    private void UpdateSmoothing(
         int column,
-        float targetValue)
+        float target)
     {
         float current = _smoothedValues[column];
-
-        _smoothedValues[column] = current < targetValue
-            ? Lerp(current, targetValue, ATTACK_RATE)
-            : Lerp(current, targetValue, 1f - DECAY_RATE);
+        _smoothedValues[column] = current < target
+            ? Lerp(current, target, ATTACK_RATE)
+            : Lerp(current, target, 1f - DECAY_RATE);
     }
 
-    private void UpdatePeakForColumn(
+    private void UpdatePeak(
         int column,
         float deltaTime)
     {
-        if (_grid == null || !_grid.UsePeakHold) return;
+        if (!ShouldUpdatePeak(column))
+            return;
 
         if (_smoothedValues[column] > _peakValues[column])
         {
-            _peakValues[column] = _smoothedValues[column];
-            _peakTimers[column] = PEAK_HOLD_TIME;
+            ResetPeak(column);
         }
         else if (_peakTimers[column] > 0)
         {
@@ -467,43 +438,31 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void ProcessColumn(int col) { }
+    private bool ShouldUpdatePeak(int column) =>
+        _grid != null && _grid.UsePeakHold;
 
-    private void RenderActiveLeds(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKPaint paint)
+    private void ResetPeak(int column)
     {
-        if (_grid == null) return;
-
-        int columns = Math.Min(_grid.Columns, spectrum.Length);
-
-        for (int col = 0; col < columns; col += BATCH_PROCESS_SIZE)
-        {
-            int batchEnd = Math.Min(col + BATCH_PROCESS_SIZE, columns);
-            RenderBatch(canvas, col, batchEnd, paint);
-        }
+        _peakValues[column] = _smoothedValues[column];
+        _peakTimers[column] = PEAK_HOLD_TIME;
     }
 
-    private void RenderBatch(
-        SKCanvas canvas,
-        int startCol,
-        int endCol,
-        SKPaint paint)
+    private void RenderActiveLeds(SKCanvas canvas)
     {
         if (_grid == null) return;
 
-        for (int col = startCol; col < endCol; col++)
+        int columns = Min(_grid.Columns, _smoothedValues.Length);
+
+        for (int col = 0; col < columns; col++)
         {
-            RenderColumn(canvas, col, paint);
-            RenderPeakIfNeeded(canvas, col, paint);
+            RenderColumn(canvas, col);
+            RenderPeakIfActive(canvas, col);
         }
     }
 
     private void RenderColumn(
         SKCanvas canvas,
-        int col,
-        SKPaint paint)
+        int col)
     {
         if (_grid == null) return;
 
@@ -512,8 +471,11 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
 
         for (int row = 0; row < activeLeds; row++)
         {
-            bool isTop = row == activeLeds - 1;
-            RenderSingleLed(canvas, col, row, value, isTop, paint);
+            float brightness = CalculateLedBrightness(
+                value,
+                row == activeLeds - 1);
+
+            RenderLed(canvas, col, row, brightness, value);
         }
     }
 
@@ -529,206 +491,240 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         return activeLeds;
     }
 
-    private void RenderPeakIfNeeded(
-        SKCanvas canvas,
-        int col,
-        SKPaint paint)
+    private static float CalculateLedBrightness(
+        float value,
+        bool isTopLed)
     {
-        if (_grid == null || !_grid.UsePeakHold || _peakTimers[col] <= 0)
+        float brightness = Lerp(MIN_ACTIVE_BRIGHTNESS, 1f, value);
+
+        if (isTopLed)
+            brightness *= 1.2f;
+
+        return MathF.Min(brightness, 1f);
+    }
+
+    private void RenderPeakIfActive(
+        SKCanvas canvas,
+        int col)
+    {
+        if (!IsPeakActive(col))
             return;
 
         int peakRow = CalculatePeakRow(col);
-        if (IsValidRow(peakRow))
+
+        if (IsValidPeakRow(peakRow))
         {
             float alpha = _peakTimers[col] / PEAK_HOLD_TIME;
-            RenderPeakLed(canvas, col, peakRow, alpha, paint);
+            RenderPeakLed(canvas, col, peakRow, alpha);
         }
     }
+
+    private bool IsPeakActive(int col) =>
+        _grid != null &&
+        _grid.UsePeakHold &&
+        _peakTimers[col] > 0;
 
     private int CalculatePeakRow(int col) =>
         _grid == null ? -1 : (int)(_peakValues[col] * _grid.Rows) - 1;
 
-    private bool IsValidRow(int row) =>
+    private bool IsValidPeakRow(int row) =>
         _grid != null && row >= 0 && row < _grid.Rows;
 
-    private void RenderSingleLed(
+    private void RenderLed(
         SKCanvas canvas,
         int col,
         int row,
-        float intensity,
-        bool isTop,
-        SKPaint paint)
+        float brightness,
+        float intensity)
     {
         if (_grid == null) return;
 
         var pos = _ledPositions[col, row];
-        var baseColor = GetLedColor(row, paint);
-        float brightness = CalculateBrightness(intensity, isTop);
+        var baseColor = GetLedColor(row);
 
-        RenderLedWithEffects(
-            canvas,
-            pos,
-            baseColor,
-            brightness,
-            intensity,
-            paint);
-    }
+        float adjustedBrightness = IsOverlayActive
+            ? brightness * _overlayStateManager.OverlayAlphaFactor
+            : brightness;
 
-    private SKColor GetLedColor(int row, SKPaint paint)
-    {
-        if (_useExternalColors)
-        {
-            float t = row / (float)(_rowColors.Length - 1);
-            return BlendWithExternalColor(_rowColors[row], t);
-        }
-
-        return _rowColors[Math.Min(row, _rowColors.Length - 1)];
-    }
-
-    private SKColor BlendWithExternalColor(SKColor gradientColor, float t)
-    {
-        float blendFactor = 0.7f;
-        return new SKColor(
-            (byte)(_externalBaseColor.Red * blendFactor +
-                gradientColor.Red * (1 - blendFactor) * t),
-            (byte)(_externalBaseColor.Green * blendFactor +
-                gradientColor.Green * (1 - blendFactor) * t),
-            (byte)(_externalBaseColor.Blue * blendFactor +
-                gradientColor.Blue * (1 - blendFactor) * t)
-        );
-    }
-
-    private float CalculateBrightness(float intensity, bool isTop)
-    {
-        float brightness = Lerp(MIN_ACTIVE_BRIGHTNESS, 1f, intensity);
-        if (isTop) brightness *= 1.2f;
-        return brightness;
-    }
-
-    private void RenderLedWithEffects(
-        SKCanvas canvas,
-        SKPoint pos,
-        SKColor baseColor,
-        float brightness,
-        float intensity,
-        SKPaint paint)
-    {
-        if (_grid == null) return;
-
-        var ledColor = baseColor.WithAlpha((byte)(brightness * 255));
+        var ledColor = baseColor.WithAlpha((byte)(adjustedBrightness * 255));
 
         if (_grid.UseGlow)
-            RenderLedGlow(canvas, pos, ledColor, brightness, paint);
+        {
+            RenderLedGlow(canvas, pos, ledColor, adjustedBrightness);
+        }
 
-        RenderLedBody(canvas, pos, ledColor, paint);
-        RenderLedInnerGlow(canvas, pos, brightness, intensity, paint);
+        RenderLedBody(canvas, pos, ledColor);
+        RenderLedInnerGlow(canvas, pos, adjustedBrightness, intensity);
     }
 
     private void RenderLedGlow(
         SKCanvas canvas,
         SKPoint pos,
         SKColor ledColor,
-        float brightness,
-        SKPaint paint)
+        float brightness)
     {
         if (_grid == null) return;
 
-        var savedColor = paint.Color;
-        var savedMaskFilter = paint.MaskFilter;
+        using var glowPaint = CreateGlowPaint(ledColor, brightness);
+        canvas.DrawCircle(pos, LED_RADIUS + GLOW_RADIUS, glowPaint);
+    }
 
-        paint.Color = ledColor.WithAlpha((byte)(brightness * 60));
+    private SKPaint CreateGlowPaint(
+        SKColor ledColor,
+        float brightness)
+    {
+        var glowAlpha = IsOverlayActive
+            ? (byte)(brightness * 60 * _overlayStateManager.OverlayAlphaFactor)
+            : (byte)(brightness * 60);
+
+        var paint = CreateStandardPaint(
+            ledColor.WithAlpha(glowAlpha));
+
         paint.MaskFilter = SKMaskFilter.CreateBlur(
             SKBlurStyle.Normal,
-            GLOW_RADIUS * _grid.GlowStrength);
+            GLOW_RADIUS * _grid!.GlowStrength);
 
-        canvas.DrawCircle(pos, LED_RADIUS + GLOW_RADIUS, paint);
-
-        paint.Color = savedColor;
-        paint.MaskFilter = savedMaskFilter;
+        return paint;
     }
 
     private void RenderLedBody(
         SKCanvas canvas,
         SKPoint pos,
-        SKColor ledColor,
-        SKPaint paint)
+        SKColor ledColor)
     {
-        var savedColor = paint.Color;
-        paint.Color = ledColor;
-        canvas.DrawCircle(pos, LED_RADIUS, paint);
-        paint.Color = savedColor;
+        using var ledPaint = CreateStandardPaint(ledColor);
+        canvas.DrawCircle(pos, LED_RADIUS, ledPaint);
     }
 
     private void RenderLedInnerGlow(
         SKCanvas canvas,
         SKPoint pos,
         float brightness,
-        float intensity,
-        SKPaint paint)
+        float intensity)
     {
-        var savedColor = paint.Color;
-        var glowColor = _useExternalColors
-            ? _externalBaseColor.WithAlpha((byte)(brightness * intensity * 128))
-            : SKColors.White.WithAlpha((byte)(brightness * intensity * 128));
+        var innerGlowColor = GetInnerGlowColor(brightness, intensity);
 
-        paint.Color = glowColor;
-        canvas.DrawCircle(pos, LED_RADIUS * INNER_GLOW_SIZE, paint);
-        paint.Color = savedColor;
+        using var innerPaint = CreateStandardPaint(innerGlowColor);
+        canvas.DrawCircle(pos, LED_RADIUS * INNER_GLOW_SIZE, innerPaint);
+    }
+
+    private SKColor GetInnerGlowColor(
+        float brightness,
+        float intensity)
+    {
+        var baseAlpha = brightness * intensity * 128;
+        byte alpha = IsOverlayActive
+            ? (byte)(baseAlpha * _overlayStateManager.OverlayAlphaFactor)
+            : (byte)baseAlpha;
+
+        return _useExternalColors
+            ? _externalBaseColor.WithAlpha(alpha)
+            : SKColors.White.WithAlpha(alpha);
     }
 
     private void RenderPeakLed(
         SKCanvas canvas,
         int col,
         int row,
-        float alpha,
-        SKPaint paint)
+        float alpha)
     {
         var pos = _ledPositions[col, row];
+        var peakColor = GetPeakColor(alpha);
 
-        var savedColor = paint.Color;
-        var savedStyle = paint.Style;
-        var savedStrokeWidth = paint.StrokeWidth;
-
-        var peakColor = _useExternalColors
-            ? _externalBaseColor.WithAlpha((byte)(alpha * 200))
-            : PeakColor.WithAlpha((byte)(alpha * 200));
-
-        paint.Color = peakColor;
-        paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = 2;
-
+        using var paint = CreatePeakPaint(peakColor);
         canvas.DrawCircle(pos, LED_RADIUS + 2, paint);
-
-        paint.Color = savedColor;
-        paint.Style = savedStyle;
-        paint.StrokeWidth = savedStrokeWidth;
     }
 
+    private SKColor GetPeakColor(float alpha)
+    {
+        var baseAlpha = alpha * 200;
+        byte alphaValue = IsOverlayActive
+            ? (byte)(baseAlpha * _overlayStateManager.OverlayAlphaFactor)
+            : (byte)baseAlpha;
+
+        return _useExternalColors
+            ? _externalBaseColor.WithAlpha(alphaValue)
+            : PeakColor.WithAlpha(alphaValue);
+    }
+
+    private SKPaint CreatePeakPaint(SKColor color)
+    {
+        var paint = CreateStandardPaint(color);
+        paint.Style = SKPaintStyle.Stroke;
+        paint.StrokeWidth = 2;
+        return paint;
+    }
+
+    private SKColor GetLedColor(int row)
+    {
+        var baseColor = _rowColors[Min(row, _rowColors.Length - 1)];
+
+        if (!_useExternalColors)
+            return baseColor;
+
+        return BlendWithExternalColor(baseColor, row);
+    }
+
+    private SKColor BlendWithExternalColor(
+        SKColor baseColor,
+        int row)
+    {
+        float t = row / (float)(_rowColors.Length - 1);
+        float blend = 0.7f;
+
+        return new SKColor(
+            BlendColorComponent(_externalBaseColor.Red, baseColor.Red, blend, t),
+            BlendColorComponent(_externalBaseColor.Green, baseColor.Green, blend, t),
+            BlendColorComponent(_externalBaseColor.Blue, baseColor.Blue, blend, t)
+        );
+    }
+
+    private static byte BlendColorComponent(
+        byte external,
+        byte gradient,
+        float blend,
+        float t) =>
+        (byte)(external * blend + gradient * (1 - blend) * t);
+
     private static float Lerp(float a, float b, float t) =>
-        a + (b - a) * t;
+        a + (b - a) * Clamp(t, 0f, 1f);
+
+    public override bool RequiresRedraw() =>
+        base.RequiresRedraw() ||
+        HasActivePeaks();
+
+    private bool HasActivePeaks() =>
+        _grid != null &&
+        _grid.UsePeakHold &&
+        Array.Exists(_peakTimers, t => t > 0);
 
     protected override void CleanupUnusedResources()
     {
-        if (_grid != null && _smoothedValues.Length > _grid.Columns * 2)
-            ClearUnusedArrayData();
+        if (!ShouldCleanupArrays())
+            return;
+
+        CleanupArrayData();
     }
 
-    private void ClearUnusedArrayData()
+    private bool ShouldCleanupArrays() =>
+        _grid != null &&
+        _smoothedValues.Length > _grid.Columns * 2;
+
+    private void CleanupArrayData()
     {
         if (_grid == null) return;
 
-        int startIndex = _grid.Columns;
+        int start = _grid.Columns;
         int count = _smoothedValues.Length - _grid.Columns;
 
-        Array.Clear(_smoothedValues, startIndex, count);
-        Array.Clear(_peakValues, startIndex, count);
-        Array.Clear(_peakTimers, startIndex, count);
+        Array.Clear(_smoothedValues, start, count);
+        Array.Clear(_peakValues, start, count);
+        Array.Clear(_peakTimers, start, count);
     }
 
     protected override void OnDispose()
     {
-        _inactiveLedLayer?.Dispose();
-        _inactiveLedLayer = null;
         base.OnDispose();
+        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
     }
 }
