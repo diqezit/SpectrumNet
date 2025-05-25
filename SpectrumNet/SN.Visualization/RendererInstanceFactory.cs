@@ -32,6 +32,8 @@ internal static class RendererInstanceFactory
         RenderStyle.Waveform => WaveformRenderer.GetInstance(),
         RenderStyle.RippleRenderer => RippleRenderer.GetInstance(),
         RenderStyle.HackerTextRenderer => HackerTextRenderer.GetInstance(),
+        RenderStyle.LedPanelRenderer => LedPanelRenderer.GetInstance(),
+
         _ => throw new ArgumentException($"Unknown render style: {style}")
     };
 }

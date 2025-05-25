@@ -32,5 +32,6 @@ public enum RenderStyle
     Waterfall,
     RippleRenderer,
     Waveform,
-    HackerTextRenderer
+    HackerTextRenderer,
+    LedPanelRenderer
 }
