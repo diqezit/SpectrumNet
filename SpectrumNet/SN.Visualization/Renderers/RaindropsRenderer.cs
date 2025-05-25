@@ -49,7 +49,9 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             SPLASH_MIN_INTENSITY = 0.2f,
             DROP_ALPHA_BASE = 0.7f,
             DROP_ALPHA_INTENSITY = 0.3f,
-            HIGHLIGHT_ALPHA_MULTIPLIER = 150f;
+            HIGHLIGHT_ALPHA_MULTIPLIER = 150f,
+            DROP_SIZE_MULTIPLIER = 1.5f,
+            FALL_SPEED_DAMPING = 0.25f;
 
         public const int
             INITIAL_DROP_COUNT = 30,
@@ -61,24 +63,12 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
         public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
-            [RenderQuality.Low] = new(
-                UseAdvancedEffects: false,
-                EffectsThreshold: 4
-            ),
-            [RenderQuality.Medium] = new(
-                UseAdvancedEffects: true,
-                EffectsThreshold: 3
-            ),
-            [RenderQuality.High] = new(
-                UseAdvancedEffects: true,
-                EffectsThreshold: 2
-            )
+            [RenderQuality.Low] = new(false, 4),
+            [RenderQuality.Medium] = new(true, 3),
+            [RenderQuality.High] = new(true, 2)
         };
 
-        public record QualitySettings(
-            bool UseAdvancedEffects,
-            int EffectsThreshold
-        );
+        public record QualitySettings(bool UseAdvancedEffects, int EffectsThreshold);
     }
 
     private static readonly SKColor[] TrailGradientColors = new SKColor[2];
@@ -91,7 +81,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private float _actualDeltaTime = TARGET_DELTA_TIME;
     private float _averageLoudness = 0f;
     private int _frameCounter = 0;
-    private bool _cacheNeedsUpdate;
+    private bool _cacheNeedsUpdate = true;
 
     private readonly SKPath _trailPath = new();
     private readonly Random _random = new();
@@ -131,10 +121,8 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         float barWidth,
         float barSpacing,
         int barCount,
-        SKPaint paint)
-    {
+        SKPaint paint) =>
         RenderRainEffect(canvas, spectrum, info, barCount, paint);
-    }
 
     private void RenderRainEffect(
         SKCanvas canvas,
@@ -165,12 +153,15 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     private void UpdateCache(SKImageInfo info)
     {
-        if (!_cacheNeedsUpdate &&
-            _renderCache.Width == info.Width &&
-            _renderCache.Height == info.Height) return;
+        bool needsUpdate = _cacheNeedsUpdate ||
+            _renderCache.Width != info.Width ||
+            _renderCache.Height != info.Height ||
+            _renderCache.IsOverlay != IsOverlayActive;
+
+        if (!needsUpdate) return;
 
         _renderCache = new RenderCache(info.Width, info.Height, IsOverlayActive);
-        _particleBuffer.UpdateLowerBound(_renderCache.LowerBound);
+        _particleBuffer.UpdateBounds(_renderCache.UpperBound, _renderCache.LowerBound);
         _cacheNeedsUpdate = false;
     }
 
@@ -182,29 +173,28 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         int initialCount = Min(INITIAL_DROP_COUNT, _settings.Raindrops.MaxRaindrops);
 
         for (int i = 0; i < initialCount; i++)
-        {
             _raindrops[_raindropCount++] = CreateInitialRaindrop(
                 barCount,
                 _renderCache.Width,
                 _renderCache.Height
             );
-        }
 
-        _firstRender = true;
+        _firstRender = false;
     }
 
-    private Raindrop CreateInitialRaindrop(int barCount, float width, float height)
-    {
-        return new Raindrop(
+    private Raindrop CreateInitialRaindrop(
+        int barCount,
+        float width,
+        float height) =>
+        new(
             X: width * (float)_random.NextDouble(),
-            Y: height * (float)_random.NextDouble() * 0.5f,
-            FallSpeed: _settings.Raindrops.BaseFallSpeed +
-                (float)(_random.NextDouble() * _settings.Raindrops.SpeedVariation),
-            Size: _settings.Raindrops.RaindropSize * (0.7f + (float)_random.NextDouble() * 0.6f),
+            Y: _renderCache.UpperBound + (float)_random.NextDouble() * height * 0.5f,
+            FallSpeed: (_settings.Raindrops.BaseFallSpeed +
+                (float)(_random.NextDouble() * _settings.Raindrops.SpeedVariation)) * FALL_SPEED_DAMPING,
+            Size: _settings.Raindrops.RaindropSize * DROP_SIZE_MULTIPLIER * (0.7f + (float)_random.NextDouble() * 0.6f),
             Intensity: 0.3f + (float)_random.NextDouble() * 0.3f,
             SpectrumIndex: _random.Next(barCount)
         );
-    }
 
     private void UpdateSimulation(float[] spectrum, int barCount)
     {
@@ -233,11 +223,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
             if (end > start)
             {
-                float value = 0f;
-                for (int j = start; j < end; j++)
-                    value += spectrum[j];
-
-                value /= (end - start);
+                float value = CalculateAverageValue(spectrum, start, end);
                 _smoothedSpectrumCache[i] = _smoothedSpectrumCache[i] * (1 - SMOOTH_FACTOR) +
                     value * SMOOTH_FACTOR;
                 sum += _smoothedSpectrumCache[i];
@@ -247,6 +233,14 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _averageLoudness = Clamp(sum / _smoothedSpectrumCache.Length * LOUDNESS_SCALE, 0f, 1f);
     }
 
+    private static float CalculateAverageValue(float[] spectrum, int start, int end)
+    {
+        float value = 0f;
+        for (int j = start; j < end; j++)
+            value += spectrum[j];
+        return value / (end - start);
+    }
+
     private void UpdateRaindrops(float[] spectrum)
     {
         int writeIdx = 0;
@@ -254,23 +248,26 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         for (int i = 0; i < _raindropCount; i++)
         {
             var drop = _raindrops[i];
-            float newY = drop.Y + drop.FallSpeed * _actualDeltaTime * _settings.Raindrops.TimeScaleFactor;
+            float normalizedY = (drop.Y - _renderCache.UpperBound) / _renderCache.Height;
+            float acceleration = 1f + normalizedY * 0.3f;
+            float newY = drop.Y + drop.FallSpeed * _actualDeltaTime * _settings.Raindrops.TimeScaleFactor * acceleration;
 
             if (newY < _renderCache.LowerBound)
-            {
                 _raindrops[writeIdx++] = drop with { Y = newY };
-            }
             else
-            {
-                float intensity = drop.SpectrumIndex < spectrum.Length ?
-                    spectrum[drop.SpectrumIndex] : drop.Intensity;
-
-                if (intensity > SPLASH_MIN_INTENSITY)
-                    _particleBuffer.CreateSplashParticles(drop.X, _renderCache.LowerBound, intensity);
-            }
+                HandleRaindropSplash(drop, spectrum);
         }
 
         _raindropCount = writeIdx;
+    }
+
+    private void HandleRaindropSplash(Raindrop drop, float[] spectrum)
+    {
+        float intensity = drop.SpectrumIndex < spectrum.Length ?
+            spectrum[drop.SpectrumIndex] : drop.Intensity;
+
+        if (intensity > SPLASH_MIN_INTENSITY)
+            _particleBuffer.CreateSplashParticles(drop.X, _renderCache.LowerBound, intensity);
     }
 
     private void SpawnNewDrops(float[] spectrum, int barCount)
@@ -287,14 +284,17 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
              spawns < MAX_SPAWNS_PER_FRAME &&
              _raindropCount < _raindrops.Length; i++)
         {
-            if (spectrum[i] > threshold &&
-                _random.NextDouble() < _settings.Particles.SpawnProbability * spectrum[i] * spawnBoost)
+            if (ShouldSpawnDrop(spectrum[i], threshold, spawnBoost))
             {
                 _raindrops[_raindropCount++] = CreateRaindrop(i, spectrum[i], stepWidth);
                 spawns++;
             }
         }
     }
+
+    private bool ShouldSpawnDrop(float intensity, float threshold, float spawnBoost) =>
+        intensity > threshold &&
+        _random.NextDouble() < _settings.Particles.SpawnProbability * intensity * spawnBoost;
 
     private Raindrop CreateRaindrop(int index, float intensity, float stepWidth)
     {
@@ -305,9 +305,11 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             X: x,
             Y: _renderCache.UpperBound,
             FallSpeed: _settings.Raindrops.BaseFallSpeed *
-                (1f + intensity * _settings.Raindrops.IntensitySpeedMultiplier) +
+                (1f + intensity * _settings.Raindrops.IntensitySpeedMultiplier) *
+                FALL_SPEED_DAMPING +
                 (float)(_random.NextDouble() * _settings.Raindrops.SpeedVariation),
-            Size: _settings.Raindrops.RaindropSize * (0.8f + intensity * 0.4f) *
+            Size: _settings.Raindrops.RaindropSize * DROP_SIZE_MULTIPLIER *
+                (0.8f + intensity * 0.4f) *
                 (0.9f + (float)_random.NextDouble() * 0.2f),
             Intensity: intensity,
             SpectrumIndex: index
@@ -342,23 +344,32 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
             if (intensity < TRAIL_INTENSITY_THRESHOLD) continue;
 
-            float trailLength = MathF.Min(
-                drop.FallSpeed * TRAIL_LENGTH_MULTIPLIER * intensity,
-                drop.Size * TRAIL_LENGTH_SIZE_FACTOR
-            );
-
-            trailPaint.Color = basePaint.Color.WithAlpha(
-                (byte)(TRAIL_OPACITY_MULTIPLIER * intensity)
-            );
-            trailPaint.StrokeWidth = drop.Size * TRAIL_STROKE_MULTIPLIER;
-
-            _trailPath.Reset();
-            _trailPath.MoveTo(drop.X, drop.Y);
-            _trailPath.LineTo(drop.X, drop.Y - trailLength);
-
-            if (!canvas.QuickReject(_trailPath.Bounds))
-                canvas.DrawPath(_trailPath, trailPaint);
+            RenderSingleTrail(canvas, drop, intensity, trailPaint);
         }
+    }
+
+    private void RenderSingleTrail(
+        SKCanvas canvas,
+        Raindrop drop,
+        float intensity,
+        SKPaint trailPaint)
+    {
+        float trailLength = MathF.Min(
+            drop.FallSpeed * TRAIL_LENGTH_MULTIPLIER * intensity,
+            drop.Size * TRAIL_LENGTH_SIZE_FACTOR
+        );
+
+        trailPaint.Color = trailPaint.Color.WithAlpha(
+            (byte)(TRAIL_OPACITY_MULTIPLIER * intensity)
+        );
+        trailPaint.StrokeWidth = drop.Size * TRAIL_STROKE_MULTIPLIER;
+
+        _trailPath.Reset();
+        _trailPath.MoveTo(drop.X, drop.Y);
+        _trailPath.LineTo(drop.X, drop.Y - trailLength);
+
+        if (!canvas.QuickReject(_trailPath.Bounds))
+            canvas.DrawPath(_trailPath, trailPaint);
     }
 
     private SKPaint CreateTrailPaint(SKPaint basePaint)
@@ -396,43 +407,56 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
             CreateStandardPaint(SKColors.White) : null;
 
         for (int i = 0; i < _raindropCount; i++)
-        {
-            var drop = _raindrops[i];
-            float intensity = drop.SpectrumIndex < spectrum.Length ?
-                spectrum[drop.SpectrumIndex] * 0.7f + drop.Intensity * 0.3f :
-                drop.Intensity;
+            RenderSingleDrop(canvas, _raindrops[i], spectrum, dropPaint, highlightPaint);
+    }
 
-            byte alpha = (byte)(MAX_ALPHA_BYTE * MathF.Min(
-                DROP_ALPHA_BASE + intensity * DROP_ALPHA_INTENSITY,
-                1.0f
-            ));
-            dropPaint.Color = basePaint.Color.WithAlpha(alpha);
+    private void RenderSingleDrop(
+        SKCanvas canvas,
+        Raindrop drop,
+        float[] spectrum,
+        SKPaint dropPaint,
+        SKPaint? highlightPaint)
+    {
+        float intensity = drop.SpectrumIndex < spectrum.Length ?
+            spectrum[drop.SpectrumIndex] * 0.7f + drop.Intensity * 0.3f :
+            drop.Intensity;
 
-            var dropRect = new SKRect(
-                drop.X - drop.Size,
-                drop.Y - drop.Size,
-                drop.X + drop.Size,
-                drop.Y + drop.Size
-            );
+        byte alpha = (byte)(MAX_ALPHA_BYTE * MathF.Min(
+            DROP_ALPHA_BASE + intensity * DROP_ALPHA_INTENSITY,
+            1.0f
+        ));
+        dropPaint.Color = dropPaint.Color.WithAlpha(alpha);
 
-            if (!canvas.QuickReject(dropRect))
-            {
-                canvas.DrawCircle(drop.X, drop.Y, drop.Size, dropPaint);
+        var dropRect = new SKRect(
+            drop.X - drop.Size,
+            drop.Y - drop.Size,
+            drop.X + drop.Size,
+            drop.Y + drop.Size
+        );
 
-                if (highlightPaint != null && ShouldRenderHighlight(drop, intensity))
-                {
-                    highlightPaint.Color = SKColors.White.WithAlpha(
-                        (byte)(HIGHLIGHT_ALPHA_MULTIPLIER * intensity)
-                    );
+        if (canvas.QuickReject(dropRect)) return;
 
-                    float highlightSize = drop.Size * HIGHLIGHT_SIZE_MULTIPLIER;
-                    float highlightX = drop.X - drop.Size * HIGHLIGHT_OFFSET_MULTIPLIER;
-                    float highlightY = drop.Y - drop.Size * HIGHLIGHT_OFFSET_MULTIPLIER;
+        canvas.DrawCircle(drop.X, drop.Y, drop.Size, dropPaint);
 
-                    canvas.DrawCircle(highlightX, highlightY, highlightSize, highlightPaint);
-                }
-            }
-        }
+        if (highlightPaint != null && ShouldRenderHighlight(drop, intensity))
+            RenderDropHighlight(canvas, drop, intensity, highlightPaint);
+    }
+
+    private static void RenderDropHighlight(
+        SKCanvas canvas,
+        Raindrop drop,
+        float intensity,
+        SKPaint highlightPaint)
+    {
+        highlightPaint.Color = SKColors.White.WithAlpha(
+            (byte)(HIGHLIGHT_ALPHA_MULTIPLIER * intensity)
+        );
+
+        float highlightSize = drop.Size * HIGHLIGHT_SIZE_MULTIPLIER;
+        float highlightX = drop.X - drop.Size * HIGHLIGHT_OFFSET_MULTIPLIER;
+        float highlightY = drop.Y - drop.Size * HIGHLIGHT_OFFSET_MULTIPLIER;
+
+        canvas.DrawCircle(highlightX, highlightY, highlightSize, highlightPaint);
     }
 
     private bool ShouldRenderHighlight(Raindrop drop, float intensity) =>
@@ -455,23 +479,17 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     private void HandleRaindropSettingsChange()
     {
         if (_settings.Raindrops.MaxRaindrops != _raindrops.Length)
-        {
             ResizeRaindropArrays();
-        }
         _cacheNeedsUpdate = true;
     }
 
     private void HandleParticleSettingsChange()
     {
         if (_settings.Particles.MaxParticles != _particleBuffer._capacity)
-        {
             _particleBuffer.ResizeBuffer(_settings.Particles.MaxParticles);
-        }
 
-        if (Math.Abs(_settings.Particles.OverlayHeightMultiplier - _renderCache.OverlayHeightMultiplier) > 0.001f)
-        {
+        if (MathF.Abs(_settings.Particles.OverlayHeightMultiplier - _renderCache.OverlayHeightMultiplier) > 0.001f)
             _cacheNeedsUpdate = true;
-        }
     }
 
     private void ResizeRaindropArrays()
@@ -498,9 +516,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     protected override void CleanupUnusedResources()
     {
         if (_raindropCount == 0 && _particleBuffer._count == 0)
-        {
             _firstRender = true;
-        }
     }
 
     protected override void OnDispose()
@@ -512,24 +528,27 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     private sealed class RenderCache
     {
+        private readonly ISettings _settings = Settings.Settings.Instance;
+
         public float Width { get; }
         public float Height { get; }
+        public bool IsOverlay { get; }
         public float StepSize { get; }
-        public float OverlayHeight { get; }
         public float OverlayHeightMultiplier { get; }
+        public float OverlayHeight { get; }
         public float UpperBound { get; }
         public float LowerBound { get; }
 
         public RenderCache(float width, float height, bool isOverlay)
         {
-            var settings = Settings.Settings.Instance;
-
             Width = width;
             Height = height;
-            StepSize = width / settings.Raindrops.MaxRaindrops;
-            OverlayHeightMultiplier = settings.Particles.OverlayHeightMultiplier;
-            OverlayHeight = isOverlay ? height * OverlayHeightMultiplier : 0f;
-            UpperBound = isOverlay ? height - height * OverlayHeightMultiplier : 0f;
+            IsOverlay = isOverlay;
+            StepSize = width / _settings.Raindrops.MaxRaindrops;
+            OverlayHeightMultiplier = _settings.Particles.OverlayHeightMultiplier;
+            OverlayHeight = isOverlay ? height * _settings.Particles.OverlayHeightMultiplier : 0f;
+
+            UpperBound = 0f;
             LowerBound = height;
         }
     }
@@ -540,8 +559,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         float FallSpeed,
         float Size,
         float Intensity,
-        int SpectrumIndex
-    );
+        int SpectrumIndex);
 
     private struct Particle(
         float x,
@@ -551,50 +569,50 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         float size,
         bool isSplash)
     {
-        public float
-            X = x,
-            Y = y,
-            VelocityX = velocityX,
-            VelocityY = velocityY,
-            Lifetime = 1.0f,
-            Size = size;
+        public float X = x;
+        public float Y = y;
+        public float VelocityX = velocityX;
+        public float VelocityY = velocityY;
+        public float Lifetime = 1.0f;
+        public float Size = size;
+        public readonly bool IsSplash = isSplash;
 
-        public bool IsSplash = isSplash;
-
-        public bool Update(float deltaTime, float lowerBound)
+        public bool Update(float deltaTime, float upperBound, float lowerBound)
         {
             X += VelocityX * deltaTime;
             Y += VelocityY * deltaTime;
             VelocityY += deltaTime * GRAVITY;
 
-            if (IsSplash && Y >= lowerBound)
+            if (IsSplash && Y >= lowerBound - 1)
             {
-                Y = lowerBound;
-                VelocityY = -VelocityY * SPLASH_REBOUND;
+                Y = lowerBound - 1;
+                VelocityY *= -SPLASH_REBOUND;
                 if (MathF.Abs(VelocityY) < SPLASH_VELOCITY_THRESHOLD)
                     VelocityY = 0;
             }
 
             Lifetime -= deltaTime * LIFETIME_DECAY;
-            return Lifetime > 0;
+            return Lifetime > 0 && Y < lowerBound + 50;
         }
     }
 
     private sealed class ParticleBuffer(int capacity, float lowerBound)
     {
         private Particle[] _particles = new Particle[capacity];
-        internal int _count = 0;
+        internal int _count;
         internal int _capacity = capacity;
+        private float _upperBound;
         private float _lowerBound = lowerBound;
         private readonly ISettings _settings = Settings.Settings.Instance;
+        private readonly Random _random = Random.Shared;
 
-        public void UpdateLowerBound(float lowerBound) => _lowerBound = lowerBound;
+        public void UpdateBounds(float upperBound, float lowerBound) =>
+            (_upperBound, _lowerBound) = (upperBound, lowerBound);
 
         public void ResizeBuffer(int newCapacity)
         {
             if (newCapacity <= 0) return;
 
-            _capacity = newCapacity;
             var newParticles = new Particle[newCapacity];
             int copyCount = Min(_count, newCapacity);
 
@@ -602,6 +620,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
                 Array.Copy(_particles, newParticles, copyCount);
 
             _particles = newParticles;
+            _capacity = newCapacity;
             _count = copyCount;
         }
 
@@ -611,7 +630,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
             for (int i = 0; i < _count; i++)
             {
-                if (_particles[i].Update(deltaTime, _lowerBound))
+                if (_particles[i].Update(deltaTime, _upperBound, _lowerBound))
                 {
                     if (writeIndex != i)
                         _particles[writeIndex] = _particles[i];
@@ -624,62 +643,96 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
         public void CreateSplashParticles(float x, float y, float intensity)
         {
-            int count = Min(
-                Random.Shared.Next(SPLASH_PARTICLE_COUNT_MIN, SPLASH_PARTICLE_COUNT_MAX),
-                _particles.Length - _count
-            );
-
+            int count = CalculateSplashCount();
             if (count <= 0) return;
 
-            float velocityMax = _settings.Particles.ParticleVelocityMax *
-                (PARTICLE_VELOCITY_BASE_MULTIPLIER +
-                 intensity * PARTICLE_VELOCITY_INTENSITY_MULTIPLIER);
-
-            float upwardForce = _settings.Raindrops.SplashUpwardForce *
-                (SPLASH_UPWARD_BASE_MULTIPLIER +
-                 intensity * SPLASH_UPWARD_INTENSITY_MULTIPLIER);
+            float velocityMax = CalculateVelocityMax(intensity);
+            float upwardForce = CalculateUpwardForce(intensity);
 
             for (int i = 0; i < count; i++)
-            {
-                float angle = (float)(Random.Shared.NextDouble() * MathF.PI * 2);
-                float speed = (float)(Random.Shared.NextDouble() * velocityMax);
-                float size = _settings.Raindrops.SplashParticleSize *
-                    (SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER +
-                     (float)Random.Shared.NextDouble() * SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER) *
-                    (intensity * SPLASH_PARTICLE_SIZE_INTENSITY_MULTIPLIER +
-                     SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET);
-
-                _particles[_count++] = new Particle(
-                    x,
-                    y,
-                    Cos(angle) * speed,
-                    Sin(angle) * speed - upwardForce,
-                    size,
-                    true
-                );
-            }
+                _particles[_count++] = CreateSplashParticle(
+                    x, y - 2, intensity, velocityMax, upwardForce);
         }
+
+        private int CalculateSplashCount() =>
+            Min(_random.Next(SPLASH_PARTICLE_COUNT_MIN, SPLASH_PARTICLE_COUNT_MAX),
+                _particles.Length - _count);
+
+        private float CalculateVelocityMax(float intensity) =>
+            _settings.Particles.ParticleVelocityMax *
+            (PARTICLE_VELOCITY_BASE_MULTIPLIER +
+             intensity * PARTICLE_VELOCITY_INTENSITY_MULTIPLIER);
+
+        private float CalculateUpwardForce(float intensity) =>
+            _settings.Raindrops.SplashUpwardForce *
+            (SPLASH_UPWARD_BASE_MULTIPLIER +
+             intensity * SPLASH_UPWARD_INTENSITY_MULTIPLIER);
+
+        private Particle CreateSplashParticle(
+            float x,
+            float y,
+            float intensity,
+            float velocityMax,
+            float upwardForce)
+        {
+            float angle = (float)(_random.NextDouble() * MathF.PI * 2);
+            float speed = (float)(_random.NextDouble() * velocityMax);
+            float size = CalculateParticleSize(intensity);
+
+            return new Particle(
+                x,
+                y,
+                Cos(angle) * speed,
+                Sin(angle) * speed - upwardForce,
+                size,
+                true
+            );
+        }
+
+        private float CalculateParticleSize(float intensity) =>
+            _settings.Raindrops.SplashParticleSize *
+            (SPLASH_PARTICLE_SIZE_BASE_MULTIPLIER +
+             (float)_random.NextDouble() * SPLASH_PARTICLE_SIZE_RANDOM_MULTIPLIER) *
+            (intensity * SPLASH_PARTICLE_SIZE_INTENSITY_MULTIPLIER +
+             SPLASH_PARTICLE_SIZE_INTENSITY_OFFSET);
 
         public void RenderParticles(SKCanvas canvas, SKPaint basePaint)
         {
             if (_count == 0) return;
 
-            using var paint = basePaint.Clone();
-            paint.Style = SKPaintStyle.Fill;
-            paint.IsAntialias = true;
+            using var paint = CreateParticlePaint(basePaint);
 
             for (int i = 0; i < _count; i++)
-            {
-                ref var p = ref _particles[i];
-                float lifetime = Clamp(p.Lifetime, 0f, 1f);
-
-                paint.Color = basePaint.Color.WithAlpha(
-                    (byte)(MAX_ALPHA_BYTE * lifetime * lifetime)
-                );
-
-                float sizeMultiplier = 0.8f + 0.2f * lifetime;
-                canvas.DrawCircle(p.X, p.Y, p.Size * sizeMultiplier, paint);
-            }
+                RenderSingleParticle(
+                    canvas,
+                    ref _particles[i],
+                    paint,
+                    basePaint.Color);
         }
+
+        private static SKPaint CreateParticlePaint(SKPaint basePaint)
+        {
+            var paint = basePaint.Clone();
+            paint.Style = SKPaintStyle.Fill;
+            paint.IsAntialias = true;
+            return paint;
+        }
+
+        private static void RenderSingleParticle(
+            SKCanvas canvas,
+            ref Particle p,
+            SKPaint paint,
+            SKColor baseColor)
+        {
+            float lifetime = Clamp(p.Lifetime, 0f, 1f);
+            paint.Color = baseColor.WithAlpha(CalculateParticleAlpha(lifetime));
+            canvas.DrawCircle(p.X, p.Y, CalculateRenderSize(p.Size, lifetime), paint);
+        }
+
+        private static byte CalculateParticleAlpha(float lifetime) =>
+            (byte)(MAX_ALPHA_BYTE * lifetime * lifetime);
+
+        private static float CalculateRenderSize(float baseSize, float lifetime) =>
+            baseSize * (0.8f + 0.2f * lifetime);
     }
 }
