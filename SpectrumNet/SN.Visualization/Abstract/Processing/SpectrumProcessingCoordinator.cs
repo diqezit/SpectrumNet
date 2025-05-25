@@ -1,4 +1,5 @@
-﻿// SN.Visualization/Abstract/Processing/SpectrumProcessingCoordinator.cs
+﻿#nullable enable
+
 namespace SpectrumNet.SN.Visualization.Abstract.Processing;
 
 // процесс обработки спектра

@@ -1,7 +1,7 @@
-﻿// SN.Visualization/Abstract/Processing/SpectrumSmoother.cs
-namespace SpectrumNet.SN.Visualization.Abstract.Processing;
+﻿#nullable enable
 
-// сглаживание спектра
+namespace SpectrumNet.SN.Visualization.Abstract.Processing;
+ 
 public interface ISpectrumSmoother
 {
     float SmoothingFactor { get; set; }
@@ -11,7 +11,7 @@ public interface ISpectrumSmoother
 
 public class SpectrumSmoother : ISpectrumSmoother
 {
-    private const float 
+    private const float
         DEFAULT_SMOOTHING_FACTOR = 0.3f,
         MIN_SMOOTHING_FACTOR = 0.0f,
         MAX_SMOOTHING_FACTOR = 1.0f;
@@ -20,6 +20,7 @@ public class SpectrumSmoother : ISpectrumSmoother
 
     private float[]? _previousSpectrum;
     private float _smoothingFactor = DEFAULT_SMOOTHING_FACTOR;
+    private readonly object _previousSpectrumLock = new();
 
     public float SmoothingFactor
     {
@@ -43,18 +44,27 @@ public class SpectrumSmoother : ISpectrumSmoother
         return smoothed;
     }
 
-    public void Reset() => ClearPreviousSpectrum();
-    
-    private static float ClampSmoothingFactor(float value) =>
-        Math.Clamp(value, MIN_SMOOTHING_FACTOR, MAX_SMOOTHING_FACTOR);
+    public void Reset()
+    {
+        lock (_previousSpectrumLock)
+        {
+            ClearPreviousSpectrum();
+        }
+    }
+
+    private static float ClampSmoothingFactor(float value) => 
+        Clamp(value, MIN_SMOOTHING_FACTOR, MAX_SMOOTHING_FACTOR);
 
     private float GetEffectiveSmoothingFactor(float? customFactor) =>
         customFactor ?? _smoothingFactor;
 
     private void EnsurePreviousSpectrumInitialized(float[] spectrum, int targetCount)
     {
-        if (ShouldInitializePreviousSpectrum(targetCount))
-            InitializePreviousSpectrum(spectrum, targetCount);
+        lock (_previousSpectrumLock)
+        {
+            if (ShouldInitializePreviousSpectrum(targetCount))
+                InitializePreviousSpectrum(spectrum, targetCount);
+        }
     }
 
     private bool ShouldInitializePreviousSpectrum(int targetCount) =>
@@ -84,10 +94,16 @@ public class SpectrumSmoother : ISpectrumSmoother
         int count,
         float factor)
     {
-        if (ShouldUseVectorizedSmoothing(count))
-            ApplyVectorizedSmoothing(spectrum, smoothed, count, factor);
-        else
-            ApplySequentialSmoothing(spectrum, smoothed, count, factor);
+        lock (_previousSpectrumLock)
+        {
+            if (_previousSpectrum == null)
+                throw new InvalidOperationException("Previous spectrum not initialized");
+
+            if (ShouldUseVectorizedSmoothing(count))
+                ApplyVectorizedSmoothing(spectrum, smoothed, count, factor);
+            else
+                ApplySequentialSmoothing(spectrum, smoothed, count, factor);
+        }
     }
 
     private static bool ShouldUseVectorizedSmoothing(int count) =>
@@ -218,8 +234,11 @@ public class SpectrumSmoother : ISpectrumSmoother
     private static void StoreSmoothedValue(float[] array, int index, float value) =>
         array[index] = value;
 
-    private void UpdatePreviousValue(int index, float value) =>
-        _previousSpectrum![index] = value;
+    private void UpdatePreviousValue(int index, float value)
+    {
+        if (_previousSpectrum != null && index < _previousSpectrum.Length)
+            _previousSpectrum[index] = value;
+    }
 
     private void ClearPreviousSpectrum() =>
         _previousSpectrum = null;

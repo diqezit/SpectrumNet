@@ -1,9 +1,7 @@
-﻿// SN.Visualization/Abstract/Processing/SpectrumScaler.cs
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet.SN.Visualization.Abstract.Processing;
 
-// масштабирование спектра
 public interface ISpectrumScaler
 {
     float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength);
@@ -15,6 +13,10 @@ public class SpectrumScaler : ISpectrumScaler
     private const int MIN_PARALLEL_SIZE = 32;
 
     private static readonly bool _isHardwareAcceleratedCached = IsHardwareAccelerated;
+    private static readonly ParallelOptions _parallelOptions = new()
+    {
+        MaxDegreeOfParallelism = Environment.ProcessorCount
+    };
 
     public float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength)
     {
@@ -74,7 +76,7 @@ public class SpectrumScaler : ISpectrumScaler
         int length,
         float blockSize)
     {
-        Parallel.For(0, count, i =>
+        Parallel.For(0, count, _parallelOptions, i =>
         {
             ProcessSingleBlock(spectrum, target, i, length, blockSize);
         });
@@ -136,7 +138,7 @@ public class SpectrumScaler : ISpectrumScaler
     {
         float sum = CalculateBlockSum(spectrum, start, end);
         int count = CalculateBlockCount(start, end);
-        return sum / count;
+        return count > 0 ? sum / count : 0f;
     }
 
     private static float CalculateBlockSum(
@@ -144,8 +146,11 @@ public class SpectrumScaler : ISpectrumScaler
         int start,
         int end)
     {
+        if (start < 0 || start >= spectrum.Length) return 0f;
+
         float sum = 0;
-        for (int i = start; i < end; i++)
+        int safeEnd = Min(end, spectrum.Length);
+        for (int i = start; i < safeEnd; i++)
             sum += spectrum[i];
         return sum;
     }
