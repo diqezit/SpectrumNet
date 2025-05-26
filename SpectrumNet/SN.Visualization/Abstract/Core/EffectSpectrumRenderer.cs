@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization.Abstract;
+using SpectrumNet;
+
+namespace SpectrumNet.SN.Visualization.Abstract.Core;
 
 public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 {
@@ -8,6 +10,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     private readonly IAnimationTimer _animationTimer;
     private readonly object _renderLock = new();
     private readonly Dictionary<string, IPaintConfig> _paintConfigs = new();
+    private IPathBatchRenderer? _pathBatchRenderer;
 
     protected EffectSpectrumRenderer(
         ISpectrumProcessingCoordinator? processingCoordinator = null,
@@ -28,17 +31,60 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     protected void UpdateAnimation() => _animationTimer.Update();
     protected void ResetAnimation() => _animationTimer.Reset();
 
+    // Resource management
     protected SKPath GetPath() => _resourceManager.GetPath();
     protected void ReturnPath(SKPath path) => _resourceManager.ReturnPath(path);
     protected SKPaint GetPaint() => _resourceManager.GetPaint();
     protected void ReturnPaint(SKPaint paint) => _resourceManager.ReturnPaint(paint);
 
+    protected void ReleasePaints(params SKPaint[] paints)
+    {
+        foreach (var paint in paints)
+        {
+            if (paint != null)
+                ReturnPaint(paint);
+        }
+    }
+
+    protected void ReleasePaths(params SKPath[] paths)
+    {
+        foreach (var path in paths)
+        {
+            if (path != null)
+                ReturnPath(path);
+        }
+    }
+
+    // PaintConfig management
     protected void RegisterPaintConfig(string name, IPaintConfig config) =>
         _paintConfigs[name] = config;
 
     protected IPaintConfig GetPaintConfig(string name) =>
         _paintConfigs.TryGetValue(name, out var config) ? config : PaintConfig.Default;
 
+    protected void RemovePaintConfig(string name) =>
+        _paintConfigs.Remove(name);
+
+    protected void ClearPaintConfigs() =>
+        _paintConfigs.Clear();
+
+    protected IPaintConfig CreateDefaultPaintConfig(SKColor color) =>
+        new PaintConfig(color);
+
+    protected IPaintConfig CreateStrokePaintConfig(
+        SKColor color,
+        float strokeWidth,
+        SKStrokeCap cap = SKStrokeCap.Round,
+        SKStrokeJoin join = SKStrokeJoin.Round) =>
+        new PaintConfig(color, Stroke, strokeWidth, cap, join);
+
+    protected IPaintConfig CreateGlowPaintConfig(SKColor color, float blurRadius) =>
+        PaintConfig.Glow(color, blurRadius);
+
+    protected IPaintConfig CreateEdgePaintConfig(SKColor color, float width, float blurRadius = 0) =>
+        PaintConfig.Edge(color, width, blurRadius);
+
+    // Paint creation methods
     protected SKPaint CreatePaint(IPaintConfig config)
     {
         var paint = _resourceManager.GetPaint();
@@ -46,7 +92,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         paint.Style = config.Style;
         paint.IsAntialias = UseAntiAlias;
 
-        if (config.Style == SKPaintStyle.Stroke)
+        if (config.Style == Stroke)
         {
             paint.StrokeWidth = config.StrokeWidth;
             paint.StrokeCap = config.StrokeCap;
@@ -69,7 +115,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     {
         var paint = _resourceManager.GetPaint();
         paint.Color = color;
-        paint.Style = SKPaintStyle.Fill;
+        paint.Style = Fill;
         paint.IsAntialias = UseAntiAlias;
         return paint;
     }
@@ -81,7 +127,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     {
         var paint = _resourceManager.GetPaint();
         paint.Color = color;
-        paint.Style = SKPaintStyle.Stroke;
+        paint.Style = Stroke;
         paint.StrokeWidth = strokeWidth;
         paint.StrokeCap = cap;
         paint.IsAntialias = UseAntiAlias;
@@ -94,9 +140,58 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     protected SKPaint CreateEdgePaint(SKColor color, float width, float blurRadius = 0) =>
         CreatePaint(PaintConfig.Edge(color, width, blurRadius));
 
+    // Visibility helpers
     protected bool IsAreaVisible(SKCanvas? canvas, SKRect rect) =>
         IsRectVisible(canvas, rect);
 
+    // PathBatchRenderer methods
+    protected IPathBatchRenderer GetPathBatchRenderer()
+    {
+        _pathBatchRenderer ??= new PathBatchRenderer(_resourceManager);
+        return _pathBatchRenderer;
+    }
+
+    protected void RenderBatch(
+        SKCanvas canvas,
+        Action<SKPath> buildPath,
+        SKPaint paint) =>
+        GetPathBatchRenderer().RenderBatch(canvas, buildPath, paint);
+
+    protected void RenderFiltered<T>(
+        SKCanvas canvas,
+        IEnumerable<T> items,
+        Func<T, bool> filter,
+        Action<SKPath, T> addToPath,
+        SKPaint paint) =>
+        GetPathBatchRenderer().RenderFiltered(canvas, items, filter, addToPath, paint);
+
+    protected void RenderRects(
+        SKCanvas canvas,
+        IEnumerable<SKRect> rects,
+        SKPaint paint,
+        float cornerRadius = 0) =>
+        GetPathBatchRenderer().RenderRects(canvas, rects, paint, cornerRadius);
+
+    protected void RenderCircles(
+        SKCanvas canvas,
+        IEnumerable<(SKPoint center, float radius)> circles,
+        SKPaint paint) =>
+        GetPathBatchRenderer().RenderCircles(canvas, circles, paint);
+
+    protected void RenderLines(
+        SKCanvas canvas,
+        IEnumerable<(SKPoint start, SKPoint end)> lines,
+        SKPaint paint) =>
+        GetPathBatchRenderer().RenderLines(canvas, lines, paint);
+
+    protected void RenderPolygon(
+        SKCanvas canvas,
+        SKPoint[] points,
+        SKPaint paint,
+        bool close = true) =>
+        GetPathBatchRenderer().RenderPolygon(canvas, points, paint, close);
+
+    // Abstract method for effect implementation
     protected abstract void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
@@ -106,6 +201,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         int barCount,
         SKPaint paint);
 
+    // Quality and render parameters
     protected virtual int GetMaxBarsForQuality() => Quality switch
     {
         RenderQuality.Low => 150,
@@ -125,7 +221,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         int requestedBarCount)
     {
         int maxBars = GetMaxBarsForQuality();
-        int effectiveBarCount = Math.Min(requestedBarCount, maxBars);
+        int effectiveBarCount = Min(requestedBarCount, maxBars);
         float totalBarSpace = info.Width / effectiveBarCount;
 
         return new RenderParameters(
@@ -135,6 +231,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             0f);
     }
 
+    // Initialization
     public override void Initialize() =>
         SafeExecute(() =>
         {
@@ -142,8 +239,6 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
             OnInitialize();
             LogDebug("Initialized");
         }, "Failed to initialize renderer");
-
-    protected virtual void RequestRedraw() => base.RequiresRedraw();
 
     protected override void OnConfigurationChanged()
     {
@@ -153,6 +248,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 
     protected virtual void OnQualitySettingsApplied() { }
 
+    // Main render method
     public override void Render(
         SKCanvas? canvas,
         float[]? spectrum,
@@ -213,6 +309,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         drawPerformanceInfo?.Invoke(canvas!, info);
     }
 
+    // Overlay rendering
     protected void RenderWithOverlay(SKCanvas canvas, Action renderAction)
     {
         if (IsOverlayActive)
@@ -234,6 +331,7 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         }
     }
 
+    // Virtual methods for customization
     protected virtual void BeforeRender(
         SKCanvas? canvas,
         float[]? spectrum,
@@ -250,8 +348,12 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         SKImageInfo info)
     { }
 
+    // Cleanup
+    protected override void CleanupUnusedResources() => base.CleanupUnusedResources();
+    
     protected override void OnDispose()
     {
+        _pathBatchRenderer?.Dispose();
         _resourceManager?.Dispose();
         base.OnDispose();
     }

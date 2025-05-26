@@ -1,8 +1,9 @@
 ﻿#nullable enable
 
+using SpectrumNet;
 using Timer = System.Threading.Timer;
 
-namespace SpectrumNet.SN.Visualization.Abstract;
+namespace SpectrumNet.SN.Visualization.Abstract.Core;
 
 public abstract class BaseSpectrumRenderer : ISpectrumRenderer
 {
@@ -99,7 +100,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
 
     protected byte CalculateAlpha(float magnitude, float multiplier = 255f) =>
         _customAlphaCalculator?.Invoke(magnitude) ??
-        (byte)MathF.Min(Clamp(magnitude, 0f, 1f) * multiplier, 255);
+        _renderingHelpers.CalculateAlpha(magnitude, multiplier);
 
     protected SKColor ApplyAlpha(SKColor color, float magnitude, float multiplier = 1f) =>
         color.WithAlpha(CalculateAlpha(magnitude, multiplier * 255f));
@@ -247,6 +248,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         _overlayStateManager.StateChanged ||
         _overlayStateManager.IsOverlayActive;
 
+    protected void RequestRedraw() => _needsRedraw = true;
+
     protected bool ValidateRenderParameters(
         SKCanvas? canvas,
         float[]? spectrum,
@@ -280,10 +283,10 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         SafeExecute(() =>
         {
             CleanupUnusedResources();
-            var memoryMb = GC.GetTotalMemory(false) / 1024 / 1024;
+            var memoryMb = GetTotalMemory(false) / 1024 / 1024;
             if (memoryMb > HIGH_MEMORY_THRESHOLD_MB)
             {
-                GC.Collect(1, GCCollectionMode.Optimized);
+                Collect(1, GCCollectionMode.Optimized);
                 LogDebug($"Performed GC cleanup, memory was {memoryMb}MB");
             }
         }, "Periodic cleanup error");
