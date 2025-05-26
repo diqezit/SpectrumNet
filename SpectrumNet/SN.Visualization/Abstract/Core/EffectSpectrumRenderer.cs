@@ -4,6 +4,11 @@ namespace SpectrumNet.SN.Visualization.Abstract.Core;
 
 public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 {
+    private const int 
+        LowQualityBarLimit = 150,
+        MediumQualityBarLimit = 75,
+        HighQualityBarLimit = 75;
+
     private readonly IResourceManager _resourceManager;
     private readonly IAnimationTimer _animationTimer;
     private readonly object _renderLock = new();
@@ -259,10 +264,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     // Quality and render parameters
     protected virtual int GetMaxBarsForQuality() => Quality switch
     {
-        RenderQuality.Low => 150,
-        RenderQuality.Medium => 75,
-        RenderQuality.High => 75,
-        _ => 75
+        RenderQuality.Low => LowQualityBarLimit,
+        RenderQuality.Medium => MediumQualityBarLimit,
+        RenderQuality.High => HighQualityBarLimit,
+        _ => HighQualityBarLimit
     };
 
     protected record RenderParameters(
