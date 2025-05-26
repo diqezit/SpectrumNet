@@ -161,7 +161,7 @@ public sealed class OverlayEventHandler(
         _ = NativeMethods.SetWindowLong(
             handle,
             NativeMethods.GWL_EXSTYLE,
-            extendedStyle | NativeMethods.WS_EX_LAYERED
+            extendedStyle | NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT
         );
 
         if (_configuration.DisableWindowAnimations)
