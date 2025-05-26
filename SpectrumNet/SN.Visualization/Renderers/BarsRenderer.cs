@@ -1,76 +1,47 @@
 ﻿#nullable enable
 
 using static SpectrumNet.SN.Visualization.Renderers.BarsRenderer.Constants;
-using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class BarsRenderer : EffectSpectrumRenderer
 {
-    private static readonly Lazy<BarsRenderer> _instance =
+    private static readonly Lazy<BarsRenderer> _instance = 
         new(() => new BarsRenderer());
-
-    private BarsRenderer() { }
 
     public static BarsRenderer GetInstance() => _instance.Value;
 
     public static class Constants
     {
         public const float
-            MAX_CORNER_RADIUS = 125f,
             DEFAULT_CORNER_RADIUS_FACTOR = 0.5f,
             MIN_BAR_HEIGHT = 1f,
+            MAX_CORNER_RADIUS = 125f,
             GLOW_EFFECT_ALPHA = 0.25f,
             ALPHA_MULTIPLIER = 1.5f,
             HIGH_INTENSITY_THRESHOLD = 0.6f;
 
-        public const int
-            BATCH_SIZE = 32,
-            MAX_BARS_LOW = 200,
-            MAX_BARS_MEDIUM = 100,
-            MAX_BARS_HIGH = 100;
-
         public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
             [RenderQuality.Low] = new(
-                UseGlow: false,
-                UseEdge: false,
                 GlowRadius: 1.0f,
-                GlowAlpha: GLOW_EFFECT_ALPHA * 0.5f,
-                IntensityThreshold: HIGH_INTENSITY_THRESHOLD * 1.2f,
-                AlphaMultiplier: ALPHA_MULTIPLIER * 0.8f,
                 EdgeStrokeWidth: 0f,
                 EdgeBlurRadius: 0f
             ),
             [RenderQuality.Medium] = new(
-                UseGlow: true,
-                UseEdge: true,
                 GlowRadius: 2.0f,
-                GlowAlpha: GLOW_EFFECT_ALPHA * 0.8f,
-                IntensityThreshold: HIGH_INTENSITY_THRESHOLD * 1.05f,
-                AlphaMultiplier: ALPHA_MULTIPLIER,
                 EdgeStrokeWidth: 1.5f,
                 EdgeBlurRadius: 1f
             ),
             [RenderQuality.High] = new(
-                UseGlow: true,
-                UseEdge: true,
                 GlowRadius: 3.0f,
-                GlowAlpha: GLOW_EFFECT_ALPHA,
-                IntensityThreshold: HIGH_INTENSITY_THRESHOLD,
-                AlphaMultiplier: ALPHA_MULTIPLIER * 1.2f,
                 EdgeStrokeWidth: 2.5f,
                 EdgeBlurRadius: 2f
             )
         };
 
         public record QualitySettings(
-            bool UseGlow,
-            bool UseEdge,
             float GlowRadius,
-            float GlowAlpha,
-            float IntensityThreshold,
-            float AlphaMultiplier,
             float EdgeStrokeWidth,
             float EdgeBlurRadius
         );
@@ -78,24 +49,26 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
 
-    protected override int GetMaxBarsForQuality() => Quality switch
-    {
-        RenderQuality.Low => MAX_BARS_LOW,
-        RenderQuality.Medium => MAX_BARS_MEDIUM,
-        RenderQuality.High => MAX_BARS_HIGH,
-        _ => MAX_BARS_MEDIUM
-    };
+    protected override void OnInitialize() =>
+        UpdatePaintConfigs();
 
-    protected override void OnInitialize()
-    {
-        base.OnInitialize();
-        LogDebug("Initialized");
-    }
+    protected override void OnConfigurationChanged() =>
+        UpdatePaintConfigs();
 
-    protected override void OnQualitySettingsApplied()
+    private void UpdatePaintConfigs()
     {
         _currentSettings = QualityPresets[Quality];
-        LogDebug($"Quality changed to {Quality}");
+
+        RegisterPaintConfig(
+            "glow",
+            PaintConfig.Glow(SKColors.White, _currentSettings.GlowRadius));
+
+        RegisterPaintConfig(
+            "edge",
+            PaintConfig.Edge(
+                SKColors.White,
+                _currentSettings.EdgeStrokeWidth,
+                _currentSettings.EdgeBlurRadius));
     }
 
     protected override void RenderEffect(
@@ -107,136 +80,151 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        SafeExecute(
-            () => RenderBars(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
-            "Error during rendering"
-        );
+        float cornerRadius = Min(
+            barWidth * DEFAULT_CORNER_RADIUS_FACTOR,
+            MAX_CORNER_RADIUS);
+
+        int spectrumLength = Min(barCount, spectrum.Length);
+
+        if (UseAdvancedEffects)
+        {
+            using SKPaint glowPaint = GlowEffects(canvas, spectrum, info, 
+                barWidth, barSpacing, cornerRadius, spectrumLength);
+        }
+
+        for (int i = 0; i < spectrumLength; i++)
+        {
+            bool flowControl = MainBars(canvas, spectrum, info, barWidth, 
+                barSpacing, paint, cornerRadius, i);
+
+            if (!flowControl)
+            {
+                continue;
+            }
+        }
+
+        if (UseAdvancedEffects && _currentSettings.EdgeStrokeWidth > 0)
+        {
+            using SKPaint edgePaint = Edge(canvas, spectrum, info, barWidth,
+                barSpacing, cornerRadius, spectrumLength);
+        }
     }
 
-    private void RenderBars(
+    private SKPaint GlowEffects(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
         float barWidth,
         float barSpacing,
-        int barCount,
-        SKPaint basePaint)
+        float cornerRadius,
+        int spectrumLength)
     {
-        float canvasHeight = info.Height;
-        float cornerRadius = MathF.Min(
-            barWidth * DEFAULT_CORNER_RADIUS_FACTOR, MAX_CORNER_RADIUS);
+        var glowPaint = CreatePaint("glow");
 
-        int spectrumLength = Min(barCount, spectrum.Length);
-
-        for (int i = 0; i < spectrumLength; i += Constants.BATCH_SIZE)
+        for (int i = 0; i < spectrumLength; i++)
         {
-            int batchEnd = Min(i + Constants.BATCH_SIZE, spectrumLength);
-            RenderBatch(
-                canvas, spectrum, i, batchEnd, basePaint, barWidth,
-                barSpacing, canvasHeight, cornerRadius);
+            float magnitude = spectrum[i];
+            if (magnitude < HIGH_INTENSITY_THRESHOLD) continue;
+
+            float x = i * (barWidth + barSpacing);
+            var rect = GetBarRect(
+                x,
+                magnitude,
+                barWidth,
+                info.Height,
+                MIN_BAR_HEIGHT);
+
+            if (!IsAreaVisible(canvas, rect)) continue;
+
+            glowPaint.Color = ApplyAlpha(
+                glowPaint.Color,
+                magnitude * GLOW_EFFECT_ALPHA);
+
+            canvas.DrawRoundRect(
+                rect,
+                cornerRadius,
+                cornerRadius,
+                glowPaint);
         }
+
+        return glowPaint;
     }
 
-    private void RenderBatch(
+    private bool MainBars(
         SKCanvas canvas,
         float[] spectrum,
-        int start,
-        int end,
-        SKPaint basePaint,
+        SKImageInfo info,
         float barWidth,
         float barSpacing,
-        float canvasHeight,
-        float cornerRadius)
+        SKPaint paint,
+        float cornerRadius,
+        int i)
     {
-        for (int i = start; i < end; i++)
+        float magnitude = spectrum[i];
+        if (magnitude < MIN_MAGNITUDE_THRESHOLD) return false;
+
+        float x = i * (barWidth + barSpacing);
+        var rect = GetBarRect(
+            x,
+            magnitude,
+            barWidth,
+            info.Height,
+            MIN_BAR_HEIGHT);
+
+        if (!IsAreaVisible(canvas, rect)) return false;
+
+        paint.Color = ApplyAlpha(
+            paint.Color,
+            magnitude,
+            ALPHA_MULTIPLIER);
+
+        canvas.DrawRoundRect(
+            rect,
+            cornerRadius,
+            cornerRadius,
+            paint);
+        return true;
+    }
+
+    private SKPaint Edge(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        float barWidth,
+        float barSpacing,
+        float cornerRadius,
+        int spectrumLength)
+    {
+        var edgePaint = CreatePaint("edge");
+
+        for (int i = 0; i < spectrumLength; i++)
         {
             float magnitude = spectrum[i];
             if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
 
             float x = i * (barWidth + barSpacing);
-            if (!IsRenderAreaVisible(canvas, x, 0, barWidth, canvasHeight)) continue;
+            var rect = GetBarRect(
+                x,
+                magnitude,
+                barWidth,
+                info.Height,
+                MIN_BAR_HEIGHT);
 
-            RenderSingleBar(
-                canvas, x, magnitude, barWidth, canvasHeight, cornerRadius, basePaint);
-        }
-    }
+            if (!IsAreaVisible(canvas, rect)) continue;
 
-    private void RenderSingleBar(
-        SKCanvas canvas,
-        float x,
-        float magnitude,
-        float barWidth,
-        float canvasHeight,
-        float cornerRadius,
-        SKPaint basePaint)
-    {
-        float barHeight = MathF.Max(magnitude * canvasHeight, MIN_BAR_HEIGHT);
-        float y = canvasHeight - barHeight;
-        var rect = new SKRect(x, y, x + barWidth, y + barHeight);
+            edgePaint.Color = InterpolateColor(
+                SKColors.White,
+                magnitude,
+                0.3f,
+                1f);
 
-        byte alpha = (byte)MathF.Min(
-            magnitude * _currentSettings.AlphaMultiplier * 255f, 255f);
-
-        if (UseAdvancedEffects && _currentSettings.UseGlow &&
-            magnitude > _currentSettings.IntensityThreshold)
-        {
-            using var glowPaint = CreateEffectPaint(
-                SKColors.White.WithAlpha((byte)(magnitude * 255f * _currentSettings.GlowAlpha)),
-                SKPaintStyle.Fill,
-                createBlur: true,
-                blurRadius: _currentSettings.GlowRadius
-            );
-            canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, glowPaint);
+            canvas.DrawRoundRect(
+                rect,
+                cornerRadius,
+                cornerRadius,
+                edgePaint);
         }
 
-        using var barPaint = CreateEffectPaint(
-            basePaint.Color.WithAlpha(alpha), SKPaintStyle.Fill);
-        canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, barPaint);
-
-        if (UseAdvancedEffects && _currentSettings.UseEdge &&
-            _currentSettings.EdgeStrokeWidth > 0)
-        {
-            using var edgePaint = CreateEffectPaint(
-                SKColors.White.WithAlpha(alpha),
-                SKPaintStyle.Stroke,
-                strokeWidth: _currentSettings.EdgeStrokeWidth,
-                createBlur: _currentSettings.EdgeBlurRadius > 0,
-                blurRadius: _currentSettings.EdgeBlurRadius
-            );
-            canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, edgePaint);
-        }
-    }
-
-    private SKPaint CreateEffectPaint(
-        SKColor color,
-        SKPaintStyle style,
-        float strokeWidth = 0,
-        bool createBlur = false,
-        float blurRadius = 0)
-    {
-        var paint = GetPaint();
-        paint.Color = color;
-        paint.Style = style;
-        paint.IsAntialias = UseAntiAlias;
-
-        if (style == SKPaintStyle.Stroke)
-        {
-            paint.StrokeWidth = strokeWidth;
-            paint.StrokeCap = SKStrokeCap.Round;
-            paint.StrokeJoin = SKStrokeJoin.Round;
-        }
-
-        if (createBlur && blurRadius > 0)
-        {
-            paint.ImageFilter = SKImageFilter.CreateBlur(blurRadius, blurRadius);
-        }
-
-        return paint;
-    }
-
-    protected override void OnDispose()
-    {
-        base.OnDispose();
-        LogDebug("Disposed");
+        return edgePaint;
     }
 }
