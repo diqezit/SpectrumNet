@@ -14,16 +14,11 @@ public interface ISpectrumProcessingCoordinator : IDisposable
 
 public class SpectrumProcessingCoordinator(
     ISpectrumScaler? scaler = null,
-    ISpectrumSmoother? smoother = null)
-    : ISpectrumProcessingCoordinator
+    ISpectrumSmoother? smoother = null) : ISpectrumProcessingCoordinator
 {
-    private const string LogPrefix = nameof(SpectrumProcessingCoordinator);
-    private const int SEMAPHORE_TIMEOUT_MS = 0;
-
-    protected readonly ISmartLogger _logger = Instance;
-    protected readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
-    protected readonly object _spectrumLock = new();
-
+    private readonly ISmartLogger _logger = Instance;
+    private readonly SemaphoreSlim _spectrumSemaphore = new(1, 1);
+    private readonly object _spectrumLock = new();
     private readonly ISpectrumScaler _scaler = scaler ?? new SpectrumScaler();
     private readonly ISpectrumSmoother _smoother = smoother ?? new SpectrumSmoother();
 
@@ -38,145 +33,45 @@ public class SpectrumProcessingCoordinator(
         int targetCount,
         int spectrumLength)
     {
-        if (!ValidateInput(spectrum, targetCount))
+        if (spectrum == null || spectrum.Length == 0 || targetCount <= 0)
             return (false, null);
 
-        float[] processed = ProcessSpectrum(spectrum!, targetCount, spectrumLength);
-        return (true, processed);
-    }
-
-    private static bool ValidateInput(float[]? spectrum, int targetCount) =>
-        spectrum != null &&
-        spectrum.Length > 0 &&
-        targetCount > 0;
-
-    private float[] ProcessSpectrum(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
-        if (TryProcessWithLock(spectrum, targetCount, spectrumLength))
-            return GetCachedOrProcessNew(spectrum, targetCount, spectrumLength);
-
-        return ProcessWithoutLock(spectrum, targetCount, spectrumLength);
-    }
-
-    private bool TryProcessWithLock(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
-        bool lockAcquired = TryAcquireSemaphore();
-
-        if (!lockAcquired)
-            return false;
-
-        try
+        if (_spectrumSemaphore.Wait(0))
         {
-            UpdateProcessedSpectrum(spectrum, targetCount, spectrumLength);
-            return true;
+            try
+            {
+                var scaled = _scaler.ScaleSpectrum(spectrum, targetCount, spectrumLength);
+                _processedSpectrum = _smoother.SmoothSpectrum(scaled, targetCount);
+            }
+            finally
+            {
+                _spectrumSemaphore.Release();
+            }
         }
-        finally
-        {
-            ReleaseSemaphore();
-        }
-    }
 
-    private bool TryAcquireSemaphore() =>
-        _spectrumSemaphore.Wait(SEMAPHORE_TIMEOUT_MS);
-
-    private void ReleaseSemaphore() =>
-        _spectrumSemaphore.Release();
-
-    private void UpdateProcessedSpectrum(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
-        var scaled = ScaleSpectrum(spectrum, targetCount, spectrumLength);
-        _processedSpectrum = SmoothSpectrum(scaled, targetCount);
-    }
-
-    private float[] ScaleSpectrum(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength) =>
-        _scaler.ScaleSpectrum(spectrum, targetCount, spectrumLength);
-
-    private float[] SmoothSpectrum(
-        float[] scaled,
-        int targetCount) =>
-        _smoother.SmoothSpectrum(scaled, targetCount);
-
-    private float[] GetCachedOrProcessNew(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
         lock (_spectrumLock)
         {
-            if (IsCachedSpectrumValid(targetCount))
-                return _processedSpectrum!;
-
-            return CreateNewProcessedSpectrum(spectrum, targetCount, spectrumLength);
+            if (_processedSpectrum?.Length != targetCount)
+            {
+                var scaled = _scaler.ScaleSpectrum(spectrum, targetCount, spectrumLength);
+                _processedSpectrum = _smoother.SmoothSpectrum(scaled, targetCount);
+            }
+            return (true, _processedSpectrum);
         }
-    }
-
-    private bool IsCachedSpectrumValid(int targetCount) =>
-        _processedSpectrum != null &&
-        _processedSpectrum.Length == targetCount;
-
-    private float[] ProcessWithoutLock(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
-        lock (_spectrumLock)
-        {
-            return CreateNewProcessedSpectrum(spectrum, targetCount, spectrumLength);
-        }
-    }
-
-    private float[] CreateNewProcessedSpectrum(
-        float[] spectrum,
-        int targetCount,
-        int spectrumLength)
-    {
-        var scaled = ScaleSpectrum(spectrum, targetCount, spectrumLength);
-        _processedSpectrum = SmoothSpectrum(scaled, targetCount);
-        return _processedSpectrum;
     }
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
+        if (_disposed) return;
 
-        _logger.Safe(
-            DisposeResources,
-            LogPrefix,
-            "Error during spectrum processor disposal");
+        _logger.Safe(() =>
+        {
+            _spectrumSemaphore.Dispose();
+            _smoother.Reset();
+            _processedSpectrum = null;
+            _disposed = true;
+        }, nameof(SpectrumProcessingCoordinator), "Error during disposal");
 
         GC.SuppressFinalize(this);
     }
-
-    private void DisposeResources()
-    {
-        DisposeSemaphore();
-        ResetSmoother();
-        ClearProcessedSpectrum();
-        MarkAsDisposed();
-    }
-
-    private void DisposeSemaphore() =>
-        _spectrumSemaphore.Dispose();
-
-    private void ResetSmoother() =>
-        _smoother.Reset();
-
-    private void ClearProcessedSpectrum() =>
-        _processedSpectrum = null;
-
-    private void MarkAsDisposed() =>
-        _disposed = true;
 }
