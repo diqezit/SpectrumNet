@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using SpectrumNet;
-
 namespace SpectrumNet.SN.Visualization.Abstract.Core;
 
 public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
@@ -11,6 +9,10 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
     private readonly object _renderLock = new();
     private readonly Dictionary<string, IPaintConfig> _paintConfigs = new();
     private IPathBatchRenderer? _pathBatchRenderer;
+    private readonly IValueAnimatorArray _valueAnimator;
+    private readonly IPeakTracker _peakTracker;
+    private readonly IGradientManager _gradientManager;
+    private readonly ICommonEffects _commonEffects;
 
     protected EffectSpectrumRenderer(
         ISpectrumProcessingCoordinator? processingCoordinator = null,
@@ -18,11 +20,22 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         IOverlayStateManager? overlayStateManager = null,
         IResourceManager? resourceManager = null,
         IAnimationTimer? animationTimer = null,
-        IRenderingHelpers? renderingHelpers = null)
-        : base(processingCoordinator, qualityManager, overlayStateManager, renderingHelpers)
+        IRenderingHelpers? renderingHelpers = null,
+        IBufferManager? bufferManager = null,
+        ISpectrumBandProcessor? bandProcessor = null) : base(
+            processingCoordinator,
+            qualityManager,
+            overlayStateManager,
+            renderingHelpers,
+            bufferManager,
+            bandProcessor)
     {
         _resourceManager = resourceManager ?? new ResourceManager();
         _animationTimer = animationTimer ?? new AnimationTimer();
+        _valueAnimator = new ValueAnimatorArray();
+        _peakTracker = new PeakTracker();
+        _gradientManager = new GradientManager();
+        _commonEffects = new CommonEffects(_resourceManager);
     }
 
     protected override float GetAnimationTime() => _animationTimer.Time;
@@ -54,6 +67,48 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
                 ReturnPath(path);
         }
     }
+
+    // для анимации
+    protected void AnimateValues(float[] targets, float speed)
+    {
+        _valueAnimator.EnsureSize(targets.Length);
+        _valueAnimator.Update(targets, speed);
+    }
+
+    protected float[] GetAnimatedValues() => _valueAnimator.Values;
+
+    // для пиков
+    protected void UpdatePeaks(float[] values, float deltaTime)
+    {
+        _peakTracker.EnsureSize(values.Length);
+        for (int i = 0; i < values.Length; i++)
+            _peakTracker.Update(i, values[i], deltaTime);
+    }
+
+    protected float GetPeak(int index) => _peakTracker.GetPeak(index);
+
+    protected void ConfigurePeaks(float holdTime, float fallSpeed) =>
+        _peakTracker.Configure(holdTime, fallSpeed);
+
+    protected bool HasActivePeaks() => _peakTracker.HasActivePeaks();
+
+    // для градиентов
+    protected void CreateSpectrumGradient(float height, SKColor[] colors, float[]? positions = null)
+    {
+        _gradientManager.CreateLinearGradient(height, colors, positions);
+    }
+
+    protected SKShader? GetSpectrumGradient() => _gradientManager.CurrentGradient;
+
+    protected void InvalidateGradientIfNeeded(float height) =>
+        _gradientManager.InvalidateIfHeightChanged(height);
+
+    // для эффектов
+    protected void RenderGlow(SKCanvas canvas, SKRect rect, SKColor color, float radius, float alpha) =>
+        _commonEffects.RenderGlow(canvas, rect, color, radius, alpha);
+
+    protected void RenderGlow(SKCanvas canvas, SKPath path, SKColor color, float radius, float alpha) =>
+        _commonEffects.RenderGlow(canvas, path, color, radius, alpha);
 
     // PaintConfig management
     protected void RegisterPaintConfig(string name, IPaintConfig config) =>
@@ -348,13 +403,18 @@ public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
         SKImageInfo info)
     { }
 
+    //  если есть пики то нужно будет преопределить
+    public override bool RequiresRedraw() =>
+        base.RequiresRedraw() || HasActivePeaks();
+
     // Cleanup
     protected override void CleanupUnusedResources() => base.CleanupUnusedResources();
-    
+
     protected override void OnDispose()
     {
         _pathBatchRenderer?.Dispose();
         _resourceManager?.Dispose();
+        _gradientManager?.Dispose();
         base.OnDispose();
     }
 }

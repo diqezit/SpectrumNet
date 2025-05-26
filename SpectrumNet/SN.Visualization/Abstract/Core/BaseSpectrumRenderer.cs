@@ -1,6 +1,5 @@
 ﻿#nullable enable
 
-using SpectrumNet;
 using Timer = System.Threading.Timer;
 
 namespace SpectrumNet.SN.Visualization.Abstract.Core;
@@ -16,6 +15,8 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
     private readonly IOverlayStateManager _overlayStateManager;
     private readonly IRenderingHelpers _renderingHelpers;
     private readonly Timer _cleanupTimer;
+    private readonly IBufferManager _bufferManager;
+    private readonly ISpectrumBandProcessor _bandProcessor;
 
     private bool _isInitialized, _needsRedraw, _disposed;
     private Func<float, byte>? _customAlphaCalculator;
@@ -28,12 +29,17 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         ISpectrumProcessingCoordinator? processingCoordinator = null,
         IQualityManager? qualityManager = null,
         IOverlayStateManager? overlayStateManager = null,
-        IRenderingHelpers? renderingHelpers = null)
+        IRenderingHelpers? renderingHelpers = null,
+        IBufferManager? bufferManager = null,
+        ISpectrumBandProcessor? bandProcessor = null)
     {
         _processingCoordinator = processingCoordinator ?? new SpectrumProcessingCoordinator();
         _qualityManager = qualityManager ?? new QualityManager();
         _overlayStateManager = overlayStateManager ?? new OverlayStateManager();
         _renderingHelpers = renderingHelpers ?? RenderingHelpers.Instance;
+        _bufferManager = bufferManager ?? new BufferManager();
+        _bandProcessor = bandProcessor ?? new SpectrumBandProcessor();
+
         _cleanupTimer = new Timer(
             PerformPeriodicCleanup,
             null,
@@ -82,6 +88,21 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
 
     protected void ApplyQualitySettings(RenderQuality quality) =>
         _qualityManager.ApplyQuality(quality);
+
+    protected T[] GetBuffer<T>(string key, int size) =>
+        _bufferManager.GetBuffer<T>(key, size);
+
+    protected float[] ProcessSpectrumBands(float[] spectrum, int bandCount) =>
+        _bandProcessor.ProcessBands(spectrum, bandCount);
+
+    protected float GetBandAverage(float[] spectrum, int start, int end) =>
+        _bandProcessor.GetBandAverage(spectrum, start, end);
+
+    protected float CalculateBarX(int index, float barWidth, float barSpacing, float startOffset = 0) =>
+        startOffset + index * (barWidth + barSpacing);
+
+    protected SKRect GetBarRect(float x, float magnitude, float barWidth, float canvasHeight, float minHeight = 1f) =>
+        _renderingHelpers.GetBarRect(x, magnitude, barWidth, canvasHeight, minHeight);
 
     public virtual void SetAlphaCalculator(Func<float, byte>? calculator) =>
         _customAlphaCalculator = calculator;
@@ -138,14 +159,6 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
 
     protected float Normalize(float value, float min, float max) =>
         _renderingHelpers.Normalize(value, min, max);
-
-    protected SKRect GetBarRect(
-        float x,
-        float magnitude,
-        float barWidth,
-        float canvasHeight,
-        float minHeight = 1f) =>
-        _renderingHelpers.GetBarRect(x, magnitude, barWidth, canvasHeight, minHeight);
 
     protected SKRect GetCenteredRect(SKPoint center, float width, float height) =>
         _renderingHelpers.GetCenteredRect(center, width, height);
@@ -300,6 +313,7 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         {
             _cleanupTimer?.Dispose();
             _processingCoordinator?.Dispose();
+            _bufferManager?.Dispose();
             OnDispose();
             _disposed = true;
             LogDebug("Disposed");
