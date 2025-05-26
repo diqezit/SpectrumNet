@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Spectrum;
+namespace SpectrumNet.SN.Spectrum.Models;
 
 public sealed class GainParameters : IGainParametersProvider, INotifyPropertyChanged
 {

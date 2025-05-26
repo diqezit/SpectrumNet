@@ -1,6 +1,8 @@
 ﻿// SN.Sound/CaptureService.cs
 #nullable enable
 
+using SpectrumNet.SN.Spectrum.Core;
+
 namespace SpectrumNet.SN.Sound;
 
 public sealed class CaptureService : AsyncDisposableBase, ICaptureService

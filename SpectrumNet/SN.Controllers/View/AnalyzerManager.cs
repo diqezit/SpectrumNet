@@ -1,6 +1,8 @@
 ﻿// SpectrumNet/Controllers/ViewCore/AnalyzerManager.cs
 #nullable enable
 
+using SpectrumNet.SN.Spectrum.Core;
+
 namespace SpectrumNet.SN.Controllers.View;
 
 public class AnalyzerManager : IAnalyzerManager, IDisposable

@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization.Overlay.Utils;
+namespace SpectrumNet.SN.Visualization.Overlay.Native;
 
 internal sealed class SystemBackdrop
 {

@@ -1,7 +1,7 @@
 ﻿// SN.Visualization/Overlay/OverlayPerformanceManager.cs
 #nullable enable
 
-namespace SpectrumNet.SN.Visualization.Overlay;
+namespace SpectrumNet.SN.Visualization.Overlay.Managers;
 
 public sealed class OverlayPerformanceManager : IOverlayPerformanceManager
 {
@@ -23,9 +23,9 @@ public sealed class OverlayPerformanceManager : IOverlayPerformanceManager
         _lastFrameTime = _frameTimer.ElapsedMilliseconds;
     }
 
-    public void Initialize(IMainController controller) => 
+    public void Initialize(IMainController controller) =>
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
-    
+
     public bool ShouldRender()
     {
         if (_controller == null || _disposed)

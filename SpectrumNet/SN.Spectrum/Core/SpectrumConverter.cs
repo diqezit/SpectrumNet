@@ -1,9 +1,9 @@
 ﻿#nullable enable
 
-using static SpectrumNet.SN.Spectrum.Utils.FastFourierTransformHelper;
-using static SpectrumNet.SN.Spectrum.Utils.FrequencyConverter;
+using static SpectrumNet.SN.Spectrum.Utils.Converters.FrequencyConverter;
+using static SpectrumNet.SN.Spectrum.Utils.Math.FastFourierTransformHelper;
 
-namespace SpectrumNet.SN.Spectrum;
+namespace SpectrumNet.SN.Spectrum.Core;
 
 public sealed class SpectrumConverter : ISpectrumConverter
 {

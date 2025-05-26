@@ -2,7 +2,7 @@
 
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 
-namespace SpectrumNet.SN.Visualization.Overlay;
+namespace SpectrumNet.SN.Visualization.Overlay.Managers;
 
 public sealed class OverlayRenderManager
     (ITransparencyManager transparencyManager)

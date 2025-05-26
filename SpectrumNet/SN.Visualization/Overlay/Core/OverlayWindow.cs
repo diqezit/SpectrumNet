@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization.Overlay;
+namespace SpectrumNet.SN.Visualization.Overlay.Core;
 
 public sealed class OverlayWindow : Window, IDisposable
 {
@@ -92,7 +92,7 @@ public sealed class OverlayWindow : Window, IDisposable
                 return;
             }
         }
-        bool handled = _controller.InputController.HandleKeyDown(e, 
+        bool handled = _controller.InputController.HandleKeyDown(e,
             Keyboard.FocusedElement);
 
         e.Handled = handled;

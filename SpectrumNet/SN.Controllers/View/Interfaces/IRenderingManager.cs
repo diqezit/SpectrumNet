@@ -1,6 +1,8 @@
 ﻿// SpectrumNet/Controllers/Interfaces/ViewCore/IRenderingManager.cs
 #nullable enable
 
+using SpectrumNet.SN.Visualization.Core;
+
 namespace SpectrumNet.SN.Controllers.View.Interfaces;
 
 public interface IRenderingManager

@@ -1,5 +1,8 @@
 ﻿#nullable enable
 
+using SpectrumNet.SN.Spectrum.Core;
+using SpectrumNet.SN.Visualization.Core;
+
 namespace SpectrumNet.SN.Controllers.View;
 
 public class VisualizationController(

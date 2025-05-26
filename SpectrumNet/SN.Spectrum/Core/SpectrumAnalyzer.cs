@@ -1,12 +1,10 @@
 ﻿#nullable enable
 
-using Constants = SpectrumNet.SN.Spectrum.Utils.Constants;
+namespace SpectrumNet.SN.Spectrum.Core;
 
-namespace SpectrumNet.SN.Spectrum;
-
-public sealed class SpectrumAnalyzer 
-    : AsyncDisposableBase, 
-    ISpectralDataProvider, 
+public sealed class SpectrumAnalyzer
+    : AsyncDisposableBase,
+    ISpectralDataProvider,
     IComponent
 {
     private const string LogPrefix = nameof(SpectrumAnalyzer);
@@ -280,9 +278,9 @@ public sealed class SpectrumAnalyzer
             _lastSampleRate = rate;
         }
 
-        lock (_scaleTypeLock) 
+        lock (_scaleTypeLock)
             scale = _scaleType;
-        
+
         float[] spectrum = await ComputeSpectrumAsync(
             fft,
             rate,
@@ -338,9 +336,9 @@ public sealed class SpectrumAnalyzer
 
     private void StoreAndNotify(SpectralData spectralData)
     {
-        lock (_spectralDataLock) 
+        lock (_spectralDataLock)
             _lastSpectralData = spectralData;
-        
+
         PostEvent(() =>
             SpectralDataReady?.Invoke(
                 this,
@@ -351,9 +349,9 @@ public sealed class SpectrumAnalyzer
 
     private void NotifyEmpty()
     {
-        lock (_spectralDataLock) 
+        lock (_spectralDataLock)
             _lastSpectralData = null;
-        
+
         var emptySpectralData = new SpectralData([], UtcNow);
         PostEvent(() =>
             SpectralDataReady?.Invoke(

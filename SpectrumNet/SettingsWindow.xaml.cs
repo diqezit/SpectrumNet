@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.SN.Visualization.Core;
+
 namespace SpectrumNet;
 
 public partial class SettingsWindow : Window

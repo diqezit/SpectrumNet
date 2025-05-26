@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Spectrum.Utils;
+namespace SpectrumNet.SN.Spectrum.Utils.Converters;
 
 public static class FrequencyConverter
 {

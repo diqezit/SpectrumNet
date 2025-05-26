@@ -1,9 +1,6 @@
 ﻿#nullable enable
 
-using System.Runtime.CompilerServices;
-using System.Threading;
-
-namespace SpectrumNet.SN.Visualization;
+namespace SpectrumNet.SN.Visualization.Core;
 
 public sealed class SpectrumDataProcessor
     (IMainController controller)
@@ -82,7 +79,7 @@ public sealed class SpectrumDataProcessor
         for (int i = 0; i < targetCount; i++)
         {
             int start = (int)(i * blockSize);
-            int end = Math.Min((int)((i + 1) * blockSize), spectrumLength);
+            int end = Min((int)((i + 1) * blockSize), spectrumLength);
             result[i] = end > start
                 ? CalculateBlockAverage(spectrum, start, end)
                 : 0;
@@ -114,7 +111,7 @@ public sealed class SpectrumDataProcessor
         return smoothed;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(AggressiveInlining)]
     private static float CalculateBlockAverage(float[] spectrum, int start, int end)
     {
         float sum = 0;

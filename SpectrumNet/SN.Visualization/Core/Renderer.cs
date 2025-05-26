@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization;
+using SpectrumNet.SN.Spectrum.Core;
+
+namespace SpectrumNet.SN.Visualization.Core;
 
 public sealed class Renderer : AsyncDisposableBase
 {

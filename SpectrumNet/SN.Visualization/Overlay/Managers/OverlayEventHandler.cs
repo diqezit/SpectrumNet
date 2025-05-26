@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization.Overlay;
+namespace SpectrumNet.SN.Visualization.Overlay.Managers;
 
 public sealed class OverlayEventHandler(
     IOverlayRenderManager renderManager,

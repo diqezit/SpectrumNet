@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization.Overlay;
+namespace SpectrumNet.SN.Visualization.Overlay.Core;
 
 public sealed class OverlayManager : AsyncDisposableBase, IOverlayManager
 {

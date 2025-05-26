@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization;
+namespace SpectrumNet.SN.Visualization.Core;
 
 internal sealed class RendererConfigurator
 {

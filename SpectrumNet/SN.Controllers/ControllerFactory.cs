@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.SN.Visualization.Core;
+
 namespace SpectrumNet.SN.Controllers;
 
 public sealed class ControllerFactory : IControllerProvider, IDisposable

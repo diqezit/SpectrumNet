@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization;
+using SpectrumNet.SN.Visualization.Overlay.Managers;
+
+namespace SpectrumNet.SN.Visualization.Core;
 
 public sealed class RendererFactory : IRendererFactory
 {
@@ -21,7 +23,7 @@ public sealed class RendererFactory : IRendererFactory
 
     private RenderQuality _globalQuality;
 
-    private bool 
+    private bool
         _isApplyingGlobalQuality,
         _suppressConfigEvents;
 

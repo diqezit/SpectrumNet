@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Spectrum;
+namespace SpectrumNet.SN.Spectrum.Core;
 
 public sealed class FftProcessor : AsyncDisposableBase, IFftProcessor
 {

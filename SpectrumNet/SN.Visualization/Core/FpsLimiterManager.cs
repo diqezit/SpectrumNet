@@ -1,6 +1,6 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization;
+namespace SpectrumNet.SN.Visualization.Core;
 
 public sealed class FpsLimiterManager : IFpsLimiter
 {

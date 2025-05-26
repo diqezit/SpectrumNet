@@ -1,6 +1,6 @@
-﻿using static SpectrumNet.SN.Visualization.Overlay.RendererTransparencyManager.Constants;
+﻿using static SpectrumNet.SN.Visualization.Overlay.Managers.RendererTransparencyManager.Constants;
 
-namespace SpectrumNet.SN.Visualization.Overlay;
+namespace SpectrumNet.SN.Visualization.Overlay.Managers;
 
 public sealed partial class RendererTransparencyManager : ITransparencyManager, IDisposable
 {

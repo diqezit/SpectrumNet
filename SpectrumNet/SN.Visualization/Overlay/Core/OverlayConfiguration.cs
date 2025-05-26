@@ -1,9 +1,9 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization.Overlay;
+namespace SpectrumNet.SN.Visualization.Overlay.Core;
 
 public sealed record OverlayConfiguration(
-    int RenderInterval = 8, 
+    int RenderInterval = 8,
     bool IsTopmost = true,
     bool ShowInTaskbar = false,
     WindowStyle Style = WindowStyle.None,

@@ -1,6 +1,8 @@
 ﻿// SpectrumNet/Controllers/ViewCore/RenderingManager.cs
 #nullable enable
 
+using SpectrumNet.SN.Visualization.Core;
+
 namespace SpectrumNet.SN.Controllers.View;
 
 public class RenderingManager(
