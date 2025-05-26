@@ -77,13 +77,13 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeDonut();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -95,9 +95,8 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderDonut(canvas, spectrum, info, paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -237,6 +236,6 @@ public sealed class AsciiDonutRenderer : EffectSpectrumRenderer
         _font = null;
         _vertices = [];
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

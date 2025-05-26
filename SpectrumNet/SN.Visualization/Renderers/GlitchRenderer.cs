@@ -91,13 +91,13 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -209,7 +209,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
 
     private void UpdateGlitchEffects(SKImageInfo info)
     {
-        _scanlinePosition = (_scanlinePosition + (int)(SCANLINE_SPEED * _animationTimer.DeltaTime * 60)) % info.Height;
+        _scanlinePosition = (_scanlinePosition + (int)(SCANLINE_SPEED * GetAnimationDeltaTime() * 60)) % info.Height;
 
         UpdateExistingSegments();
         TryAddNewSegment(info);
@@ -220,7 +220,7 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         for (int i = _glitchSegments.Count - 1; i >= 0; i--)
         {
             var seg = _glitchSegments[i];
-            float newDuration = seg.Duration - _animationTimer.DeltaTime;
+            float newDuration = seg.Duration - GetAnimationDeltaTime();
 
             if (newDuration <= 0)
             {
@@ -487,8 +487,6 @@ public sealed class GlitchRenderer : EffectSpectrumRenderer
         _glitchSegments.Clear();
 
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
-
-    private static float Lerp(float a, float b, float t) => a + (b - a) * t;
 }

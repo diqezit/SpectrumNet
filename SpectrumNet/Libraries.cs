@@ -91,4 +91,5 @@ global using Settings = SpectrumNet.SN.Settings.Settings;
 global using SpectrumNet.SN.Controllers;
 global using SpectrumNet.SN.Visualization.Abstract.Rendering;
 global using SpectrumNet.SN.Visualization.Abstract.Processing;
-
+global using SpectrumNet.SN.Visualization.Abstract.Helpers;
+global using SpectrumNet.SN.Visualization.Abstract.Helpers.Interfaces;

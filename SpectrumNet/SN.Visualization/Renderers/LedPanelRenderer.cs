@@ -97,7 +97,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeColorGradient();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     private void InitializeColorGradient()
@@ -344,7 +344,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
             using var bgPaint = new SKPaint
             {
                 Color = BackgroundTint.WithAlpha(
-                    (byte)(BackgroundTint.Alpha * _overlayStateManager.OverlayAlphaFactor))
+                    (byte)(BackgroundTint.Alpha * GetOverlayAlphaFactor()))
             };
             canvas.DrawRect(0, 0, info.Width, info.Height, bgPaint);
         }
@@ -373,7 +373,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     private SKPaint CreateInactiveLedPaint()
     {
         var alpha = IsOverlayActive
-            ? (byte)(INACTIVE_ALPHA * 255 * _overlayStateManager.OverlayAlphaFactor)
+            ? (byte)(INACTIVE_ALPHA * 255 * GetOverlayAlphaFactor())
             : (byte)(INACTIVE_ALPHA * 255);
 
         return CreateStandardPaint(
@@ -397,7 +397,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     {
         if (_grid == null) return;
 
-        float deltaTime = _animationTimer.DeltaTime;
+        float deltaTime = GetAnimationDeltaTime();
         int count = Min(_grid.Columns, spectrum.Length);
 
         Parallel.For(0, count, i =>
@@ -491,7 +491,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         return activeLeds;
     }
 
-    private static float CalculateLedBrightness(
+    private float CalculateLedBrightness(
         float value,
         bool isTopLed)
     {
@@ -543,7 +543,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         var baseColor = GetLedColor(row);
 
         float adjustedBrightness = IsOverlayActive
-            ? brightness * _overlayStateManager.OverlayAlphaFactor
+            ? brightness * GetOverlayAlphaFactor()
             : brightness;
 
         var ledColor = baseColor.WithAlpha((byte)(adjustedBrightness * 255));
@@ -569,12 +569,12 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         canvas.DrawCircle(pos, LED_RADIUS + GLOW_RADIUS, glowPaint);
     }
 
-    private SKPaint CreateGlowPaint(
+    private new SKPaint CreateGlowPaint(
         SKColor ledColor,
         float brightness)
     {
         var glowAlpha = IsOverlayActive
-            ? (byte)(brightness * 60 * _overlayStateManager.OverlayAlphaFactor)
+            ? (byte)(brightness * 60 * GetOverlayAlphaFactor())
             : (byte)(brightness * 60);
 
         var paint = CreateStandardPaint(
@@ -614,7 +614,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     {
         var baseAlpha = brightness * intensity * 128;
         byte alpha = IsOverlayActive
-            ? (byte)(baseAlpha * _overlayStateManager.OverlayAlphaFactor)
+            ? (byte)(baseAlpha * GetOverlayAlphaFactor())
             : (byte)baseAlpha;
 
         return _useExternalColors
@@ -639,7 +639,7 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     {
         var baseAlpha = alpha * 200;
         byte alphaValue = IsOverlayActive
-            ? (byte)(baseAlpha * _overlayStateManager.OverlayAlphaFactor)
+            ? (byte)(baseAlpha * GetOverlayAlphaFactor())
             : (byte)baseAlpha;
 
         return _useExternalColors
@@ -686,9 +686,6 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
         float t) =>
         (byte)(external * blend + gradient * (1 - blend) * t);
 
-    private static float Lerp(float a, float b, float t) =>
-        a + (b - a) * Clamp(t, 0f, 1f);
-
     public override bool RequiresRedraw() =>
         base.RequiresRedraw() ||
         HasActivePeaks();
@@ -725,6 +722,6 @@ public sealed class LedPanelRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

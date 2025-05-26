@@ -96,13 +96,13 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         int bufferHeight = IsOverlayActive ?
             OVERLAY_BUFFER_HEIGHT : DEFAULT_BUFFER_HEIGHT;
         InitializeSpectrogramBuffer(bufferHeight, DEFAULT_SPECTRUM_WIDTH);
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void OnConfigurationChanged()
@@ -111,8 +111,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         {
             ResizeBufferForOverlayMode(IsOverlayActive);
         }
-        _logger.Log(LogLevel.Information, LogPrefix,
-            $"Configuration changed. Quality: {Quality}, Overlay: {IsOverlayActive}");
+        LogDebug($"Configuration changed. Quality: {Quality}, Overlay: {IsOverlayActive}");
     }
 
     protected override void RenderEffect(
@@ -124,9 +123,8 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderWaterfall(canvas, spectrum, info, barWidth, barSpacing, barCount),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -214,7 +212,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
     {
         if (_spectrogramBuffer == null)
         {
-            _logger.Log(LogLevel.Warning, LogPrefix, "Spectrogram buffer is null");
+            LogDebug("Spectrogram buffer is null");
             return;
         }
 
@@ -607,7 +605,7 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         nint pixelsPtr = bitmap.GetPixels();
         if (pixelsPtr == IntPtr.Zero)
         {
-            _logger.Log(LogLevel.Error, LogPrefix, "Invalid bitmap pixels pointer");
+            LogDebug("Invalid bitmap pixels pointer");
             return;
         }
 
@@ -979,6 +977,6 @@ public sealed class WaterfallRenderer : EffectSpectrumRenderer
         _spectrogramBuffer = null;
         _currentSpectrum = null;
         _spectrumPool?.Dispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

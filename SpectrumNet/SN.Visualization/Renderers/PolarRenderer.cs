@@ -143,7 +143,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeResources();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     private void InitializeResources()
@@ -155,8 +155,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _processedSpectrum = new float[MAX_POINT_COUNT];
         _previousSpectrum = new float[MAX_POINT_COUNT];
 
-        _outerPath = _resourceManager.GetPath();
-        _innerPath = _resourceManager.GetPath();
+        _outerPath = GetPath();
+        _innerPath = GetPath();
 
         InitializePaints();
 
@@ -231,7 +231,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             (int)MathF.Min(_currentSettings.MaxPoints, MAX_POINT_COUNT);
         _pathsNeedUpdate = true;
 
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     private void UpdatePaintSettings()
@@ -267,9 +267,8 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderPolarEffect(canvas, spectrum, info, barWidth, barCount, paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -360,7 +359,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             _innerPath == null || _outerPoints == null ||
             _innerPoints == null) return;
 
-        _rotation += ROTATION_SPEED * _animationTimer.DeltaTime * TIME_MODIFIER;
+        _rotation += ROTATION_SPEED * GetAnimationDeltaTime() * TIME_MODIFIER;
 
         int effectivePointCount = (int)MathF.Min(barCount, _currentPointCount);
         int skipFactor = _currentSettings.PathSimplification > 0 ?
@@ -382,11 +381,11 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
             float modulation = Quality == RenderQuality.Low ? 1.0f :
                 1 + MODULATION_FACTOR * Sin(
-                    pointIndex * angleStep * MODULATION_FREQ * DEG_TO_RAD + _animationTimer.Time * 2
+                    pointIndex * angleStep * MODULATION_FREQ * DEG_TO_RAD + GetAnimationTime() * 2
                 );
 
             if (_currentSettings.UsePulseEffect)
-                modulation += PULSE_AMPLITUDE * 0.5f * Sin(_animationTimer.Time * 0.5f + pointIndex * 0.1f);
+                modulation += PULSE_AMPLITUDE * 0.5f * Sin(GetAnimationTime() * 0.5f + pointIndex * 0.1f);
 
             float outerRadius = MIN_RADIUS + spectrumValue * modulation * RADIUS_MULTIPLIER;
             _outerPoints[pointIndex] = new SKPoint(
@@ -461,7 +460,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
             _dashEffect?.Dispose();
             _dashEffect = SKPathEffect.CreateDash(
                 DashIntervals,
-                _animationTimer.Time * DASH_PHASE_SPEED % (DASH_LENGTH * 3)
+                GetAnimationTime() * DASH_PHASE_SPEED % (DASH_LENGTH * 3)
             );
         }
 
@@ -473,7 +472,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         float safeBarWidth = Clamp(barWidth, MIN_BAR_WIDTH, MAX_BAR_WIDTH);
 
         _pulseEffect = _currentSettings.UsePulseEffect ?
-            Sin(_animationTimer.Time * PULSE_SPEED) * PULSE_AMPLITUDE + 1.0f : 1.0f;
+            Sin(GetAnimationTime() * PULSE_SPEED) * PULSE_AMPLITUDE + 1.0f : 1.0f;
 
         if (_strokePaint != null)
             _strokePaint.StrokeWidth = safeBarWidth * _pulseEffect * _currentSettings.StrokeMultiplier;
@@ -528,7 +527,7 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         if (_cachedCenterCircle == null) return;
 
         float pulseScale = _currentSettings.UsePulseEffect ?
-            1.0f + Sin(_animationTimer.Time * PULSE_SPEED * 0.5f) * PULSE_SCALE_MULTIPLIER : 1.0f;
+            1.0f + Sin(GetAnimationTime() * PULSE_SPEED * 0.5f) * PULSE_SCALE_MULTIPLIER : 1.0f;
 
         canvas.Save();
         canvas.Scale(pulseScale, pulseScale);
@@ -611,13 +610,13 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
 
         if (_outerPath != null)
         {
-            _resourceManager.ReturnPath(_outerPath);
+            ReturnPath(_outerPath);
             _outerPath = null;
         }
 
         if (_innerPath != null)
         {
-            _resourceManager.ReturnPath(_innerPath);
+            ReturnPath(_innerPath);
             _innerPath = null;
         }
 
@@ -647,6 +646,6 @@ public sealed class PolarRenderer : EffectSpectrumRenderer
         _previousSpectrum = null;
 
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

@@ -7,8 +7,6 @@ namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class CircularWaveRenderer : EffectSpectrumRenderer
 {
-    private const string LogPrefix = nameof(CircularWaveRenderer);
-
     private static readonly Lazy<CircularWaveRenderer> _instance =
         new(() => new CircularWaveRenderer());
 
@@ -65,14 +63,14 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         CreateCirclePoints();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
         CreateCirclePoints();
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -84,7 +82,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderWaves(
                 canvas,
                 spectrum,
@@ -93,7 +91,6 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
                 barSpacing,
                 barCount,
                 paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -114,7 +111,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         float maxRadius = Min(info.Width, info.Height) * MAX_RADIUS_FACTOR;
         float ringStep = barWidth + barSpacing;
 
-        using var paint = _resourceManager.GetPaint();
+        using var paint = GetPaint();
         paint.Color = basePaint.Color;
         paint.IsAntialias = UseAntiAlias;
         paint.Style = SKPaintStyle.Stroke;
@@ -145,7 +142,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         if (magnitude < MIN_MAGNITUDE_THRESHOLD) return;
 
         float baseRadius = CENTER_RADIUS + index * ringStep;
-        float waveOffset = Sin(_animationTimer.Time * WAVE_SPEED + index * 0.1f + _angle) *
+        float waveOffset = Sin(GetAnimationTime() * WAVE_SPEED + index * 0.1f + _angle) *
                           magnitude * ringStep * WAVE_INFLUENCE;
         float radius = baseRadius + waveOffset;
 
@@ -171,7 +168,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         float magnitude,
         SKPaint paint)
     {
-        using var glowPaint = _resourceManager.GetPaint();
+        using var glowPaint = GetPaint();
         glowPaint.Color = paint.Color.WithAlpha((byte)(paint.Color.Alpha * 0.7f));
         glowPaint.IsAntialias = paint.IsAntialias;
         glowPaint.Style = paint.Style;
@@ -190,7 +187,7 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         if (_circlePoints == null) return;
 
-        var path = _resourceManager.GetPath();
+        var path = GetPath();
         try
         {
             bool first = true;
@@ -216,14 +213,14 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(path);
+            ReturnPath(path);
         }
     }
 
     private void UpdateRotation(float[] spectrum)
     {
         float avgIntensity = spectrum.Length > 0 ? spectrum.Average() : 0f;
-        _angle = (_angle + ROTATION_SPEED * (1f + avgIntensity * 0.3f) * _animationTimer.DeltaTime) % MathF.Tau;
+        _angle = (_angle + ROTATION_SPEED * (1f + avgIntensity * 0.3f) * GetAnimationDeltaTime()) % MathF.Tau;
     }
 
     private static float GetRingMagnitude(
@@ -261,6 +258,6 @@ public sealed class CircularWaveRenderer : EffectSpectrumRenderer
     {
         _circlePoints = null;
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

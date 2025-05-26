@@ -56,12 +56,12 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        _processingCoordinator.SetSmoothingFactor(
+        SetProcessingSmoothingFactor(
             IsOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE);
         RequestRedraw();
     }
@@ -152,7 +152,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         float barWidth,
         float magnitude)
     {
-        using var highlightPaint = _resourceManager.GetPaint();
+        using var highlightPaint = GetPaint();
         highlightPaint.Color = SKColors.White.WithAlpha(
             (byte)(magnitude * HIGHLIGHT_ALPHA * 255)
         );
@@ -175,7 +175,7 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         SKColor barColor,
         float magnitude)
     {
-        using var reflectionPaint = _resourceManager.GetPaint();
+        using var reflectionPaint = GetPaint();
         reflectionPaint.Color = barColor.WithAlpha(
             (byte)(magnitude * REFLECTION_OPACITY * 255)
         );
@@ -208,6 +208,6 @@ public sealed class RainbowRenderer : EffectSpectrumRenderer
         _barPaint?.Dispose();
         _glowPaint?.Dispose();
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

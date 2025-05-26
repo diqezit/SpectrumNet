@@ -110,7 +110,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         InitializeComponents();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     private void InitializeComponents()
@@ -188,7 +188,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
         UpdateFontQuality();
         InvalidateCachedBackground();
         RequestRedraw();
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     private void UpdateFontQuality()
@@ -541,7 +541,7 @@ public sealed class TextParticlesRenderer : EffectSpectrumRenderer
     {
         ReleaseArrayPools();
         DisposeResources();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 
     private void ReleaseArrayPools()

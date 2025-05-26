@@ -72,13 +72,13 @@ public sealed class FireRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -90,7 +90,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderFire(
                 canvas,
                 spectrum,
@@ -98,7 +98,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
                 barWidth,
                 barSpacing,
                 paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -182,7 +181,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
     {
         float x = index * totalBarWidth;
         float waveOffset = Sin(
-            _animationTimer.Time * WAVE_SPEED +
+            GetAnimationTime() * WAVE_SPEED +
             index * POSITION_PHASE_SHIFT);
 
         float currentHeight = spectrumValue *
@@ -198,7 +197,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 
         x += waveOffset * barWidth * HORIZONTAL_WAVE_FACTOR;
 
-        var flamePath = _resourceManager.GetPath();
+        var flamePath = GetPath();
         try
         {
             CreateFlamePath(
@@ -228,7 +227,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(flamePath);
+            ReturnPath(flamePath);
         }
     }
 
@@ -289,7 +288,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPaint(glowPaint);
+            ReturnPaint(glowPaint);
         }
     }
 
@@ -301,7 +300,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         float intensity)
     {
         float opacityWave = Sin(
-            _animationTimer.Time * OPACITY_WAVE_SPEED +
+            GetAnimationTime() * OPACITY_WAVE_SPEED +
             index * OPACITY_PHASE_SHIFT) *
             OPACITY_WAVE_AMPLITUDE +
             OPACITY_BASE;
@@ -320,7 +319,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPaint(flamePaint);
+            ReturnPaint(flamePaint);
         }
     }
 
@@ -331,7 +330,7 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Color = color;
         paint.Style = style;
         paint.IsAntialias = UseAntiAlias;
@@ -349,6 +348,6 @@ public sealed class FireRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

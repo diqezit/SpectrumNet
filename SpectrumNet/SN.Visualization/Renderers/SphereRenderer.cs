@@ -93,7 +93,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         UpdateConfiguration(ConfigPresets[false]);
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnConfigurationChanged()
@@ -105,8 +105,8 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _processingCoordinator.SetSmoothingFactor(_currentSettings.SmoothingFactor);
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        SetProcessingSmoothingFactor(_currentSettings.SmoothingFactor);
+        LogDebug($"Quality changed to {Quality}");
     }
 
     private void UpdateConfiguration(SphereConfig config)
@@ -298,7 +298,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
             SKShaderTileMode.Clamp
         );
 
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Shader = shader;
         paint.IsAntialias = UseAntiAlias;
         return paint;
@@ -418,7 +418,7 @@ public sealed class SphereRenderer : EffectSpectrumRenderer
         _currentAlphas = null;
         _processedSpectrum = null;
 
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 
     private readonly record struct AlphaGroup(int Start, int End, float Alpha);

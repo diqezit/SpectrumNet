@@ -55,7 +55,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     }
 
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
-    private Star[] _stars = Array.Empty<Star>();
+    private Star[] _stars = [];
     private float _lowSpectrum, _midSpectrum, _highSpectrum, _energy;
     private float _spawnAccumulator;
     private readonly Random _random = new();
@@ -64,13 +64,13 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         InitializeStars();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void OnConfigurationChanged()
@@ -91,9 +91,8 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderStarfield(canvas, spectrum, info, paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -148,7 +147,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
 
     private void UpdateStars(SKImageInfo info)
     {
-        float deltaTime = _animationTimer.DeltaTime;
+        float deltaTime = GetAnimationDeltaTime();
         _spawnAccumulator += _energy * SPAWN_RATE * deltaTime;
 
         for (int i = 0; i < _stars.Length; i++)
@@ -177,7 +176,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         if (_energy < MIN_MAGNITUDE_THRESHOLD) return;
 
-        float angle = _animationTimer.Time * star.Speed;
+        float angle = GetAnimationTime() * star.Speed;
         float velocityX = (_lowSpectrum * Sin(angle) +
                           _midSpectrum * Cos(angle * 1.3f) +
                           _highSpectrum * Sin(angle * 1.8f)) * SPECTRUM_SENSITIVITY;
@@ -194,7 +193,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         float lifetimeRatio = star.Lifetime / star.MaxLifetime;
         star.Opacity = lifetimeRatio < 0.2f ? lifetimeRatio * 5f : 1f;
 
-        float twinkle = Sin(_animationTimer.Time * TWINKLE_SPEED * star.TwinkleSpeed + star.Phase) * 0.3f;
+        float twinkle = Sin(GetAnimationTime() * TWINKLE_SPEED * star.TwinkleSpeed + star.Phase) * 0.3f;
         star.Brightness = Clamp(0.8f + twinkle + _energy * 0.5f, MIN_BRIGHTNESS, 1.5f);
     }
 
@@ -256,7 +255,7 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
         SKCanvas canvas,
         SKPaint basePaint)
     {
-        using var paint = _resourceManager.GetPaint();
+        using var paint = GetPaint();
         paint.IsAntialias = UseAntiAlias;
         paint.Style = SKPaintStyle.Fill;
 
@@ -298,6 +297,6 @@ public sealed class ConstellationRenderer : EffectSpectrumRenderer
     {
         _stars = [];
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

@@ -75,13 +75,13 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         _barVectors = null;
         _previousBarCount = 0;
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -93,9 +93,8 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderCircularBars(canvas, spectrum, info, barWidth, barCount, paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -188,7 +187,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        var batchPath = _resourceManager.GetPath();
+        var batchPath = GetPath();
         try
         {
             for (int i = 0; i < barCount; i++)
@@ -212,7 +211,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(batchPath);
+            ReturnPath(batchPath);
         }
     }
 
@@ -226,7 +225,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float barWidth,
         SKPaint basePaint)
     {
-        var batchPath = _resourceManager.GetPath();
+        var batchPath = GetPath();
         try
         {
             for (int i = 0; i < barCount; i++)
@@ -249,7 +248,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(batchPath);
+            ReturnPath(batchPath);
         }
     }
 
@@ -262,7 +261,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         float mainRadius,
         float barWidth)
     {
-        var batchPath = _resourceManager.GetPath();
+        var batchPath = GetPath();
         try
         {
             for (int i = 0; i < barCount; i++)
@@ -285,7 +284,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(batchPath);
+            ReturnPath(batchPath);
         }
     }
 
@@ -297,7 +296,7 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Color = color;
         paint.Style = style;
         paint.IsAntialias = UseAntiAlias;
@@ -331,6 +330,6 @@ public sealed class CircularBarsRenderer : EffectSpectrumRenderer
     {
         _barVectors = null;
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

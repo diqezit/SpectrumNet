@@ -7,8 +7,6 @@ namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class BarsRenderer : EffectSpectrumRenderer
 {
-    private const string LogPrefix = nameof(BarsRenderer);
-
     private static readonly Lazy<BarsRenderer> _instance =
         new(() => new BarsRenderer());
 
@@ -91,13 +89,13 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -109,9 +107,8 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderBars(canvas, spectrum, info, barWidth, barSpacing, barCount, paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -217,7 +214,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Color = color;
         paint.Style = style;
         paint.IsAntialias = UseAntiAlias;
@@ -240,6 +237,6 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

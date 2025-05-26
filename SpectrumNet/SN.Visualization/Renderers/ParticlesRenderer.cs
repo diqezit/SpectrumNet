@@ -265,7 +265,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         InitializeResources();
         StartProcessingThread();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     private void InitializeResources()
@@ -306,13 +306,12 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
     protected override void OnConfigurationChanged()
     {
         base.OnConfigurationChanged();
-        _processingCoordinator.SetSmoothingFactor(IsOverlayActive ?
+        SetProcessingSmoothingFactor(IsOverlayActive ?
             SMOOTHING_FACTOR_OVERLAY :
             SMOOTHING_FACTOR_NORMAL);
 
         InvalidateCachedPicture();
-        _logger.Info(LogPrefix,
-            $"Configuration changed. New Quality: {Quality}, Overlay: {IsOverlayActive}");
+        LogDebug($"Configuration changed. New Quality: {Quality}, Overlay: {IsOverlayActive}");
     }
 
     protected override void OnQualitySettingsApplied()
@@ -323,7 +322,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         _sampleCount = _currentSettings.SampleCount;
 
         InvalidateCachedPicture();
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     private void InvalidateCachedPicture()
@@ -341,9 +340,8 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderParticles(canvas, spectrum, info, barWidth, barCount, paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -435,7 +433,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         }
         catch (Exception ex)
         {
-            _logger.Log(LogLevel.Error, LogPrefix, $"Error in processing thread: {ex.Message}");
+            LogError($"Error in processing thread: {ex.Message}");
         }
     }
 
@@ -643,7 +641,7 @@ public sealed class ParticlesRenderer : EffectSpectrumRenderer
         StopProcessingThread();
         DisposeResources();
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 
     private void StopProcessingThread()

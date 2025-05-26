@@ -79,13 +79,13 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -120,7 +120,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
     private void UpdateRotation(float[] spectrum)
     {
-        float deltaTime = _animationTimer.DeltaTime;
+        float deltaTime = GetAnimationDeltaTime();
 
         if (spectrum.Length >= 3)
         {
@@ -198,7 +198,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         {
             if (depth >= 0) continue;
 
-            var path = _resourceManager.GetPath();
+            var path = GetPath();
             try
             {
                 CreateFacePath(path, projected, face);
@@ -220,7 +220,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
             }
             finally
             {
-                _resourceManager.ReturnPath(path);
+                ReturnPath(path);
             }
         }
     }
@@ -304,6 +304,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

@@ -129,14 +129,14 @@ public sealed class KenwoodBarsRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         _glowPath = new SKPath();
         ApplyQualitySettings();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
         ApplyQualitySettings();
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -162,7 +162,7 @@ public sealed class KenwoodBarsRenderer : EffectSpectrumRenderer
 
     private void ApplyQualitySettings()
     {
-        _processingCoordinator.SetSmoothingFactor(_currentSettings.SmoothingFactor);
+        SetProcessingSmoothingFactor(_currentSettings.SmoothingFactor);
         UpdatePeakPaint();
     }
 
@@ -331,7 +331,7 @@ public sealed class KenwoodBarsRenderer : EffectSpectrumRenderer
     {
         if (_glowPath == null || _glowPath.IsEmpty) return;
 
-        using var glowPaint = _resourceManager.GetPaint();
+        using var glowPaint = GetPaint();
         glowPaint.Color = SKColors.White.WithAlpha(
             (byte)(_currentSettings.GlowAlpha * 255));
         glowPaint.Style = SKPaintStyle.Fill;
@@ -479,7 +479,7 @@ public sealed class KenwoodBarsRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateBarPaint()
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         ConfigureBarPaint(paint);
         return paint;
     }
@@ -494,7 +494,7 @@ public sealed class KenwoodBarsRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateEdgePaint(float magnitude)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         ConfigureEdgePaint(paint, magnitude);
         return paint;
     }
@@ -526,15 +526,12 @@ public sealed class KenwoodBarsRenderer : EffectSpectrumRenderer
         }
     }
 
-    private static float Lerp(float a, float b, float t) =>
-        a + (b - a) * t;
-
     protected override void OnDispose()
     {
         DisposeResources();
         ClearBuffers();
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 
     private void DisposeResources()

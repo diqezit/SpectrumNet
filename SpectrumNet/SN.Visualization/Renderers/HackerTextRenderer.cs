@@ -116,7 +116,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         InitializeFont();
         InitializeReusablePaints();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     private void InitializeFont()
@@ -131,11 +131,11 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 
     private void InitializeReusablePaints()
     {
-        _reusableExtrusionPaint = _resourceManager.GetPaint();
+        _reusableExtrusionPaint = GetPaint();
         _reusableExtrusionPaint.Style = SKPaintStyle.Fill;
         _reusableExtrusionPaint.IsAntialias = UseAntiAlias;
 
-        _reusableFacePaint = _resourceManager.GetPaint();
+        _reusableFacePaint = GetPaint();
         _reusableFacePaint.Style = SKPaintStyle.Fill;
         _reusableFacePaint.IsAntialias = UseAntiAlias;
     }
@@ -164,7 +164,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
             var letter = _letters[i];
             if (letter.Path != null)
             {
-                _resourceManager.ReturnPath(letter.Path);
+                ReturnPath(letter.Path);
                 letter.Path = null;
             }
             _letters[i] = letter;
@@ -190,7 +190,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 
         if (_staticTextInitialized)
         {
-            UpdateLetterPhysics(spectrum, info, barCount, _animationTimer.DeltaTime);
+            UpdateLetterPhysics(spectrum, info, barCount, GetAnimationDeltaTime());
             DrawLetters3D(canvas, paint.Color);
         }
     }
@@ -265,9 +265,6 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     private float CalculateExtrusionOffset(float baseValue, float _) =>
         Clamp(baseValue * BASE_EXTRUSION_SCALE_FACTOR * _currentSettings.ExtrusionScaleFactor, -2f, 2f);
 
-    private static float Lerp(float start, float end, float amount) =>
-        start + (end - start) * Clamp(amount, 0f, 1f);
-
     private static float CalculateAverageMagnitude(float[] spectrum)
     {
         if (spectrum == null || spectrum.Length == 0) return 0f;
@@ -308,7 +305,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
             string charStr = c.ToString();
             float width = _font!.MeasureText(charStr);
 
-            SKPath path = _resourceManager.GetPath();
+            SKPath path = GetPath();
             SKPath textPath = _font.GetTextPath(charStr, new SKPoint(0, 0));
 
             path.AddPath(textPath);
@@ -415,7 +412,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     {
         if (_reusableExtrusionPaint == null)
         {
-            _reusableExtrusionPaint = _resourceManager.GetPaint();
+            _reusableExtrusionPaint = GetPaint();
             _reusableExtrusionPaint.Style = SKPaintStyle.Fill;
             _reusableExtrusionPaint.IsAntialias = UseAntiAlias;
         }
@@ -427,7 +424,7 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
     {
         if (_reusableFacePaint == null)
         {
-            _reusableFacePaint = _resourceManager.GetPaint();
+            _reusableFacePaint = GetPaint();
             _reusableFacePaint.Style = SKPaintStyle.Fill;
             _reusableFacePaint.IsAntialias = UseAntiAlias;
         }
@@ -523,13 +520,13 @@ public sealed class HackerTextRenderer : EffectSpectrumRenderer
 
         if (_reusableExtrusionPaint != null)
         {
-            _resourceManager.ReturnPaint(_reusableExtrusionPaint);
+            ReturnPaint(_reusableExtrusionPaint);
             _reusableExtrusionPaint = null;
         }
 
         if (_reusableFacePaint != null)
         {
-            _resourceManager.ReturnPaint(_reusableFacePaint);
+            ReturnPaint(_reusableFacePaint);
             _reusableFacePaint = null;
         }
 

@@ -154,13 +154,13 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void OnConfigurationChanged()
@@ -175,7 +175,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
 
         if (IsOverlayActive)
         {
-            _overlayStateManager.SetOverlayTransparency(0.75f);
+            SetOverlayTransparency(0.75f);
         }
     }
 
@@ -188,9 +188,8 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderGauge(canvas, spectrum, info, paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -275,7 +274,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             BG_OUTER_CORNER_RADIUS,
             BG_OUTER_CORNER_RADIUS,
             outerFramePaint);
-        _resourceManager.ReturnPaint(outerFramePaint);
+        ReturnPaint(outerFramePaint);
 
         var innerFrameRect = new SKRect(
             rect.Left + BG_INNER_PADDING,
@@ -292,7 +291,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             BG_INNER_CORNER_RADIUS,
             BG_INNER_CORNER_RADIUS,
             innerFramePaint);
-        _resourceManager.ReturnPaint(innerFramePaint);
+        ReturnPaint(innerFramePaint);
 
         var backgroundRect = new SKRect(
             innerFrameRect.Left + BG_BACKGROUND_PADDING,
@@ -315,7 +314,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             BG_BACKGROUND_CORNER_RADIUS,
             BG_BACKGROUND_CORNER_RADIUS,
             backgroundPaint);
-        _resourceManager.ReturnPaint(backgroundPaint);
+        ReturnPaint(backgroundPaint);
 
         DrawVuText(canvas, backgroundRect, rect.Height);
     }
@@ -343,7 +342,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             font,
             textPaint);
 
-        _resourceManager.ReturnPaint(textPaint);
+        ReturnPaint(textPaint);
     }
 
     private void DrawScale(SKCanvas canvas, SKRect rect)
@@ -386,7 +385,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 tickPaint, null);
         }
 
-        _resourceManager.ReturnPaint(textPaint);
+        ReturnPaint(textPaint);
     }
 
     private void DrawMark(
@@ -529,7 +528,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         float radiusX, float radiusY,
         float angle, float needleLength)
     {
-        var needlePath = _resourceManager.GetPath();
+        var needlePath = GetPath();
 
         float radian = angle * (MathF.PI / 180.0f);
         float ellipseX = centerX + radiusX * Cos(radian);
@@ -576,7 +575,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 SKShaderTileMode.Clamp);
 
             canvas.DrawPath(needlePath, needlePaint);
-            _resourceManager.ReturnPaint(needlePaint);
+            ReturnPaint(needlePaint);
 
             var outlinePaint = CreateEffectPaint(
                 SKColors.Black.WithAlpha(180),
@@ -584,10 +583,10 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 strokeWidth: 0.8f
             );
             canvas.DrawPath(needlePath, outlinePaint);
-            _resourceManager.ReturnPaint(outlinePaint);
+            ReturnPaint(outlinePaint);
         }
 
-        _resourceManager.ReturnPath(needlePath);
+        ReturnPath(needlePath);
     }
 
     private void DrawNeedleCenter(
@@ -612,7 +611,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             SKShaderTileMode.Clamp);
 
         canvas.DrawCircle(centerX, centerY, centerCircleRadius, centerCirclePaint);
-        _resourceManager.ReturnPaint(centerCirclePaint);
+        ReturnPaint(centerCirclePaint);
 
         var highlightPaint = CreateEffectPaint(
             SKColors.White.WithAlpha(150),
@@ -623,7 +622,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             centerY - centerCircleRadius * 0.25f,
             centerCircleRadius * 0.4f,
             highlightPaint);
-        _resourceManager.ReturnPaint(highlightPaint);
+        ReturnPaint(highlightPaint);
     }
 
     private void DrawPeakLamp(SKCanvas canvas, SKRect rect)
@@ -652,7 +651,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
                 lampX, lampY,
                 lampRadius * PEAK_LAMP_GLOW_RADIUS,
                 glowPaint);
-            _resourceManager.ReturnPaint(glowPaint);
+            ReturnPaint(glowPaint);
         }
 
         var innerPaint = CreateEffectPaint(
@@ -670,7 +669,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             lampX, lampY,
             lampRadius * PEAK_LAMP_INNER_RADIUS,
             innerPaint);
-        _resourceManager.ReturnPaint(innerPaint);
+        ReturnPaint(innerPaint);
 
         var reflectionPaint = CreateEffectPaint(
             SKColors.White.WithAlpha(180),
@@ -681,7 +680,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             lampY - lampRadius * 0.3f,
             lampRadius * 0.25f,
             reflectionPaint);
-        _resourceManager.ReturnPaint(reflectionPaint);
+        ReturnPaint(reflectionPaint);
 
         var rimPaint = CreateEffectPaint(
             new SKColor(40, 40, 40),
@@ -689,7 +688,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             strokeWidth: PEAK_LAMP_RIM_STROKE_WIDTH * 1.2f
         );
         canvas.DrawCircle(lampX, lampY, lampRadius, rimPaint);
-        _resourceManager.ReturnPaint(rimPaint);
+        ReturnPaint(rimPaint);
 
         DrawPeakLampLabel(canvas, lampX, lampY, lampRadius);
     }
@@ -724,7 +723,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
             font,
             peakTextPaint);
 
-        _resourceManager.ReturnPaint(peakTextPaint);
+        ReturnPaint(peakTextPaint);
     }
 
     private SKPaint CreateEffectPaint(
@@ -734,7 +733,7 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Color = color;
         paint.Style = style;
         paint.IsAntialias = UseAntiAlias;
@@ -818,6 +817,6 @@ public sealed class GaugeRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

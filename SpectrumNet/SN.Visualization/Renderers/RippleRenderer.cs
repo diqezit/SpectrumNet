@@ -86,7 +86,7 @@ public sealed class RippleRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
@@ -105,8 +105,8 @@ public sealed class RippleRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        float deltaTime = _animationTimer.DeltaTime;
-        float currentTime = _animationTimer.Time;
+        float deltaTime = GetAnimationDeltaTime();
+        float currentTime = GetAnimationTime();
 
         UpdateBandMagnitudes(spectrum, barCount);
         UpdateRipples(deltaTime);

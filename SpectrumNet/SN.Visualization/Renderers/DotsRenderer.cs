@@ -87,7 +87,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         ResetDots(new SKImageInfo(800, 600));
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
@@ -97,7 +97,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         {
             ResetDots(_lastImageInfo);
         }
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -109,9 +109,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderDots(canvas, spectrum, info, barCount),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -177,7 +176,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             0.5f,
             2.0f);
 
-        float deltaTime = _animationTimer.DeltaTime;
+        float deltaTime = GetAnimationDeltaTime();
 
         for (int i = 0; i < _dots.Length; i++)
         {
@@ -305,7 +304,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Color = color;
         paint.Style = style;
         paint.IsAntialias = UseAntiAlias;
@@ -321,7 +320,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     protected override void OnDispose()
     {
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 
     public override bool RequiresRedraw() => true;

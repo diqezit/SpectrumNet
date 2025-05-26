@@ -88,14 +88,14 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
     {
         ResetState();
         InitializePaints();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
         UpdatePaintsForQuality();
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -107,9 +107,8 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderLoudnessMeter(canvas, spectrum, info),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -364,7 +363,7 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         bool createBlur = false,
         float blurRadius = 0)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Color = color;
         paint.Style = style;
         paint.IsAntialias = UseAntiAlias;
@@ -395,18 +394,18 @@ public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer
         if (_fillPaint != null)
         {
             _fillPaint.Shader?.Dispose();
-            _resourceManager.ReturnPaint(_fillPaint);
+            ReturnPaint(_fillPaint);
             _fillPaint = null;
         }
 
         if (_glowPaint != null)
         {
             _glowPaint.MaskFilter?.Dispose();
-            _resourceManager.ReturnPaint(_glowPaint);
+            ReturnPaint(_glowPaint);
             _glowPaint = null;
         }
 
         _cachedLoudness = null;
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

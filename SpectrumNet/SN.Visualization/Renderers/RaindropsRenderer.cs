@@ -99,7 +99,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
         _particleBuffer = new ParticleBuffer(_settings.Particles.MaxParticles, 1);
         _settings.PropertyChanged += OnSettingsChanged;
         _frameTimer.Start();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     private void InitializeArrays()
@@ -111,7 +111,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -374,7 +374,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateTrailPaint(SKPaint basePaint)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeCap = SKStrokeCap.Round;
         paint.IsAntialias = UseAntiAlias;
@@ -523,7 +523,7 @@ public sealed class RaindropsRenderer : EffectSpectrumRenderer
     {
         _settings.PropertyChanged -= OnSettingsChanged;
         _trailPath?.Dispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 
     private sealed class RenderCache

@@ -86,7 +86,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         InitializeVariations();
         CreateCachedTextures();
         ResetState();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
@@ -97,14 +97,14 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         {
             CreateStaticBitmap(new SKImageInfo(_currentWidth, _currentHeight));
         }
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void OnConfigurationChanged()
     {
         base.OnConfigurationChanged();
         _smoothingFactor = IsOverlayActive ? SMOOTHING_FACTOR_OVERLAY : SMOOTHING_FACTOR_NORMAL;
-        _processingCoordinator.SetSmoothingFactor(_smoothingFactor);
+        SetProcessingSmoothingFactor(_smoothingFactor);
     }
 
     protected override void RenderEffect(
@@ -147,21 +147,6 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         else
         {
             _peakLoudness = MathF.Max(0, _peakLoudness - PEAK_DECAY_RATE);
-        }
-    }
-
-    private void UpdateAnimation()
-    {
-        float loudness = _previousLoudness;
-        if (loudness > HIGH_LOUDNESS_THRESHOLD)
-        {
-            float vibrationIntensity = (loudness - HIGH_LOUDNESS_THRESHOLD) /
-                                     (1 - HIGH_LOUDNESS_THRESHOLD);
-            _vibrationOffset = Sin(_animationTimer.Time * MathF.PI * 10) * 0.8f * vibrationIntensity;
-        }
-        else
-        {
-            _vibrationOffset = 0;
         }
     }
 
@@ -505,7 +490,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         canvas.DrawRoundRect(recessRoundRect, borderPaint);
     }
 
-    private void RenderLabels(SKCanvas canvas, SKRect panelRect)
+    private static void RenderLabels(SKCanvas canvas, SKRect panelRect)
     {
         using var boldTypeface = SKTypeface.FromFamilyName(
             "Arial",
@@ -661,7 +646,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void RenderBrandingText(SKCanvas canvas, SKRect panelRect)
+    private static void RenderBrandingText(SKCanvas canvas, SKRect panelRect)
     {
         using var font = new SKFont(
             SKTypeface.FromFamilyName(
@@ -969,7 +954,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         return bitmap;
     }
 
-    private SKBitmap CreateBrushedMetalTexture()
+    private static SKBitmap CreateBrushedMetalTexture()
     {
         var bitmap = new SKBitmap(BRUSHED_METAL_TEXTURE_SIZE, BRUSHED_METAL_TEXTURE_SIZE);
         using var canvas = new SKCanvas(bitmap);
@@ -1068,7 +1053,7 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
 
     public override bool RequiresRedraw()
     {
-        return base.RequiresRedraw() || _animationTimer.Time > 0;
+        return base.RequiresRedraw() || GetAnimationTime() > 0;
     }
 
     protected override void CleanupUnusedResources()
@@ -1088,6 +1073,6 @@ public sealed class LedMeterRenderer : EffectSpectrumRenderer
         _ledColorVariations.Clear();
         _ledVariations.Clear();
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

@@ -6,8 +6,6 @@ namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class CubesRenderer : EffectSpectrumRenderer
 {
-    private const string LogPrefix = nameof(CubesRenderer);
-
     private static readonly Lazy<CubesRenderer> _instance = new(() => new CubesRenderer());
 
     private CubesRenderer() { }
@@ -69,13 +67,13 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -87,7 +85,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        _logger.Safe(
+        SafeExecute(
             () => RenderCubes(
                 canvas,
                 spectrum,
@@ -95,7 +93,6 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
                 barWidth,
                 barSpacing,
                 paint),
-            LogPrefix,
             "Error during rendering"
         );
     }
@@ -205,7 +202,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
         float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
-        var topPath = _resourceManager.GetPath();
+        var topPath = GetPath();
         try
         {
             topPath.MoveTo(x, y);
@@ -224,7 +221,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(topPath);
+            ReturnPath(topPath);
         }
     }
 
@@ -239,7 +236,7 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
         float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
-        var sidePath = _resourceManager.GetPath();
+        var sidePath = GetPath();
         try
         {
             sidePath.MoveTo(x + barWidth, y);
@@ -258,13 +255,13 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(sidePath);
+            ReturnPath(sidePath);
         }
     }
 
     protected override void OnDispose()
     {
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

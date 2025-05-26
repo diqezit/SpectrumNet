@@ -78,13 +78,13 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        _processingCoordinator.SetSmoothingFactor(SMOOTHING_FACTOR_NORMAL);
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        SetProcessingSmoothingFactor(SMOOTHING_FACTOR_NORMAL);
+        LogDebug("Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
-        _processingCoordinator.SetSmoothingFactor(IsOverlayActive
+        SetProcessingSmoothingFactor(IsOverlayActive
             ? SMOOTHING_FACTOR_OVERLAY
             : SMOOTHING_FACTOR_NORMAL);
     }
@@ -276,7 +276,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         SKPaint basePaint,
         int spectrumLength)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeWidth = MathF.Max(
             MIN_STROKE_WIDTH,
@@ -290,7 +290,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateFillPaint(SKPaint basePaint)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Style = SKPaintStyle.Fill;
         paint.Color = basePaint.Color.WithAlpha(
             (byte)(255 * FILL_OPACITY));
@@ -302,7 +302,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         SKPaint basePaint,
         int spectrumLength)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeWidth = MathF.Max(
             MIN_STROKE_WIDTH,
@@ -318,7 +318,7 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
 
     private SKPaint CreateHighlightPaint(int spectrumLength)
     {
-        var paint = _resourceManager.GetPaint();
+        var paint = GetPaint();
         paint.Style = SKPaintStyle.Stroke;
         paint.StrokeWidth = MathF.Max(
             MIN_STROKE_WIDTH,
@@ -366,6 +366,6 @@ public sealed class WaveformRenderer : EffectSpectrumRenderer
         _bottomPath?.Dispose();
         _fillPath?.Dispose();
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }

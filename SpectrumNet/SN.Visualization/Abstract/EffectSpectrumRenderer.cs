@@ -2,19 +2,100 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract;
 
-public abstract class EffectSpectrumRenderer(
-    ISpectrumProcessingCoordinator? processingCoordinator = null,
-    IQualityManager? qualityManager = null,
-    IOverlayStateManager? overlayStateManager = null,
-    IResourceManager? resourceManager = null,
-    IAnimationTimer? animationTimer = null)
-    : BaseSpectrumRenderer(processingCoordinator, qualityManager, overlayStateManager)
+public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 {
-    private const string LogPrefix = nameof(EffectSpectrumRenderer);
-
-    protected readonly IResourceManager _resourceManager = resourceManager ?? new ResourceManager();
-    protected readonly IAnimationTimer _animationTimer = animationTimer ?? new AnimationTimer();
+    private readonly IResourceManager _resourceManager;
+    private readonly IAnimationTimer _animationTimer;
     private readonly object _renderLock = new();
+    private readonly Dictionary<string, IPaintConfig> _paintConfigs = new();
+
+    protected EffectSpectrumRenderer(
+        ISpectrumProcessingCoordinator? processingCoordinator = null,
+        IQualityManager? qualityManager = null,
+        IOverlayStateManager? overlayStateManager = null,
+        IResourceManager? resourceManager = null,
+        IAnimationTimer? animationTimer = null,
+        IRenderingHelpers? renderingHelpers = null)
+        : base(processingCoordinator, qualityManager, overlayStateManager, renderingHelpers)
+    {
+        _resourceManager = resourceManager ?? new ResourceManager();
+        _animationTimer = animationTimer ?? new AnimationTimer();
+    }
+
+    protected override float GetAnimationTime() => _animationTimer.Time;
+    protected override float GetAnimationDeltaTime() => _animationTimer.DeltaTime;
+
+    protected void UpdateAnimation() => _animationTimer.Update();
+    protected void ResetAnimation() => _animationTimer.Reset();
+
+    protected SKPath GetPath() => _resourceManager.GetPath();
+    protected void ReturnPath(SKPath path) => _resourceManager.ReturnPath(path);
+    protected SKPaint GetPaint() => _resourceManager.GetPaint();
+    protected void ReturnPaint(SKPaint paint) => _resourceManager.ReturnPaint(paint);
+
+    protected void RegisterPaintConfig(string name, IPaintConfig config) =>
+        _paintConfigs[name] = config;
+
+    protected IPaintConfig GetPaintConfig(string name) =>
+        _paintConfigs.TryGetValue(name, out var config) ? config : PaintConfig.Default;
+
+    protected SKPaint CreatePaint(IPaintConfig config)
+    {
+        var paint = _resourceManager.GetPaint();
+        paint.Color = config.Color;
+        paint.Style = config.Style;
+        paint.IsAntialias = UseAntiAlias;
+
+        if (config.Style == SKPaintStyle.Stroke)
+        {
+            paint.StrokeWidth = config.StrokeWidth;
+            paint.StrokeCap = config.StrokeCap;
+            paint.StrokeJoin = config.StrokeJoin;
+        }
+
+        if (config.BlurRadius > 0)
+            paint.ImageFilter = SKImageFilter.CreateBlur(config.BlurRadius, config.BlurRadius);
+
+        if (config.MaskBlurRadius > 0)
+            paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, config.MaskBlurRadius);
+
+        return paint;
+    }
+
+    protected SKPaint CreatePaint(string configName) =>
+        CreatePaint(GetPaintConfig(configName));
+
+    protected SKPaint CreateStandardPaint(SKColor color)
+    {
+        var paint = _resourceManager.GetPaint();
+        paint.Color = color;
+        paint.Style = SKPaintStyle.Fill;
+        paint.IsAntialias = UseAntiAlias;
+        return paint;
+    }
+
+    protected SKPaint CreateStrokePaint(
+        SKColor color,
+        float strokeWidth,
+        SKStrokeCap cap = SKStrokeCap.Round)
+    {
+        var paint = _resourceManager.GetPaint();
+        paint.Color = color;
+        paint.Style = SKPaintStyle.Stroke;
+        paint.StrokeWidth = strokeWidth;
+        paint.StrokeCap = cap;
+        paint.IsAntialias = UseAntiAlias;
+        return paint;
+    }
+
+    protected SKPaint CreateGlowPaint(SKColor color, float blurRadius) =>
+        CreatePaint(PaintConfig.Glow(color, blurRadius));
+
+    protected SKPaint CreateEdgePaint(SKColor color, float width, float blurRadius = 0) =>
+        CreatePaint(PaintConfig.Edge(color, width, blurRadius));
+
+    protected bool IsAreaVisible(SKCanvas? canvas, SKRect rect) =>
+        IsRectVisible(canvas, rect);
 
     protected abstract void RenderEffect(
         SKCanvas canvas,
@@ -37,8 +118,7 @@ public abstract class EffectSpectrumRenderer(
         int EffectiveBarCount,
         float BarWidth,
         float BarSpacing,
-        float StartOffset
-    );
+        float StartOffset);
 
     protected virtual RenderParameters CalculateRenderParameters(
         SKImageInfo info,
@@ -46,35 +126,24 @@ public abstract class EffectSpectrumRenderer(
     {
         int maxBars = GetMaxBarsForQuality();
         int effectiveBarCount = Math.Min(requestedBarCount, maxBars);
-        float totalWidth = info.Width;
-
-        float totalBarSpace = totalWidth / effectiveBarCount;
-        float barWidth = totalBarSpace * 0.8f;
-        float barSpacing = totalBarSpace * 0.2f;
+        float totalBarSpace = info.Width / effectiveBarCount;
 
         return new RenderParameters(
             effectiveBarCount,
-            barWidth,
-            barSpacing,
-            0f
-        );
+            totalBarSpace * 0.8f,
+            totalBarSpace * 0.2f,
+            0f);
     }
 
-    public override void Initialize()
-    {
-        _logger.Safe(() => HandleInitialize(),
-                  LogPrefix,
-                  "Failed to initialize renderer");
-    }
+    public override void Initialize() =>
+        SafeExecute(() =>
+        {
+            base.Initialize();
+            OnInitialize();
+            LogDebug("Initialized");
+        }, "Failed to initialize renderer");
 
-    protected override void HandleInitialize()
-    {
-        base.HandleInitialize();
-        OnInitialize();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
-    }
-
-    protected virtual void RequestRedraw() => _needsRedraw = true;
+    protected virtual void RequestRedraw() => base.RequiresRedraw();
 
     protected override void OnConfigurationChanged()
     {
@@ -94,15 +163,15 @@ public abstract class EffectSpectrumRenderer(
         SKPaint? paint,
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo)
     {
-        if (!ValidateRenderParameters(canvas, spectrum, info, barWidth, barSpacing, barCount, paint))
+        if (!ValidateRenderParameters(
+            canvas, spectrum, info, barWidth, barSpacing, barCount, paint))
         {
             drawPerformanceInfo?.Invoke(canvas!, info);
             return;
         }
 
         var renderParams = CalculateRenderParameters(info, barCount);
-
-        var (isValid, processed) = _processingCoordinator.PrepareSpectrum(
+        var (isValid, processed) = PrepareSpectrum(
             spectrum,
             renderParams.EffectiveBarCount,
             spectrum!.Length);
@@ -113,95 +182,56 @@ public abstract class EffectSpectrumRenderer(
             return;
         }
 
-        var cv = canvas!;
-        var sp = spectrum!;
-        var pr = processed!;
-        var pt = paint!;
-
-        _logger.Safe(() => RenderLocked(cv, sp, pr, info, renderParams, pt),
-                 LogPrefix,
-                 "Error during rendering");
-
-        drawPerformanceInfo?.Invoke(cv, info);
-    }
-
-    private void RenderLocked(
-        SKCanvas canvas,
-        float[] spectrum,
-        float[] processedSpectrum,
-        SKImageInfo info,
-        RenderParameters renderParams,
-        SKPaint paint)
-    {
-        lock (_renderLock)
+        SafeExecute(() =>
         {
-            _animationTimer.Update();
+            lock (_renderLock)
+            {
+                _animationTimer.Update();
 
-            BeforeRender(
-                canvas,
-                spectrum,
-                info,
-                renderParams.BarWidth,
-                renderParams.BarSpacing,
-                renderParams.EffectiveBarCount,
-                paint);
-
-            RenderWithOverlay(canvas, () =>
-                RenderEffect(
-                    canvas,
-                    processedSpectrum,
-                    info,
+                BeforeRender(
+                    canvas!, spectrum!, info,
                     renderParams.BarWidth,
                     renderParams.BarSpacing,
                     renderParams.EffectiveBarCount,
-                    paint));
+                    paint!);
 
-            AfterRender(
-                canvas,
-                processedSpectrum,
-                info);
+                RenderWithOverlay(canvas!, () =>
+                    RenderEffect(
+                        canvas!, processed!, info,
+                        renderParams.BarWidth,
+                        renderParams.BarSpacing,
+                        renderParams.EffectiveBarCount,
+                        paint!));
 
-            if (_overlayStateManager.StateChanged)
-            {
-                _overlayStateManager.ResetStateFlags();
-                _needsRedraw = false;
+                AfterRender(canvas!, processed!, info);
+
+                if (IsOverlayStateChanged())
+                    ResetOverlayStateFlags();
             }
-        }
+        }, "Error during rendering");
+
+        drawPerformanceInfo?.Invoke(canvas!, info);
     }
 
     protected void RenderWithOverlay(SKCanvas canvas, Action renderAction)
     {
-        if (_overlayStateManager.IsOverlayActive)
+        if (IsOverlayActive)
         {
             using var overlayPaint = new SKPaint
             {
-                Color = new SKColor(255, 255, 255,
-                    (byte)(255 * _overlayStateManager.OverlayAlphaFactor))
+                Color = new SKColor(
+                    255, 255, 255,
+                    (byte)(255 * GetOverlayAlphaFactor()))
             };
 
             canvas.SaveLayer(overlayPaint);
-            try
-            {
-                renderAction();
-            }
-            finally
-            {
-                canvas.Restore();
-            }
+            try { renderAction(); }
+            finally { canvas.Restore(); }
         }
         else
         {
             renderAction();
         }
-    }
-
-    protected SKPaint CreateStandardPaint(SKColor color)
-    {
-        var paint = _resourceManager.GetPaint();
-        paint.Color = color;
-        paint.Style = SKPaintStyle.Fill;
-        paint.IsAntialias = UseAntiAlias;
-        return paint;
     }
 
     protected virtual void BeforeRender(
@@ -220,13 +250,9 @@ public abstract class EffectSpectrumRenderer(
         SKImageInfo info)
     { }
 
-    protected override void HandleDispose()
+    protected override void OnDispose()
     {
-        if (!_disposed)
-        {
-            OnDispose();
-            _resourceManager?.Dispose();
-            base.HandleDispose();
-        }
+        _resourceManager?.Dispose();
+        base.OnDispose();
     }
 }

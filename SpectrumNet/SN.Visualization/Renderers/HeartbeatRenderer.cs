@@ -88,14 +88,13 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         base.OnInitialize();
         UpdateConfiguration(DEFAULT_CONFIG);
         PrecomputeTrigValues();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Initialized");
+        LogDebug("Initialized");
     }
 
     protected override void OnConfigurationChanged()
     {
         base.OnConfigurationChanged();
-        _processingCoordinator.SetSmoothingFactor(
-            IsOverlayActive ? 0.7f : 0.3f);
+        SetProcessingSmoothingFactor(IsOverlayActive ? 0.7f : 0.3f);
         UpdateConfiguration(IsOverlayActive ? OVERLAY_CONFIG : DEFAULT_CONFIG);
         InvalidateCachedResources();
     }
@@ -104,7 +103,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
     {
         _currentSettings = QualityPresets[Quality];
         InvalidateCachedResources();
-        _logger.Log(LogLevel.Debug, LogPrefix, $"Quality changed to {Quality}");
+        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -188,7 +187,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         float centerY = info.Height * CENTER_PROPORTION;
         float radius = Min(info.Width, info.Height) * RADIUS_PROPORTION;
 
-        var heartPath = _resourceManager.GetPath();
+        var heartPath = GetPath();
         try
         {
             EnsureCachedHeartPicture(heartPath, basePaint);
@@ -212,7 +211,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         }
         finally
         {
-            _resourceManager.ReturnPath(heartPath);
+            ReturnPath(heartPath);
         }
     }
 
@@ -255,7 +254,7 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         SKPaint basePaint,
         int actualHeartCount)
     {
-        float time = _animationTimer.Time;
+        float time = GetAnimationTime();
 
         for (int i = 0; i < actualHeartCount && i < spectrum.Length; i++)
         {
@@ -441,6 +440,6 @@ public sealed class HeartbeatRenderer : EffectSpectrumRenderer
         _cachedHeartPicture = null;
         _cosValues = _sinValues = [];
         base.OnDispose();
-        _logger.Log(LogLevel.Debug, LogPrefix, "Disposed");
+        LogDebug("Disposed");
     }
 }
