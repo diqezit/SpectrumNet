@@ -6,7 +6,7 @@ namespace SpectrumNet.SN.Visualization.Renderers;
 
 public sealed class BarsRenderer : EffectSpectrumRenderer
 {
-    private static readonly Lazy<BarsRenderer> _instance = 
+    private static readonly Lazy<BarsRenderer> _instance =
         new(() => new BarsRenderer());
 
     public static BarsRenderer GetInstance() => _instance.Value;
@@ -52,7 +52,7 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     protected override void OnInitialize() =>
         UpdatePaintConfigs();
 
-    protected override void OnConfigurationChanged() =>
+    protected override void OnQualitySettingsApplied() =>
         UpdatePaintConfigs();
 
     private void UpdatePaintConfigs()
@@ -61,11 +61,11 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
         RegisterPaintConfig(
             "glow",
-            PaintConfig.Glow(SKColors.White, _currentSettings.GlowRadius));
+            CreateGlowPaintConfig(SKColors.White, _currentSettings.GlowRadius));
 
         RegisterPaintConfig(
             "edge",
-            PaintConfig.Edge(
+            CreateEdgePaintConfig(
                 SKColors.White,
                 _currentSettings.EdgeStrokeWidth,
                 _currentSettings.EdgeBlurRadius));
@@ -88,29 +88,21 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
 
         if (UseAdvancedEffects)
         {
-            using SKPaint glowPaint = GlowEffects(canvas, spectrum, info, 
+            RenderGlowEffects(canvas, spectrum, info,
                 barWidth, barSpacing, cornerRadius, spectrumLength);
         }
 
-        for (int i = 0; i < spectrumLength; i++)
-        {
-            bool flowControl = MainBars(canvas, spectrum, info, barWidth, 
-                barSpacing, paint, cornerRadius, i);
-
-            if (!flowControl)
-            {
-                continue;
-            }
-        }
+        RenderMainBars(canvas, spectrum, info, barWidth,
+            barSpacing, paint, cornerRadius, spectrumLength);
 
         if (UseAdvancedEffects && _currentSettings.EdgeStrokeWidth > 0)
         {
-            using SKPaint edgePaint = Edge(canvas, spectrum, info, barWidth,
+            RenderEdgeEffects(canvas, spectrum, info, barWidth,
                 barSpacing, cornerRadius, spectrumLength);
         }
     }
 
-    private SKPaint GlowEffects(
+    private void RenderGlowEffects(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
@@ -121,36 +113,37 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     {
         var glowPaint = CreatePaint("glow");
 
-        for (int i = 0; i < spectrumLength; i++)
+        try
         {
-            float magnitude = spectrum[i];
-            if (magnitude < HIGH_INTENSITY_THRESHOLD) continue;
+            var glowBars = new List<(SKRect rect, float alpha)>();
 
-            float x = i * (barWidth + barSpacing);
-            var rect = GetBarRect(
-                x,
-                magnitude,
-                barWidth,
-                info.Height,
-                MIN_BAR_HEIGHT);
+            for (int i = 0; i < spectrumLength; i++)
+            {
+                float magnitude = spectrum[i];
+                if (magnitude < HIGH_INTENSITY_THRESHOLD) continue;
 
-            if (!IsAreaVisible(canvas, rect)) continue;
+                float x = i * (barWidth + barSpacing);
+                var rect = GetBarRect(x, magnitude, barWidth, info.Height, MIN_BAR_HEIGHT);
 
-            glowPaint.Color = ApplyAlpha(
-                glowPaint.Color,
-                magnitude * GLOW_EFFECT_ALPHA);
+                if (IsAreaVisible(canvas, rect))
+                {
+                    glowBars.Add((rect, magnitude * GLOW_EFFECT_ALPHA));
+                }
+            }
 
-            canvas.DrawRoundRect(
-                rect,
-                cornerRadius,
-                cornerRadius,
-                glowPaint);
+            foreach (var (rect, alpha) in glowBars)
+            {
+                glowPaint.Color = ApplyAlpha(SKColors.White, alpha);
+                canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, glowPaint);
+            }
         }
-
-        return glowPaint;
+        finally
+        {
+            ReturnPaint(glowPaint);
+        }
     }
 
-    private bool MainBars(
+    private void RenderMainBars(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
@@ -158,35 +151,49 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
         float barSpacing,
         SKPaint paint,
         float cornerRadius,
-        int i)
+        int spectrumLength)
     {
-        float magnitude = spectrum[i];
-        if (magnitude < MIN_MAGNITUDE_THRESHOLD) return false;
+        var visibleBars = new List<(SKRect rect, float magnitude)>();
 
-        float x = i * (barWidth + barSpacing);
-        var rect = GetBarRect(
-            x,
-            magnitude,
-            barWidth,
-            info.Height,
-            MIN_BAR_HEIGHT);
+        for (int i = 0; i < spectrumLength; i++)
+        {
+            float magnitude = spectrum[i];
+            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
 
-        if (!IsAreaVisible(canvas, rect)) return false;
+            float x = i * (barWidth + barSpacing);
+            var rect = GetBarRect(x, magnitude, barWidth, info.Height, MIN_BAR_HEIGHT);
 
-        paint.Color = ApplyAlpha(
-            paint.Color,
-            magnitude,
-            ALPHA_MULTIPLIER);
+            if (IsAreaVisible(canvas, rect))
+            {
+                visibleBars.Add((rect, magnitude));
+            }
+        }
 
-        canvas.DrawRoundRect(
-            rect,
-            cornerRadius,
-            cornerRadius,
-            paint);
-        return true;
+        if (cornerRadius == 0 && visibleBars.Count > 20)
+        {
+            var baseColor = paint.Color;
+
+            RenderBatch(canvas, path =>
+            {
+                foreach (var (rect, _) in visibleBars)
+                {
+                    path.AddRect(rect);
+                }
+            }, paint);
+
+            paint.Color = baseColor;
+        }
+        else
+        {
+            foreach (var (rect, magnitude) in visibleBars)
+            {
+                paint.Color = ApplyAlpha(paint.Color, magnitude, ALPHA_MULTIPLIER);
+                canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, paint);
+            }
+        }
     }
 
-    private SKPaint Edge(
+    private void RenderEdgeEffects(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
@@ -197,34 +204,25 @@ public sealed class BarsRenderer : EffectSpectrumRenderer
     {
         var edgePaint = CreatePaint("edge");
 
-        for (int i = 0; i < spectrumLength; i++)
+        try
         {
-            float magnitude = spectrum[i];
-            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
+            for (int i = 0; i < spectrumLength; i++)
+            {
+                float magnitude = spectrum[i];
+                if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
 
-            float x = i * (barWidth + barSpacing);
-            var rect = GetBarRect(
-                x,
-                magnitude,
-                barWidth,
-                info.Height,
-                MIN_BAR_HEIGHT);
+                float x = i * (barWidth + barSpacing);
+                var rect = GetBarRect(x, magnitude, barWidth, info.Height, MIN_BAR_HEIGHT);
 
-            if (!IsAreaVisible(canvas, rect)) continue;
+                if (!IsAreaVisible(canvas, rect)) continue;
 
-            edgePaint.Color = InterpolateColor(
-                SKColors.White,
-                magnitude,
-                0.3f,
-                1f);
-
-            canvas.DrawRoundRect(
-                rect,
-                cornerRadius,
-                cornerRadius,
-                edgePaint);
+                edgePaint.Color = InterpolateColor(SKColors.White, magnitude, 0.3f, 1f);
+                canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, edgePaint);
+            }
         }
-
-        return edgePaint;
+        finally
+        {
+            ReturnPaint(edgePaint);
+        }
     }
 }
