@@ -5,14 +5,10 @@ using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class DotsRenderer : EffectSpectrumRenderer
+public sealed class DotsRenderer() : EffectSpectrumRenderer
 {
-    private const string LogPrefix = nameof(DotsRenderer);
-
     private static readonly Lazy<DotsRenderer> _instance =
         new(() => new DotsRenderer());
-
-    private DotsRenderer() { }
 
     public static DotsRenderer GetInstance() => _instance.Value;
 
@@ -31,7 +27,13 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             ALPHA_BASE = 0.85f,
             GLOW_RADIUS_FACTOR = 0.3f,
             BASE_GLOW_ALPHA = 0.6f,
-            BOUNDARY_DAMPING = 0.5f;
+            BOUNDARY_DAMPING = 0.5f,
+            CENTER_GRAVITY_OFFSET = 0.5f,
+            GLOBAL_RADIUS_MIN = 0.5f,
+            GLOBAL_RADIUS_MAX = 2.0f,
+            ALPHA_FACTOR_MIN = 0.3f,
+            ALPHA_FACTOR_MAX = 1.0f,
+            ALPHA_FACTOR_OFFSET = 0.3f;
 
         public const int DOTS_BATCH_SIZE = 64;
 
@@ -42,22 +44,19 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
                 UseGlow: false,
                 GlowRadius: 0.2f,
                 GlowAlpha: 0.4f,
-                DotSpeedFactor: 0.7f
-            ),
+                DotSpeedFactor: 0.7f),
             [RenderQuality.Medium] = new(
                 DotCount: 150,
                 UseGlow: true,
                 GlowRadius: GLOW_RADIUS_FACTOR,
                 GlowAlpha: BASE_GLOW_ALPHA,
-                DotSpeedFactor: 1.0f
-            ),
+                DotSpeedFactor: 1.0f),
             [RenderQuality.High] = new(
                 DotCount: 300,
                 UseGlow: true,
                 GlowRadius: 0.5f,
                 GlowAlpha: 0.8f,
-                DotSpeedFactor: 1.3f
-            )
+                DotSpeedFactor: 1.3f)
         };
 
         public record QualitySettings(
@@ -65,8 +64,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             bool UseGlow,
             float GlowRadius,
             float GlowAlpha,
-            float DotSpeedFactor
-        );
+            float DotSpeedFactor);
     }
 
     private readonly record struct Dot(
@@ -87,17 +85,13 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         ResetDots(new SKImageInfo(800, 600));
-        LogDebug("Initialized");
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
         if (_lastImageInfo.Width > 0 && _lastImageInfo.Height > 0)
-        {
             ResetDots(_lastImageInfo);
-        }
-        LogDebug($"Quality changed to {Quality}");
     }
 
     protected override void RenderEffect(
@@ -109,23 +103,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        SafeExecute(
-            () => RenderDots(canvas, spectrum, info, barCount),
-            "Error during rendering"
-        );
-    }
-
-    private void RenderDots(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        int barCount)
-    {
-        if (_lastImageInfo.Width != info.Width ||
-            _lastImageInfo.Height != info.Height)
-        {
+        if (_lastImageInfo.Width != info.Width || _lastImageInfo.Height != info.Height)
             ResetDots(info);
-        }
 
         UpdateDots(spectrum, info);
         DrawDots(canvas);
@@ -137,17 +116,17 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         _dots = new Dot[_currentSettings.DotCount];
 
         for (int i = 0; i < _currentSettings.DotCount; i++)
-        {
             _dots[i] = CreateRandomDot(info);
-        }
     }
 
     private Dot CreateRandomDot(SKImageInfo info)
     {
         float x = _random.NextSingle() * info.Width;
         float y = _random.NextSingle() * info.Height;
-        float baseRadius = MIN_DOT_RADIUS +
-            _random.NextSingle() * (MAX_DOT_RADIUS - MIN_DOT_RADIUS);
+        float baseRadius = Lerp(
+            MIN_DOT_RADIUS,
+            MAX_DOT_RADIUS,
+            _random.NextSingle());
         float speedFactor = _currentSettings.DotSpeedFactor;
 
         return new Dot(
@@ -156,8 +135,7 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             (_random.NextSingle() - 0.5f) * DOT_SPEED_BASE * speedFactor,
             baseRadius,
             baseRadius,
-            GenerateRandomColor()
-        );
+            GenerateRandomColor());
     }
 
     private static SKColor GenerateRandomColor()
@@ -173,8 +151,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         _maxSpectrum = spectrum.Length > 0 ? spectrum.Max() : 0f;
         _globalRadiusMultiplier = Clamp(
             1.0f + _maxSpectrum * DOT_RADIUS_SCALE_FACTOR,
-            0.5f,
-            2.0f);
+            GLOBAL_RADIUS_MIN,
+            GLOBAL_RADIUS_MAX);
 
         float deltaTime = GetAnimationDeltaTime();
 
@@ -197,14 +175,14 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         float normalizedX = dot.X / info.Width;
         float normalizedY = dot.Y / info.Height;
 
-        float gravityX = (0.5f - normalizedX) *
+        float gravityX = (CENTER_GRAVITY_OFFSET - normalizedX) *
             DOT_SPEED_BASE * _currentSettings.DotSpeedFactor;
-        float gravityY = (0.5f - normalizedY) *
+        float gravityY = (CENTER_GRAVITY_OFFSET - normalizedY) *
             DOT_SPEED_BASE * _currentSettings.DotSpeedFactor;
 
-        float spectrumForceX = (normalizedX - 0.5f) *
+        float spectrumForceX = (normalizedX - CENTER_GRAVITY_OFFSET) *
             spectrumValue * SPECTRUM_INFLUENCE_FACTOR * DOT_SPEED_SCALE;
-        float spectrumForceY = (normalizedY - 0.5f) *
+        float spectrumForceY = (normalizedY - CENTER_GRAVITY_OFFSET) *
             spectrumValue * SPECTRUM_INFLUENCE_FACTOR * DOT_SPEED_SCALE;
 
         float newVelocityX = (dot.VelocityX +
@@ -215,27 +193,8 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         float newX = dot.X + newVelocityX * deltaTime;
         float newY = dot.Y + newVelocityY * deltaTime;
 
-        if (newX < 0)
-        {
-            newX = 0;
-            newVelocityX = -newVelocityX * BOUNDARY_DAMPING;
-        }
-        else if (newX > info.Width)
-        {
-            newX = info.Width;
-            newVelocityX = -newVelocityX * BOUNDARY_DAMPING;
-        }
-
-        if (newY < 0)
-        {
-            newY = 0;
-            newVelocityY = -newVelocityY * BOUNDARY_DAMPING;
-        }
-        else if (newY > info.Height)
-        {
-            newY = info.Height;
-            newVelocityY = -newVelocityY * BOUNDARY_DAMPING;
-        }
+        (newX, newVelocityX) = ClampPosition(newX, newVelocityX, 0, info.Width);
+        (newY, newVelocityY) = ClampPosition(newY, newVelocityY, 0, info.Height);
 
         float newRadius = dot.BaseRadius *
             (1.0f + spectrumValue * SPECTRUM_VELOCITY_FACTOR) *
@@ -251,10 +210,26 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
         };
     }
 
+    private static (float position, float velocity) ClampPosition(
+        float position,
+        float velocity,
+        float min,
+        float max)
+    {
+        if (position < min)
+            return (min, -velocity * BOUNDARY_DAMPING);
+        if (position > max)
+            return (max, -velocity * BOUNDARY_DAMPING);
+        return (position, velocity);
+    }
+
     private void DrawDots(SKCanvas canvas)
     {
-        float alphaFactor = MathF.Max(0.3f, MathF.Min(1.0f, _maxSpectrum + 0.3f));
-        byte alpha = (byte)(ALPHA_BASE * 255f * alphaFactor);
+        float alphaFactor = Clamp(
+            _maxSpectrum + ALPHA_FACTOR_OFFSET,
+            ALPHA_FACTOR_MIN,
+            ALPHA_FACTOR_MAX);
+        byte alpha = CalculateAlpha(ALPHA_BASE * alphaFactor);
 
         var sortedDots = _dots.OrderBy(d => d.Radius).ToArray();
 
@@ -277,51 +252,35 @@ public sealed class DotsRenderer : EffectSpectrumRenderer
             var dot = dots[i];
             if (dot.Radius < 0.5f) continue;
 
-            if (UseAdvancedEffects && _currentSettings.UseGlow)
-            {
-                using var glowPaint = CreateEffectPaint(
-                    dot.Color.WithAlpha((byte)(_currentSettings.GlowAlpha * alpha)),
-                    SKPaintStyle.Fill,
-                    createBlur: true,
-                    blurRadius: BASE_DOT_RADIUS * _currentSettings.GlowRadius
-                );
-                float glowRadius = dot.Radius * (1.0f + _currentSettings.GlowRadius);
-                canvas.DrawCircle(dot.X, dot.Y, glowRadius, glowPaint);
-            }
+            if (ShouldRenderGlow())
+                DrawDotGlow(canvas, dot, alpha);
 
-            using var dotPaint = CreateEffectPaint(
-                dot.Color.WithAlpha(alpha),
-                SKPaintStyle.Fill
-            );
-            canvas.DrawCircle(dot.X, dot.Y, dot.Radius, dotPaint);
+            DrawDot(canvas, dot, alpha);
         }
     }
 
-    private SKPaint CreateEffectPaint(
-        SKColor color,
-        SKPaintStyle style,
-        float strokeWidth = 0,
-        bool createBlur = false,
-        float blurRadius = 0)
+    private void DrawDotGlow(SKCanvas canvas, Dot dot, byte alpha)
     {
-        var paint = GetPaint();
-        paint.Color = color;
-        paint.Style = style;
-        paint.IsAntialias = UseAntiAlias;
+        var glowPaint = CreateStandardPaint(
+            dot.Color.WithAlpha((byte)(_currentSettings.GlowAlpha * alpha)));
+        glowPaint.ImageFilter = SKImageFilter.CreateBlur(
+            BASE_DOT_RADIUS * _currentSettings.GlowRadius,
+            BASE_DOT_RADIUS * _currentSettings.GlowRadius);
 
-        if (createBlur && blurRadius > 0)
-        {
-            paint.ImageFilter = SKImageFilter.CreateBlur(blurRadius, blurRadius);
-        }
-
-        return paint;
+        float glowRadius = dot.Radius * (1.0f + _currentSettings.GlowRadius);
+        canvas.DrawCircle(dot.X, dot.Y, glowRadius, glowPaint);
+        ReturnPaint(glowPaint);
     }
 
-    protected override void OnDispose()
+    private void DrawDot(SKCanvas canvas, Dot dot, byte alpha)
     {
-        base.OnDispose();
-        LogDebug("Disposed");
+        var dotPaint = CreateStandardPaint(dot.Color.WithAlpha(alpha));
+        canvas.DrawCircle(dot.X, dot.Y, dot.Radius, dotPaint);
+        ReturnPaint(dotPaint);
     }
+
+    private bool ShouldRenderGlow() =>
+        UseAdvancedEffects && _currentSettings.UseGlow;
 
     public override bool RequiresRedraw() => true;
 }

@@ -5,21 +5,18 @@ using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class FireRenderer : EffectSpectrumRenderer
+public sealed class FireRenderer() : EffectSpectrumRenderer
 {
     private const string LogPrefix = nameof(FireRenderer);
 
     private static readonly Lazy<FireRenderer> _instance =
         new(() => new FireRenderer());
 
-    private FireRenderer() { }
-
     public static FireRenderer GetInstance() => _instance.Value;
 
     public static class Constants
     {
         public const float
-            TIME_STEP = 0.016f,
             DECAY_RATE = 0.08f,
             FLAME_BOTTOM_MAX = 6.0f,
             WAVE_SPEED = 2.0f,
@@ -67,19 +64,15 @@ public sealed class FireRenderer : EffectSpectrumRenderer
 
     private readonly Random _random = new();
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
-    private float[] _flameHeights = [];
 
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        LogDebug("Initialized");
+        ConfigurePeaks(0f, DECAY_RATE);
     }
 
-    protected override void OnQualitySettingsApplied()
-    {
+    protected override void OnQualitySettingsApplied() =>
         _currentSettings = QualityPresets[Quality];
-        LogDebug($"Quality changed to {Quality}");
-    }
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -90,94 +83,38 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        SafeExecute(
-            () => RenderFire(
-                canvas,
-                spectrum,
-                info,
-                barWidth,
-                barSpacing,
-                paint),
-            "Error during rendering"
-        );
-    }
-
-    private void RenderFire(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        SKPaint paint)
-    {
-        UpdateFlameHeights(spectrum);
+        UpdatePeaks(spectrum, GetAnimationDeltaTime());
 
         float totalBarWidth = barWidth + barSpacing;
-
-        for (int i = 0; i < spectrum.Length; i += FIRE_BATCH_SIZE)
-        {
-            int batchEnd = Min(i + FIRE_BATCH_SIZE, spectrum.Length);
-            RenderBatch(
-                canvas,
-                spectrum,
-                i,
-                batchEnd,
-                info,
-                barWidth,
-                totalBarWidth,
-                paint);
-        }
-    }
-
-    private void UpdateFlameHeights(float[] spectrum)
-    {
-        if (_flameHeights.Length != spectrum.Length)
-        {
-            _flameHeights = new float[spectrum.Length];
-        }
+        var flames = new List<(SKPath path, float intensity, int index)>();
 
         for (int i = 0; i < spectrum.Length; i++)
         {
-            _flameHeights[i] = MathF.Max(
-                spectrum[i],
-                _flameHeights[i] - DECAY_RATE);
-        }
-    }
+            if (spectrum[i] < MIN_MAGNITUDE_THRESHOLD) continue;
 
-    private void RenderBatch(
-        SKCanvas canvas,
-        float[] spectrum,
-        int start,
-        int end,
-        SKImageInfo info,
-        float barWidth,
-        float totalBarWidth,
-        SKPaint basePaint)
-    {
-        for (int i = start; i < end; i++)
-        {
-            float spectrumValue = spectrum[i];
-            if (spectrumValue < MIN_MAGNITUDE_THRESHOLD) continue;
-
-            RenderSingleFlame(
-                canvas,
+            var flamePath = CreateFlamePath(
                 i,
-                spectrumValue,
+                spectrum[i],
                 info,
                 barWidth,
-                totalBarWidth,
-                basePaint);
+                totalBarWidth);
+
+            if (flamePath != null)
+                flames.Add((flamePath, spectrum[i], i));
         }
+
+        RenderFlames(canvas, flames, paint);
+
+        foreach (var (path, _, _) in flames)
+            ReturnPath(path);
     }
 
-    private void RenderSingleFlame(
-        SKCanvas canvas,
+    private SKPath? CreateFlamePath(
         int index,
         float spectrumValue,
         SKImageInfo info,
         float barWidth,
-        float totalBarWidth,
-        SKPaint basePaint)
+        float totalBarWidth)
     {
         float x = index * totalBarWidth;
         float waveOffset = Sin(
@@ -187,51 +124,28 @@ public sealed class FireRenderer : EffectSpectrumRenderer
         float currentHeight = spectrumValue *
             info.Height *
             (1 + waveOffset * WAVE_AMPLITUDE);
-        float previousHeight = _flameHeights[index] * info.Height;
+        float previousHeight = GetPeak(index) * info.Height;
         float flameHeight = MathF.Max(currentHeight, previousHeight);
 
         float flameTop = info.Height - flameHeight;
         float flameBottom = info.Height - FLAME_BOTTOM_MAX;
 
-        if (flameBottom - flameTop < 1) return;
+        if (flameBottom - flameTop < 1) return null;
 
         x += waveOffset * barWidth * HORIZONTAL_WAVE_FACTOR;
 
-        var flamePath = GetPath();
-        try
-        {
-            CreateFlamePath(
-                flamePath,
-                x,
-                flameTop,
-                flameBottom,
-                barWidth);
+        var path = GetPath();
+        CreateFlameShape(
+            path,
+            x,
+            flameTop,
+            flameBottom,
+            barWidth);
 
-            if (UseAdvancedEffects &&
-                _currentSettings.UseGlow &&
-                flameHeight / info.Height > HIGH_INTENSITY_THRESHOLD)
-            {
-                RenderFlameGlow(
-                    canvas,
-                    flamePath,
-                    basePaint,
-                    flameHeight / info.Height);
-            }
-
-            RenderFlameBody(
-                canvas,
-                flamePath,
-                basePaint,
-                index,
-                flameHeight / info.Height);
-        }
-        finally
-        {
-            ReturnPath(flamePath);
-        }
+        return path;
     }
 
-    private void CreateFlamePath(
+    private void CreateFlameShape(
         SKPath path,
         float x,
         float flameTop,
@@ -267,87 +181,46 @@ public sealed class FireRenderer : EffectSpectrumRenderer
             barWidth * RANDOM_OFFSET_CENTER);
     }
 
-    private void RenderFlameGlow(
+    private void RenderFlames(
         SKCanvas canvas,
-        SKPath path,
-        SKPaint basePaint,
-        float intensity)
+        List<(SKPath path, float intensity, int index)> flames,
+        SKPaint basePaint)
     {
-        byte glowAlpha = (byte)(255 * intensity * GLOW_INTENSITY);
-
-        var glowPaint = CreateEffectPaint(
-            basePaint.Color.WithAlpha(glowAlpha),
-            SKPaintStyle.Fill,
-            createBlur: true,
-            blurRadius: _currentSettings.GlowRadius
-        );
-
-        try
+        if (UseAdvancedEffects && _currentSettings.UseGlow)
         {
-            canvas.DrawPath(path, glowPaint);
-        }
-        finally
-        {
+            var glowPaint = CreateGlowPaint(
+                basePaint.Color,
+                _currentSettings.GlowRadius);
+
+            foreach (var (path, intensity, _) in flames)
+            {
+                if (intensity > HIGH_INTENSITY_THRESHOLD)
+                {
+                    byte glowAlpha = CalculateAlpha(intensity * GLOW_INTENSITY);
+                    glowPaint.Color = basePaint.Color.WithAlpha(glowAlpha);
+                    canvas.DrawPath(path, glowPaint);
+                }
+            }
+
             ReturnPaint(glowPaint);
         }
-    }
 
-    private void RenderFlameBody(
-        SKCanvas canvas,
-        SKPath path,
-        SKPaint basePaint,
-        int index,
-        float intensity)
-    {
-        float opacityWave = Sin(
-            GetAnimationTime() * OPACITY_WAVE_SPEED +
-            index * OPACITY_PHASE_SHIFT) *
-            OPACITY_WAVE_AMPLITUDE +
-            OPACITY_BASE;
+        var flamePaint = CreateStandardPaint(basePaint.Color);
 
-        byte alpha = (byte)(255 *
-            MathF.Min(intensity * opacityWave, 1.0f));
-
-        var flamePaint = CreateEffectPaint(
-            basePaint.Color.WithAlpha(alpha),
-            SKPaintStyle.Fill
-        );
-
-        try
+        foreach (var (path, intensity, index) in flames)
         {
+            float opacityWave = Sin(
+                GetAnimationTime() * OPACITY_WAVE_SPEED +
+                index * OPACITY_PHASE_SHIFT) *
+                OPACITY_WAVE_AMPLITUDE +
+                OPACITY_BASE;
+
+            byte alpha = CalculateAlpha(
+                MathF.Min(intensity * opacityWave, 1.0f));
+            flamePaint.Color = basePaint.Color.WithAlpha(alpha);
             canvas.DrawPath(path, flamePaint);
         }
-        finally
-        {
-            ReturnPaint(flamePaint);
-        }
-    }
 
-    private SKPaint CreateEffectPaint(
-        SKColor color,
-        SKPaintStyle style,
-        float strokeWidth = 0,
-        bool createBlur = false,
-        float blurRadius = 0)
-    {
-        var paint = GetPaint();
-        paint.Color = color;
-        paint.Style = style;
-        paint.IsAntialias = UseAntiAlias;
-
-        if (createBlur && blurRadius > 0)
-        {
-            paint.ImageFilter = SKImageFilter.CreateBlur(
-                blurRadius,
-                blurRadius);
-        }
-
-        return paint;
-    }
-
-    protected override void OnDispose()
-    {
-        base.OnDispose();
-        LogDebug("Disposed");
+        ReturnPaint(flamePaint);
     }
 }

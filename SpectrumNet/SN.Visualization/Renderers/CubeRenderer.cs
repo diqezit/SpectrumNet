@@ -60,33 +60,29 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         );
     }
 
-    private static readonly Vector3 LIGHT_DIRECTION = Vector3.Normalize(new(0.5f, 0.7f, -1f));
+    private static readonly Vector3 LIGHT_DIRECTION =
+        Vector3.Normalize(new(0.5f, 0.7f, -1f));
 
     private readonly record struct Vertex(float X, float Y, float Z);
-    private readonly record struct Face(int V1, int V2, int V3, int V4, int ColorIndex);
+    private readonly record struct Face(
+        int V1, int V2, int V3, int V4, int ColorIndex);
 
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
     private readonly Vertex[] _vertices;
     private readonly Face[] _faces;
 
     private float _rotationX, _rotationY, _rotationZ;
-    private float _speedX = BASE_ROTATION;
-    private float _speedY = BASE_ROTATION * 1.2f;
-    private float _speedZ = BASE_ROTATION * 0.8f;
-    private float _cubeScale = 1f;
     private SKColor _baseColor = SKColors.White;
 
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        LogDebug("Initialized");
+        RegisterPaintConfig("face", CreateDefaultPaintConfig(SKColors.White));
+        RegisterPaintConfig("edge", CreateEdgePaintConfig(SKColors.White, 2f, 2f));
     }
 
-    protected override void OnQualitySettingsApplied()
-    {
+    protected override void OnQualitySettingsApplied() =>
         _currentSettings = QualityPresets[Quality];
-        LogDebug($"Quality changed to {Quality}");
-    }
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -98,14 +94,26 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         SKPaint paint)
     {
         _baseColor = paint.Color;
-        UpdateRotation(spectrum);
+
+        var bands = ProcessSpectrumBands(spectrum, 3);
+        float speedX = BASE_ROTATION + (bands.Length > 0 ? bands[0] : 0f) * ROTATION_INFLUENCE;
+        float speedY = BASE_ROTATION + (bands.Length > 1 ? bands[1] : 0f) * ROTATION_INFLUENCE;
+        float speedZ = BASE_ROTATION + (bands.Length > 2 ? bands[2] : 0f) * ROTATION_INFLUENCE;
+        float avgIntensity = GetAverageInRange(spectrum, 0, spectrum.Length);
+
+        AnimateValues([speedX, speedY, speedZ, avgIntensity], 0.1f);
+        var animated = GetAnimatedValues();
+
+        UpdateRotation(animated);
 
         var center = new SKPoint(info.Width * 0.5f, info.Height * 0.5f);
-
         float barCountScale = 1f + (barCount - 50) * BAR_COUNT_SCALE_FACTOR;
         float barWidthScale = 1f + (barWidth - 5) * BAR_WIDTH_SCALE_FACTOR;
-        float totalScale = Clamp(barCountScale * barWidthScale * _cubeScale, MIN_SCALE, MAX_SCALE);
-
+        float cubeScale = 0.8f + animated[3] * 0.4f;
+        float totalScale = Clamp(
+            barCountScale * barWidthScale * cubeScale,
+            MIN_SCALE,
+            MAX_SCALE);
         float scale = Min(info.Width, info.Height) * 0.3f * totalScale;
 
         var rotation = Matrix4x4.CreateRotationX(_rotationX) *
@@ -113,35 +121,18 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                       Matrix4x4.CreateRotationZ(_rotationZ);
 
         var projected = ProjectVertices(rotation, scale, center);
-        var facesWithDepth = CalculateFaceDepths(projected, rotation);
+        var facesWithDepth = CalculateFaceDepths(rotation);
 
-        DrawFaces(canvas, projected, facesWithDepth, spectrum);
+        DrawFaces(canvas, projected, facesWithDepth, animated[3]);
     }
 
-    private void UpdateRotation(float[] spectrum)
+    private void UpdateRotation(float[] animated)
     {
         float deltaTime = GetAnimationDeltaTime();
-
-        if (spectrum.Length >= 3)
-        {
-            _speedX = BASE_ROTATION + spectrum[0] * ROTATION_INFLUENCE;
-            _speedY = BASE_ROTATION + spectrum[spectrum.Length / 2] * ROTATION_INFLUENCE;
-            _speedZ = BASE_ROTATION + spectrum[^1] * ROTATION_INFLUENCE;
-
-            float avgIntensity = spectrum.Average();
-            _cubeScale = Lerp(_cubeScale, 0.8f + avgIntensity * 0.4f, 0.1f);
-        }
-
-        _rotationX = (_rotationX + _speedX * deltaTime) % MathF.Tau;
-        _rotationY = (_rotationY + _speedY * deltaTime) % MathF.Tau;
-        _rotationZ = (_rotationZ + _speedZ * deltaTime) % MathF.Tau;
+        _rotationX = (_rotationX + animated[0] * deltaTime) % MathF.Tau;
+        _rotationY = (_rotationY + animated[1] * deltaTime) % MathF.Tau;
+        _rotationZ = (_rotationZ + animated[2] * deltaTime) % MathF.Tau;
     }
-
-    private static float Lerp(
-        float current,
-        float target,
-        float amount) =>
-        current * (1f - amount) + target * amount;
 
     private SKPoint[] ProjectVertices(
         Matrix4x4 rotation,
@@ -153,7 +144,9 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         for (int i = 0; i < _vertices.Length; i++)
         {
             var v = _vertices[i];
-            var rotated = Vector3.Transform(new Vector3(v.X, v.Y, v.Z), rotation);
+            var rotated = Vector3.Transform(
+                new Vector3(v.X, v.Y, v.Z),
+                rotation);
 
             projected[i] = new SKPoint(
                 rotated.X * scale + center.X,
@@ -165,7 +158,6 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
     }
 
     private (Face face, float depth, float light)[] CalculateFaceDepths(
-        SKPoint[] _,
         Matrix4x4 rotation)
     {
         var result = new (Face face, float depth, float light)[_faces.Length];
@@ -177,8 +169,10 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
             var rotatedNormal = Vector3.TransformNormal(normal, rotation);
 
             float depth = rotatedNormal.Z;
-            float light = AMBIENT_LIGHT + DIFFUSE_LIGHT *
-                         MathF.Max(0, Vector3.Dot(Vector3.Normalize(rotatedNormal), LIGHT_DIRECTION));
+            float light = AMBIENT_LIGHT +
+                DIFFUSE_LIGHT * MathF.Max(0, Vector3.Dot(
+                    Vector3.Normalize(rotatedNormal),
+                    LIGHT_DIRECTION));
 
             result[i] = (face, depth, light);
         }
@@ -190,38 +184,41 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         SKCanvas canvas,
         SKPoint[] projected,
         (Face face, float depth, float light)[] faces,
-        float[] spectrum)
+        float intensity)
     {
-        float maxSpectrum = spectrum.Length > 0 ? spectrum.Max() : 0f;
-
         foreach (var (face, depth, light) in faces)
         {
             if (depth >= 0) continue;
 
             var path = GetPath();
-            try
+            CreateFacePath(path, projected, face);
+
+            var faceColor = GetFaceColor(face.ColorIndex);
+            byte alpha = CalculateAlpha(BASE_ALPHA + intensity * 0.1f);
+
+            var facePaint = CreateStandardPaint(
+                new SKColor(
+                    (byte)(faceColor.Red * light),
+                    (byte)(faceColor.Green * light),
+                    (byte)(faceColor.Blue * light),
+                    alpha));
+
+            canvas.DrawPath(path, facePaint);
+            ReturnPaint(facePaint);
+
+            if (UseAdvancedEffects && _currentSettings.UseGlow)
             {
-                CreateFacePath(path, projected, face);
+                var edgeConfig = GetPaintConfig("edge")
+                    .WithAlpha((byte)(alpha * 0.8f))
+                    .WithStroke(_currentSettings.EdgeWidth)
+                    .WithMaskBlur(_currentSettings.EdgeBlur);
 
-                var faceColor = GetFaceColor(face.ColorIndex);
-
-                byte r = (byte)(faceColor.Red * light);
-                byte g = (byte)(faceColor.Green * light);
-                byte b = (byte)(faceColor.Blue * light);
-                byte a = (byte)((BASE_ALPHA + maxSpectrum * 0.1f) * 255f);
-
-                using var facePaint = CreateStandardPaint(new SKColor(r, g, b, a));
-                canvas.DrawPath(path, facePaint);
-
-                if (UseAdvancedEffects && _currentSettings.UseGlow)
-                {
-                    DrawGlow(canvas, path, a);
-                }
+                var edgePaint = CreatePaint(edgeConfig);
+                canvas.DrawPath(path, edgePaint);
+                ReturnPaint(edgePaint);
             }
-            finally
-            {
-                ReturnPath(path);
-            }
+
+            ReturnPath(path);
         }
     }
 
@@ -231,29 +228,12 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
 
         float hueShift = faceIndex * 60f;
         hue = (hue + hueShift) % 360f;
-
-        lightness = Clamp(lightness + (faceIndex % 2 == 0 ? 0.1f : -0.1f), 0.2f, 0.8f);
+        lightness = Clamp(
+            lightness + (faceIndex % 2 == 0 ? 0.1f : -0.1f),
+            0.2f,
+            0.8f);
 
         return SKColor.FromHsl(hue, saturation * 100f, lightness * 100f);
-    }
-
-    private void DrawGlow(
-        SKCanvas canvas,
-        SKPath path,
-        byte alpha)
-    {
-        using var edgePaint = CreateStandardPaint(SKColors.White.WithAlpha((byte)(alpha * 0.8f)));
-        edgePaint.Style = SKPaintStyle.Stroke;
-        edgePaint.StrokeWidth = _currentSettings.EdgeWidth;
-
-        if (_currentSettings.EdgeBlur > 0)
-        {
-            edgePaint.MaskFilter = SKMaskFilter.CreateBlur(
-                SKBlurStyle.Normal,
-                _currentSettings.EdgeBlur);
-        }
-
-        canvas.DrawPath(path, edgePaint);
     }
 
     private static void CreateFacePath(
@@ -300,10 +280,4 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
         5 => -Vector3.UnitX,
         _ => Vector3.Zero
     };
-
-    protected override void OnDispose()
-    {
-        base.OnDispose();
-        LogDebug("Disposed");
-    }
 }

@@ -5,14 +5,10 @@ using static System.MathF;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class GradientWaveRenderer : EffectSpectrumRenderer
+public sealed class GradientWaveRenderer() : EffectSpectrumRenderer
 {
-    private const string LogPrefix = nameof(GradientWaveRenderer);
-
     private static readonly Lazy<GradientWaveRenderer> _instance =
         new(() => new GradientWaveRenderer());
-
-    private GradientWaveRenderer() { }
 
     public static GradientWaveRenderer GetInstance() => _instance.Value;
 
@@ -35,11 +31,16 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             OVERLAY_GRADIENT_SATURATION = 100f,
             OVERLAY_GRADIENT_LIGHTNESS = 55f,
             MAX_BLUR_RADIUS = 6f,
-            BAR_COUNT_TRANSITION_FRAMES = 10;
+            BAR_COUNT_TRANSITION_FRAMES = 10,
+            FILL_OPACITY_MID_FACTOR = 0.5f,
+            MIN_SEGMENT_MAGNITUDE = 0.6f,
+            MAX_SEGMENT_MAGNITUDE = 1.0f;
 
         public const int
             EXTRA_POINTS_COUNT = 4,
             BATCH_SIZE = 128;
+
+        public static readonly float[] FillGradientPositions = [0.0f, 0.7f, 1.0f];
 
         public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
         {
@@ -48,13 +49,10 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             [RenderQuality.High] = new(80, 3)
         };
 
-        public record QualitySettings(
-            int PointCount,
-            int SmoothingPasses);
+        public record QualitySettings(int PointCount, int SmoothingPasses);
     }
 
     private List<SKPoint>? _cachedPoints;
-    private SKPicture? _cachedBackground;
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
     private readonly SemaphoreSlim _renderSemaphore = new(1, 1);
 
@@ -70,7 +68,6 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
     {
         base.OnInitialize();
         _smoothingFactor = SMOOTHING_FACTOR_NORMAL;
-        LogDebug("Initialized");
     }
 
     protected override void OnConfigurationChanged()
@@ -78,14 +75,12 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         _smoothingFactor = IsOverlayActive
             ? SMOOTHING_FACTOR_OVERLAY
             : SMOOTHING_FACTOR_NORMAL;
-
         SetProcessingSmoothingFactor(_smoothingFactor);
     }
 
     protected override void OnQualitySettingsApplied()
     {
         _currentSettings = QualityPresets[Quality];
-        CleanupUnusedResources();
     }
 
     protected override void RenderEffect(
@@ -97,16 +92,14 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        if (canvas.QuickReject(new SKRect(0, 0, info.Width, info.Height)))
+        if (!IsRectVisible(canvas, new SKRect(0, 0, info.Width, info.Height)))
             return;
 
         UpdateState(spectrum, barCount);
         RenderFrame(canvas, spectrum, info, barCount, paint);
     }
 
-    private void UpdateState(
-        float[] spectrum,
-        int barCount)
+    private void UpdateState(float[] spectrum, int barCount)
     {
         if (!_renderSemaphore.Wait(0))
             return;
@@ -121,9 +114,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         }
     }
 
-    private void ProcessSpectrumData(
-        float[] spectrum,
-        int barCount)
+    private void ProcessSpectrumData(float[] spectrum, int barCount)
     {
         int actualBarCount = Min(spectrum.Length, barCount);
 
@@ -161,9 +152,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
                 : (float[])scaledSpectrum.Clone();
     }
 
-    private static float[] InterpolateSpectrum(
-        float[] source,
-        int targetLength)
+    private float[] InterpolateSpectrum(float[] source, int targetLength)
     {
         var result = new float[targetLength];
         float ratio = (float)(source.Length - 1) / (targetLength - 1);
@@ -175,23 +164,20 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             float fraction = sourceIndex - index;
 
             result[i] = index < source.Length - 1
-                ? source[index] * (1 - fraction) + source[index + 1] * fraction
+                ? Lerp(source[index], source[index + 1], fraction)
                 : source[^1];
         }
 
         return result;
     }
 
-    private float[] SmoothSpectrumData(
-        float[] spectrum,
-        int targetCount) =>
-        ApplySpatialSmoothing(
-            ApplyTemporalSmoothing(spectrum, targetCount),
-            targetCount);
+    private float[] SmoothSpectrumData(float[] spectrum, int targetCount)
+    {
+        var smoothed = ApplyTemporalSmoothing(spectrum, targetCount);
+        return ApplySpatialSmoothing(smoothed, targetCount);
+    }
 
-    private float[] ApplyTemporalSmoothing(
-        float[] spectrum,
-        int targetCount)
+    private float[] ApplyTemporalSmoothing(float[] spectrum, int targetCount)
     {
         if (_previousScaledSpectrum == null || _previousScaledSpectrum.Length != targetCount)
             _previousScaledSpectrum = (float[])spectrum.Clone();
@@ -206,11 +192,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
                 spectrum[i],
                 effectiveSmoothingFactor);
 
-            smoothed[i] = Clamp(
-                value,
-                MIN_MAGNITUDE_THRESHOLD,
-                MAX_SPECTRUM_VALUE);
-
+            smoothed[i] = Clamp(value, MIN_MAGNITUDE_THRESHOLD, MAX_SPECTRUM_VALUE);
             _previousScaledSpectrum[i] = smoothed[i];
         }
 
@@ -225,9 +207,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
                 1f - (_barCountTransitionFrames / BAR_COUNT_TRANSITION_FRAMES))
             : _smoothingFactor;
 
-    private float[] ApplySpatialSmoothing(
-        float[] spectrum,
-        int targetCount)
+    private float[] ApplySpatialSmoothing(float[] spectrum, int targetCount)
     {
         var smoothed = spectrum;
         int passes = _barCountTransitionFrames > 0
@@ -240,9 +220,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         return smoothed;
     }
 
-    private static float[] ApplySingleSpatialPass(
-        float[] spectrum,
-        int targetCount)
+    private static float[] ApplySingleSpatialPass(float[] spectrum, int targetCount)
     {
         var temp = new float[targetCount];
 
@@ -276,17 +254,8 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        var (renderSpectrum, renderPoints) = GetRenderingData(
-            spectrum,
-            info,
-            barCount);
-
-        RenderGradientWave(
-            canvas,
-            renderPoints,
-            renderSpectrum,
-            info,
-            paint);
+        var (renderSpectrum, renderPoints) = GetRenderingData(spectrum, info, barCount);
+        RenderGradientWave(canvas, renderPoints, renderSpectrum, info, paint);
     }
 
     private (float[] spectrum, List<SKPoint> points) GetRenderingData(
@@ -306,9 +275,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         }
     }
 
-    private float[] ProcessSpectrumSynchronously(
-        float[] spectrum,
-        int barCount)
+    private float[] ProcessSpectrumSynchronously(float[] spectrum, int barCount)
     {
         int actualBarCount = Min(spectrum.Length, barCount);
 
@@ -322,9 +289,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             : SmoothSpectrumData(scaledSpectrum, actualBarCount);
     }
 
-    private List<SKPoint> GenerateOptimizedPoints(
-        float[] spectrum,
-        SKImageInfo info)
+    private List<SKPoint> GenerateOptimizedPoints(float[] spectrum, SKImageInfo info)
     {
         if (spectrum.Length < 1)
             return [];
@@ -339,13 +304,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             new(0, maxY)
         };
 
-        AddInterpolatedPoints(
-            points,
-            spectrum,
-            info,
-            minY,
-            maxY,
-            pointCount);
+        AddInterpolatedPoints(points, spectrum, info, minY, maxY, pointCount);
 
         points.Add(new SKPoint(info.Width, maxY));
         points.Add(new SKPoint(info.Width + EDGE_OFFSET, maxY));
@@ -353,7 +312,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         return points;
     }
 
-    private static void AddInterpolatedPoints(
+    private void AddInterpolatedPoints(
         List<SKPoint> points,
         float[] spectrum,
         SKImageInfo info,
@@ -370,7 +329,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             float remainder = position - index;
 
             float value = index < spectrum.Length - 1 && remainder > 0
-                ? spectrum[index] * (1 - remainder) + spectrum[index + 1] * remainder
+                ? Lerp(spectrum[index], spectrum[index + 1], remainder)
                 : spectrum[index];
 
             float x = i / (float)(pointCount - 1) * info.Width;
@@ -389,43 +348,23 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         if (points.Count < 2)
             return;
 
-        float maxMagnitude = CalculateMaxMagnitude(spectrum);
+        float maxMagnitude = spectrum.Length > 0 ? spectrum.Max() : 0f;
         float yBaseline = info.Height - EDGE_OFFSET + BASELINE_OFFSET;
-        bool shouldRenderGlow = maxMagnitude > HIGH_MAGNITUDE_THRESHOLD && UseAdvancedEffects;
 
         var wavePath = GetPath();
         var fillPath = GetPath();
 
-        CreateWavePaths(
-            points,
-            info,
-            yBaseline,
-            wavePath,
-            fillPath);
+        CreateWavePaths(points, info, yBaseline, wavePath, fillPath);
 
         canvas.Save();
         try
         {
-            RenderFillGradient(
-                canvas,
-                basePaint,
-                maxMagnitude,
-                yBaseline,
-                fillPath);
+            RenderFillGradient(canvas, basePaint, maxMagnitude, yBaseline, fillPath);
 
-            if (shouldRenderGlow)
-                RenderGlowEffect(
-                    canvas,
-                    basePaint,
-                    maxMagnitude,
-                    spectrum.Length,
-                    wavePath);
+            if (ShouldRenderGlow(maxMagnitude))
+                RenderGlowEffect(canvas, basePaint, maxMagnitude, spectrum.Length, wavePath);
 
-            RenderLineGradient(
-                canvas,
-                points,
-                info,
-                wavePath);
+            RenderLineGradient(canvas, points, info, wavePath);
         }
         finally
         {
@@ -435,9 +374,6 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         ReturnPath(wavePath);
         ReturnPath(fillPath);
     }
-
-    private static float CalculateMaxMagnitude(float[] spectrum) =>
-        spectrum.Length > 0 ? spectrum.Max() : 0f;
 
     private static void CreateWavePaths(
         List<SKPoint> points,
@@ -474,11 +410,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         float yBaseline,
         SKPath fillPath)
     {
-        var fillPaint = CreateFillPaint(
-            basePaint,
-            maxMagnitude,
-            yBaseline);
-
+        var fillPaint = CreateFillPaint(basePaint, maxMagnitude, yBaseline);
         canvas.DrawPath(fillPath, fillPaint);
         ReturnPaint(fillPaint);
     }
@@ -495,7 +427,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         SKColor[] colors =
         [
             basePaint.Color.WithAlpha((byte)(255 * FILL_OPACITY * maxMagnitude)),
-            basePaint.Color.WithAlpha((byte)(255 * FILL_OPACITY * maxMagnitude * 0.5f)),
+            basePaint.Color.WithAlpha((byte)(255 * FILL_OPACITY * maxMagnitude * FILL_OPACITY_MID_FACTOR)),
             SKColors.Transparent
         ];
 
@@ -503,7 +435,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             new SKPoint(0, EDGE_OFFSET),
             new SKPoint(0, yBaseline),
             colors,
-            [0.0f, 0.7f, 1.0f],
+            FillGradientPositions,
             SKShaderTileMode.Clamp);
 
         return paint;
@@ -516,16 +448,12 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         int barCount,
         SKPath wavePath)
     {
-        float blurRadius = MathF.Min(
-            MAX_BLUR_RADIUS,
-            10f / Sqrt((float)barCount));
+        float blurRadius = MathF.Min(MAX_BLUR_RADIUS, 10f / Sqrt((float)barCount));
 
-        var glowPaint = CreatePaint(
+        var glowPaint = CreateGlowPaint(
             basePaint.Color.WithAlpha((byte)(255 * GLOW_INTENSITY * maxMagnitude)),
-            SKPaintStyle.Stroke,
-            DEFAULT_LINE_WIDTH * 2.0f,
-            createBlur: true,
-            blurRadius: blurRadius);
+            DEFAULT_LINE_WIDTH * 2.0f);
+        glowPaint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blurRadius);
 
         canvas.DrawPath(wavePath, glowPaint);
         ReturnPaint(glowPaint);
@@ -542,9 +470,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         ReturnPaint(gradientPaint);
     }
 
-    private SKPaint CreateGradientPaint(
-        List<SKPoint> points,
-        SKImageInfo info)
+    private SKPaint CreateGradientPaint(List<SKPoint> points, SKImageInfo info)
     {
         var paint = GetPaint();
         paint.Style = SKPaintStyle.Stroke;
@@ -582,7 +508,7 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         return paint;
     }
 
-    private static (SKColor[] colors, float[] positions) GenerateGradientColors(
+    private (SKColor[] colors, float[] positions) GenerateGradientColors(
         List<SKPoint> points,
         SKImageInfo info,
         float saturation,
@@ -597,14 +523,19 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
             float normalizedValue = (float)i / (colorSteps - 1);
             int pointIndex = (int)(normalizedValue * (points.Count - 1));
 
-            float segmentMagnitude = 1.0f - (points[pointIndex].Y - EDGE_OFFSET) /
-                (info.Height - 2 * EDGE_OFFSET);
+            float segmentMagnitude = Normalize(
+                1.0f - (points[pointIndex].Y - EDGE_OFFSET) / (info.Height - 2 * EDGE_OFFSET),
+                0f,
+                1f);
 
             colors[i] = SKColor.FromHsl(
                 normalizedValue * 360,
                 saturation,
                 lightness,
-                (byte)(255 * MathF.Min(0.6f + segmentMagnitude * 0.4f, 1.0f)));
+                (byte)(255 * Clamp(
+                    MIN_SEGMENT_MAGNITUDE + segmentMagnitude * (MAX_SEGMENT_MAGNITUDE - MIN_SEGMENT_MAGNITUDE),
+                    MIN_SEGMENT_MAGNITUDE,
+                    MAX_SEGMENT_MAGNITUDE)));
 
             positions[i] = normalizedValue;
         }
@@ -612,45 +543,15 @@ public sealed class GradientWaveRenderer : EffectSpectrumRenderer
         return (colors, positions);
     }
 
-    private SKPaint CreatePaint(
-        SKColor color,
-        SKPaintStyle style,
-        float strokeWidth,
-        SKStrokeCap strokeCap = SKStrokeCap.Butt,
-        bool createBlur = false,
-        float blurRadius = 0)
-    {
-        var paint = GetPaint();
-        paint.Color = color;
-        paint.Style = style;
-        paint.IsAntialias = UseAntiAlias;
-        paint.StrokeWidth = strokeWidth;
-        paint.StrokeCap = strokeCap;
-
-        if (createBlur && blurRadius > 0)
-            paint.MaskFilter = SKMaskFilter.CreateBlur(
-                SKBlurStyle.Normal,
-                blurRadius);
-
-        return paint;
-    }
-
-    protected override void CleanupUnusedResources()
-    {
-        _cachedBackground?.Dispose();
-        _cachedBackground = null;
-        _cachedPoints = null;
-    }
+    private bool ShouldRenderGlow(float maxMagnitude) =>
+        maxMagnitude > HIGH_MAGNITUDE_THRESHOLD && UseAdvancedEffects;
 
     protected override void OnDispose()
     {
-        _cachedBackground?.Dispose();
-        _cachedBackground = null;
         _renderSemaphore?.Dispose();
         _previousScaledSpectrum = null;
         _processedSpectrum = [];
         _cachedPoints = null;
         base.OnDispose();
-        LogDebug("Disposed");
     }
 }

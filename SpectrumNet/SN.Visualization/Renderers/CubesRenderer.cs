@@ -4,11 +4,10 @@ using static SpectrumNet.SN.Visualization.Renderers.CubesRenderer.Constants;
 
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class CubesRenderer : EffectSpectrumRenderer
+public sealed class CubesRenderer() : EffectSpectrumRenderer
 {
-    private static readonly Lazy<CubesRenderer> _instance = new(() => new CubesRenderer());
-
-    private CubesRenderer() { }
+    private static readonly Lazy<CubesRenderer> _instance =
+        new(() => new CubesRenderer());
 
     public static CubesRenderer GetInstance() => _instance.Value;
 
@@ -22,7 +21,6 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
             SIDE_FACE_ALPHA_FACTOR = 0.6f;
 
         public const int CUBE_BATCH_SIZE = 32;
-        public const byte MAX_ALPHA_BYTE = 255;
 
         public static readonly Dictionary<RenderQuality, CubeQualitySettings> QualityPresets = new()
         {
@@ -64,17 +62,8 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
 
     private CubeQualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
 
-    protected override void OnInitialize()
-    {
-        base.OnInitialize();
-        LogDebug("Initialized");
-    }
-
-    protected override void OnQualitySettingsApplied()
-    {
+    protected override void OnQualitySettingsApplied() =>
         _currentSettings = QualityPresets[Quality];
-        LogDebug($"Quality changed to {Quality}");
-    }
 
     protected override void RenderEffect(
         SKCanvas canvas,
@@ -85,57 +74,15 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        SafeExecute(
-            () => RenderCubes(
-                canvas,
-                spectrum,
-                info,
-                barWidth,
-                barSpacing,
-                paint),
-            "Error during rendering"
-        );
-    }
-
-    private void RenderCubes(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        SKPaint basePaint)
-    {
         float canvasHeight = info.Height;
-        int spectrumLength = (int)MathF.Min(
+        int spectrumLength = Min(
             spectrum.Length,
-            info.Width / (barWidth + barSpacing));
+            (int)(info.Width / (barWidth + barSpacing)));
 
-        for (int i = 0; i < spectrumLength; i += CUBE_BATCH_SIZE)
-        {
-            int batchEnd = (int)MathF.Min(i + CUBE_BATCH_SIZE, spectrumLength);
-            RenderBatch(
-                canvas,
-                spectrum,
-                i,
-                batchEnd,
-                basePaint,
-                barWidth,
-                barSpacing,
-                canvasHeight);
-        }
-    }
+        var rects = new List<SKRect>();
+        var cubeData = new List<(float x, float y, float height, float magnitude)>();
 
-    private void RenderBatch(
-        SKCanvas canvas,
-        float[] spectrum,
-        int start,
-        int end,
-        SKPaint basePaint,
-        float barWidth,
-        float barSpacing,
-        float canvasHeight)
-    {
-        for (int i = start; i < end; i++)
+        for (int i = 0; i < spectrumLength; i++)
         {
             float magnitude = spectrum[i];
             if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
@@ -151,117 +98,90 @@ public sealed class CubesRenderer : EffectSpectrumRenderer
                 barWidth + barWidth * _currentSettings.TopWidthProportion,
                 height + barWidth * _currentSettings.TopHeightProportion)) continue;
 
-            RenderSingleCube(
-                canvas,
-                x,
-                y,
-                barWidth,
-                height,
-                magnitude,
-                basePaint);
+            rects.Add(new SKRect(x, y, x + barWidth, y + height));
+            cubeData.Add((x, y, height, magnitude));
+        }
+
+        RenderMainFaces(canvas, rects, cubeData, paint);
+
+        if (UseAdvancedEffects)
+        {
+            if (_currentSettings.UseTopFaceEffect)
+                RenderTopFaces(canvas, cubeData, barWidth);
+
+            if (_currentSettings.UseSideFaceEffect)
+                RenderSideFaces(canvas, cubeData, barWidth);
         }
     }
 
-    private void RenderSingleCube(
+    private void RenderMainFaces(
         SKCanvas canvas,
-        float x,
-        float y,
-        float barWidth,
-        float height,
-        float magnitude,
+        List<SKRect> rects,
+        List<(float x, float y, float height, float magnitude)> cubeData,
         SKPaint basePaint)
     {
-        byte alpha = (byte)MathF.Min(
-            magnitude * ALPHA_MULTIPLIER,
-            MAX_ALPHA_BYTE);
+        var mainPaint = CreateStandardPaint(basePaint.Color);
 
-        using var cubePaint = CreateStandardPaint(
-            basePaint.Color.WithAlpha(alpha));
-        canvas.DrawRect(x, y, barWidth, height, cubePaint);
-
-        if (!UseAdvancedEffects) return;
-
-        if (_currentSettings.UseTopFaceEffect)
+        for (int i = 0; i < rects.Count && i < cubeData.Count; i++)
         {
-            RenderCubeTopFace(canvas, x, y, barWidth, magnitude);
+            byte alpha = CalculateAlpha(cubeData[i].magnitude);
+            mainPaint.Color = basePaint.Color.WithAlpha(alpha);
+            canvas.DrawRect(rects[i], mainPaint);
         }
 
-        if (_currentSettings.UseSideFaceEffect)
-        {
-            RenderCubeSideFace(canvas, x, y, barWidth, height, magnitude);
-        }
+        ReturnPaint(mainPaint);
     }
 
-    private void RenderCubeTopFace(
+    private void RenderTopFaces(
         SKCanvas canvas,
-        float x,
-        float y,
-        float barWidth,
-        float magnitude)
+        List<(float x, float y, float height, float magnitude)> cubeData,
+        float barWidth)
     {
         float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
         float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
-        var topPath = GetPath();
-        try
+        RenderBatch(canvas, path =>
         {
-            topPath.MoveTo(x, y);
-            topPath.LineTo(x + barWidth, y);
-            topPath.LineTo(x + topOffsetX, y - topOffsetY);
-            topPath.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
-            topPath.Close();
-
-            byte alpha = (byte)MathF.Min(
-                magnitude * ALPHA_MULTIPLIER * _currentSettings.TopAlphaFactor,
-                MAX_ALPHA_BYTE);
-            using var topPaint = CreateStandardPaint(
-                SKColors.White.WithAlpha(alpha));
-
-            canvas.DrawPath(topPath, topPaint);
-        }
-        finally
-        {
-            ReturnPath(topPath);
-        }
+            foreach (var (x, y, _, magnitude) in cubeData)
+            {
+                path.MoveTo(x, y);
+                path.LineTo(x + barWidth, y);
+                path.LineTo(x + topOffsetX, y - topOffsetY);
+                path.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
+                path.Close();
+            }
+        }, CreateFacePaint(SKColors.White, cubeData, _currentSettings.TopAlphaFactor));
     }
 
-    private void RenderCubeSideFace(
+    private void RenderSideFaces(
         SKCanvas canvas,
-        float x,
-        float y,
-        float barWidth,
-        float height,
-        float magnitude)
+        List<(float x, float y, float height, float magnitude)> cubeData,
+        float barWidth)
     {
         float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
         float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
 
-        var sidePath = GetPath();
-        try
+        RenderBatch(canvas, path =>
         {
-            sidePath.MoveTo(x + barWidth, y);
-            sidePath.LineTo(x + barWidth, y + height);
-            sidePath.LineTo(x + topOffsetX, y - topOffsetY + height);
-            sidePath.LineTo(x + topOffsetX, y - topOffsetY);
-            sidePath.Close();
-
-            byte alpha = (byte)MathF.Min(
-                magnitude * ALPHA_MULTIPLIER * _currentSettings.SideFaceAlphaFactor,
-                MAX_ALPHA_BYTE);
-            using var sidePaint = CreateStandardPaint(
-                SKColors.Gray.WithAlpha(alpha));
-
-            canvas.DrawPath(sidePath, sidePaint);
-        }
-        finally
-        {
-            ReturnPath(sidePath);
-        }
+            foreach (var (x, y, height, _) in cubeData)
+            {
+                path.MoveTo(x + barWidth, y);
+                path.LineTo(x + barWidth, y + height);
+                path.LineTo(x + topOffsetX, y - topOffsetY + height);
+                path.LineTo(x + topOffsetX, y - topOffsetY);
+                path.Close();
+            }
+        }, CreateFacePaint(SKColors.Gray, cubeData, _currentSettings.SideFaceAlphaFactor));
     }
 
-    protected override void OnDispose()
+    private SKPaint CreateFacePaint(
+        SKColor baseColor,
+        List<(float x, float y, float height, float magnitude)> cubeData,
+        float alphaFactor)
     {
-        base.OnDispose();
-        LogDebug("Disposed");
+        float avgMagnitude = cubeData.Count > 0 ?
+            cubeData.Average(d => d.magnitude) : 0f;
+        byte alpha = CalculateAlpha(avgMagnitude * alphaFactor);
+        return CreateStandardPaint(baseColor.WithAlpha(alpha));
     }
 }
