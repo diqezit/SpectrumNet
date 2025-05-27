@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
-using SpectrumNet.SN.Visualization.Core;
+using SpectrumNet.SN.Settings.Models;
+using TabControl = System.Windows.Controls.TabControl;
+using TabItem = System.Windows.Controls.TabItem;
 
 namespace SpectrumNet;
 
@@ -14,55 +16,53 @@ public partial class SettingsWindow : Window
 
     private readonly ISettings _settings = Settings.Instance;
     private readonly IThemes _themeManager = ThemeManager.Instance;
-    private Dictionary<string, object?>? _originalValues;
     private readonly IRendererFactory _rendererFactory = RendererFactory.Instance;
+    private readonly IKeyBindingManager _keyBindingManager;
 
-    private bool _changesApplied;
+    private Dictionary<string, object?>? _originalValues;
+    private readonly Dictionary<KeyBindingControl, bool> _initializedControls = new();
+
+    private bool _hasUnsavedChanges;
+    private bool _isUpdatingBindings;
+    private bool _isClosing;
 
     public SettingsWindow()
     {
         CommonResources.InitialiseResources();
         InitializeComponent();
+
         _themeManager.RegisterWindow(this);
+        _keyBindingManager = new KeyBindingManager(_settings);
+
         BackupCurrentSettings();
         DataContext = _settings;
 
-        _settings.SettingsChanged += OnSettingsChanged;
+        SubscribeToEvents();
     }
 
-    private void OnSettingsChanged(object? sender, string action)
+    private void SubscribeToEvents()
     {
-        if (action is "LoadSettings" or "ResetToDefaults")
-        {
-            _themeManager.SetTheme(_settings.General.IsDarkTheme);
-            UpdateAllRenderers();
-        }
+        _settings.SettingsChanged += OnSettingsChanged;
+        Loaded += OnWindowLoaded;
     }
 
-    public void EnsureWindowVisible() =>
-        _logger.Safe(() =>
+    private void UnsubscribeFromEvents()
+    {
+        _settings.SettingsChanged -= OnSettingsChanged;
+
+        foreach (var kvp in _initializedControls)
         {
-            if (!IsWindowOnScreen())
-                ResetWindowPosition();
-        },
-        LogPrefix,
-        "Error ensuring window visibility");
+            kvp.Key.KeyChanged -= OnKeyBindingChanged;
+            kvp.Key.RequestInitialization -= OnControlRequestInitialization;
+        }
 
-    public void LoadSettings() => _settings.LoadSettings();
-    public void SaveSettings() => _settings.SaveSettings();
+        _initializedControls.Clear();
+    }
 
-    public void ResetToDefaults() =>
-        _logger.Safe(() =>
-        {
-            if (!ConfirmSettingsReset())
-                return;
-
-            _settings.ResetToDefaults();
-            _changesApplied = true;
-            ShowSettingsResetConfirmation();
-        },
-        LogPrefix,
-        "Error resetting settings");
+    private void OnWindowLoaded(object sender, RoutedEventArgs e)
+    {
+        _logger.Log(LogLevel.Debug, LogPrefix, "Window loaded");
+    }
 
     private void OnWindowDrag(object sender, MouseButtonEventArgs e)
     {
@@ -70,80 +70,284 @@ public partial class SettingsWindow : Window
             DragMove();
     }
 
-    private void Window_Closing(object sender, CancelEventArgs e) =>
-        _logger.Safe(() =>
+    private void Window_Closing(object sender, CancelEventArgs e)
+    {
+        if (_isClosing) return;
+
+        e.Cancel = !HandleWindowClosing();
+    }
+
+    private bool HandleWindowClosing()
+    {
+        if (_hasUnsavedChanges)
         {
-            CleanupOnClosing();
-            _themeManager.UnregisterWindow(this);
-        },
-        LogPrefix,
-        "Error closing window");
+            var result = ShowUnsavedChangesDialog();
+
+            switch (result)
+            {
+                case MessageBoxResult.Yes:
+                    ApplyAndSaveSettings();
+                    break;
+                case MessageBoxResult.No:
+                    RestoreBackupSettings();
+                    break;
+                case MessageBoxResult.Cancel:
+                    return false;
+            }
+        }
+
+        _isClosing = true;
+        CleanupOnClosing();
+        return true;
+    }
+
+    private void CleanupOnClosing()
+    {
+        _themeManager.UnregisterWindow(this);
+        UnsubscribeFromEvents();
+    }
 
     private void OnCloseButton_Click(object sender, RoutedEventArgs e)
     {
-        _changesApplied = false;
         Close();
     }
 
-    private void OnApplyButton_Click(object sender, RoutedEventArgs e) =>
-        _logger.Safe(() =>
-        {
-            ApplyAndSaveSettings();
-            _changesApplied = true;
-            ShowSettingsAppliedConfirmation();
-        },
-        LogPrefix,
-        "Error applying settings");
-
-    private void OnResetButton_Click(object sender, RoutedEventArgs e) =>
-        ResetToDefaults();
-
-    private void BackupCurrentSettings()
+    private void OnApplyButton_Click(object sender, RoutedEventArgs e)
     {
-        var settingsToBackup = new (string, object?)[]
-        {
-        ("Particles", _settings.Particles),
-        ("Raindrops", _settings.Raindrops),
-        ("Window", _settings.Window),
-        ("Visualization", _settings.Visualization),
-        ("Audio", _settings.Audio),
-        ("General", _settings.General)
-        };
-
-        _originalValues = CreateBackupDictionary(settingsToBackup);
+        ApplyAndSaveSettings();
+        ShowSettingsAppliedConfirmation();
     }
 
-    private static Dictionary<string, object?> CreateBackupDictionary(
-        (string, object?)[] settingsToBackup)
+    private void OnResetButton_Click(object sender, RoutedEventArgs e)
     {
-        return settingsToBackup
-            .ToDictionary(
-                item => item.Item1,
-                item => (object?)JsonConvert.DeserializeObject(
-                    JsonConvert.SerializeObject(item.Item2),
-                    item.Item2?.GetType() ?? typeof(object)));
+        if (ConfirmSettingsReset())
+        {
+            ResetToDefaults();
+        }
     }
 
-    private void RestoreBackupSettings()
+    private void TabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_originalValues == null)
+        if (e.Source != sender) return;
+
+        if (IsKeyBindingsTabSelected(sender))
+            ScheduleKeyBindingsInitialization();
+    }
+
+    private static bool IsKeyBindingsTabSelected(object sender)
+    {
+        return sender is TabControl tabControl &&
+               tabControl.SelectedItem is TabItem selectedTab &&
+               selectedTab.Header?.ToString() == "Key Bindings";
+    }
+
+    private void ScheduleKeyBindingsInitialization()
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (MainTabControl?.SelectedItem is TabItem selectedTab)
+                ConnectLazyInitialization(selectedTab);
+            
+        }), DispatcherPriority.Background);
+    }
+
+    private void KeyBindingControl_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is KeyBindingControl control)
+            EnsureControlInitialized(control);
+    }
+
+    private void OnControlRequestInitialization(object? sender, EventArgs e)
+    {
+        if (sender is KeyBindingControl control)
+            EnsureControlInitialized(control);
+        
+    }
+
+    private void OnKeyBindingChanged(object? sender, Key newKey)
+    {
+        if (sender is not KeyBindingControl control || _isUpdatingBindings)
             return;
 
-        RestoreSettingsFromBackup();
-        ApplyRestoredSettings();
+        if (string.IsNullOrEmpty(control.ActionName))
+            return;
+
+        var currentKey = _keyBindingManager.GetKeyForAction(control.ActionName);
+        if (currentKey == newKey)
+            return;
+
+        if (newKey == Key.None)
+        {
+            ClearKeyBinding(control);
+        }
+        else
+        {
+            AssignKeyBinding(control, newKey, currentKey);
+        }
+
+        _hasUnsavedChanges = true;
     }
 
-    private void RestoreSettingsFromBackup()
+    private void ConnectLazyInitialization(DependencyObject parent)
     {
-        _settings.Particles = (ParticleSettings)_originalValues!["Particles"]!;
-        _settings.Raindrops = (RaindropSettings)_originalValues!["Raindrops"]!;
-        _settings.Window = (WindowSettings)_originalValues!["Window"]!;
-        _settings.Visualization = (VisualizationSettings)_originalValues!["Visualization"]!;
-        _settings.Audio = (AudioSettings)_originalValues!["Audio"]!;
-        _settings.General = (GeneralSettings)_originalValues!["General"]!;
+        if (parent == null) return;
+
+        foreach (var child in LogicalTreeHelper.GetChildren(parent))
+        {
+            if (child is KeyBindingControl keyBindingControl)
+            {
+                ConnectControlEvents(keyBindingControl);
+            }
+            else if (child is DependencyObject depObj)
+            {
+                ConnectLazyInitialization(depObj);
+            }
+        }
     }
 
-    private void ApplyRestoredSettings()
+    private void ConnectControlEvents(KeyBindingControl control)
+    {
+        control.RequestInitialization -= OnControlRequestInitialization;
+        control.RequestInitialization += OnControlRequestInitialization;
+    }
+
+    private void EnsureControlInitialized(KeyBindingControl control)
+    {
+        if (_initializedControls.TryGetValue(control, out bool value) && value)
+            return;
+
+        if (control.Tag is string actionName && !string.IsNullOrEmpty(actionName))
+        {
+            InitializeControl(control, actionName);
+            _initializedControls[control] = true;
+        }
+    }
+
+    private void InitializeControl(KeyBindingControl control, string actionName)
+    {
+        control.ActionName = actionName;
+
+        if (string.IsNullOrEmpty(control.Description))
+        {
+            var descriptions = _keyBindingManager.GetActionDescriptions();
+            control.Description = descriptions.GetValueOrDefault(actionName, actionName);
+        }
+
+        var currentKey = _keyBindingManager.GetKeyForAction(actionName);
+        control.CurrentKey = currentKey;
+
+        control.KeyChanged -= OnKeyBindingChanged;
+        control.KeyChanged += OnKeyBindingChanged;
+    }
+
+    private void ClearKeyBinding(KeyBindingControl control)
+    {
+        _isUpdatingBindings = true;
+
+        try
+        {
+            if (_keyBindingManager.SetKeyForAction(control.ActionName, Key.None))
+            {
+                control.CurrentKey = Key.None;
+            }
+        }
+        finally
+        {
+            _isUpdatingBindings = false;
+        }
+
+        RefreshOtherControls(control.ActionName);
+    }
+
+    private void AssignKeyBinding(KeyBindingControl control, Key newKey, Key currentKey)
+    {
+        var existingAction = _keyBindingManager.GetActionForKey(newKey);
+
+        if (existingAction != null && existingAction != control.ActionName)
+        {
+            if (!ConfirmKeyReassignment(control, newKey, existingAction))
+                return;
+        }
+
+        _isUpdatingBindings = true;
+
+        try
+        {
+            if (_keyBindingManager.SetKeyForAction(control.ActionName, newKey, force: existingAction != null))
+            {
+                control.CurrentKey = newKey;
+            }
+        }
+        finally
+        {
+            _isUpdatingBindings = false;
+        }
+
+        RefreshOtherControls(control.ActionName);
+    }
+
+    private void RefreshOtherControls(string excludeAction)
+    {
+        if (_isUpdatingBindings) return;
+
+        _isUpdatingBindings = true;
+
+        try
+        {
+            foreach (var kvp in _initializedControls)
+            {
+                var control = kvp.Key;
+                if (control.ActionName != null && control.ActionName != excludeAction)
+                {
+                    var currentKey = _keyBindingManager.GetKeyForAction(control.ActionName);
+                    if (control.CurrentKey != currentKey)
+                    {
+                        control.CurrentKey = currentKey;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _isUpdatingBindings = false;
+        }
+    }
+
+    private void RefreshAllKeyBindings()
+    {
+        _keyBindingManager.ValidateAndFixConflicts();
+
+        _isUpdatingBindings = true;
+        try
+        {
+            foreach (var kvp in _initializedControls)
+            {
+                var control = kvp.Key;
+                if (!string.IsNullOrEmpty(control.ActionName))
+                {
+                    var currentKey = _keyBindingManager.GetKeyForAction(control.ActionName);
+                    control.CurrentKey = currentKey;
+                }
+            }
+        }
+        finally
+        {
+            _isUpdatingBindings = false;
+        }
+    }
+
+    private void OnSettingsChanged(object? sender, string action)
+    {
+        if (_isUpdatingBindings) return;
+
+        if (action is "LoadSettings" or "ResetToDefaults")
+        {
+            ApplyLoadedSettings();
+            RefreshAllKeyBindings();
+        }
+    }
+
+    private void ApplyLoadedSettings()
     {
         _themeManager.SetTheme(_settings.General.IsDarkTheme);
         UpdateAllRenderers();
@@ -151,47 +355,125 @@ public partial class SettingsWindow : Window
 
     private void ApplyAndSaveSettings()
     {
+        _keyBindingManager.ValidateAndFixConflicts();
         SaveSettings();
         BackupCurrentSettings();
+        _hasUnsavedChanges = false;
     }
 
-    private void CleanupOnClosing()
+    public void LoadSettings() => _settings.LoadSettings();
+
+    public void SaveSettings() => _settings.SaveSettings();
+
+    public void ResetToDefaults()
     {
-        if (_changesApplied)
-            SaveSettings();
-        else
-            RestoreBackupSettings();
+        _settings.ResetToDefaults();
+        _hasUnsavedChanges = false;
+        ShowSettingsResetConfirmation();
+        RefreshAllKeyBindings();
     }
 
-    private void UpdateAllRenderers() =>
-        _logger.Safe(() =>
+    private void BackupCurrentSettings() =>
+        _originalValues = CreateBackupDictionary(GetSettingsToBackup());
+    
+    private (string, object?)[] GetSettingsToBackup() =>
+    [
+        ("Particles", _settings.Particles),
+        ("Raindrops", _settings.Raindrops),
+        ("Window", _settings.Window),
+        ("Visualization", _settings.Visualization),
+        ("Audio", _settings.Audio),
+        ("General", _settings.General),
+        ("KeyBindings", _settings.KeyBindings)
+    ];
+
+    private static Dictionary<string, object?> CreateBackupDictionary(
+        (string, object?)[] settingsToBackup) =>
+        settingsToBackup.ToDictionary(
+            item => item.Item1,
+            item => DeserializeSettingsItem(item.Item2));
+
+    private static object? DeserializeSettingsItem(object? item)
+    {
+        if (item == null) return null;
+
+        var json = JsonConvert.SerializeObject(item);
+        return JsonConvert.DeserializeObject(json, item.GetType());
+    }
+
+    private void RestoreBackupSettings()
+    {
+        if (_originalValues == null) return;
+
+        _settings.Particles = (ParticleSettings)_originalValues["Particles"]!;
+        _settings.Raindrops = (RaindropSettings)_originalValues["Raindrops"]!;
+        _settings.Window = (WindowSettings)_originalValues["Window"]!;
+        _settings.Visualization = (VisualizationSettings)_originalValues["Visualization"]!;
+        _settings.Audio = (AudioSettings)_originalValues["Audio"]!;
+        _settings.General = (GeneralSettings)_originalValues["General"]!;
+        _settings.KeyBindings = (KeyBindingSettings)_originalValues["KeyBindings"]!;
+
+        ApplyRestoredSettings();
+    }
+
+    private void ApplyRestoredSettings()
+    {
+        _themeManager.SetTheme(_settings.General.IsDarkTheme);
+        UpdateAllRenderers();
+        RefreshAllKeyBindings();
+    }
+
+    private void UpdateAllRenderers()
+    {
+        foreach (var renderer in _rendererFactory.GetAllRenderers())
+            UpdateRenderer(renderer);
+    }
+
+    private void UpdateRenderer(ISpectrumRenderer renderer)
+    {
+        var isOverlayActive = renderer.IsOverlayActive;
+        renderer.Configure(isOverlayActive, _settings.Visualization.SelectedRenderQuality);
+    }
+
+    public void EnsureWindowVisible()
+    {
+        if (!IsWindowOnScreen())
         {
-            foreach (var renderer in _rendererFactory.GetAllRenderers())
-            {
-                var isOverlayActive = renderer.IsOverlayActive;
-                renderer.Configure(
-                    isOverlayActive,
-                    _settings.Visualization.SelectedRenderQuality);
-            }
-        },
-        LogPrefix,
-        "Error updating renderers");
+            ResetWindowPosition();
+        }
+    }
 
-    private bool IsWindowOnScreen()
-    {
-        return Screen.AllScreens.Any(screen =>
+    private bool IsWindowOnScreen() =>
+        Screen.AllScreens.Any(screen =>
             screen.Bounds.IntersectsWith(
                 new System.Drawing.Rectangle(
                     (int)Left,
                     (int)Top,
                     (int)Width,
                     (int)Height)));
-    }
 
-    private void ResetWindowPosition()
-    {
+    private void ResetWindowPosition() =>
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        _logger.Log(LogLevel.Warning, LogPrefix, "Window position reset to center");
+    
+    private static MessageBoxResult ShowUnsavedChangesDialog() =>
+        MessageBox.Show(
+            "You have unsaved changes. Do you want to save them before closing?",
+            "Unsaved Changes",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning);
+
+    private bool ConfirmKeyReassignment(KeyBindingControl control, Key newKey, string existingAction)
+    {
+        var descriptions = _keyBindingManager.GetActionDescriptions();
+        var existingDescription = descriptions.GetValueOrDefault(existingAction, existingAction);
+
+        var message = $"Key '{newKey}' is already used for '{existingDescription}'.\n\n" +
+                     $"Do you want to reassign it to '{control.Description}'?\n" +
+                     $"('{existingDescription}' will be left without a key binding)";
+
+        var result = MessageBox.Show(message, "Key Conflict", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        return result == MessageBoxResult.Yes;
     }
 
     private static bool ConfirmSettingsReset() =>

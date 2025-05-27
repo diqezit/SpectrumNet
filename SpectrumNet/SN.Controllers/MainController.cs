@@ -1,8 +1,5 @@
 ﻿#nullable enable
 
-using SpectrumNet.SN.Spectrum.Core;
-using SpectrumNet.SN.Visualization.Core;
-
 namespace SpectrumNet.SN.Controllers;
 
 public sealed class MainController

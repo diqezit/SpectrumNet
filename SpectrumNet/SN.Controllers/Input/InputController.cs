@@ -11,6 +11,7 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
     private readonly List<Window> _registeredWindows = [];
     private readonly Dictionary<Window, List<EventSubscription>> _eventSubscriptions = [];
     private readonly ISmartLogger _logger = Instance;
+    private readonly IKeyBindingManager _keyBindingManager;
     private bool _isDisposed;
 
     private record EventSubscription(string EventName, Delegate Handler);
@@ -18,6 +19,7 @@ public class InputController : IInputController, IDisposable, IAsyncDisposable
     public InputController(IMainController mainController)
     {
         _mainController = mainController ?? throw new ArgumentNullException(nameof(mainController));
+        _keyBindingManager = new KeyBindingManager(Settings.Settings.Instance);
         _handlers = CreateHandlers();
     }
 

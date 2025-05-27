@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Settings;
+using SpectrumNet;
+
+namespace SpectrumNet.SN.Settings.Constants;
 
 public class DefaultSettings
 {

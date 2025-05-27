@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using SpectrumNet.SN.Settings.Models;
+
 namespace SpectrumNet.SN.Settings.Interfaces;
 
 public interface ISettings : INotifyPropertyChanged
@@ -10,6 +12,7 @@ public interface ISettings : INotifyPropertyChanged
     VisualizationSettings Visualization { get; set; }
     AudioSettings Audio { get; set; }
     GeneralSettings General { get; set; }
+    KeyBindingSettings KeyBindings { get; set; }
 
     void LoadSettings(string? filePath = null);
     void SaveSettings(string? filePath = null);

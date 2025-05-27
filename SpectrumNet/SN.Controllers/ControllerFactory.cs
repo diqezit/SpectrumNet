@@ -1,7 +1,5 @@
 ﻿#nullable enable
 
-using SpectrumNet.SN.Visualization.Core;
-
 namespace SpectrumNet.SN.Controllers;
 
 public sealed class ControllerFactory : IControllerProvider, IDisposable
@@ -22,6 +20,7 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
     private readonly IResourceCleanupManager _resourceCleanupManager;
     private readonly IFpsLimiter _fpsLimiter;
     private readonly ITransparencyManager _transparencyManager;
+    private readonly IKeyBindingManager _keyBindingManager;
 
     private bool _isDisposed;
 
@@ -37,6 +36,7 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
         _resourceCleanupManager = new ResourceCleanupManager();
         _fpsLimiter = new FpsLimiterManager(Settings.Settings.Instance);
         _transparencyManager = RendererTransparencyManager.Instance;
+        _keyBindingManager = new KeyBindingManager(Settings.Settings.Instance);
 
         _mainController = new MainController(this, ownerWindow);
 
@@ -48,6 +48,7 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
 
         InitializeRendering();
         RegisterWindowEvents();
+        ValidateKeyBindings();
     }
 
     public IUIController UIController => _uiController;
@@ -108,6 +109,8 @@ public sealed class ControllerFactory : IControllerProvider, IDisposable
         _fpsLimiter.LimitChanged += (_, _) => _mainController.OnPropertyChanged(nameof(IMainController.LimitFpsTo60));
     }
 
+    private void ValidateKeyBindings() => _keyBindingManager.ValidateAndFixConflicts();
+    
     public void Dispose()
     {
         if (_isDisposed) return;

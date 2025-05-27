@@ -3,6 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:local="clr-namespace:SpectrumNet"
+        xmlns:controls="clr-namespace:SpectrumNet.SN.Shared.Controls"
+        xmlns:converters="clr-namespace:SpectrumNet.SN.Shared.Converters"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="Settings"
         Height="500"
@@ -13,6 +15,10 @@
         AllowsTransparency="True"
         WindowStyle="None"
         ResizeMode="CanResize">
+
+    <Window.Resources>
+        <converters:KeyToStringConverter x:Key="KeyToStringConverter"/>
+    </Window.Resources>
 
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0"
@@ -31,7 +37,6 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- Title Bar -->
             <Border Grid.Row="0"
                     Style="{DynamicResource TitleBarBorderStyle}"
                     MouseLeftButtonDown="OnWindowDrag"
@@ -63,7 +68,6 @@
                 </Grid>
             </Border>
 
-            <!-- Content -->
             <Border Padding="16"
                     Grid.Row="1"
                     Background="{DynamicResource SurfaceBrush}">
@@ -73,8 +77,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TabControl Grid.Row="0">
-                        <!-- Particles Tab -->
+                    <TabControl Grid.Row="0" x:Name="MainTabControl" SelectionChanged="TabControl_SelectionChanged">
                         <TabItem Header="Particles">
                             <ScrollViewer VerticalScrollBarVisibility="Auto" Width="390">
                                 <StackPanel Margin="8">
@@ -248,7 +251,6 @@
                             </ScrollViewer>
                         </TabItem>
 
-                        <!-- Raindrops Tab -->
                         <TabItem Header="Raindrops">
                             <ScrollViewer VerticalScrollBarVisibility="Auto" Width="390">
                                 <StackPanel Margin="8">
@@ -345,6 +347,116 @@
                                     </GroupBox>
                                 </StackPanel>
                             </ScrollViewer>
+                        </TabItem>
+
+                        <TabItem Header="Key Bindings">
+                            <Grid>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" 
+                                      HorizontalScrollBarVisibility="Hidden"
+                                      Margin="0,0,0,0">
+                                    <StackPanel Margin="16,8,16,8">
+                                        <GroupBox Header="Navigation" 
+                                              Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                              Margin="0,0,0,8">
+                                            <StackPanel Margin="8">
+                                                <controls:KeyBindingControl 
+                                                        Tag="NextRenderer" 
+                                                        Description="Next Renderer"
+                                                        Loaded="KeyBindingControl_Loaded"
+                                                        Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                        Tag="PreviousRenderer" 
+                                                        Description="Previous Renderer"
+                                                        Loaded="KeyBindingControl_Loaded"
+                                                        Margin="0,2"/>
+                                            </StackPanel>
+                                        </GroupBox>
+
+                                        <GroupBox Header="Quality Control" 
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                                  Margin="0,0,0,8">
+                                            <StackPanel Margin="8">
+                                                <controls:KeyBindingControl 
+                                                    Tag="QualityLow" 
+                                                    Description="Low Quality"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                    Tag="QualityMedium" 
+                                                    Description="Medium Quality"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                    Tag="QualityHigh" 
+                                                    Description="High Quality"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                            </StackPanel>
+                                        </GroupBox>
+
+                                        <GroupBox Header="Interface" 
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                                  Margin="0,0,0,8">
+                                            <StackPanel Margin="8">
+                                                <controls:KeyBindingControl 
+                                                    Tag="ToggleOverlay" 
+                                                    Description="Toggle Overlay"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                    Tag="ToggleControlPanel" 
+                                                    Description="Toggle Control Panel"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                    Tag="ClosePopup" 
+                                                    Description="Close Popup"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                            </StackPanel>
+                                        </GroupBox>
+
+                                        <GroupBox Header="Visualization" 
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                                  Margin="0,0,0,8">
+                                            <StackPanel Margin="8">
+                                                <controls:KeyBindingControl 
+                                                    Tag="IncreaseBarCount" 
+                                                    Description="Increase Bar Count"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                    Tag="DecreaseBarCount" 
+                                                    Description="Decrease Bar Count"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                    Tag="IncreaseBarSpacing" 
+                                                    Description="Increase Bar Spacing"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                                <controls:KeyBindingControl 
+                                                    Tag="DecreaseBarSpacing" 
+                                                    Description="Decrease Bar Spacing"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                            </StackPanel>
+                                        </GroupBox>
+
+                                        <GroupBox Header="Recording" 
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                                  Margin="0,0,0,8">
+                                            <StackPanel Margin="8">
+                                                <controls:KeyBindingControl 
+                                                    Tag="ToggleRecording" 
+                                                    Description="Toggle Recording"
+                                                    Loaded="KeyBindingControl_Loaded"
+                                                    Margin="0,2"/>
+                                            </StackPanel>
+                                        </GroupBox>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
                         </TabItem>
                     </TabControl>
 

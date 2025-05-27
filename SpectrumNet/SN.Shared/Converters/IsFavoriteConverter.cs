@@ -2,6 +2,8 @@
 
 public class IsFavoriteConverter : IValueConverter
 {
+    private readonly ISettings _settings = Settings.Settings.Instance;
+
     public object Convert(
         object value,
         Type targetType,
@@ -9,9 +11,8 @@ public class IsFavoriteConverter : IValueConverter
         CultureInfo culture)
     {
         if (value is RenderStyle style)
-        {
-            return Settings.Settings.Instance.General.FavoriteRenderers.Contains(style);
-        }
+            _settings.General.FavoriteRenderers.Contains(style);
+
         return false;
     }
 
@@ -19,8 +20,9 @@ public class IsFavoriteConverter : IValueConverter
         object value,
         Type targetType,
         object parameter,
-        CultureInfo culture)
+        CultureInfo culture) 
     {
         throw new NotImplementedException();
     }
+
 }
