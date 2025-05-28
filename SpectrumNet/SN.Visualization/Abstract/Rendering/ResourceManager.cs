@@ -1,5 +1,4 @@
-﻿// SN.Visualization/Abstract/Rendering/ResourceManager.cs
-#nullable enable
+﻿#nullable enable
 
 namespace SpectrumNet.SN.Visualization.Abstract.Rendering;
 
@@ -36,6 +35,17 @@ public class ResourceManager(int poolSize = ResourceManager.DEFAULT_POOL_SIZE) :
     {
         if (ShouldReturnResource(paint))
             ReturnPaintToPool(paint);
+    }
+
+    public void CleanupUnused()
+    {
+        lock (_syncLock)
+        {
+            if (_disposed) return;
+
+            _pathPool.Clear();
+            _paintPool.Clear();
+        }
     }
 
     public void Dispose()

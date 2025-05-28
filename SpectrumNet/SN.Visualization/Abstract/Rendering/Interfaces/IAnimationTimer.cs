@@ -1,7 +1,8 @@
-﻿namespace SpectrumNet.SN.Visualization.Abstract.Rendering.Interfaces;
+﻿#nullable enable
 
-// Отвечает за отслеживание времени для анимаций
-public interface IAnimationTimer
+namespace SpectrumNet.SN.Visualization.Abstract.Rendering.Interfaces;
+
+public interface IAnimationTimer : IDisposable
 {
     float Time { get; }
     float DeltaTime { get; }

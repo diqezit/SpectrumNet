@@ -85,6 +85,23 @@ public class ObjectPool<T> : IDisposable where T : class
         }
     }
 
+    public void Clear()
+    {
+        if (_disposed) return;
+
+        while (_objects.TryTake(out T? obj))
+        {
+            Interlocked.Decrement(ref _currentCount);
+
+            if (_isDisposable && obj != null)
+            {
+                try { (obj as IDisposable)?.Dispose(); } catch { }
+            }
+        }
+
+        _currentCount = 0;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

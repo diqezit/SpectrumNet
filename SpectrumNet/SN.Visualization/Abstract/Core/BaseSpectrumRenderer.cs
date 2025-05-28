@@ -6,7 +6,8 @@ namespace SpectrumNet.SN.Visualization.Abstract.Core;
 
 public abstract class BaseSpectrumRenderer : ISpectrumRenderer
 {
-    private const int CLEANUP_INTERVAL_MS = 30000, HIGH_MEMORY_THRESHOLD_MB = 500;
+    private const int CLEANUP_INTERVAL_MS = 30000;
+    private const int HIGH_MEMORY_THRESHOLD_MB = 500;
     protected const float MIN_MAGNITUDE_THRESHOLD = 0.01f;
 
     private readonly ISmartLogger _logger = Instance;
@@ -18,7 +19,9 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
     private readonly IBufferManager _bufferManager;
     private readonly ISpectrumBandProcessor _bandProcessor;
 
-    private bool _isInitialized, _needsRedraw, _disposed;
+    private bool _isInitialized;
+    private bool _needsRedraw;
+    private bool _disposed;
     private Func<float, byte>? _customAlphaCalculator;
     private Func<float, float, float, float>? _customLerpFunction;
     private Func<float, SKColor, SKColor, SKColor>? _customGradientFunction;
@@ -33,12 +36,18 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         IBufferManager? bufferManager = null,
         ISpectrumBandProcessor? bandProcessor = null)
     {
-        _processingCoordinator = processingCoordinator ?? new SpectrumProcessingCoordinator();
-        _qualityManager = qualityManager ?? new QualityManager();
-        _overlayStateManager = overlayStateManager ?? new OverlayStateManager();
-        _renderingHelpers = renderingHelpers ?? RenderingHelpers.Instance;
-        _bufferManager = bufferManager ?? new BufferManager();
-        _bandProcessor = bandProcessor ?? new SpectrumBandProcessor();
+        _processingCoordinator = processingCoordinator ??
+            new SpectrumProcessingCoordinator();
+        _qualityManager = qualityManager ??
+            new QualityManager();
+        _overlayStateManager = overlayStateManager ??
+            new OverlayStateManager();
+        _renderingHelpers = renderingHelpers ??
+            RenderingHelpers.Instance;
+        _bufferManager = bufferManager ??
+            new BufferManager();
+        _bandProcessor = bandProcessor ??
+            new SpectrumBandProcessor();
 
         _cleanupTimer = new Timer(
             PerformPeriodicCleanup,
@@ -59,7 +68,9 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
     protected void LogError(string message) =>
         _logger.Log(LogLevel.Error, GetType().Name, message);
 
-    protected void SafeExecute(Action action, string errorMessage) =>
+    protected void SafeExecute(
+        Action action,
+        string errorMessage) =>
         _logger.Safe(action, GetType().Name, errorMessage);
 
     protected virtual float GetAnimationTime() => 0f;
@@ -72,7 +83,10 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         float[]? spectrum,
         int targetCount,
         int spectrumLength) =>
-        _processingCoordinator.PrepareSpectrum(spectrum, targetCount, spectrumLength);
+        _processingCoordinator.PrepareSpectrum(
+            spectrum,
+            targetCount,
+            spectrumLength);
 
     protected void SetOverlayActive(bool isActive) =>
         _overlayStateManager.SetOverlayActive(isActive);
@@ -92,38 +106,67 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
     protected T[] GetBuffer<T>(string key, int size) =>
         _bufferManager.GetBuffer<T>(key, size);
 
-    protected float[] ProcessSpectrumBands(float[] spectrum, int bandCount) =>
+    protected float[] ProcessSpectrumBands(
+        float[] spectrum,
+        int bandCount) =>
         _bandProcessor.ProcessBands(spectrum, bandCount);
 
-    protected float GetBandAverage(float[] spectrum, int start, int end) =>
+    protected float GetBandAverage(
+        float[] spectrum,
+        int start,
+        int end) =>
         _bandProcessor.GetBandAverage(spectrum, start, end);
 
-    protected float CalculateBarX(int index, float barWidth, float barSpacing, float startOffset = 0) =>
+    protected float CalculateBarX(
+        int index,
+        float barWidth,
+        float barSpacing,
+        float startOffset = 0) =>
         startOffset + index * (barWidth + barSpacing);
 
-    protected SKRect GetBarRect(float x, float magnitude, float barWidth, float canvasHeight, float minHeight = 1f) =>
-        _renderingHelpers.GetBarRect(x, magnitude, barWidth, canvasHeight, minHeight);
+    protected SKRect GetBarRect(
+        float x,
+        float magnitude,
+        float barWidth,
+        float canvasHeight,
+        float minHeight = 1f) =>
+        _renderingHelpers.GetBarRect(
+            x,
+            magnitude,
+            barWidth,
+            canvasHeight,
+            minHeight);
 
-    public virtual void SetAlphaCalculator(Func<float, byte>? calculator) =>
+    public virtual void SetAlphaCalculator(
+        Func<float, byte>? calculator) =>
         _customAlphaCalculator = calculator;
 
-    public virtual void SetLerpFunction(Func<float, float, float, float>? lerpFunction) =>
+    public virtual void SetLerpFunction(
+        Func<float, float, float, float>? lerpFunction) =>
         _customLerpFunction = lerpFunction;
 
-    public virtual void SetGradientFunction(Func<float, SKColor, SKColor, SKColor>? gradientFunction) =>
+    public virtual void SetGradientFunction(
+        Func<float, SKColor, SKColor, SKColor>? gradientFunction) =>
         _customGradientFunction = gradientFunction;
 
-    public virtual void SetBackgroundRenderer(Action<SKCanvas, SKImageInfo>? backgroundRenderer) =>
+    public virtual void SetBackgroundRenderer(
+        Action<SKCanvas, SKImageInfo>? backgroundRenderer) =>
         _customBackgroundRenderer = backgroundRenderer;
 
-    public virtual void SetPostProcessor(Action<SKCanvas, float[], SKImageInfo>? postProcessor) =>
+    public virtual void SetPostProcessor(
+        Action<SKCanvas, float[], SKImageInfo>? postProcessor) =>
         _customPostProcessor = postProcessor;
 
-    protected byte CalculateAlpha(float magnitude, float multiplier = 255f) =>
+    protected byte CalculateAlpha(
+        float magnitude,
+        float multiplier = 255f) =>
         _customAlphaCalculator?.Invoke(magnitude) ??
         _renderingHelpers.CalculateAlpha(magnitude, multiplier);
 
-    protected SKColor ApplyAlpha(SKColor color, float magnitude, float multiplier = 1f) =>
+    protected SKColor ApplyAlpha(
+        SKColor color,
+        float magnitude,
+        float multiplier = 1f) =>
         color.WithAlpha(CalculateAlpha(magnitude, multiplier * 255f));
 
     protected SKColor InterpolateColor(
@@ -131,39 +174,65 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         float magnitude,
         float minAlpha = 0.1f,
         float maxAlpha = 1f) =>
-        baseColor.WithAlpha((byte)(Lerp(minAlpha, maxAlpha, magnitude) * 255));
+        baseColor.WithAlpha(
+            (byte)(Lerp(minAlpha, maxAlpha, magnitude) * 255));
 
-    protected float Lerp(float current, float target, float amount) =>
+    protected float Lerp(
+        float current,
+        float target,
+        float amount) =>
         _customLerpFunction?.Invoke(current, target, amount) ??
         _renderingHelpers.Lerp(current, target, amount);
 
-    protected SKColor GetGradientColor(float value, SKColor startColor, SKColor endColor) =>
+    protected SKColor GetGradientColor(
+        float value,
+        SKColor startColor,
+        SKColor endColor) =>
         _customGradientFunction?.Invoke(value, startColor, endColor) ??
         _renderingHelpers.GetGradientColor(value, startColor, endColor);
 
-    // Delegated rendering helpers
-    protected float GetAverageInRange(float[] array, int start, int end) =>
+    protected float GetAverageInRange(
+        float[] array,
+        int start,
+        int end) =>
         _renderingHelpers.GetAverageInRange(array, start, end);
 
-    protected SKPoint[] CreateCirclePoints(int pointCount, float radius, SKPoint center) =>
+    protected SKPoint[] CreateCirclePoints(
+        int pointCount,
+        float radius,
+        SKPoint center) =>
         _renderingHelpers.CreateCirclePoints(pointCount, radius, center);
 
     protected Vector2[] CreateCircleVectors(int count) =>
         _renderingHelpers.CreateCircleVectors(count);
 
-    protected float SmoothStep(float edge0, float edge1, float x) =>
+    protected float SmoothStep(
+        float edge0,
+        float edge1,
+        float x) =>
         _renderingHelpers.SmoothStep(edge0, edge1, x);
 
-    protected float Distance(SKPoint p1, SKPoint p2) =>
+    protected float Distance(
+        SKPoint p1,
+        SKPoint p2) =>
         _renderingHelpers.Distance(p1, p2);
 
-    protected float Normalize(float value, float min, float max) =>
+    protected float Normalize(
+        float value,
+        float min,
+        float max) =>
         _renderingHelpers.Normalize(value, min, max);
 
-    protected SKRect GetCenteredRect(SKPoint center, float width, float height) =>
+    protected SKRect GetCenteredRect(
+        SKPoint center,
+        float width,
+        float height) =>
         _renderingHelpers.GetCenteredRect(center, width, height);
 
-    protected SKPoint GetPolarPoint(SKPoint center, float angle, float radius) =>
+    protected SKPoint GetPolarPoint(
+        SKPoint center,
+        float angle,
+        float radius) =>
         _renderingHelpers.GetPolarPoint(center, angle, radius);
 
     protected float GetFrequencyMagnitude(
@@ -171,21 +240,40 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         float frequency,
         float sampleRate,
         int fftSize) =>
-        _renderingHelpers.GetFrequencyMagnitude(spectrum, frequency, sampleRate, fftSize);
+        _renderingHelpers.GetFrequencyMagnitude(
+            spectrum,
+            frequency,
+            sampleRate,
+            fftSize);
 
-    protected SKColor[] CreateGradientColors(int count, SKColor startColor, SKColor endColor) =>
-        _renderingHelpers.CreateGradientColors(count, startColor, endColor);
+    protected SKColor[] CreateGradientColors(
+        int count,
+        SKColor startColor,
+        SKColor endColor) =>
+        _renderingHelpers.CreateGradientColors(
+            count,
+            startColor,
+            endColor);
 
-    protected float EaseInOut(float t) => _renderingHelpers.EaseInOut(t);
-    protected float EaseIn(float t) => _renderingHelpers.EaseIn(t);
-    protected float EaseOut(float t) => _renderingHelpers.EaseOut(t);
+    protected float EaseInOut(float t) =>
+        _renderingHelpers.EaseInOut(t);
+
+    protected float EaseIn(float t) =>
+        _renderingHelpers.EaseIn(t);
+
+    protected float EaseOut(float t) =>
+        _renderingHelpers.EaseOut(t);
 
     protected SKPath CreateWavePath(
         float[] values,
         float width,
         float height,
         float offsetY = 0) =>
-        _renderingHelpers.CreateWavePath(values, width, height, offsetY);
+        _renderingHelpers.CreateWavePath(
+            values,
+            width,
+            height,
+            offsetY);
 
     protected bool IsRenderAreaVisible(
         SKCanvas? canvas,
@@ -193,12 +281,21 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         float y,
         float width,
         float height) =>
-        _renderingHelpers.IsAreaVisible(canvas, x, y, width, height);
+        _renderingHelpers.IsAreaVisible(
+            canvas,
+            x,
+            y,
+            width,
+            height);
 
-    protected bool IsRectVisible(SKCanvas? canvas, SKRect rect) =>
+    protected bool IsRectVisible(
+        SKCanvas? canvas,
+        SKRect rect) =>
         _renderingHelpers.IsAreaVisible(canvas, rect);
 
-    protected virtual void RenderBackground(SKCanvas canvas, SKImageInfo info) =>
+    protected virtual void RenderBackground(
+        SKCanvas canvas,
+        SKImageInfo info) =>
         _customBackgroundRenderer?.Invoke(canvas, info);
 
     protected virtual void ApplyPostProcessing(
