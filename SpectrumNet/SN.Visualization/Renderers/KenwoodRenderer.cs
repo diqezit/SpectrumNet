@@ -94,6 +94,11 @@ public sealed class KenwoodBarsRenderer() : EffectSpectrumRenderer
         Color = SKColors.White
     };
 
+    private float[] _peaks = [];
+    private float[] _timers = [];
+    private readonly float _holdTime = PEAK_HOLD_TIME_MS / 1000f;
+    private readonly float _fallSpeed = PEAK_FALL_SPEED;
+
     protected override int GetMaxBarsForQuality() => Quality switch
     {
         RenderQuality.Low => MAX_BARS_LOW,
@@ -138,7 +143,6 @@ public sealed class KenwoodBarsRenderer() : EffectSpectrumRenderer
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        ConfigurePeaks(PEAK_HOLD_TIME_MS / 1000f, PEAK_FALL_SPEED);
         CreateSpectrumGradient(100, BarColors, BarColorPositions);
         RegisterPaintConfigs();
         ApplyQualitySettings();
@@ -168,8 +172,10 @@ public sealed class KenwoodBarsRenderer() : EffectSpectrumRenderer
             spectrum,
             renderParams.EffectiveBarCount);
         AnimateValues(processedSpectrum, ANIMATION_SPEED);
-        UpdatePeaks(GetAnimatedValues(), GetAnimationDeltaTime());
-
+        EnsurePeakArraySize(spectrum.Length);
+        for (int i = 0; i < spectrum.Length; i++) 
+            UpdatePeak(i, spectrum[i], DeltaTime);
+        
         RenderBars(canvas, info, renderParams);
         RenderPeaks(canvas, info, renderParams);
     }
@@ -329,7 +335,7 @@ public sealed class KenwoodBarsRenderer() : EffectSpectrumRenderer
 
         for (int i = 0; i < renderParams.EffectiveBarCount; i++)
         {
-            float peakValue = GetPeak(i);
+            float peakValue = GetPeakValue(i);
             if (peakValue > MIN_MAGNITUDE_THRESHOLD)
             {
                 float x = CalculateBarX(
@@ -351,6 +357,37 @@ public sealed class KenwoodBarsRenderer() : EffectSpectrumRenderer
                     cornerRadius,
                     _peakPaint);
             }
+        }
+    }
+
+    private void UpdatePeak(int index, float value, float deltaTime)
+    {
+        if (index < 0 || index >= _peaks.Length) return;
+
+        if (value > _peaks[index])
+        {
+            _peaks[index] = value;
+            _timers[index] = _holdTime;
+        }
+        else if (_timers[index] > 0)
+        {
+            _timers[index] -= deltaTime;
+        }
+        else
+        {
+            _peaks[index] = MathF.Max(0, _peaks[index] - _fallSpeed * deltaTime);
+        }
+    }
+
+    private float GetPeakValue(int index) =>
+        index >= 0 && index < _peaks.Length ? _peaks[index] : 0f;
+
+    private void EnsurePeakArraySize(int size)
+    {
+        if (_peaks.Length < size)
+        {
+            Array.Resize(ref _peaks, size);
+            Array.Resize(ref _timers, size);
         }
     }
 

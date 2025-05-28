@@ -191,7 +191,7 @@ public sealed class CircularWaveRenderer() : EffectSpectrumRenderer
             GetAnimationDeltaTime()) % MathF.Tau;
     }
 
-    private static float GetRingMagnitude(
+    private float GetRingMagnitude(
         float[] spectrum,
         int ringIndex,
         int ringCount)
@@ -201,7 +201,7 @@ public sealed class CircularWaveRenderer() : EffectSpectrumRenderer
 
         return start >= end
             ? 0f
-            : RenderingHelpers.Instance.GetAverageInRange(spectrum, start, end);
+            : GetAverageInRange(spectrum, start, end);
     }
 
     private void CreateCirclePoints()

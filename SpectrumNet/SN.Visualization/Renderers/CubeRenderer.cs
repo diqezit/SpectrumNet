@@ -211,7 +211,7 @@ public sealed class CubeRenderer : EffectSpectrumRenderer
                 var edgeConfig = GetPaintConfig("edge")
                     .WithAlpha((byte)(alpha * 0.8f))
                     .WithStroke(_currentSettings.EdgeWidth)
-                    .WithMaskBlur(_currentSettings.EdgeBlur);
+                    .WithBlur(_currentSettings.EdgeBlur);
 
                 var edgePaint = CreatePaint(edgeConfig);
                 canvas.DrawPath(path, edgePaint);

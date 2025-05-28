@@ -8,8 +8,6 @@ public interface ISpectrumRenderer : IDisposable
     void Initialize();
     void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
     void SetOverlayTransparency(float level);
-    bool RequiresRedraw();
-
     void Render(
         SKCanvas? canvas,
         float[]? spectrum,
@@ -19,4 +17,5 @@ public interface ISpectrumRenderer : IDisposable
         int barCount,
         SKPaint? paint,
         Action<SKCanvas, SKImageInfo>? drawPerformanceInfo);
+    bool RequiresRedraw();
 }

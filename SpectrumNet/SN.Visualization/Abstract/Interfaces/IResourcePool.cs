@@ -1,8 +1,8 @@
 ﻿#nullable enable
 
-namespace SpectrumNet.SN.Visualization.Abstract.Rendering.Interfaces;
+namespace SpectrumNet.SN.Visualization.Abstract.Interfaces;
 
-public interface IResourceManager : IDisposable
+public interface IResourcePool : IDisposable
 {
     SKPath GetPath();
     void ReturnPath(SKPath path);

@@ -64,11 +64,14 @@ public sealed class FireRenderer() : EffectSpectrumRenderer
 
     private readonly Random _random = new();
     private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
+    private float[] _peaks = [];
+    private float[] _timers = [];
+    private readonly float _holdTime = 0f;
+    private readonly float _fallSpeed = DECAY_RATE;
 
     protected override void OnInitialize()
     {
         base.OnInitialize();
-        ConfigurePeaks(0f, DECAY_RATE);
     }
 
     protected override void OnQualitySettingsApplied() =>
@@ -83,8 +86,10 @@ public sealed class FireRenderer() : EffectSpectrumRenderer
         int barCount,
         SKPaint paint)
     {
-        UpdatePeaks(spectrum, GetAnimationDeltaTime());
-
+        EnsurePeakArraySize(spectrum.Length);
+        for (int i = 0; i < spectrum.Length; i++)
+            UpdatePeak(i, spectrum[i], DeltaTime);
+        
         float totalBarWidth = barWidth + barSpacing;
         var flames = new List<(SKPath path, float intensity, int index)>();
 
@@ -124,7 +129,7 @@ public sealed class FireRenderer() : EffectSpectrumRenderer
         float currentHeight = spectrumValue *
             info.Height *
             (1 + waveOffset * WAVE_AMPLITUDE);
-        float previousHeight = GetPeak(index) * info.Height;
+        float previousHeight = GetPeakValue(index) * info.Height;
         float flameHeight = MathF.Max(currentHeight, previousHeight);
 
         float flameTop = info.Height - flameHeight;
@@ -222,5 +227,36 @@ public sealed class FireRenderer() : EffectSpectrumRenderer
         }
 
         ReturnPaint(flamePaint);
+    }
+
+    private void UpdatePeak(int index, float value, float deltaTime)
+    {
+        if (index < 0 || index >= _peaks.Length) return;
+
+        if (value > _peaks[index])
+        {
+            _peaks[index] = value;
+            _timers[index] = _holdTime;
+        }
+        else if (_timers[index] > 0)
+        {
+            _timers[index] -= deltaTime;
+        }
+        else
+        {
+            _peaks[index] = MathF.Max(0, _peaks[index] - _fallSpeed * deltaTime);
+        }
+    }
+
+    private float GetPeakValue(int index) =>
+        index >= 0 && index < _peaks.Length ? _peaks[index] : 0f;
+
+    private void EnsurePeakArraySize(int size)
+    {
+        if (_peaks.Length < size)
+        {
+            Array.Resize(ref _peaks, size);
+            Array.Resize(ref _timers, size);
+        }
     }
 }
