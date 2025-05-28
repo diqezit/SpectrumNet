@@ -2,16 +2,6 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Processing;
 
-// процесс обработки спектра
-public interface ISpectrumProcessingCoordinator : IDisposable
-{
-    (bool isValid, float[]? processedSpectrum) PrepareSpectrum(
-        float[]? spectrum,
-        int targetCount,
-        int spectrumLength);
-    void SetSmoothingFactor(float factor);
-}
-
 public class SpectrumProcessingCoordinator(
     ISpectrumScaler? scaler = null,
     ISpectrumSmoother? smoother = null) : ISpectrumProcessingCoordinator

@@ -2,13 +2,6 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Helpers;
 
-public interface IGradientManager : IDisposable
-{
-    SKShader? CurrentGradient { get; }
-    void CreateLinearGradient(float height, SKColor[] colors, float[]? positions = null);
-    void InvalidateIfHeightChanged(float newHeight);
-}
-
 public class GradientManager : IGradientManager
 {
     private SKShader? _gradient;

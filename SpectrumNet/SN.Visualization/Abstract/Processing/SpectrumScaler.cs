@@ -2,11 +2,6 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Processing;
 
-public interface ISpectrumScaler
-{
-    float[] ScaleSpectrum(float[] spectrum, int targetCount, int spectrumLength);
-}
-
 public class SpectrumScaler : ISpectrumScaler
 {
     private const int PARALLEL_BATCH_SIZE = 32;

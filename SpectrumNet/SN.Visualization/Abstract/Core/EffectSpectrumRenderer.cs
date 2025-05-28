@@ -4,7 +4,7 @@ namespace SpectrumNet.SN.Visualization.Abstract.Core;
 
 public abstract class EffectSpectrumRenderer : BaseSpectrumRenderer
 {
-    private const int 
+    private const int
         LowQualityBarLimit = 150,
         MediumQualityBarLimit = 75,
         HighQualityBarLimit = 75;

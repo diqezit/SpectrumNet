@@ -1,14 +1,5 @@
 ﻿namespace SpectrumNet.SN.Visualization.Abstract.Rendering;
 
-// Отвечает за отслеживание времени для анимаций
-public interface IAnimationTimer
-{
-    float Time { get; }
-    float DeltaTime { get; }
-    void Update();
-    void Reset();
-}
-
 public class AnimationTimer : IAnimationTimer
 {
     private float _time;

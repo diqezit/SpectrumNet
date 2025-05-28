@@ -1,16 +1,6 @@
 ﻿// SN.Visualization/Abstract/Rendering/QualityManager.cs
 namespace SpectrumNet.SN.Visualization.Abstract.Rendering;
 
-// Отвечает за настройки качества
-public interface IQualityManager
-{
-    RenderQuality Quality { get; set; }
-    bool UseAntiAlias { get; }
-    bool UseAdvancedEffects { get; }
-    SKSamplingOptions SamplingOptions { get; }
-    void ApplyQuality(RenderQuality quality);
-}
-
 public class QualityManager : IQualityManager
 {
     private RenderQuality _quality = RenderQuality.Medium;

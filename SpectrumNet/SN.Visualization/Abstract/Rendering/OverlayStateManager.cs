@@ -1,22 +1,9 @@
 ﻿// SN.Visualization/Abstract/Rendering/OverlayStateManager.cs
 namespace SpectrumNet.SN.Visualization.Abstract.Rendering;
 
-// Отвечает за состояние оверлея
-public interface IOverlayStateManager
-{
-    bool IsOverlayActive { get; }
-    float OverlayAlphaFactor { get; }
-    bool StateChanged { get; }
-    bool StateChangeRequested { get; }
-
-    void SetOverlayActive(bool isActive);
-    void SetOverlayTransparency(float level);
-    void ResetStateFlags();
-}
-
 public class OverlayStateManager : IOverlayStateManager
 {
-    private const float 
+    private const float
         DEFAULT_OVERLAY_ALPHA_FACTOR = 0.3f,
         HOVER_OVERLAY_ALPHA_FACTOR = 0.8f,
         MIN_ALPHA_FACTOR = 0.0f,

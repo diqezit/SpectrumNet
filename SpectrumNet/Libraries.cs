@@ -104,3 +104,5 @@ global using Settings = SpectrumNet.SN.Settings.Settings;
 global using TextBox = System.Windows.Controls.TextBox;
 global using UserControl = System.Windows.Controls.UserControl;
 
+global using SpectrumNet.SN.Visualization.Abstract.Rendering.Interfaces;
+global using SpectrumNet.SN.Visualization.Abstract.Processing.Interfaces;

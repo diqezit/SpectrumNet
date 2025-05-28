@@ -2,12 +2,6 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Processing;
 
-public interface ISpectrumBandProcessor
-{
-    float[] ProcessBands(float[] spectrum, int bandCount);
-    float GetBandAverage(float[] spectrum, int start, int end);
-}
-
 public class SpectrumBandProcessor : ISpectrumBandProcessor
 {
     public float[] ProcessBands(float[] spectrum, int bandCount)

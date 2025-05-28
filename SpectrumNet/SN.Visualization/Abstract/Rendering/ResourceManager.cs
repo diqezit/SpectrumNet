@@ -3,15 +3,6 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Rendering;
 
-// управление пулами ресурсов
-public interface IResourceManager : IDisposable
-{
-    SKPath GetPath();
-    void ReturnPath(SKPath path);
-    SKPaint GetPaint();
-    void ReturnPaint(SKPaint paint);
-}
-
 public class ResourceManager(int poolSize = ResourceManager.DEFAULT_POOL_SIZE) : IResourceManager
 {
     public const int DEFAULT_POOL_SIZE = 5;

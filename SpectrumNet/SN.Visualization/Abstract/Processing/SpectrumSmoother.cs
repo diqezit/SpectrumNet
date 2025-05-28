@@ -2,13 +2,6 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Processing;
 
-public interface ISpectrumSmoother
-{
-    float SmoothingFactor { get; set; }
-    float[] SmoothSpectrum(float[] spectrum, int targetCount, float? customFactor = null);
-    void Reset();
-}
-
 public class SpectrumSmoother : ISpectrumSmoother
 {
     private const float DEFAULT_SMOOTHING_FACTOR = 0.3f;

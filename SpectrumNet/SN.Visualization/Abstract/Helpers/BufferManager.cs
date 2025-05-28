@@ -2,12 +2,6 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Helpers;
 
-public interface IBufferManager : IDisposable
-{
-    T[] GetBuffer<T>(string key, int size);
-    void Clear();
-}
-
 public class BufferManager : IBufferManager
 {
     private readonly Dictionary<string, Array> _buffers = new();
