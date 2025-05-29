@@ -2,96 +2,169 @@
 
 namespace SpectrumNet.SN.Visualization.Abstract.Core;
 
-public abstract class CoreSpectrumRenderer(
-    ISpectrumProcessor? spectrumProcessor = null,
-    IResourcePool? resourcePool = null) : BaseSpectrumRenderer()
+public abstract class CoreSpectrumRenderer : BaseSpectrumRenderer
 {
-    protected const float MIN_MAGNITUDE_THRESHOLD = 0.01f;
-
-    private readonly ISpectrumProcessor _spectrumProcessor =
-        spectrumProcessor ?? new DefaultSpectrumProcessor();
-    private readonly IResourcePool _resourcePool =
-        resourcePool ?? new DefaultResourcePool();
-
-    private float[] _animationValues = [];
-    private float _animationTime;
-    private DateTime _lastUpdateTime = DateTime.Now;
-    private float _deltaTime;
-
+    private readonly ObjectPool<SKPaint> _paintPool;
+    private readonly ObjectPool<SKPath> _pathPool;
+    private readonly object _spectrumLock = new();
+    private float _smoothingFactor = 0.3f;
+    private float[]? _previousSpectrum;
     private bool _needsRedraw;
     private bool _useAntiAlias = true;
 
-    protected ISpectrumProcessor SpectrumProcessor => _spectrumProcessor;
-    protected IResourcePool ResourcePool => _resourcePool;
+    protected CoreSpectrumRenderer()
+    {
+        _paintPool = new ObjectPool<SKPaint>(
+            () => new SKPaint(),
+            paint => paint.Reset());
+        _pathPool = new ObjectPool<SKPath>(
+            () => new SKPath(),
+            path => path.Reset());
+    }
+
     protected bool UseAntiAlias => _useAntiAlias;
 
-    protected float AnimationTime => _animationTime;
-    protected float DeltaTime => _deltaTime;
-    protected float[] AnimatedValues => _animationValues;
+    public float SmoothingFactor
+    {
+        get => _smoothingFactor;
+        protected set => _smoothingFactor = Math.Clamp(value, 0f, 1f);
+    }
 
     public override bool RequiresRedraw() => _needsRedraw || IsOverlayActive;
 
     protected void RequestRedraw() => _needsRedraw = true;
 
-    protected void UpdateAnimation()
-    {
-        var now = DateTime.Now;
-        _deltaTime = MathF.Max(0, (float)(now - _lastUpdateTime).TotalSeconds);
-        _lastUpdateTime = now;
-        _animationTime += _deltaTime;
-    }
-
-    protected float GetAnimationTime() => AnimationTime;
-    protected float GetAnimationDeltaTime() => DeltaTime;
-    protected float[] GetAnimatedValues() => AnimatedValues;
-
-    protected void AnimateValues(float[] targets, float speed)
-    {
-        EnsureAnimationSize(targets.Length);
-        int count = Math.Min(_animationValues.Length, targets.Length);
-        float clampedSpeed = Math.Clamp(speed, 0f, 1f);
-
-        for (int i = 0; i < count; i++)
-            _animationValues[i] += (targets[i] - _animationValues[i]) * clampedSpeed;
-    }
-
-    private void EnsureAnimationSize(int size)
-    {
-        if (_animationValues.Length < size)
-            Array.Resize(ref _animationValues, size);
-    }
+    protected SKPath GetPath() => _pathPool.Get();
+    protected void ReturnPath(SKPath path) => _pathPool.Return(path);
+    protected SKPaint GetPaint() => _paintPool.Get();
+    protected void ReturnPaint(SKPaint paint) => _paintPool.Return(paint);
 
     protected (bool isValid, float[]? processedSpectrum) ProcessSpectrum(
         float[]? spectrum,
         int targetCount,
-        int spectrumLength) =>
-        _spectrumProcessor.ProcessSpectrum(spectrum, targetCount, spectrumLength);
+        float? customSmoothingFactor = null,
+        bool applyTemporalSmoothing = true)
+    {
+        if (!ValidateSpectrumInput(spectrum, targetCount)) 
+            return (false, null);
 
-    protected (bool isValid, float[]? processedSpectrum) PrepareSpectrum(
-        float[]? spectrum,
+        var scaledSpectrum = ScaleSpectrum(spectrum!, targetCount);
+
+        if (applyTemporalSmoothing)
+        {
+            var smoothedSpectrum = ApplyTemporalSmoothing(
+                scaledSpectrum,
+                targetCount,
+                customSmoothingFactor);
+            return (true, smoothedSpectrum);
+        }
+
+        return (true, scaledSpectrum);
+    }
+
+    private static bool ValidateSpectrumInput(float[]? spectrum, int targetCount) =>
+        spectrum != null && spectrum.Length > 0 && targetCount > 0;
+
+    private static float[] ScaleSpectrum(
+        float[] spectrum,
+        int targetCount)
+    {
+        var result = new float[targetCount];
+        float blockSize = CalculateBlockSize(spectrum.Length, targetCount);
+
+        for (int i = 0; i < targetCount; i++)
+            result[i] = CalculateScaledValue(spectrum, i, blockSize);
+
+        return result;
+    }
+
+    private static float CalculateBlockSize(int currentSpectrumLength, int targetCount)
+    {
+        if (targetCount <= 0) return 0;
+        float blockSize = currentSpectrumLength / (float)targetCount;
+        return blockSize < 1 ? 1 : blockSize;
+    }
+
+    private static float CalculateScaledValue(
+        float[] spectrum,
+        int index,
+        float blockSize)
+    {
+        int start = (int)(index * blockSize);
+        int end = Min((int)((index + 1) * blockSize), spectrum.Length);
+
+        if (end > start)
+            return CalculateBlockAverage(spectrum, start, end);
+
+        if (start < spectrum.Length)
+            return spectrum[start];
+
+        return 0f;
+    }
+
+    private static float CalculateBlockAverage(float[] spectrum, int start, int end)
+    {
+        float sum = 0f;
+        int count = 0;
+
+        for (int j = start; j < end && j < spectrum.Length; j++)
+        {
+            sum += spectrum[j];
+            count++;
+        }
+
+        return count > 0 ? sum / count : 0f;
+    }
+
+    private float[] ApplyTemporalSmoothing(
+        float[] scaledSpectrum,
         int targetCount,
-        int spectrumLength) =>
-        ProcessSpectrum(spectrum, targetCount, spectrumLength);
+        float? customSmoothingFactor)
+    {
+        lock (_spectrumLock)
+        {
+            EnsurePreviousSpectrumInitialized(scaledSpectrum, targetCount);
+            return SmoothSpectrum(scaledSpectrum, targetCount, customSmoothingFactor);
+        }
+    }
 
-    protected float[] ProcessSpectrumBands(float[] spectrum, int bandCount) =>
-        _spectrumProcessor.ProcessBands(spectrum, bandCount);
+    private void EnsurePreviousSpectrumInitialized(float[] scaledSpectrum, int targetCount)
+    {
+        if (_previousSpectrum == null || _previousSpectrum.Length != targetCount)
+        {
+            _previousSpectrum = new float[targetCount];
+            Array.Copy(scaledSpectrum, _previousSpectrum, Math.Min(scaledSpectrum.Length, targetCount));
+        }
+    }
+
+    private float[] SmoothSpectrum(
+        float[] scaledSpectrum,
+        int targetCount,
+        float? customSmoothingFactor)
+    {
+        float factor = customSmoothingFactor ?? _smoothingFactor;
+        float invFactor = 1 - factor;
+
+        for (int i = 0; i < targetCount; i++)
+        {
+            _previousSpectrum![i] = (_previousSpectrum[i] * invFactor) + (scaledSpectrum[i] * factor);
+            scaledSpectrum[i] = _previousSpectrum[i];
+        }
+
+        return scaledSpectrum;
+    }
 
     protected void SetProcessingSmoothingFactor(float factor) =>
-        _spectrumProcessor.SmoothingFactor = factor;
+        SmoothingFactor = factor;
 
-    protected SKPath GetPath() => _resourcePool.GetPath();
-    protected void ReturnPath(SKPath path) => _resourcePool.ReturnPath(path);
-    protected SKPaint GetPaint() => _resourcePool.GetPaint();
-    protected void ReturnPaint(SKPaint paint) => _resourcePool.ReturnPaint(paint);
+    protected float GetOverlayAlphaFactor() =>
+        IsOverlayActive ? OverlayAlpha : 1f;
 
-    protected float GetOverlayAlphaFactor() => IsOverlayActive ? OverlayAlpha : 1f;
-
-    protected override void OnConfigurationChanged()
+    protected override void OnQualitySettingsApplied()
     {
-        base.OnConfigurationChanged();
+        base.OnQualitySettingsApplied();
         _useAntiAlias = Quality != RenderQuality.Low;
-        _spectrumProcessor.SmoothingFactor = IsOverlayActive ? 0.5f : 0.3f;
-        OnQualitySettingsApplied();
+        SmoothingFactor = IsOverlayActive ? 0.5f : 0.3f;
     }
 
     protected override void OnOverlayTransparencyChanged(float alpha)
@@ -100,17 +173,21 @@ public abstract class CoreSpectrumRenderer(
         _needsRedraw = true;
     }
 
-    protected override void OnCleanup()
+    protected override void CleanupUnusedResources()
     {
-        base.OnCleanup();
-        _resourcePool.CleanupUnused();
+        base.CleanupUnusedResources();
+        _paintPool.Clear();
+        _pathPool.Clear();
     }
 
     protected override void OnDispose()
     {
-        _animationValues = [];
-        _spectrumProcessor.Dispose();
-        _resourcePool.Dispose();
+        lock (_spectrumLock)
+        {
+            _previousSpectrum = null;
+        }
+        _paintPool.Dispose();
+        _pathPool.Dispose();
         base.OnDispose();
     }
 }

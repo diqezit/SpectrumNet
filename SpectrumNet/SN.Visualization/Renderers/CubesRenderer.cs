@@ -1,187 +1,352 @@
 ﻿#nullable enable
 
-using static SpectrumNet.SN.Visualization.Renderers.CubesRenderer.Constants;
-
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class CubesRenderer() : EffectSpectrumRenderer
+public sealed class CubesRenderer : EffectSpectrumRenderer<CubesRenderer.QualitySettings>
 {
     private static readonly Lazy<CubesRenderer> _instance =
         new(() => new CubesRenderer());
 
     public static CubesRenderer GetInstance() => _instance.Value;
 
-    public static class Constants
+    public sealed class QualitySettings
     {
-        public const float
-            CUBE_TOP_WIDTH_PROPORTION = 0.75f,
-            CUBE_TOP_HEIGHT_PROPORTION = 0.25f,
-            ALPHA_MULTIPLIER = 255f,
-            TOP_ALPHA_FACTOR = 0.8f,
-            SIDE_FACE_ALPHA_FACTOR = 0.6f;
-
-        public const int CUBE_BATCH_SIZE = 32;
-
-        public static readonly Dictionary<RenderQuality, CubeQualitySettings> QualityPresets = new()
-        {
-            [RenderQuality.Low] = new(
-                UseTopFaceEffect: false,
-                UseSideFaceEffect: false,
-                TopAlphaFactor: 0.7f,
-                SideFaceAlphaFactor: 0.5f,
-                TopWidthProportion: 0.7f,
-                TopHeightProportion: 0.2f
-            ),
-            [RenderQuality.Medium] = new(
-                UseTopFaceEffect: true,
-                UseSideFaceEffect: true,
-                TopAlphaFactor: TOP_ALPHA_FACTOR,
-                SideFaceAlphaFactor: SIDE_FACE_ALPHA_FACTOR,
-                TopWidthProportion: CUBE_TOP_WIDTH_PROPORTION,
-                TopHeightProportion: CUBE_TOP_HEIGHT_PROPORTION
-            ),
-            [RenderQuality.High] = new(
-                UseTopFaceEffect: true,
-                UseSideFaceEffect: true,
-                TopAlphaFactor: 0.9f,
-                SideFaceAlphaFactor: 0.7f,
-                TopWidthProportion: 0.8f,
-                TopHeightProportion: 0.3f
-            )
-        };
-
-        public record CubeQualitySettings(
-            bool UseTopFaceEffect,
-            bool UseSideFaceEffect,
-            float TopAlphaFactor,
-            float SideFaceAlphaFactor,
-            float TopWidthProportion,
-            float TopHeightProportion
-        );
+        public bool UseTopFace { get; init; }
+        public bool UseSideFace { get; init; }
+        public float TopWidthRatio { get; init; }
+        public float TopHeightRatio { get; init; }
+        public float TopFaceBrightness { get; init; }
+        public float SideFaceBrightness { get; init; }
+        public bool UseShadow { get; init; }
+        public float ShadowOffset { get; init; }
+        public byte ShadowAlpha { get; init; }
     }
 
-    private CubeQualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
-
-    protected override void OnQualitySettingsApplied() =>
-        _currentSettings = QualityPresets[Quality];
+    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
+        QualitySettingsPresets
+    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    {
+        [RenderQuality.Low] = new()
+        {
+            UseTopFace = false,
+            UseSideFace = false,
+            TopWidthRatio = 0.7f,
+            TopHeightRatio = 0.2f,
+            TopFaceBrightness = 1.0f,
+            SideFaceBrightness = 0.7f,
+            UseShadow = false,
+            ShadowOffset = 0f,
+            ShadowAlpha = 0
+        },
+        [RenderQuality.Medium] = new()
+        {
+            UseTopFace = true,
+            UseSideFace = true,
+            TopWidthRatio = 0.75f,
+            TopHeightRatio = 0.25f,
+            TopFaceBrightness = 1.2f,
+            SideFaceBrightness = 0.6f,
+            UseShadow = true,
+            ShadowOffset = 2f,
+            ShadowAlpha = 20
+        },
+        [RenderQuality.High] = new()
+        {
+            UseTopFace = true,
+            UseSideFace = true,
+            TopWidthRatio = 0.8f,
+            TopHeightRatio = 0.3f,
+            TopFaceBrightness = 1.3f,
+            SideFaceBrightness = 0.5f,
+            UseShadow = true,
+            ShadowOffset = 3f,
+            ShadowAlpha = 30
+        }
+    };
 
     protected override void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint paint)
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
     {
-        float canvasHeight = info.Height;
-        int spectrumLength = Min(
-            spectrum.Length,
-            (int)(info.Width / (barWidth + barSpacing)));
+        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+            return;
 
-        var rects = new List<SKRect>();
-        var cubeData = new List<(float x, float y, float height, float magnitude)>();
+        var (isValid, processedSpectrum) = ProcessSpectrum(
+            spectrum,
+            renderParams.EffectiveBarCount,
+            applyTemporalSmoothing: true);
 
-        for (int i = 0; i < spectrumLength; i++)
-        {
-            float magnitude = spectrum[i];
-            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
+        if (!isValid || processedSpectrum == null)
+            return;
 
-            float x = i * (barWidth + barSpacing);
-            float height = magnitude * canvasHeight;
-            float y = canvasHeight - height;
+        var cubes = CalculateCubeGeometry(
+            processedSpectrum,
+            info,
+            renderParams);
 
-            if (!IsRenderAreaVisible(
-                canvas,
-                x,
-                y - barWidth * _currentSettings.TopHeightProportion,
-                barWidth + barWidth * _currentSettings.TopWidthProportion,
-                height + barWidth * _currentSettings.TopHeightProportion)) continue;
+        if (cubes.Count == 0)
+            return;
 
-            rects.Add(new SKRect(x, y, x + barWidth, y + height));
-            cubeData.Add((x, y, height, magnitude));
-        }
-
-        RenderMainFaces(canvas, rects, cubeData, paint);
-
-        if (UseAdvancedEffects)
-        {
-            if (_currentSettings.UseTopFaceEffect)
-                RenderTopFaces(canvas, cubeData, barWidth);
-
-            if (_currentSettings.UseSideFaceEffect)
-                RenderSideFaces(canvas, cubeData, barWidth);
-        }
+        RenderCubeVisualization(
+            canvas,
+            cubes,
+            renderParams,
+            passedInPaint);
     }
 
-    private void RenderMainFaces(
+    private static List<CubeData> CalculateCubeGeometry(
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams)
+    {
+        var cubes = new List<CubeData>(renderParams.EffectiveBarCount);
+        float xPosition = renderParams.StartOffset;
+        const float MIN_MAGNITUDE = 0.01f;
+
+        for (int i = 0; i < renderParams.EffectiveBarCount && i < spectrum.Length; i++)
+        {
+            float magnitude = Math.Max(spectrum[i], 0f);
+
+            if (magnitude >= MIN_MAGNITUDE)
+            {
+                var cube = CreateCubeData(
+                    xPosition,
+                    magnitude,
+                    renderParams.BarWidth,
+                    info.Height);
+
+                cubes.Add(cube);
+            }
+
+            xPosition += renderParams.BarWidth + renderParams.BarSpacing;
+        }
+
+        return cubes;
+    }
+
+    private static CubeData CreateCubeData(
+        float x,
+        float magnitude,
+        float width,
+        float canvasHeight)
+    {
+        float height = magnitude * canvasHeight * 0.8f;
+        float y = canvasHeight - height;
+
+        return new CubeData(x, y, width, height, magnitude);
+    }
+
+    private void RenderCubeVisualization(
         SKCanvas canvas,
-        List<SKRect> rects,
-        List<(float x, float y, float height, float magnitude)> cubeData,
+        List<CubeData> cubes,
+        RenderParameters renderParams,
         SKPaint basePaint)
     {
-        var mainPaint = CreateStandardPaint(basePaint.Color);
+        var settings = CurrentQualitySettings!;
 
-        for (int i = 0; i < rects.Count && i < cubeData.Count; i++)
+        RenderWithOverlay(canvas, () =>
         {
-            byte alpha = CalculateAlpha(cubeData[i].magnitude);
-            mainPaint.Color = basePaint.Color.WithAlpha(alpha);
-            canvas.DrawRect(rects[i], mainPaint);
-        }
+            if (UseAdvancedEffects && settings.UseShadow)
+                RenderShadowLayer(canvas, cubes, settings);
 
-        ReturnPaint(mainPaint);
+            RenderFrontFaces(canvas, cubes, basePaint);
+
+            if (UseAdvancedEffects && settings.UseSideFace)
+                RenderSideFaces(canvas, cubes, basePaint, settings);
+
+            if (UseAdvancedEffects && settings.UseTopFace)
+                RenderTopFaces(canvas, cubes, basePaint, settings);
+        });
     }
 
-    private void RenderTopFaces(
+    private void RenderShadowLayer(
         SKCanvas canvas,
-        List<(float x, float y, float height, float magnitude)> cubeData,
-        float barWidth)
+        List<CubeData> cubes,
+        QualitySettings settings)
     {
-        float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
-        float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
+        if (settings.ShadowAlpha == 0) return;
 
-        RenderBatch(canvas, path =>
+        var shadowPaint = CreatePaint(
+            new SKColor(0, 0, 0, settings.ShadowAlpha),
+            SKPaintStyle.Fill);
+
+        try
         {
-            foreach (var (x, y, _, magnitude) in cubeData)
+            var shadowRects = cubes
+                .Select(cube => CreateShadowRect(cube, settings.ShadowOffset))
+                .ToList();
+
+            RenderRects(canvas, shadowRects, shadowPaint);
+        }
+        finally
+        {
+            ReturnPaint(shadowPaint);
+        }
+    }
+
+    private void RenderFrontFaces(
+        SKCanvas canvas,
+        List<CubeData> cubes,
+        SKPaint basePaint)
+    {
+        var frontPaint = CreatePaint(basePaint.Color, SKPaintStyle.Fill);
+
+        try
+        {
+            foreach (var cube in cubes)
             {
-                path.MoveTo(x, y);
-                path.LineTo(x + barWidth, y);
-                path.LineTo(x + topOffsetX, y - topOffsetY);
-                path.LineTo(x - (barWidth - topOffsetX), y - topOffsetY);
-                path.Close();
+                byte alpha = CalculateAlpha(cube.Magnitude);
+                frontPaint.Color = basePaint.Color.WithAlpha(alpha);
+
+                var frontRect = new SKRect(
+                    cube.X,
+                    cube.Y,
+                    cube.X + cube.Width,
+                    cube.Y + cube.Height);
+
+                canvas.DrawRect(frontRect, frontPaint);
             }
-        }, CreateFacePaint(SKColors.White, cubeData, _currentSettings.TopAlphaFactor));
+        }
+        finally
+        {
+            ReturnPaint(frontPaint);
+        }
     }
 
     private void RenderSideFaces(
         SKCanvas canvas,
-        List<(float x, float y, float height, float magnitude)> cubeData,
-        float barWidth)
+        List<CubeData> cubes,
+        SKPaint basePaint,
+        QualitySettings settings)
     {
-        float topOffsetX = barWidth * _currentSettings.TopWidthProportion;
-        float topOffsetY = barWidth * _currentSettings.TopHeightProportion;
+        var sideColor = AdjustBrightness(
+            basePaint.Color,
+            settings.SideFaceBrightness);
 
-        RenderBatch(canvas, path =>
+        var sidePaint = CreatePaint(sideColor, SKPaintStyle.Fill);
+
+        try
         {
-            foreach (var (x, y, height, _) in cubeData)
+            RenderPath(canvas, path =>
             {
-                path.MoveTo(x + barWidth, y);
-                path.LineTo(x + barWidth, y + height);
-                path.LineTo(x + topOffsetX, y - topOffsetY + height);
-                path.LineTo(x + topOffsetX, y - topOffsetY);
-                path.Close();
-            }
-        }, CreateFacePaint(SKColors.Gray, cubeData, _currentSettings.SideFaceAlphaFactor));
+                foreach (var cube in cubes)
+                {
+                    AddSideFacePath(path, cube, settings);
+                }
+            }, sidePaint);
+        }
+        finally
+        {
+            ReturnPaint(sidePaint);
+        }
     }
 
-    private SKPaint CreateFacePaint(
-        SKColor baseColor,
-        List<(float x, float y, float height, float magnitude)> cubeData,
-        float alphaFactor)
+    private void RenderTopFaces(
+        SKCanvas canvas,
+        List<CubeData> cubes,
+        SKPaint basePaint,
+        QualitySettings settings)
     {
-        float avgMagnitude = cubeData.Count > 0 ?
-            cubeData.Average(d => d.magnitude) : 0f;
-        byte alpha = CalculateAlpha(avgMagnitude * alphaFactor);
-        return CreateStandardPaint(baseColor.WithAlpha(alpha));
+        var topColor = AdjustBrightness(
+            basePaint.Color,
+            settings.TopFaceBrightness);
+
+        var topPaint = CreatePaint(topColor, SKPaintStyle.Fill);
+
+        try
+        {
+            RenderPath(canvas, path =>
+            {
+                foreach (var cube in cubes)
+                {
+                    AddTopFacePath(path, cube, settings);
+                }
+            }, topPaint);
+        }
+        finally
+        {
+            ReturnPaint(topPaint);
+        }
     }
+
+    private static void AddSideFacePath(
+        SKPath path,
+        CubeData cube,
+        QualitySettings settings)
+    {
+        float topOffset = cube.Width * settings.TopWidthRatio;
+        float topHeight = cube.Width * settings.TopHeightRatio;
+
+        path.MoveTo(cube.X + cube.Width, cube.Y);
+        path.LineTo(cube.X + cube.Width, cube.Y + cube.Height);
+        path.LineTo(cube.X + topOffset, cube.Y - topHeight + cube.Height);
+        path.LineTo(cube.X + topOffset, cube.Y - topHeight);
+        path.Close();
+    }
+
+    private static void AddTopFacePath(
+        SKPath path,
+        CubeData cube,
+        QualitySettings settings)
+    {
+        float topOffset = cube.Width * settings.TopWidthRatio;
+        float topHeight = cube.Width * settings.TopHeightRatio;
+        float backOffset = cube.Width - topOffset;
+
+        path.MoveTo(cube.X, cube.Y);
+        path.LineTo(cube.X + cube.Width, cube.Y);
+        path.LineTo(cube.X + topOffset, cube.Y - topHeight);
+        path.LineTo(cube.X - backOffset, cube.Y - topHeight);
+        path.Close();
+    }
+
+    private static SKRect CreateShadowRect(CubeData cube, float offset) =>
+        new(
+            cube.X + offset,
+            cube.Y + offset,
+            cube.X + cube.Width + offset,
+            cube.Y + cube.Height);
+
+    private static SKColor AdjustBrightness(SKColor color, float factor)
+    {
+        byte r = (byte)Math.Min(255, color.Red * factor);
+        byte g = (byte)Math.Min(255, color.Green * factor);
+        byte b = (byte)Math.Min(255, color.Blue * factor);
+
+        return new SKColor(r, g, b, color.Alpha);
+    }
+
+    protected override int GetMaxBarsForQuality() => Quality switch
+    {
+        RenderQuality.Low => 80,
+        RenderQuality.Medium => 150,
+        RenderQuality.High => 250,
+        _ => 150
+    };
+
+    protected override void OnQualitySettingsApplied()
+    {
+        base.OnQualitySettingsApplied();
+
+        float smoothingFactor = Quality switch
+        {
+            RenderQuality.Low => 0.35f,
+            RenderQuality.Medium => 0.25f,
+            RenderQuality.High => 0.2f,
+            _ => 0.25f
+        };
+
+        SetProcessingSmoothingFactor(smoothingFactor);
+        RequestRedraw();
+    }
+
+    private record CubeData(
+        float X,
+        float Y,
+        float Width,
+        float Height,
+        float Magnitude);
 }

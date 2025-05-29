@@ -1,273 +1,352 @@
 ﻿#nullable enable
 
-using static System.MathF;
-using static SpectrumNet.SN.Visualization.Renderers.CircularBarsRenderer.Constants;
-
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class CircularBarsRenderer() : EffectSpectrumRenderer
+public sealed class CircularBarsRenderer : EffectSpectrumRenderer<CircularBarsRenderer.QualitySettings>
 {
     private static readonly Lazy<CircularBarsRenderer> _instance =
         new(() => new CircularBarsRenderer());
 
     public static CircularBarsRenderer GetInstance() => _instance.Value;
 
-    public static class Constants
+    private SKPoint[]? _barDirections;
+
+    public sealed class QualitySettings
     {
-        public const float
-            RADIUS_PROPORTION = 0.8f,
-            INNER_RADIUS_FACTOR = 0.9f,
-            BAR_SPACING_FACTOR = 0.7f,
-            MIN_STROKE_WIDTH = 2f,
-            SPECTRUM_MULTIPLIER = 0.5f,
-            CENTER_PROPORTION = 0.5f,
-            GLOW_THRESHOLD = 0.6f,
-            HIGHLIGHT_POSITION = 0.7f,
-            HIGHLIGHT_THRESHOLD = 0.4f,
-            INNER_CIRCLE_WIDTH_FACTOR = 0.5f,
-            GLOW_WIDTH_FACTOR = 1.2f,
-            HIGHLIGHT_WIDTH_FACTOR = 0.6f;
+        public bool UseGlow { get; init; }
+        public bool UseHighlight { get; init; }
+        public float GlowIntensity { get; init; }
+        public float HighlightIntensity { get; init; }
+        public float InnerCircleAlpha { get; init; }
+        public float BarSpacingRatio { get; init; }
+        public float MinBarLength { get; init; }
+    }
 
-        public const byte INNER_CIRCLE_ALPHA = 80;
-
-        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
+    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
+        QualitySettingsPresets
+    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    {
+        [RenderQuality.Low] = new()
         {
-            [RenderQuality.Low] = new(
-                UseGlow: false,
-                UseHighlight: false,
-                GlowRadius: 1.5f,
-                GlowIntensity: 0.2f,
-                HighlightIntensity: 0.3f,
-                MaxBars: 64),
-            [RenderQuality.Medium] = new(
-                UseGlow: true,
-                UseHighlight: true,
-                GlowRadius: 3.0f,
-                GlowIntensity: 0.4f,
-                HighlightIntensity: 0.5f,
-                MaxBars: 128),
-            [RenderQuality.High] = new(
-                UseGlow: true,
-                UseHighlight: true,
-                GlowRadius: 6.0f,
-                GlowIntensity: 0.6f,
-                HighlightIntensity: 0.7f,
-                MaxBars: 256)
-        };
-
-        public record QualitySettings(
-            bool UseGlow,
-            bool UseHighlight,
-            float GlowRadius,
-            float GlowIntensity,
-            float HighlightIntensity,
-            int MaxBars);
-    }
-
-    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
-    private Vector2[]? _barVectors;
-
-    protected override void OnInitialize()
-    {
-        base.OnInitialize();
-        RegisterPaintConfigs();
-    }
-
-    protected override void OnQualitySettingsApplied()
-    {
-        _currentSettings = QualityPresets[Quality];
-        RegisterPaintConfigs();
-    }
+            UseGlow = false,
+            UseHighlight = false,
+            GlowIntensity = 0f,
+            HighlightIntensity = 0f,
+            InnerCircleAlpha = 0.3f,
+            BarSpacingRatio = 0.7f,
+            MinBarLength = 0.02f
+        },
+        [RenderQuality.Medium] = new()
+        {
+            UseGlow = true,
+            UseHighlight = false,
+            GlowIntensity = 0.4f,
+            HighlightIntensity = 0f,
+            InnerCircleAlpha = 0.4f,
+            BarSpacingRatio = 0.75f,
+            MinBarLength = 0.03f
+        },
+        [RenderQuality.High] = new()
+        {
+            UseGlow = true,
+            UseHighlight = true,
+            GlowIntensity = 0.6f,
+            HighlightIntensity = 0.5f,
+            InnerCircleAlpha = 0.5f,
+            BarSpacingRatio = 0.8f,
+            MinBarLength = 0.04f
+        }
+    };
 
     protected override void RenderEffect(
         SKCanvas canvas,
         float[] spectrum,
         SKImageInfo info,
-        float barWidth,
-        float barSpacing,
-        int barCount,
-        SKPaint paint)
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
     {
-        var center = new SKPoint(
-            info.Width * CENTER_PROPORTION,
-            info.Height * CENTER_PROPORTION);
-        float mainRadius = MathF.Min(center.X, center.Y) * RADIUS_PROPORTION;
+        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+            return;
 
-        int effectiveBarCount = Min(barCount, _currentSettings.MaxBars);
-        float adjustedBarWidth = CalculateOptimalBarWidth(effectiveBarCount, mainRadius);
+        var (isValid, processedSpectrum) = ProcessSpectrum(
+            spectrum,
+            renderParams.EffectiveBarCount,
+            applyTemporalSmoothing: true);
 
-        EnsureBarVectors(effectiveBarCount);
+        if (!isValid || processedSpectrum == null)
+            return;
 
-        RenderInnerCircle(canvas, center, mainRadius, adjustedBarWidth, paint.Color);
+        var center = new SKPoint(info.Width * 0.5f, info.Height * 0.5f);
+        float radius = Math.Min(center.X, center.Y) * 0.8f;
 
-        if (ShouldRenderGlow())
-            RenderGlowBatch(canvas, spectrum, center, mainRadius,
-                adjustedBarWidth, paint.Color, effectiveBarCount);
+        EnsureBarDirections(renderParams.EffectiveBarCount);
 
-        RenderMainBatch(canvas, spectrum, center, mainRadius,
-            adjustedBarWidth, paint.Color, effectiveBarCount);
-
-        if (ShouldRenderHighlight())
-            RenderHighlightBatch(canvas, spectrum, center, mainRadius,
-                adjustedBarWidth, effectiveBarCount);
+        RenderCircularVisualization(
+            canvas,
+            processedSpectrum,
+            center,
+            radius,
+            renderParams,
+            passedInPaint);
     }
 
-    private void RegisterPaintConfigs()
+    private void EnsureBarDirections(int barCount)
     {
-        RegisterPaintConfig("inner",
-            CreateStrokePaintConfig(SKColors.White, MIN_STROKE_WIDTH));
-        RegisterPaintConfig("main",
-            CreateStrokePaintConfig(SKColors.White, MIN_STROKE_WIDTH, SKStrokeCap.Round));
-        RegisterPaintConfig("glow",
-            CreateGlowPaintConfig(SKColors.White, _currentSettings.GlowRadius));
-        RegisterPaintConfig("highlight",
-            CreateStrokePaintConfig(SKColors.White, MIN_STROKE_WIDTH));
+        if (_barDirections?.Length != barCount)
+        {
+            _barDirections = new SKPoint[barCount];
+            float angleStep = 2 * MathF.PI / barCount;
+
+            for (int i = 0; i < barCount; i++)
+            {
+                float angle = i * angleStep;
+                _barDirections[i] = new SKPoint(
+                    MathF.Cos(angle),
+                    MathF.Sin(angle));
+            }
+        }
+    }
+
+    private void RenderCircularVisualization(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKPoint center,
+        float radius,
+        RenderParameters renderParams,
+        SKPaint basePaint)
+    {
+        var settings = CurrentQualitySettings!;
+
+        RenderWithOverlay(canvas, () =>
+        {
+            if (UseAdvancedEffects)
+                RenderInnerCircle(canvas, center, radius, basePaint, settings);
+
+            if (UseAdvancedEffects && settings.UseGlow)
+                RenderGlowLayer(canvas, spectrum, center, radius, renderParams, basePaint, settings);
+
+            RenderMainBars(canvas, spectrum, center, radius, renderParams, basePaint, settings);
+
+            if (UseAdvancedEffects && settings.UseHighlight)
+                RenderHighlightLayer(canvas, spectrum, center, radius, renderParams, settings);
+        });
     }
 
     private void RenderInnerCircle(
         SKCanvas canvas,
         SKPoint center,
         float radius,
-        float barWidth,
-        SKColor baseColor)
+        SKPaint basePaint,
+        QualitySettings settings)
     {
-        var paint = CreatePaint("inner");
-        paint.Color = ApplyAlpha(baseColor, INNER_CIRCLE_ALPHA / 255f);
-        paint.StrokeWidth = barWidth * INNER_CIRCLE_WIDTH_FACTOR;
+        byte alpha = CalculateAlpha(settings.InnerCircleAlpha);
+        var circlePaint = CreatePaint(
+            basePaint.Color.WithAlpha(alpha),
+            SKPaintStyle.Stroke);
 
-        canvas.DrawCircle(center.X, center.Y, radius * INNER_RADIUS_FACTOR, paint);
-        ReturnPaint(paint);
+        circlePaint.StrokeWidth = 2f;
+
+        try
+        {
+            canvas.DrawCircle(center, radius * 0.9f, circlePaint);
+        }
+        finally
+        {
+            ReturnPaint(circlePaint);
+        }
     }
 
-    private void RenderGlowBatch(
+    private void RenderGlowLayer(
         SKCanvas canvas,
         float[] spectrum,
         SKPoint center,
-        float mainRadius,
-        float barWidth,
-        SKColor baseColor,
-        int barCount)
+        float radius,
+        RenderParameters renderParams,
+        SKPaint basePaint,
+        QualitySettings settings)
     {
-        var glowPaint = CreatePaint("glow");
-        glowPaint.Color = ApplyAlpha(baseColor, _currentSettings.GlowIntensity);
-        glowPaint.StrokeWidth = barWidth * GLOW_WIDTH_FACTOR;
+        byte glowAlpha = CalculateAlpha(settings.GlowIntensity);
+        var glowPaint = CreatePaint(
+            basePaint.Color.WithAlpha(glowAlpha),
+            SKPaintStyle.Stroke);
 
-        RenderBatch(canvas, path =>
+        float barWidth = CalculateBarWidth(renderParams.EffectiveBarCount, radius, settings);
+        glowPaint.StrokeWidth = barWidth * 1.5f;
+        glowPaint.StrokeCap = SKStrokeCap.Round;
+
+        using var blurFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 3f);
+        glowPaint.MaskFilter = blurFilter;
+
+        try
         {
-            for (int i = 0; i < barCount && i < spectrum.Length; i++)
-            {
-                if (spectrum[i] > GLOW_THRESHOLD)
-                {
-                    float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-                    AddBarToPath(path, i, center, mainRadius, radius);
-                }
-            }
-        }, glowPaint);
-
-        ReturnPaint(glowPaint);
+            RenderBarsPaths(
+                canvas,
+                spectrum,
+                center,
+                radius,
+                glowPaint,
+                settings,
+                magnitudeThreshold: 0.6f);
+        }
+        finally
+        {
+            ReturnPaint(glowPaint);
+        }
     }
 
-    private void RenderMainBatch(
+    private void RenderMainBars(
         SKCanvas canvas,
         float[] spectrum,
         SKPoint center,
-        float mainRadius,
-        float barWidth,
-        SKColor baseColor,
-        int barCount)
+        float radius,
+        RenderParameters renderParams,
+        SKPaint basePaint,
+        QualitySettings settings)
     {
-        var paint = CreatePaint("main");
-        paint.Color = baseColor;
-        paint.StrokeWidth = barWidth;
+        var barPaint = CreatePaint(basePaint.Color, SKPaintStyle.Stroke);
+        float barWidth = CalculateBarWidth(renderParams.EffectiveBarCount, radius, settings);
+        barPaint.StrokeWidth = barWidth;
+        barPaint.StrokeCap = SKStrokeCap.Round;
 
-        RenderBatch(canvas, path =>
+        try
         {
-            for (int i = 0; i < barCount && i < spectrum.Length; i++)
+            RenderBarsPaths(
+                canvas,
+                spectrum,
+                center,
+                radius,
+                barPaint,
+                settings,
+                magnitudeThreshold: 0f);
+        }
+        finally
+        {
+            ReturnPaint(barPaint);
+        }
+    }
+
+    private void RenderHighlightLayer(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKPoint center,
+        float radius,
+        RenderParameters renderParams,
+        QualitySettings settings)
+    {
+        byte highlightAlpha = CalculateAlpha(settings.HighlightIntensity);
+        var highlightPaint = CreatePaint(
+            SKColors.White.WithAlpha(highlightAlpha),
+            SKPaintStyle.Stroke);
+
+        float barWidth = CalculateBarWidth(renderParams.EffectiveBarCount, radius, settings);
+        highlightPaint.StrokeWidth = barWidth * 0.5f;
+        highlightPaint.StrokeCap = SKStrokeCap.Round;
+
+        try
+        {
+            RenderBarsPaths(
+                canvas,
+                spectrum,
+                center,
+                radius,
+                highlightPaint,
+                settings,
+                magnitudeThreshold: 0.4f,
+                startOffset: 0.7f);
+        }
+        finally
+        {
+            ReturnPaint(highlightPaint);
+        }
+    }
+
+    private void RenderBarsPaths(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKPoint center,
+        float radius,
+        SKPaint paint,
+        QualitySettings settings,
+        float magnitudeThreshold = 0f,
+        float startOffset = 0f)
+    {
+        if (_barDirections == null) return;
+
+        RenderPath(canvas, path =>
+        {
+            for (int i = 0; i < _barDirections.Length && i < spectrum.Length; i++)
             {
-                if (spectrum[i] >= MIN_MAGNITUDE_THRESHOLD)
+                float magnitude = spectrum[i];
+                if (magnitude <= magnitudeThreshold) continue;
+
+                float barLength = Math.Max(
+                    magnitude * radius * 0.5f,
+                    radius * settings.MinBarLength);
+
+                float innerRadius = radius;
+                float outerRadius = radius + barLength;
+
+                if (startOffset > 0)
                 {
-                    float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-                    AddBarToPath(path, i, center, mainRadius, radius);
+                    innerRadius = radius + barLength * startOffset;
                 }
+
+                var direction = _barDirections[i];
+
+                path.MoveTo(
+                    center.X + innerRadius * direction.X,
+                    center.Y + innerRadius * direction.Y);
+
+                path.LineTo(
+                    center.X + outerRadius * direction.X,
+                    center.Y + outerRadius * direction.Y);
             }
         }, paint);
-
-        ReturnPaint(paint);
     }
 
-    private void RenderHighlightBatch(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKPoint center,
-        float mainRadius,
-        float barWidth,
-        int barCount)
+    private static float CalculateBarWidth(
+        int barCount,
+        float radius,
+        QualitySettings settings)
     {
-        var paint = CreatePaint("highlight");
-        paint.Color = InterpolateColor(SKColors.White, _currentSettings.HighlightIntensity);
-        paint.StrokeWidth = barWidth * HIGHLIGHT_WIDTH_FACTOR;
-
-        RenderBatch(canvas, path =>
-        {
-            for (int i = 0; i < barCount && i < spectrum.Length; i++)
-            {
-                if (spectrum[i] > HIGHLIGHT_THRESHOLD)
-                {
-                    float radius = mainRadius + spectrum[i] * mainRadius * SPECTRUM_MULTIPLIER;
-                    float innerPoint = mainRadius + (radius - mainRadius) * HIGHLIGHT_POSITION;
-                    AddBarToPath(path, i, center, innerPoint, radius);
-                }
-            }
-        }, paint);
-
-        ReturnPaint(paint);
-    }
-
-    private void EnsureBarVectors(int barCount)
-    {
-        if (_barVectors?.Length != barCount)
-            _barVectors = CreateCircleVectors(barCount);
-    }
-
-    private static float CalculateOptimalBarWidth(int barCount, float radius)
-    {
-        if (barCount <= 0) return MIN_STROKE_WIDTH;
+        if (barCount <= 0) return 2f;
 
         float circumference = 2 * MathF.PI * radius;
-        float maxWidth = circumference / barCount * BAR_SPACING_FACTOR;
-        return Clamp(maxWidth, MIN_STROKE_WIDTH, 20f);
+        float maxWidth = circumference / barCount * settings.BarSpacingRatio;
+
+        return Math.Clamp(maxWidth, 2f, 20f);
     }
-
-    private void AddBarToPath(
-        SKPath path,
-        int index,
-        SKPoint center,
-        float innerRadius,
-        float outerRadius)
-    {
-        if (_barVectors == null || index >= _barVectors.Length) return;
-
-        var vector = _barVectors[index];
-        var innerPoint = new SKPoint(
-            center.X + innerRadius * vector.X,
-            center.Y + innerRadius * vector.Y);
-        var outerPoint = new SKPoint(
-            center.X + outerRadius * vector.X,
-            center.Y + outerRadius * vector.Y);
-
-        path.MoveTo(innerPoint);
-        path.LineTo(outerPoint);
-    }
-
-    private bool ShouldRenderGlow() =>
-        UseAdvancedEffects && _currentSettings.UseGlow;
-
-    private bool ShouldRenderHighlight() =>
-        UseAdvancedEffects && _currentSettings.UseHighlight;
 
     protected override void OnDispose()
     {
-        _barVectors = null;
+        _barDirections = null;
         base.OnDispose();
+    }
+
+    protected override int GetMaxBarsForQuality()
+    {
+        return Quality switch
+        {
+            RenderQuality.Low => 64,
+            RenderQuality.Medium => 128,
+            RenderQuality.High => 256,
+            _ => 128
+        };
+    }
+
+    protected override void OnQualitySettingsApplied()
+    {
+        base.OnQualitySettingsApplied();
+
+        float smoothingFactor = Quality switch
+        {
+            RenderQuality.Low => 0.35f,
+            RenderQuality.Medium => 0.25f,
+            RenderQuality.High => 0.2f,
+            _ => 0.25f
+        };
+
+        SetProcessingSmoothingFactor(smoothingFactor);
+        RequestRedraw();
     }
 }

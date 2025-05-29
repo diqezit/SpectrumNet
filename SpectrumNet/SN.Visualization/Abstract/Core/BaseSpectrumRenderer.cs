@@ -10,12 +10,12 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
 
     private readonly ISmartLogger _logger = Instance;
     private readonly Timer _cleanupTimer;
-
     private bool _isInitialized;
     private bool _disposed;
     private bool _isOverlayActive;
     private RenderQuality _quality = RenderQuality.Medium;
     private float _overlayAlpha = 0.8f;
+    private bool _configuredOnce = false;
 
     protected BaseSpectrumRenderer()
     {
@@ -38,6 +38,10 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
             _isInitialized = true;
             OnInitialize();
             LogDebug("Renderer initialized");
+            if (!_configuredOnce)
+            {
+                OnQualitySettingsApplied();
+            }
         }
     }
 
@@ -46,8 +50,16 @@ public abstract class BaseSpectrumRenderer : ISpectrumRenderer
         RenderQuality quality = RenderQuality.Medium)
     {
         _isOverlayActive = isOverlayActive;
+        var qualityChanged = _quality != quality;
         _quality = quality;
+
         OnConfigurationChanged();
+
+        if (qualityChanged || !_configuredOnce)
+        {
+            OnQualitySettingsApplied();
+        }
+        _configuredOnce = true;
         LogDebug($"Configured: Overlay={isOverlayActive}, Quality={quality}");
     }
 

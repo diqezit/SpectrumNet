@@ -6,7 +6,7 @@ public interface ISpectrumRenderer : IDisposable
     bool IsOverlayActive { get; }
 
     void Initialize();
-    void Configure(bool isOverlayActive, RenderQuality quality = RenderQuality.Medium);
+    void Configure(bool isOverlayActive, RenderQuality quality);
     void SetOverlayTransparency(float level);
     void Render(
         SKCanvas? canvas,
