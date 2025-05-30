@@ -1,213 +1,338 @@
-﻿//#nullable enable
+﻿#nullable enable
 
-//using static SpectrumNet.SN.Visualization.Renderers.RainbowRenderer.Constants;
-//using static System.MathF;
+namespace SpectrumNet.SN.Visualization.Renderers;
 
-//namespace SpectrumNet.SN.Visualization.Renderers;
+public sealed class RainbowRenderer : EffectSpectrumRenderer<RainbowRenderer.QualitySettings>
+{
+    private static readonly Lazy<RainbowRenderer> _instance =
+        new(() => new RainbowRenderer());
 
-//public sealed class RainbowRenderer : EffectSpectrumRenderer
-//{
-//    private const string LogPrefix = nameof(RainbowRenderer);
+    public static RainbowRenderer GetInstance() => _instance.Value;
 
-//    private static readonly Lazy<RainbowRenderer> _instance =
-//        new(() => new RainbowRenderer());
+    private const float 
+        ALPHA_MULTIPLIER = 1.7f,
+        CORNER_RADIUS = 8f,
+        GLOW_INTENSITY_OVERLAY = 0.2f,
+        GLOW_RADIUS_OVERLAY = 3f,
+        HIGHLIGHT_ALPHA_OVERLAY = 0.3f,
+        REFLECTION_OPACITY_OVERLAY = 0.1f,
+        REFLECTION_FACTOR = 0.3f,
+        HUE_START = 240f,
+        HUE_RANGE = 240f,
+        GLOW_THRESHOLD = 0.4f,
+        REFLECTION_THRESHOLD = 0.2f,
+        HIGHLIGHT_WIDTH_FACTOR = 0.6f,
+        HIGHLIGHT_X_OFFSET_FACTOR = 0.2f,
+        HIGHLIGHT_MAX_HEIGHT = 10f,
+        REFLECTION_HEIGHT_FACTOR = 0.1f,
+        BRIGHTNESS_BASE = 90f,
+        BRIGHTNESS_RANGE = 10f,
+        SATURATION = 100f,
+        HUE_WRAP = 360f,
+        MIN_MAGNITUDE_THRESHOLD = 0.01f;
 
-//    private RainbowRenderer() { }
+    public sealed class QualitySettings
+    {
+        public bool UseGlow { get; init; }
+        public bool UseHighlight { get; init; }
+        public bool UseReflection { get; init; }
+        public float GlowIntensity { get; init; }
+        public float GlowRadius { get; init; }
+        public float ReflectionOpacity { get; init; }
+        public float HighlightAlpha { get; init; }
+    }
 
-//    public static RainbowRenderer GetInstance() => _instance.Value;
+    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
+        QualitySettingsPresets
+    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    {
+        [RenderQuality.Low] = new()
+        {
+            UseGlow = false,
+            UseHighlight = false,
+            UseReflection = false,
+            GlowIntensity = 0f,
+            GlowRadius = 0f,
+            ReflectionOpacity = 0f,
+            HighlightAlpha = 0f
+        },
+        [RenderQuality.Medium] = new()
+        {
+            UseGlow = true,
+            UseHighlight = true,
+            UseReflection = false,
+            GlowIntensity = 0.2f,
+            GlowRadius = 3f,
+            ReflectionOpacity = 0.15f,
+            HighlightAlpha = 0.4f
+        },
+        [RenderQuality.High] = new()
+        {
+            UseGlow = true,
+            UseHighlight = true,
+            UseReflection = true,
+            GlowIntensity = 0.3f,
+            GlowRadius = 5f,
+            ReflectionOpacity = 0.2f,
+            HighlightAlpha = 0.5f
+        }
+    };
 
-//    public static class Constants
-//    {
-//        public const float
-//            ALPHA_MULTIPLIER = 1.7f,
-//            SMOOTHING_BASE = 0.3f,
-//            SMOOTHING_OVERLAY = 0.5f,
-//            CORNER_RADIUS = 8f,
-//            GLOW_INTENSITY = 0.3f,
-//            GLOW_RADIUS = 5f,
-//            HIGHLIGHT_ALPHA = 0.5f,
-//            REFLECTION_OPACITY = 0.2f,
-//            REFLECTION_FACTOR = 0.3f,
-//            HUE_START = 240f,
-//            HUE_RANGE = 240f,
-//            GLOW_THRESHOLD = 0.4f,
-//            REFLECTION_THRESHOLD = 0.2f,
-//            HIGHLIGHT_WIDTH_FACTOR = 0.6f,
-//            HIGHLIGHT_X_OFFSET_FACTOR = 0.2f,
-//            HIGHLIGHT_MAX_HEIGHT = 10f,
-//            REFLECTION_HEIGHT_FACTOR = 0.1f,
-//            BRIGHTNESS_BASE = 90f,
-//            BRIGHTNESS_RANGE = 10f,
-//            SATURATION = 100f,
-//            HUE_WRAP = 360f;
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
+    {
+        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+            return;
 
-//        public const byte
-//            GLOW_ALPHA_BYTE = (byte)(GLOW_INTENSITY * 255);
-//    }
+        var (isValid, processedSpectrum) = ProcessSpectrum(
+            spectrum,
+            renderParams.EffectiveBarCount,
+            applyTemporalSmoothing: true);
 
-//    private readonly SKPaint _barPaint = new() { Style = SKPaintStyle.Fill };
-//    private readonly SKPaint _glowPaint = new()
-//    {
-//        Style = SKPaintStyle.Fill,
-//        IsAntialias = true,
-//        ImageFilter = SKImageFilter.CreateBlur(GLOW_RADIUS, GLOW_RADIUS)
-//    };
+        if (!isValid || processedSpectrum == null)
+            return;
 
-//    protected override void OnInitialize()
-//    {
-//        base.OnInitialize();
-//        LogDebug("Initialized");
-//    }
+        var rainbowData = CalculateRainbowData(
+            processedSpectrum,
+            info,
+            renderParams);
 
-//    protected override void OnConfigurationChanged()
-//    {
-//        SetProcessingSmoothingFactor(
-//            IsOverlayActive ? SMOOTHING_OVERLAY : SMOOTHING_BASE);
-//        RequestRedraw();
-//    }
+        if (!ValidateRainbowData(rainbowData))
+            return;
 
-//    protected override void RenderEffect(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        float barWidth,
-//        float barSpacing,
-//        int barCount,
-//        SKPaint paint)
-//    {
-//        var renderParams = CalculateRenderParameters(info, barCount);
-//        float totalBarWidth = renderParams.BarWidth + renderParams.BarSpacing;
-//        float startX = (info.Width - spectrum.Length * totalBarWidth + renderParams.BarSpacing) / 2f;
+        RenderRainbowVisualization(
+            canvas,
+            rainbowData,
+            renderParams,
+            passedInPaint);
+    }
 
-//        for (int i = 0; i < spectrum.Length; i++)
-//        {
-//            float magnitude = Clamp(spectrum[i], 0f, 1f);
-//            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
+    private static RainbowData CalculateRainbowData(
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams)
+    {
+        var bars = new List<BarData>(spectrum.Length);
+        float totalBarWidth = renderParams.BarWidth + renderParams.BarSpacing;
+        float startX = (info.Width - spectrum.Length * totalBarWidth + renderParams.BarSpacing) / 2f;
 
-//            RenderBar(
-//                canvas,
-//                i,
-//                magnitude,
-//                startX,
-//                renderParams,
-//                info.Height
-//            );
-//        }
-//    }
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            float magnitude = spectrum[i];
+            if (magnitude < MIN_MAGNITUDE_THRESHOLD)
+                continue;
 
-//    private void RenderBar(
-//        SKCanvas canvas,
-//        int index,
-//        float magnitude,
-//        float startX,
-//        RenderParameters renderParams,
-//        float canvasHeight)
-//    {
-//        float x = startX + index * (renderParams.BarWidth + renderParams.BarSpacing);
-//        float barHeight = magnitude * canvasHeight;
-//        float y = canvasHeight - barHeight;
+            float x = startX + i * totalBarWidth;
+            float barHeight = magnitude * info.Height;
+            float y = info.Height - barHeight;
 
-//        var barRect = new SKRect(
-//            x,
-//            y,
-//            x + renderParams.BarWidth,
-//            canvasHeight
-//        );
+            var barRect = new SKRect(
+                x,
+                y,
+                x + renderParams.BarWidth,
+                info.Height);
 
-//        if (canvas.QuickReject(barRect)) return;
+            bars.Add(new BarData(
+                Rect: barRect,
+                Magnitude: magnitude,
+                Index: i,
+                Color: GetRainbowColor(magnitude)));
+        }
 
-//        SKColor barColor = GetRainbowColor(magnitude);
-//        byte alpha = (byte)(magnitude * ALPHA_MULTIPLIER * 255);
+        return new RainbowData(
+            Bars: bars,
+            CanvasHeight: info.Height,
+            StartX: startX);
+    }
 
-//        if (UseAdvancedEffects && magnitude > GLOW_THRESHOLD)
-//        {
-//            _glowPaint.Color = barColor.WithAlpha(GLOW_ALPHA_BYTE);
-//            canvas.DrawRoundRect(barRect, CORNER_RADIUS, CORNER_RADIUS, _glowPaint);
-//        }
+    private static bool ValidateRainbowData(RainbowData data) =>
+        data.Bars.Count > 0 && data.CanvasHeight > 0;
 
-//        _barPaint.Color = barColor.WithAlpha(alpha);
-//        canvas.DrawRoundRect(barRect, CORNER_RADIUS, CORNER_RADIUS, _barPaint);
+    private void RenderRainbowVisualization(
+        SKCanvas canvas,
+        RainbowData data,
+        RenderParameters renderParams,
+        SKPaint basePaint)
+    {
+        var settings = CurrentQualitySettings!;
 
-//        if (UseAdvancedEffects && barHeight > CORNER_RADIUS * 2)
-//        {
-//            DrawHighlight(canvas, x, y, renderParams.BarWidth, magnitude);
+        RenderWithOverlay(canvas, () =>
+        {
+            if (UseAdvancedEffects && settings.UseGlow)
+                RenderGlowLayer(canvas, data, settings);
 
-//            if (magnitude > REFLECTION_THRESHOLD)
-//                DrawReflection(
-//                    canvas,
-//                    x,
-//                    canvasHeight,
-//                    renderParams.BarWidth,
-//                    barHeight,
-//                    barColor,
-//                    magnitude
-//                );
-//        }
-//    }
+            RenderMainBars(canvas, data, settings);
 
-//    private void DrawHighlight(
-//        SKCanvas canvas,
-//        float x,
-//        float y,
-//        float barWidth,
-//        float magnitude)
-//    {
-//        using var highlightPaint = GetPaint();
-//        highlightPaint.Color = SKColors.White.WithAlpha(
-//            (byte)(magnitude * HIGHLIGHT_ALPHA * 255)
-//        );
+            if (UseAdvancedEffects && settings.UseReflection)
+                RenderReflectionLayer(canvas, data, renderParams, settings);
+        });
+    }
 
-//        canvas.DrawRect(
-//            x + barWidth * HIGHLIGHT_X_OFFSET_FACTOR,
-//            y,
-//            barWidth * HIGHLIGHT_WIDTH_FACTOR,
-//            MathF.Min(HIGHLIGHT_MAX_HEIGHT, CORNER_RADIUS),
-//            highlightPaint
-//        );
-//    }
+    private void RenderGlowLayer(
+        SKCanvas canvas,
+        RainbowData data,
+        QualitySettings settings)
+    {
+        float glowRadius = GetAdaptiveParameter(settings.GlowRadius, GLOW_RADIUS_OVERLAY);
+        float glowIntensity = GetAdaptiveParameter(settings.GlowIntensity, GLOW_INTENSITY_OVERLAY);
 
-//    private void DrawReflection(
-//        SKCanvas canvas,
-//        float x,
-//        float canvasHeight,
-//        float barWidth,
-//        float barHeight,
-//        SKColor barColor,
-//        float magnitude)
-//    {
-//        using var reflectionPaint = GetPaint();
-//        reflectionPaint.Color = barColor.WithAlpha(
-//            (byte)(magnitude * REFLECTION_OPACITY * 255)
-//        );
-//        reflectionPaint.BlendMode = SKBlendMode.SrcOver;
+        using var blurFilter = SKImageFilter.CreateBlur(glowRadius, glowRadius);
 
-//        float reflectHeight = MathF.Min(
-//            barHeight * REFLECTION_FACTOR,
-//            canvasHeight * REFLECTION_HEIGHT_FACTOR
-//        );
+        foreach (var bar in data.Bars.Where(b => b.Magnitude > GLOW_THRESHOLD))
+        {
+            var glowPaint = CreatePaint(
+                bar.Color.WithAlpha((byte)(glowIntensity * 255)),
+                SKPaintStyle.Fill);
+            glowPaint.ImageFilter = blurFilter;
 
-//        canvas.DrawRect(
-//            x,
-//            canvasHeight,
-//            barWidth,
-//            reflectHeight,
-//            reflectionPaint
-//        );
-//    }
+            try
+            {
+                canvas.DrawRoundRect(bar.Rect, CORNER_RADIUS, CORNER_RADIUS, glowPaint);
+            }
+            finally
+            {
+                ReturnPaint(glowPaint);
+            }
+        }
+    }
 
-//    private static SKColor GetRainbowColor(float normalizedValue)
-//    {
-//        float hue = HUE_START - HUE_RANGE * normalizedValue;
-//        if (hue < 0) hue += HUE_WRAP;
-//        float brightness = BRIGHTNESS_BASE + normalizedValue * BRIGHTNESS_RANGE;
-//        return SKColor.FromHsv(hue, SATURATION, brightness);
-//    }
+    private void RenderMainBars(
+        SKCanvas canvas,
+        RainbowData data,
+        QualitySettings settings)
+    {
+        foreach (var bar in data.Bars)
+        {
+            byte alpha = CalculateAlpha(bar.Magnitude * ALPHA_MULTIPLIER);
+            var barPaint = CreatePaint(bar.Color.WithAlpha(alpha), SKPaintStyle.Fill);
 
-//    protected override void OnDispose()
-//    {
-//        _barPaint?.Dispose();
-//        _glowPaint?.Dispose();
-//        base.OnDispose();
-//        LogDebug("Disposed");
-//    }
-//}
+            try
+            {
+                canvas.DrawRoundRect(bar.Rect, CORNER_RADIUS, CORNER_RADIUS, barPaint);
+
+                if (UseAdvancedEffects && settings.UseHighlight && bar.Rect.Height > CORNER_RADIUS * 2)
+                {
+                    RenderHighlight(canvas, bar, settings);
+                }
+            }
+            finally
+            {
+                ReturnPaint(barPaint);
+            }
+        }
+    }
+
+    private void RenderHighlight(
+        SKCanvas canvas,
+        BarData bar,
+        QualitySettings settings)
+    {
+        float highlightAlpha = GetAdaptiveParameter(settings.HighlightAlpha, HIGHLIGHT_ALPHA_OVERLAY);
+        byte alpha = (byte)(bar.Magnitude * highlightAlpha * 255);
+
+        var highlightPaint = CreatePaint(SKColors.White.WithAlpha(alpha), SKPaintStyle.Fill);
+
+        try
+        {
+            canvas.DrawRect(
+                bar.Rect.Left + bar.Rect.Width * HIGHLIGHT_X_OFFSET_FACTOR,
+                bar.Rect.Top,
+                bar.Rect.Width * HIGHLIGHT_WIDTH_FACTOR,
+                MathF.Min(HIGHLIGHT_MAX_HEIGHT, CORNER_RADIUS),
+                highlightPaint);
+        }
+        finally
+        {
+            ReturnPaint(highlightPaint);
+        }
+    }
+
+    private void RenderReflectionLayer(
+        SKCanvas canvas,
+        RainbowData data,
+        RenderParameters renderParams,
+        QualitySettings settings)
+    {
+        float reflectionOpacity = GetAdaptiveParameter(settings.ReflectionOpacity, REFLECTION_OPACITY_OVERLAY);
+
+        foreach (var bar in data.Bars.Where(b => b.Magnitude > REFLECTION_THRESHOLD))
+        {
+            byte alpha = (byte)(bar.Magnitude * reflectionOpacity * 255);
+            var reflectionPaint = CreatePaint(bar.Color.WithAlpha(alpha), SKPaintStyle.Fill);
+            reflectionPaint.BlendMode = SKBlendMode.SrcOver;
+
+            try
+            {
+                float reflectHeight = MathF.Min(
+                    bar.Rect.Height * REFLECTION_FACTOR,
+                    data.CanvasHeight * REFLECTION_HEIGHT_FACTOR);
+
+                canvas.DrawRect(
+                    bar.Rect.Left,
+                    data.CanvasHeight,
+                    bar.Rect.Width,
+                    reflectHeight,
+                    reflectionPaint);
+            }
+            finally
+            {
+                ReturnPaint(reflectionPaint);
+            }
+        }
+    }
+
+    private float GetAdaptiveParameter(float normalValue, float overlayValue) =>
+        IsOverlayActive ? overlayValue : normalValue;
+
+    private static SKColor GetRainbowColor(float normalizedValue)
+    {
+        float hue = HUE_START - HUE_RANGE * normalizedValue;
+        if (hue < 0) hue += HUE_WRAP;
+        float brightness = BRIGHTNESS_BASE + normalizedValue * BRIGHTNESS_RANGE;
+        return SKColor.FromHsv(hue, SATURATION, brightness);
+    }
+
+    protected override int GetMaxBarsForQuality() => Quality switch
+    {
+        RenderQuality.Low => 100,
+        RenderQuality.Medium => 200,
+        RenderQuality.High => 300,
+        _ => 200
+    };
+
+    protected override void OnQualitySettingsApplied()
+    {
+        base.OnQualitySettingsApplied();
+
+        float smoothingFactor = Quality switch
+        {
+            RenderQuality.Low => 0.4f,
+            RenderQuality.Medium => 0.3f,
+            RenderQuality.High => 0.25f,
+            _ => 0.3f
+        };
+
+        if (IsOverlayActive)
+        {
+            smoothingFactor *= 1.2f;
+        }
+
+        SetProcessingSmoothingFactor(smoothingFactor);
+        RequestRedraw();
+    }
+
+    private record RainbowData(
+        List<BarData> Bars,
+        float CanvasHeight,
+        float StartX);
+
+    private record BarData(
+        SKRect Rect,
+        float Magnitude,
+        int Index,
+        SKColor Color);
+}

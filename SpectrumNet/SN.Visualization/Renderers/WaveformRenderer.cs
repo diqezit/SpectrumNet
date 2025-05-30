@@ -1,371 +1,837 @@
-﻿//#nullable enable
+﻿#nullable enable
 
-//using static System.MathF;
-//using static SpectrumNet.SN.Visualization.Renderers.WaveformRenderer.Constants;
+namespace SpectrumNet.SN.Visualization.Renderers;
 
-//namespace SpectrumNet.SN.Visualization.Renderers;
+public sealed class WaveformRenderer : EffectSpectrumRenderer<WaveformRenderer.QualitySettings>
+{
+    private static readonly Lazy<WaveformRenderer> _instance =
+        new(() => new WaveformRenderer());
 
-//public sealed class WaveformRenderer : EffectSpectrumRenderer
-//{
-//    private const string LogPrefix = nameof(WaveformRenderer);
+    public static WaveformRenderer GetInstance() => _instance.Value;
 
-//    private static readonly Lazy<WaveformRenderer> _instance =
-//        new(() => new WaveformRenderer());
+    private const float
+        MIN_STROKE_WIDTH = 2.5f,
+        MIN_STROKE_WIDTH_OVERLAY = 3.5f,
+        STROKE_WIDTH_DIVISOR_BASE = 80f,
+        STROKE_WIDTH_DIVISOR_OVERLAY_BASE = 60f,
+        CENTER_PROPORTION = 0.5f,
+        OVERLAY_SMOOTHING_FACTOR = 1.25f;
 
-//    private WaveformRenderer() { }
+    private const float
+        FILL_OPACITY_BASE = 0.35f,
+        FILL_OPACITY_OVERLAY_BASE = 0.2f,
+        GRADIENT_FADE_FACTOR_BASE = 0.4f,
+        GRADIENT_FADE_FACTOR_OVERLAY_BASE = 0.3f;
 
-//    public static WaveformRenderer GetInstance() => _instance.Value;
+    private const float
+        ACCENT_THRESHOLD = 0.65f,
+        ACCENT_ALPHA_BASE = 0.6f,
+        ACCENT_ALPHA_OVERLAY_BASE = 0.4f,
+        ACCENT_RADIUS_BASE = 5f,
+        ACCENT_RADIUS_OVERLAY_BASE = 3.5f,
+        ACCENT_GLOW_RADIUS_MULTIPLIER = 2.0f,
+        ACCENT_GLOW_ALPHA_BASE = 0.3f;
 
-//    public static class Constants
-//    {
-//        public const float
-//            SMOOTHING_FACTOR_NORMAL = 0.3f,
-//            SMOOTHING_FACTOR_OVERLAY = 0.5f,
-//            MAX_SPECTRUM_VALUE = 1.5f,
-//            MIN_STROKE_WIDTH = 2.0f,
-//            GLOW_INTENSITY = 0.4f,
-//            HIGHLIGHT_ALPHA = 0.7f,
-//            HIGH_AMPLITUDE_THRESHOLD = 0.6f,
-//            FILL_OPACITY = 0.25f,
-//            GLOW_STROKE_MULTIPLIER = 1.5f,
-//            HIGHLIGHT_STROKE_MULTIPLIER = 0.6f,
-//            STROKE_WIDTH_DIVISOR = 50f,
-//            CENTER_PROPORTION = 0.5f,
-//            CONTROL_POINT_FACTOR = 0.5f;
+    private const float
+        OUTLINE_ALPHA_BASE = 0.15f,
+        OUTLINE_ALPHA_OVERLAY_BASE = 0.1f,
+        OUTLINE_WIDTH_MULTIPLIER_BASE = 1.5f,
+        OUTLINE_WIDTH_MULTIPLIER_OVERLAY_BASE = 1.2f;
 
-//        public const int BATCH_SIZE = 64;
+    private const float
+        MIRROR_ALPHA_BASE = 0.3f;
 
-//        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
-//        {
-//            [RenderQuality.Low] = new(
-//                UseAntiAlias: false,
-//                UseAdvancedEffects: false,
-//                GlowRadius: 1.5f,
-//                SmoothingPasses: 1,
-//                UseCubicCurves: false
-//            ),
-//            [RenderQuality.Medium] = new(
-//                UseAntiAlias: true,
-//                UseAdvancedEffects: true,
-//                GlowRadius: 3.0f,
-//                SmoothingPasses: 2,
-//                UseCubicCurves: true
-//            ),
-//            [RenderQuality.High] = new(
-//                UseAntiAlias: true,
-//                UseAdvancedEffects: true,
-//                GlowRadius: 4.5f,
-//                SmoothingPasses: 3,
-//                UseCubicCurves: true
-//            )
-//        };
+    private const float
+        SHADOW_OFFSET_X = 1.5f,
+        SHADOW_OFFSET_Y = 1.5f,
+        SHADOW_BLUR_RADIUS = 2.0f,
+        SHADOW_ALPHA = 0.25f;
 
-//        public record QualitySettings(
-//            bool UseAntiAlias,
-//            bool UseAdvancedEffects,
-//            float GlowRadius,
-//            int SmoothingPasses,
-//            bool UseCubicCurves
-//        );
-//    }
+    private const int
+        MAX_ACCENT_POINTS_BASE = 30,
+        MAX_ACCENT_POINTS_OVERLAY_BASE = 20;
 
-//    private readonly SKPath _topPath = new();
-//    private readonly SKPath _bottomPath = new();
-//    private readonly SKPath _fillPath = new();
+    private WaveformPaths? _cachedPaths;
 
-//    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
+    public sealed class QualitySettings
+    {
+        public bool UseCubicCurves { get; init; }
+        public bool UseFill { get; init; }
+        public bool UseGradientFill { get; init; }
+        public bool UseAccent { get; init; }
+        public bool UseAccentGlow { get; init; }
+        public bool UseOutline { get; init; }
+        public bool UseMirror { get; init; }
+        public bool UseWaveShadow { get; init; }
+        public float StrokeWidthMultiplier { get; init; }
+        public int CurveDefinition { get; init; }
+        public float FillOpacityMultiplier { get; init; }
+        public float AccentGlowIntensity { get; init; }
+    }
 
-//    protected override void OnInitialize()
-//    {
-//        base.OnInitialize();
-//        SetProcessingSmoothingFactor(SMOOTHING_FACTOR_NORMAL);
-//        LogDebug("Initialized");
-//    }
+    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
+        QualitySettingsPresets
+    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    {
+        [RenderQuality.Low] = new()
+        {
+            UseCubicCurves = false,
+            UseFill = true,
+            UseGradientFill = false,
+            UseAccent = false,
+            UseAccentGlow = false,
+            UseOutline = false,
+            UseMirror = false,
+            UseWaveShadow = false,
+            StrokeWidthMultiplier = 0.9f,
+            CurveDefinition = 1,
+            FillOpacityMultiplier = 0.8f,
+            AccentGlowIntensity = 0.7f
+        },
+        [RenderQuality.Medium] = new()
+        {
+            UseCubicCurves = true,
+            UseFill = true,
+            UseGradientFill = true,
+            UseAccent = true,
+            UseAccentGlow = false,
+            UseOutline = true,
+            UseMirror = false,
+            UseWaveShadow = false,
+            StrokeWidthMultiplier = 1.0f,
+            CurveDefinition = 2,
+            FillOpacityMultiplier = 1.0f,
+            AccentGlowIntensity = 1.0f
+        },
+        [RenderQuality.High] = new()
+        {
+            UseCubicCurves = true,
+            UseFill = true,
+            UseGradientFill = true,
+            UseAccent = true,
+            UseAccentGlow = true,
+            UseOutline = true,
+            UseMirror = true,
+            UseWaveShadow = true,
+            StrokeWidthMultiplier = 1.1f,
+            CurveDefinition = 3,
+            FillOpacityMultiplier = 1.1f,
+            AccentGlowIntensity = 1.2f
+        }
+    };
 
-//    protected override void OnConfigurationChanged()
-//    {
-//        SetProcessingSmoothingFactor(IsOverlayActive
-//            ? SMOOTHING_FACTOR_OVERLAY
-//            : SMOOTHING_FACTOR_NORMAL);
-//    }
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
+    {
+        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+            return;
+        
+        var (isValid, processedSpectrum) = ProcessSpectrum(
+            spectrum,
+            renderParams.EffectiveBarCount,
+            applyTemporalSmoothing: true);
 
-//    protected override void OnQualitySettingsApplied()
-//    {
-//        _currentSettings = QualityPresets[Quality];
-//    }
+        if (!isValid || processedSpectrum == null)
+            return;
+        
+        var waveformData = CalculateWaveformData(
+            processedSpectrum,
+            info,
+            CurrentQualitySettings);
 
-//    protected override void RenderEffect(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        float barWidth,
-//        float barSpacing,
-//        int barCount,
-//        SKPaint paint)
-//    {
-//        float midY = info.Height * CENTER_PROPORTION;
-//        float xStep = info.Width / (float)spectrum.Length;
+        if (!ValidateWaveformData(waveformData))
+            return;
 
-//        UpdateWavePaths(spectrum, midY, xStep);
-//        RenderWaveform(canvas, spectrum, info, paint);
-//    }
+        RenderWaveformVisualization(
+            canvas,
+            waveformData,
+            renderParams,
+            passedInPaint,
+            CurrentQualitySettings);
+    }
 
-//    private void UpdateWavePaths(
-//        float[] spectrum,
-//        float midY,
-//        float xStep)
-//    {
-//        _topPath.Reset();
-//        _bottomPath.Reset();
-//        _fillPath.Reset();
+    private WaveformData CalculateWaveformData(
+        float[] spectrum,
+        SKImageInfo info,
+        QualitySettings settings)
+    {
+        float midY = info.Height * CENTER_PROPORTION;
+        float xStep = info.Width / (float)Math.Max(1, spectrum.Length - 1);
 
-//        if (spectrum.Length == 0) return;
+        var paths = GetOrCreatePaths();
+        UpdateWavePaths(
+            paths,
+            spectrum,
+            midY,
+            xStep,
+            settings);
 
-//        float startX = 0;
-//        float startTopY = midY - spectrum[0] * midY;
-//        float startBottomY = midY + spectrum[0] * midY;
+        List<AccentPoint>? accentPoints = null;
+        if (settings.UseAccent)
+        {
+            accentPoints = FindAccentPoints(
+                spectrum,
+                midY,
+                xStep);
+        }
 
-//        _topPath.MoveTo(startX, startTopY);
-//        _bottomPath.MoveTo(startX, startBottomY);
-//        _fillPath.MoveTo(startX, startTopY);
+        return new WaveformData(
+            Spectrum: spectrum,
+            MidY: midY,
+            XStep: xStep,
+            Info: info,
+            Paths: paths,
+            AccentPoints: accentPoints);
+    }
 
-//        if (_currentSettings.UseCubicCurves)
-//        {
-//            BuildCubicPaths(spectrum, midY, xStep);
-//        }
-//        else
-//        {
-//            BuildLinearPaths(spectrum, midY, xStep);
-//        }
+    private static bool ValidateWaveformData(WaveformData data) =>
+        data.Spectrum.Length > 0 &&
+        data.XStep > 0 &&
+        data.Paths != null;
 
-//        CompleteFillPath(spectrum, midY, xStep);
-//    }
+    private void RenderWaveformVisualization(
+        SKCanvas canvas,
+        WaveformData data,
+        RenderParameters renderParams,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        RenderWithOverlay(canvas, () =>
+        {
+            if (settings.UseFill)
+            {
+                RenderFillLayer(
+                    canvas,
+                    data,
+                    basePaint,
+                    settings);
+            }
 
-//    private void BuildCubicPaths(
-//        float[] spectrum,
-//        float midY,
-//        float xStep)
-//    {
-//        for (int i = 1; i < spectrum.Length; i++)
-//        {
-//            float prevX = (i - 1) * xStep;
-//            float prevTopY = midY - spectrum[i - 1] * midY;
-//            float prevBottomY = midY + spectrum[i - 1] * midY;
+            if (UseAdvancedEffects && settings.UseWaveShadow && !IsOverlayActive)
+            {
+                RenderWaveShadowLayer(
+                    canvas,
+                    data,
+                    basePaint,
+                    settings);
+            }
 
-//            float x = i * xStep;
-//            float topY = midY - spectrum[i] * midY;
-//            float bottomY = midY + spectrum[i] * midY;
+            if (UseAdvancedEffects && settings.UseOutline)
+            {
+                RenderOutlineLayer(
+                    canvas,
+                    data,
+                    basePaint,
+                    settings);
+            }
 
-//            float controlX = (prevX + x) * CONTROL_POINT_FACTOR;
+            RenderMainWaveform(
+                canvas,
+                data,
+                basePaint,
+                settings);
 
-//            _topPath.CubicTo(
-//                controlX, prevTopY,
-//                controlX, topY,
-//                x, topY);
+            if (UseAdvancedEffects && settings.UseMirror && !IsOverlayActive)
+            {
+                RenderMirrorLayer(
+                    canvas,
+                    data,
+                    basePaint,
+                    settings);
+            }
 
-//            _bottomPath.CubicTo(
-//                controlX, prevBottomY,
-//                controlX, bottomY,
-//                x, bottomY);
+            if (UseAdvancedEffects && settings.UseAccent && data.AccentPoints?.Count > 0)
+            {
+                RenderAccentLayer(
+                    canvas,
+                    data,
+                    basePaint,
+                    settings);
+            }
+        });
+    }
 
-//            _fillPath.CubicTo(
-//                controlX, prevTopY,
-//                controlX, topY,
-//                x, topY);
-//        }
-//    }
+    private WaveformPaths GetOrCreatePaths()
+    {
+        _cachedPaths ??= new WaveformPaths(
+            TopPath: new SKPath(),
+            BottomPath: new SKPath(),
+            FillPath: new SKPath());
 
-//    private void BuildLinearPaths(
-//        float[] spectrum,
-//        float midY,
-//        float xStep)
-//    {
-//        for (int i = 1; i < spectrum.Length; i++)
-//        {
-//            float x = i * xStep;
-//            float topY = midY - spectrum[i] * midY;
-//            float bottomY = midY + spectrum[i] * midY;
+        return _cachedPaths;
+    }
 
-//            _topPath.LineTo(x, topY);
-//            _bottomPath.LineTo(x, bottomY);
-//            _fillPath.LineTo(x, topY);
-//        }
-//    }
+    private void UpdateWavePaths(
+        WaveformPaths paths,
+        float[] spectrum,
+        float midY,
+        float xStep,
+        QualitySettings settings)
+    {
+        paths.TopPath.Reset();
+        paths.BottomPath.Reset();
+        paths.FillPath.Reset();
 
-//    private void CompleteFillPath(
-//        float[] spectrum,
-//        float midY,
-//        float xStep)
-//    {
-//        float endX = (spectrum.Length - 1) * xStep;
-//        float endBottomY = midY + spectrum[^1] * midY;
+        if (spectrum.Length < 2)
+        {
+            if (spectrum.Length == 1)
+            {
+                float yPos = midY - spectrum[0] * midY;
+                float xEnd = xStep * (spectrum.Length > 1 ? (spectrum.Length - 1) : 1);
+                paths.TopPath.MoveTo(0, yPos);
+                paths.TopPath.LineTo(xEnd, yPos);
+                paths.BottomPath.MoveTo(0, midY + spectrum[0] * midY);
+                paths.BottomPath.LineTo(xEnd, midY + spectrum[0] * midY);
+            }
+            return;
+        }
 
-//        _fillPath.LineTo(endX, endBottomY);
+        bool useCubic = ShouldUseCubicCurves(settings);
 
-//        if (_currentSettings.UseCubicCurves)
-//        {
-//            for (int i = spectrum.Length - 2; i >= 0; i--)
-//            {
-//                float prevX = (i + 1) * xStep;
-//                float prevBottomY = midY + spectrum[i + 1] * midY;
+        BuildWaveformPaths(
+            paths,
+            spectrum,
+            midY,
+            xStep,
+            useCubic,
+            settings.CurveDefinition);
+    }
 
-//                float x = i * xStep;
-//                float bottomY = midY + spectrum[i] * midY;
+    private bool ShouldUseCubicCurves(QualitySettings settings) =>
+        settings.UseCubicCurves && (!IsOverlayActive || Quality == RenderQuality.High);
 
-//                float controlX = (prevX + x) * CONTROL_POINT_FACTOR;
+    private static void BuildWaveformPaths(
+        WaveformPaths paths,
+        float[] spectrum,
+        float midY,
+        float xStep,
+        bool useCubic,
+        int curveDefinition)
+    {
+        float startX = 0;
+        float startTopY = midY - spectrum[0] * midY;
+        float startBottomY = midY + spectrum[0] * midY;
 
-//                _fillPath.CubicTo(
-//                    controlX, prevBottomY,
-//                    controlX, bottomY,
-//                    x, bottomY);
-//            }
-//        }
-//        else
-//        {
-//            for (int i = spectrum.Length - 2; i >= 0; i--)
-//            {
-//                float x = i * xStep;
-//                float bottomY = midY + spectrum[i] * midY;
-//                _fillPath.LineTo(x, bottomY);
-//            }
-//        }
+        paths.TopPath.MoveTo(startX, startTopY);
+        paths.BottomPath.MoveTo(startX, startBottomY);
+        paths.FillPath.MoveTo(startX, startTopY);
 
-//        _fillPath.Close();
-//    }
+        if (useCubic)
+        {
+            BuildSmoothCubicPaths(
+                paths,
+                spectrum,
+                midY,
+                xStep,
+                curveDefinition);
+        }
+        else
+        {
+            BuildLinearPaths(
+                paths,
+                spectrum,
+                midY,
+                xStep);
+        }
 
-//    private void RenderWaveform(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        SKPaint basePaint)
-//    {
-//        using var wavePaint = CreateWaveformPaint(basePaint, spectrum.Length);
-//        using var fillPaint = CreateFillPaint(basePaint);
+        CompleteFillPath(
+            paths,
+            spectrum,
+            midY,
+            xStep);
+    }
 
-//        canvas.DrawPath(_fillPath, fillPaint);
-//        canvas.DrawPath(_topPath, wavePaint);
-//        canvas.DrawPath(_bottomPath, wavePaint);
+    private static void BuildSmoothCubicPaths(
+        WaveformPaths paths,
+        float[] spectrum,
+        float midY,
+        float xStep,
+        int curveDefinition)
+    {
+        float smoothFactor = curveDefinition switch
+        {
+            1 => 0.5f,
+            2 => 0.33f,
+            3 => 0.25f,
+            _ => 0.33f
+        };
 
-//        if (UseAdvancedEffects && HasHighAmplitude(spectrum))
-//        {
-//            RenderAdvancedEffects(canvas, spectrum, info, basePaint);
-//        }
-//    }
+        for (int i = 0; i < spectrum.Length - 1; i++)
+        {
+            float p0x = (i > 0 ? i - 1 : i) * xStep;
+            float p0TopY = midY - spectrum[i > 0 ? i - 1 : i] * midY;
+            float p0BottomY = midY + spectrum[i > 0 ? i - 1 : i] * midY;
 
-//    private void RenderAdvancedEffects(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        SKPaint basePaint)
-//    {
-//        using var glowPaint = CreateGlowPaint(basePaint, spectrum.Length);
-//        canvas.DrawPath(_topPath, glowPaint);
-//        canvas.DrawPath(_bottomPath, glowPaint);
+            float p1x = i * xStep;
+            float p1TopY = midY - spectrum[i] * midY;
+            float p1BottomY = midY + spectrum[i] * midY;
 
-//        using var highlightPaint = CreateHighlightPaint(spectrum.Length);
+            float p2x = (i + 1) * xStep;
+            float p2TopY = midY - spectrum[i + 1] * midY;
+            float p2BottomY = midY + spectrum[i + 1] * midY;
 
-//        RenderHighlights(
-//            canvas,
-//            spectrum,
-//            info.Height * CENTER_PROPORTION,
-//            info.Width / (float)spectrum.Length,
-//            highlightPaint);
-//    }
+            float p3x = (i < spectrum.Length - 2 ? i + 2 : i + 1) * xStep;
+            float p3TopY = midY - spectrum[i < spectrum.Length - 2 ? i + 2 : i + 1] * midY;
+            float p3BottomY = midY + spectrum[i < spectrum.Length - 2 ? i + 2 : i + 1] * midY;
 
-//    private SKPaint CreateWaveformPaint(
-//        SKPaint basePaint,
-//        int spectrumLength)
-//    {
-//        var paint = GetPaint();
-//        paint.Style = SKPaintStyle.Stroke;
-//        paint.StrokeWidth = MathF.Max(
-//            MIN_STROKE_WIDTH,
-//            STROKE_WIDTH_DIVISOR / spectrumLength);
-//        paint.IsAntialias = UseAntiAlias;
-//        paint.StrokeCap = SKStrokeCap.Round;
-//        paint.StrokeJoin = SKStrokeJoin.Round;
-//        paint.Color = basePaint.Color;
-//        return paint;
-//    }
+            float tension = 0.5f;
 
-//    private SKPaint CreateFillPaint(SKPaint basePaint)
-//    {
-//        var paint = GetPaint();
-//        paint.Style = SKPaintStyle.Fill;
-//        paint.Color = basePaint.Color.WithAlpha(
-//            (byte)(255 * FILL_OPACITY));
-//        paint.IsAntialias = UseAntiAlias;
-//        return paint;
-//    }
+            float cp1TopX = p1x + (p2x - p0x) * tension * smoothFactor;
+            float cp1TopY = p1TopY + (p2TopY - p0TopY) * tension * smoothFactor;
+            float cp2TopX = p2x - (p3x - p1x) * tension * smoothFactor;
+            float cp2TopY = p2TopY - (p3TopY - p1TopY) * tension * smoothFactor;
 
-//    private SKPaint CreateGlowPaint(
-//        SKPaint basePaint,
-//        int spectrumLength)
-//    {
-//        var paint = GetPaint();
-//        paint.Style = SKPaintStyle.Stroke;
-//        paint.StrokeWidth = MathF.Max(
-//            MIN_STROKE_WIDTH,
-//            STROKE_WIDTH_DIVISOR / spectrumLength) * GLOW_STROKE_MULTIPLIER;
-//        paint.Color = basePaint.Color.WithAlpha(
-//            (byte)(255 * GLOW_INTENSITY));
-//        paint.IsAntialias = UseAntiAlias;
-//        paint.MaskFilter = SKMaskFilter.CreateBlur(
-//            SKBlurStyle.Normal,
-//            _currentSettings.GlowRadius);
-//        return paint;
-//    }
+            paths.TopPath.CubicTo(
+                cp1TopX, cp1TopY,
+                cp2TopX, cp2TopY,
+                p2x, p2TopY);
 
-//    private SKPaint CreateHighlightPaint(int spectrumLength)
-//    {
-//        var paint = GetPaint();
-//        paint.Style = SKPaintStyle.Stroke;
-//        paint.StrokeWidth = MathF.Max(
-//            MIN_STROKE_WIDTH,
-//            STROKE_WIDTH_DIVISOR / spectrumLength) * HIGHLIGHT_STROKE_MULTIPLIER;
-//        paint.Color = SKColors.White.WithAlpha(
-//            (byte)(255 * HIGHLIGHT_ALPHA));
-//        paint.IsAntialias = UseAntiAlias;
-//        return paint;
-//    }
+            paths.FillPath.CubicTo(
+                cp1TopX, cp1TopY,
+                cp2TopX, cp2TopY,
+                p2x, p2TopY);
 
-//    private static bool HasHighAmplitude(float[] spectrum)
-//    {
-//        for (int i = 0; i < spectrum.Length; i++)
-//        {
-//            if (spectrum[i] > HIGH_AMPLITUDE_THRESHOLD)
-//                return true;
-//        }
-//        return false;
-//    }
+            float cp1BottomX = p1x + (p2x - p0x) * tension * smoothFactor;
+            float cp1BottomY = p1BottomY + (p2BottomY - p0BottomY) * tension * smoothFactor;
+            float cp2BottomX = p2x - (p3x - p1x) * tension * smoothFactor;
+            float cp2BottomY = p2BottomY - (p3BottomY - p1BottomY) * tension * smoothFactor;
 
-//    private static void RenderHighlights(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        float midY,
-//        float xStep,
-//        SKPaint highlightPaint)
-//    {
-//        for (int i = 0; i < spectrum.Length; i++)
-//        {
-//            if (spectrum[i] > HIGH_AMPLITUDE_THRESHOLD)
-//            {
-//                float x = i * xStep;
-//                float topY = midY - spectrum[i] * midY;
-//                float bottomY = midY + spectrum[i] * midY;
+            paths.BottomPath.CubicTo(
+                cp1BottomX, cp1BottomY,
+                cp2BottomX, cp2BottomY,
+                p2x, p2BottomY);
+        }
+    }
 
-//                canvas.DrawPoint(x, topY, highlightPaint);
-//                canvas.DrawPoint(x, bottomY, highlightPaint);
-//            }
-//        }
-//    }
+    private static void BuildLinearPaths(
+        WaveformPaths paths,
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
+        for (int i = 1; i < spectrum.Length; i++)
+        {
+            float x = i * xStep;
+            float topY = midY - spectrum[i] * midY;
+            float bottomY = midY + spectrum[i] * midY;
 
-//    protected override void OnDispose()
-//    {
-//        _topPath?.Dispose();
-//        _bottomPath?.Dispose();
-//        _fillPath?.Dispose();
-//        base.OnDispose();
-//        LogDebug("Disposed");
-//    }
-//}
+            paths.TopPath.LineTo(x, topY);
+            paths.BottomPath.LineTo(x, bottomY);
+            paths.FillPath.LineTo(x, topY);
+        }
+    }
+
+    private static void CompleteFillPath(
+        WaveformPaths paths,
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
+        if (spectrum.Length == 0) return;
+
+        float endX = (spectrum.Length - 1) * xStep;
+        float endBottomY = midY + spectrum[^1] * midY;
+
+        paths.FillPath.LineTo(endX, endBottomY);
+
+        for (int i = spectrum.Length - 2; i >= 0; i--)
+        {
+            float x = i * xStep;
+            float bottomY = midY + spectrum[i] * midY;
+            paths.FillPath.LineTo(x, bottomY);
+        }
+        paths.FillPath.Close();
+    }
+
+    private List<AccentPoint> FindAccentPoints(
+        float[] spectrum,
+        float midY,
+        float xStep)
+    {
+        var points = new List<AccentPoint>();
+        int maxPoints = GetAdaptiveParameter(
+            MAX_ACCENT_POINTS_BASE,
+            MAX_ACCENT_POINTS_OVERLAY_BASE);
+
+        for (int i = 0; i < spectrum.Length && points.Count < maxPoints; i++)
+        {
+            if (spectrum[i] > ACCENT_THRESHOLD)
+            {
+                points.Add(new AccentPoint(
+                    X: i * xStep,
+                    TopY: midY - spectrum[i] * midY,
+                    BottomY: midY + spectrum[i] * midY,
+                    Intensity: spectrum[i]));
+            }
+        }
+        return points;
+    }
+
+    private void RenderFillLayer(
+        SKCanvas canvas,
+        WaveformData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        float fillOpacity = GetAdaptiveParameter(
+            FILL_OPACITY_BASE,
+            FILL_OPACITY_OVERLAY_BASE) * settings.FillOpacityMultiplier;
+
+        SKPaint fillPaint;
+
+        if (settings.UseGradientFill)
+        {
+            float fadeFactor = GetAdaptiveParameter(
+                GRADIENT_FADE_FACTOR_BASE,
+                GRADIENT_FADE_FACTOR_OVERLAY_BASE);
+
+            using var gradient = SKShader.CreateLinearGradient(
+                new SKPoint(0, data.MidY - data.MidY * 0.8f),
+                new SKPoint(0, data.MidY + data.MidY * 0.8f),
+                [
+                    basePaint.Color.WithAlpha((byte)Clamp(255 * fillOpacity, 0, 255)),
+                    basePaint.Color.WithAlpha((byte)Clamp(255 * fillOpacity * fadeFactor, 0, 255))
+                ],
+                CreateUniformGradientPositions(2),
+                SKShaderTileMode.Clamp);
+
+            fillPaint = CreatePaint(
+                basePaint.Color,
+                SKPaintStyle.Fill,
+                gradient);
+        }
+        else
+        {
+            fillPaint = CreatePaint(
+                basePaint.Color.WithAlpha((byte)Clamp(255 * fillOpacity, 0, 255)),
+                SKPaintStyle.Fill);
+        }
+
+        try
+        {
+            canvas.DrawPath(data.Paths.FillPath, fillPaint);
+        }
+        finally
+        {
+            ReturnPaint(fillPaint);
+        }
+    }
+
+    private void RenderWaveShadowLayer(
+        SKCanvas canvas,
+        WaveformData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        var shadowPaint = CreatePaint(
+            SKColors.Black.WithAlpha((byte)(255 * SHADOW_ALPHA)),
+            SKPaintStyle.Stroke);
+
+        shadowPaint.StrokeWidth = CalculateStrokeWidth(
+            data.Spectrum.Length,
+            settings) * 1.1f;
+
+        shadowPaint.StrokeCap = SKStrokeCap.Round;
+        shadowPaint.StrokeJoin = SKStrokeJoin.Round;
+
+        using (var blurFilter = SKMaskFilter.CreateBlur(
+            SKBlurStyle.Normal,
+            SHADOW_BLUR_RADIUS))
+        {
+            shadowPaint.MaskFilter = blurFilter;
+        }
+
+        try
+        {
+            canvas.Save();
+            canvas.Translate(SHADOW_OFFSET_X, SHADOW_OFFSET_Y);
+            canvas.DrawPath(data.Paths.TopPath, shadowPaint);
+            canvas.DrawPath(data.Paths.BottomPath, shadowPaint);
+            canvas.Restore();
+        }
+        finally
+        {
+            ReturnPaint(shadowPaint);
+        }
+    }
+
+    private void RenderOutlineLayer(
+        SKCanvas canvas,
+        WaveformData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        float outlineAlpha = GetAdaptiveParameter(
+            OUTLINE_ALPHA_BASE,
+            OUTLINE_ALPHA_OVERLAY_BASE);
+
+        float outlineMultiplier = GetAdaptiveParameter(
+            OUTLINE_WIDTH_MULTIPLIER_BASE,
+            OUTLINE_WIDTH_MULTIPLIER_OVERLAY_BASE);
+
+        var outlinePaint = CreatePaint(
+            basePaint.Color.WithAlpha((byte)Clamp(255 * outlineAlpha, 0, 255)),
+            SKPaintStyle.Stroke);
+
+        outlinePaint.StrokeWidth = CalculateStrokeWidth(
+            data.Spectrum.Length,
+            settings) * outlineMultiplier;
+
+        outlinePaint.StrokeCap = SKStrokeCap.Round;
+        outlinePaint.StrokeJoin = SKStrokeJoin.Round;
+
+        try
+        {
+            canvas.DrawPath(data.Paths.TopPath, outlinePaint);
+            canvas.DrawPath(data.Paths.BottomPath, outlinePaint);
+        }
+        finally
+        {
+            ReturnPaint(outlinePaint);
+        }
+    }
+
+    private void RenderMainWaveform(
+        SKCanvas canvas,
+        WaveformData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        var wavePaint = CreatePaint(
+            basePaint.Color,
+            SKPaintStyle.Stroke);
+
+        wavePaint.StrokeWidth = CalculateStrokeWidth(
+            data.Spectrum.Length,
+            settings);
+
+        wavePaint.StrokeCap = SKStrokeCap.Round;
+        wavePaint.StrokeJoin = SKStrokeJoin.Round;
+
+        try
+        {
+            canvas.DrawPath(data.Paths.TopPath, wavePaint);
+            canvas.DrawPath(data.Paths.BottomPath, wavePaint);
+        }
+        finally
+        {
+            ReturnPaint(wavePaint);
+        }
+    }
+
+    private void RenderMirrorLayer(
+        SKCanvas canvas,
+        WaveformData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        var mirrorPaint = CreatePaint(
+            basePaint.Color.WithAlpha((byte)Clamp(255 * MIRROR_ALPHA_BASE, 0, 255)),
+            SKPaintStyle.Stroke);
+
+        mirrorPaint.StrokeWidth = CalculateStrokeWidth(
+            data.Spectrum.Length,
+            settings) * 0.8f;
+
+        mirrorPaint.StrokeCap = SKStrokeCap.Round;
+        mirrorPaint.StrokeJoin = SKStrokeJoin.Round;
+
+        try
+        {
+            canvas.Save();
+            canvas.Scale(1, -1, 0, data.MidY);
+            canvas.Translate(0, data.Info.Height * 0.01f);
+
+            canvas.DrawPath(data.Paths.TopPath, mirrorPaint);
+            canvas.DrawPath(data.Paths.BottomPath, mirrorPaint);
+
+            canvas.Restore();
+        }
+        finally
+        {
+            ReturnPaint(mirrorPaint);
+        }
+    }
+
+    private void RenderAccentLayer(
+        SKCanvas canvas,
+        WaveformData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        if (data.AccentPoints == null || data.AccentPoints.Count == 0)
+            return;
+        
+        float accentAlpha = GetAdaptiveParameter(
+            ACCENT_ALPHA_BASE,
+            ACCENT_ALPHA_OVERLAY_BASE);
+        float radiusBase = GetAdaptiveParameter(
+            ACCENT_RADIUS_BASE,
+            ACCENT_RADIUS_OVERLAY_BASE);
+
+        if (settings.UseAccentGlow && UseAdvancedEffects)
+        {
+            RenderAccentGlow(
+                canvas,
+                data,
+                basePaint,
+                radiusBase,
+                settings);
+        }
+
+        var accentPaint = CreatePaint(
+            basePaint.Color.WithAlpha((byte)Clamp(255 * accentAlpha, 0, 255)),
+            SKPaintStyle.Fill);
+
+        try
+        {
+            foreach (var point in data.AccentPoints)
+            {
+                float radius = radiusBase * Normalize(point.Intensity, ACCENT_THRESHOLD, 1f);
+
+                canvas.DrawCircle(
+                    point.X,
+                    point.TopY,
+                    radius,
+                    accentPaint);
+
+                canvas.DrawCircle(
+                    point.X,
+                    point.BottomY,
+                    radius,
+                    accentPaint);
+            }
+        }
+        finally
+        {
+            ReturnPaint(accentPaint);
+        }
+    }
+
+    private void RenderAccentGlow(
+        SKCanvas canvas,
+        WaveformData data,
+        SKPaint basePaint,
+        float radiusBase,
+        QualitySettings settings)
+    {
+        if (data.AccentPoints == null)
+            return;
+        
+        float glowAlpha = ACCENT_GLOW_ALPHA_BASE * settings.AccentGlowIntensity;
+
+        var glowPaint = CreatePaint(
+            basePaint.Color.WithAlpha((byte)Clamp(255 * glowAlpha, 0, 255)),
+            SKPaintStyle.Fill);
+
+        using (var blurFilter = SKMaskFilter.CreateBlur(
+            SKBlurStyle.Normal,
+            radiusBase * ACCENT_GLOW_RADIUS_MULTIPLIER * 0.5f))
+        {
+            glowPaint.MaskFilter = blurFilter;
+        }
+
+        try
+        {
+            foreach (var point in data.AccentPoints)
+            {
+                float dynamicRadius = radiusBase * Normalize(point.Intensity, ACCENT_THRESHOLD, 1f);
+                float glowEffectRadius = dynamicRadius * ACCENT_GLOW_RADIUS_MULTIPLIER;
+
+                canvas.DrawCircle(
+                    point.X,
+                    point.TopY,
+                    glowEffectRadius,
+                    glowPaint);
+                canvas.DrawCircle(
+                    point.X,
+                    point.BottomY,
+                    glowEffectRadius,
+                    glowPaint);
+            }
+        }
+        finally
+        {
+            ReturnPaint(glowPaint);
+        }
+    }
+
+    private float GetAdaptiveParameter(float normalValue, float overlayValue) =>
+        IsOverlayActive ? overlayValue : normalValue;
+
+    private int GetAdaptiveParameter(int normalValue, int overlayValue) =>
+        IsOverlayActive ? overlayValue : normalValue;
+
+    private float CalculateStrokeWidth(int spectrumLength, QualitySettings settings)
+    {
+        float minWidth = GetAdaptiveParameter(
+            MIN_STROKE_WIDTH,
+            MIN_STROKE_WIDTH_OVERLAY);
+
+        float divisor = GetAdaptiveParameter(
+            STROKE_WIDTH_DIVISOR_BASE,
+            STROKE_WIDTH_DIVISOR_OVERLAY_BASE);
+
+        float baseWidth = MathF.Max(minWidth, divisor / Max(1, spectrumLength));
+        return baseWidth * settings.StrokeWidthMultiplier;
+    }
+
+    protected override int GetMaxBarsForQuality() => Quality switch
+    {
+        RenderQuality.Low => 128,
+        RenderQuality.Medium => 256,
+        RenderQuality.High => 512,
+        _ => 256
+    };
+
+    protected override void OnQualitySettingsApplied()
+    {
+        base.OnQualitySettingsApplied();
+
+        float smoothingFactor = Quality switch
+        {
+            RenderQuality.Low => 0.35f,
+            RenderQuality.Medium => 0.28f,
+            RenderQuality.High => 0.22f,
+            _ => 0.28f
+        };
+
+        if (IsOverlayActive) smoothingFactor *= OVERLAY_SMOOTHING_FACTOR;
+
+        SetProcessingSmoothingFactor(smoothingFactor);
+        _cachedPaths = null;
+        RequestRedraw();
+    }
+
+    protected override void OnDispose()
+    {
+        _cachedPaths?.TopPath?.Dispose();
+        _cachedPaths?.BottomPath?.Dispose();
+        _cachedPaths?.FillPath?.Dispose();
+        _cachedPaths = null;
+        base.OnDispose();
+    }
+
+    private record WaveformData(
+        float[] Spectrum,
+        float MidY,
+        float XStep,
+        SKImageInfo Info,
+        WaveformPaths Paths,
+        List<AccentPoint>? AccentPoints);
+
+    private record WaveformPaths(
+        SKPath TopPath,
+        SKPath BottomPath,
+        SKPath FillPath);
+
+    private record AccentPoint(
+        float X,
+        float TopY,
+        float BottomY,
+        float Intensity);
+}

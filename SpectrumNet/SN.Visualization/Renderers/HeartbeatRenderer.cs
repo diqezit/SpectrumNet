@@ -1,445 +1,565 @@
-﻿//#nullable enable
+﻿#nullable enable
 
-//using static SpectrumNet.SN.Visualization.Renderers.HeartbeatRenderer.Constants;
-//using static System.MathF;
+namespace SpectrumNet.SN.Visualization.Renderers;
 
-//namespace SpectrumNet.SN.Visualization.Renderers;
+public sealed class HeartbeatRenderer : EffectSpectrumRenderer<HeartbeatRenderer.QualitySettings>
+{
+    private static readonly Lazy<HeartbeatRenderer> _instance =
+        new(() => new HeartbeatRenderer());
 
-//public sealed class HeartbeatRenderer : EffectSpectrumRenderer
-//{
-//    private const string LogPrefix = nameof(HeartbeatRenderer);
+    public static HeartbeatRenderer GetInstance() => _instance.Value;
 
-//    private static readonly Lazy<HeartbeatRenderer> _instance =
-//        new(() => new HeartbeatRenderer());
+    private const float
+        MIN_MAGNITUDE_THRESHOLD = 0.01f,
+        PULSE_FREQUENCY = 4f,
+        PULSE_AMPLITUDE = 0.15f,
+        HEART_SCALE = 1.3f,
+        RADIUS_START_FACTOR = 0.02f,
+        RADIUS_END_FACTOR = 0.95f,
+        GLOW_INTENSITY = 0.6f,
+        GLOW_INTENSITY_OVERLAY = 0.4f,
+        ANIMATION_SPEED = 0.02f,
+        SIZE_MULTIPLIER = 20f,
+        SIZE_MULTIPLIER_OVERLAY = 15f,
+        Y_OFFSET_FACTOR = 0.05f,
+        SPIRAL_ROTATIONS = 6f,
+        SPIRAL_EXPANSION_RATE = 0.25f,
+        MIN_HEART_SPACING = 1.5f,
+        SIZE_DECAY_FACTOR = 0.3f,
+        EXPONENTIAL_PROGRESS_POWER = 0.85f,
+        MAGNITUDE_RADIUS_FACTOR = 0.15f,
+        SIMPLIFIED_HEART_RADIUS_FACTOR = 0.5f,
+        FALLBACK_MAGNITUDE_BASE = 0.3f,
+        FALLBACK_MAGNITUDE_VARIATION = 0.1f;
 
-//    private HeartbeatRenderer() { }
+    private const int FALLBACK_MAGNITUDE_MODULO = 3;
 
-//    public static HeartbeatRenderer GetInstance() => _instance.Value;
+    private float _animationTime;
+    private readonly List<HeartElement> _heartCache = [];
 
-//    public static class Constants
-//    {
-//        public const float
-//            MIN_MAGNITUDE_THRESHOLD = 0.05f,
-//            GLOW_INTENSITY = 0.2f,
-//            GLOW_ALPHA_DIVISOR = 3f,
-//            ALPHA_MULTIPLIER = 1.5f,
-//            PULSE_FREQUENCY = 6f,
-//            HEART_BASE_SCALE = 0.6f,
-//            HEART_SIZE_REDUCTION_FACTOR = 0.3f,
-//            HEART_SPACING_REDUCTION_FACTOR = 0.1f,
-//            HEART_SIZE_SPACING_FACTOR = 0.5f,
-//            HEART_SPACING_SPACING_FACTOR = 0.2f,
-//            MIN_HEART_SIZE = 10f,
-//            MIN_HEART_SPACING = 5f,
-//            CANVAS_SIZE_DIVISOR = 4f,
-//            HEART_RADIUS_FACTOR = 0.5f,
-//            HEART_PULSE_AMPLITUDE = 0.1f,
-//            HEART_Y_OFFSET_FACTOR = 0.2f,
-//            HEART_RADIUS_VARIATION = 0.3f,
-//            SIMPLIFICATION_RADIUS_FACTOR = 0.5f,
-//            CENTER_PROPORTION = 0.5f,
-//            RADIUS_PROPORTION = 1f / 3f;
+    public sealed class QualitySettings
+    {
+        public bool UseGlow { get; init; }
+        public bool UseSmoothing { get; init; }
+        public float GlowRadius { get; init; }
+        public byte GlowAlpha { get; init; }
+        public float PulseIntensity { get; init; }
+        public int SimplificationLevel { get; init; }
+    }
 
-//        public const int
-//            MIN_HEART_COUNT = 4,
-//            MAX_HEART_COUNT = 32,
-//            HEART_COUNT_DIVISOR = 2;
+    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
+        QualitySettingsPresets
+    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    {
+        [RenderQuality.Low] = new()
+        {
+            UseGlow = false,
+            UseSmoothing = false,
+            GlowRadius = 0f,
+            GlowAlpha = 0,
+            PulseIntensity = 0.5f,
+            SimplificationLevel = 2
+        },
+        [RenderQuality.Medium] = new()
+        {
+            UseGlow = true,
+            UseSmoothing = true,
+            GlowRadius = 8f,
+            GlowAlpha = 25,
+            PulseIntensity = 0.75f,
+            SimplificationLevel = 1
+        },
+        [RenderQuality.High] = new()
+        {
+            UseGlow = true,
+            UseSmoothing = true,
+            GlowRadius = 12f,
+            GlowAlpha = 35,
+            PulseIntensity = 1f,
+            SimplificationLevel = 0
+        }
+    };
 
-//        public static readonly (float Size, float Spacing, int Count)
-//            DEFAULT_CONFIG = (60f, 15f, 8),
-//            OVERLAY_CONFIG = (30f, 8f, 12);
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
+    {
+        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+            return;
 
-//        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
-//        {
-//            [RenderQuality.Low] = new(
-//                HeartSides: 8,
-//                UseGlow: false,
-//                SimplificationFactor: 0.5f
-//            ),
-//            [RenderQuality.Medium] = new(
-//                HeartSides: 12,
-//                UseGlow: true,
-//                SimplificationFactor: 0.2f
-//            ),
-//            [RenderQuality.High] = new(
-//                HeartSides: 0,
-//                UseGlow: true,
-//                SimplificationFactor: 0f
-//            )
-//        };
+        var (isValid, processedSpectrum) = ProcessSpectrum(
+            spectrum,
+            renderParams.EffectiveBarCount,
+            applyTemporalSmoothing: true);
 
-//        public record QualitySettings(
-//            int HeartSides,
-//            bool UseGlow,
-//            float SimplificationFactor
-//        );
-//    }
+        if (!isValid || processedSpectrum == null)
+            return;
 
-//    private float _heartSize;
-//    private float _heartSpacing;
-//    private int _heartCount;
-//    private float[] _cosValues = [];
-//    private float[] _sinValues = [];
-//    private SKPicture? _cachedHeartPicture;
-//    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
+        var heartData = CalculateHeartData(
+            processedSpectrum,
+            info,
+            renderParams);
 
-//    protected override void OnInitialize()
-//    {
-//        base.OnInitialize();
-//        UpdateConfiguration(DEFAULT_CONFIG);
-//        PrecomputeTrigValues();
-//        LogDebug("Initialized");
-//    }
+        if (!ValidateHeartData(heartData))
+            return;
 
-//    protected override void OnConfigurationChanged()
-//    {
-//        base.OnConfigurationChanged();
-//        SetProcessingSmoothingFactor(IsOverlayActive ? 0.7f : 0.3f);
-//        UpdateConfiguration(IsOverlayActive ? OVERLAY_CONFIG : DEFAULT_CONFIG);
-//        InvalidateCachedResources();
-//    }
+        RenderHeartVisualization(
+            canvas,
+            heartData,
+            renderParams,
+            passedInPaint);
+    }
 
-//    protected override void OnQualitySettingsApplied()
-//    {
-//        _currentSettings = QualityPresets[Quality];
-//        InvalidateCachedResources();
-//        LogDebug($"Quality changed to {Quality}");
-//    }
+    private HeartData CalculateHeartData(
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams)
+    {
+        UpdateAnimation();
 
-//    protected override void RenderEffect(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        float barWidth,
-//        float barSpacing,
-//        int barCount,
-//        SKPaint paint)
-//    {
-//        AdjustConfiguration(barCount, barSpacing, info.Width, info.Height);
-//        int actualHeartCount = Min(spectrum.Length, _heartCount);
+        var center = new SKPoint(info.Width * 0.5f, info.Height * 0.5f);
+        float maxRadius = Min(info.Width, info.Height) * 0.48f;
+        float sizeMultiplier = GetAdaptiveSizeMultiplier();
 
-//        RenderFrame(canvas, spectrum, info, paint, actualHeartCount);
-//    }
+        _heartCache.Clear();
+        int heartCount = renderParams.EffectiveBarCount;
 
-//    private void UpdateConfiguration(
-//        (float Size, float Spacing, int Count) config)
-//    {
-//        (_heartSize, _heartSpacing, _heartCount) = config;
-//        PrecomputeTrigValues();
-//        InvalidateCachedResources();
-//    }
+        for (int i = 0; i < heartCount; i++)
+        {
+            float magnitude = GetMagnitudeForIndex(i, spectrum);
 
-//    private void AdjustConfiguration(
-//        int barCount,
-//        float barSpacing,
-//        int canvasWidth,
-//        int canvasHeight)
-//    {
-//        _heartSize = MathF.Max(
-//            MIN_HEART_SIZE,
-//            DEFAULT_CONFIG.Size - barCount * HEART_SIZE_REDUCTION_FACTOR +
-//            barSpacing * HEART_SIZE_SPACING_FACTOR);
+            if (ShouldSkipHeart(i, magnitude, spectrum.Length))
+                continue;
 
-//        _heartSpacing = MathF.Max(
-//            MIN_HEART_SPACING,
-//            DEFAULT_CONFIG.Spacing - barCount * HEART_SPACING_REDUCTION_FACTOR +
-//            barSpacing * HEART_SPACING_SPACING_FACTOR);
+            var element = CreateSpiralHeartElement(
+                i,
+                heartCount,
+                magnitude,
+                center,
+                maxRadius,
+                sizeMultiplier);
 
-//        _heartCount = Clamp(
-//            barCount / HEART_COUNT_DIVISOR,
-//            MIN_HEART_COUNT,
-//            MAX_HEART_COUNT);
+            if (IsHeartSpacingSufficient(element))
+                _heartCache.Add(element);
+        }
 
-//        float maxSize = Min(canvasWidth, canvasHeight) / CANVAS_SIZE_DIVISOR;
-//        if (_heartSize > maxSize)
-//        {
-//            _heartSize = maxSize;
-//        }
+        return new HeartData(
+            Hearts: [.. _heartCache],
+            Center: center,
+            AnimationPhase: _animationTime);
+    }
 
-//        if (_cosValues.Length != _heartCount || _sinValues.Length != _heartCount)
-//        {
-//            PrecomputeTrigValues();
-//        }
-//    }
+    private static bool ValidateHeartData(HeartData data) =>
+        data.Hearts.Count > 0;
 
-//    private void PrecomputeTrigValues()
-//    {
-//        _cosValues = new float[_heartCount];
-//        _sinValues = new float[_heartCount];
-//        float angleStep = 2 * MathF.PI / _heartCount;
+    private void RenderHeartVisualization(
+        SKCanvas canvas,
+        HeartData data,
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
+    {
+        var settings = CurrentQualitySettings!;
 
-//        for (int i = 0; i < _heartCount; i++)
-//        {
-//            float angle = i * angleStep;
-//            _cosValues[i] = Cos(angle);
-//            _sinValues[i] = Sin(angle);
-//        }
-//    }
+        RenderWithOverlay(canvas, () =>
+        {
+            if (UseAdvancedEffects && settings.UseGlow)
+                RenderGlowLayer(canvas, data, passedInPaint, settings);
 
-//    private void RenderFrame(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        SKPaint basePaint,
-//        int actualHeartCount)
-//    {
-//        float centerX = info.Width * CENTER_PROPORTION;
-//        float centerY = info.Height * CENTER_PROPORTION;
-//        float radius = Min(info.Width, info.Height) * RADIUS_PROPORTION;
+            RenderHeartLayer(canvas, data, passedInPaint, settings);
+        });
+    }
 
-//        var heartPath = GetPath();
-//        try
-//        {
-//            EnsureCachedHeartPicture(heartPath, basePaint);
+    private void UpdateAnimation()
+    {
+        _animationTime += ANIMATION_SPEED;
+        if (_animationTime > MathF.Tau)
+            _animationTime -= MathF.Tau;
+    }
 
-//            using var heartPaint = CreateStandardPaint(basePaint.Color);
-//            using var glowPaint = UseAdvancedEffects && _currentSettings.UseGlow
-//                ? CreateStandardPaint(basePaint.Color)
-//                : null;
+    private static float GetMagnitudeForIndex(int index, float[] spectrum)
+    {
+        if (index < spectrum.Length)
+            return spectrum[index];
 
-//            DrawHearts(
-//                canvas,
-//                spectrum,
-//                centerX,
-//                centerY,
-//                radius,
-//                heartPath,
-//                heartPaint,
-//                glowPaint,
-//                basePaint,
-//                actualHeartCount);
-//        }
-//        finally
-//        {
-//            ReturnPath(heartPath);
-//        }
-//    }
+        return FALLBACK_MAGNITUDE_BASE +
+               (index % FALLBACK_MAGNITUDE_MODULO) * FALLBACK_MAGNITUDE_VARIATION;
+    }
 
-//    private void EnsureCachedHeartPicture(SKPath heartPath, SKPaint basePaint)
-//    {
-//        if (_cachedHeartPicture != null) return;
+    private static bool ShouldSkipHeart(int index, float magnitude, int spectrumLength) =>
+        magnitude < MIN_MAGNITUDE_THRESHOLD && index < spectrumLength;
 
-//        var recorder = new SKPictureRecorder();
-//        var recordCanvas = recorder.BeginRecording(new SKRect(-1, -1, 1, 1));
-//        CreateHeartPath(heartPath, 0, 0, 1f);
-//        recordCanvas.DrawPath(heartPath, basePaint);
-//        _cachedHeartPicture = recorder.EndRecording();
-//        heartPath.Reset();
-//    }
+    private HeartElement CreateSpiralHeartElement(
+        int index,
+        int totalCount,
+        float magnitude,
+        SKPoint center,
+        float maxRadius,
+        float sizeMultiplier)
+    {
+        float progress = (float)index / totalCount;
 
-//    private static void CreateHeartPath(SKPath path, float x, float y, float size)
-//    {
-//        path.Reset();
-//        path.MoveTo(x, y + size / 2);
-//        path.CubicTo(
-//            x - size, y,
-//            x - size, y - size / 2,
-//            x, y - size);
-//        path.CubicTo(
-//            x + size, y - size / 2,
-//            x + size, y,
-//            x, y + size / 2);
-//        path.Close();
-//    }
+        var spiralPosition = CalculateSpiralPosition(
+            progress,
+            center,
+            maxRadius,
+            magnitude);
 
-//    private void DrawHearts(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        float centerX,
-//        float centerY,
-//        float radius,
-//        SKPath heartPath,
-//        SKPaint heartPaint,
-//        SKPaint? glowPaint,
-//        SKPaint basePaint,
-//        int actualHeartCount)
-//    {
-//        float time = GetAnimationTime();
+        var (sizeBase, pulseFactor) = CalculateHeartSize(
+            progress,
+            magnitude,
+            sizeMultiplier,
+            spiralPosition.Angle);
 
-//        for (int i = 0; i < actualHeartCount && i < spectrum.Length; i++)
-//        {
-//            float magnitude = spectrum[i];
-//            if (magnitude < MIN_MAGNITUDE_THRESHOLD) continue;
+        return new HeartElement(
+            Position: spiralPosition.Position,
+            Size: sizeBase,
+            Magnitude: magnitude,
+            Angle: spiralPosition.Angle,
+            PulseFactor: pulseFactor);
+    }
 
-//            DrawSingleHeart(
-//                canvas,
-//                magnitude,
-//                i,
-//                centerX,
-//                centerY,
-//                radius,
-//                heartPath,
-//                heartPaint,
-//                glowPaint,
-//                basePaint,
-//                time);
-//        }
-//    }
+    private static SpiralPosition CalculateSpiralPosition(
+        float progress,
+        SKPoint center,
+        float maxRadius,
+        float magnitude)
+    {
+        float angle = CalculateSpiralAngle(progress);
+        float radius = CalculateSpiralRadius(progress, maxRadius, magnitude);
 
-//    private void DrawSingleHeart(
-//        SKCanvas canvas,
-//        float magnitude,
-//        int index,
-//        float centerX,
-//        float centerY,
-//        float radius,
-//        SKPath heartPath,
-//        SKPaint heartPaint,
-//        SKPaint? glowPaint,
-//        SKPaint basePaint,
-//        float time)
-//    {
-//        if (index >= _cosValues.Length || index >= _sinValues.Length) return;
+        var position = CalculatePositionFromPolar(center, radius, angle);
 
-//        float x = centerX + _cosValues[index] * radius *
-//            (1 - magnitude * HEART_RADIUS_FACTOR);
-//        float y = centerY + _sinValues[index] * radius *
-//            (1 - magnitude * HEART_RADIUS_FACTOR);
-//        float heartSize = _heartSize * magnitude * HEART_BASE_SCALE *
-//            (Sin(time * PULSE_FREQUENCY) * HEART_PULSE_AMPLITUDE + 1f);
+        return new SpiralPosition(
+            Position: position,
+            Angle: angle);
+    }
 
-//        SKRect heartBounds = new(
-//            x - heartSize,
-//            y - heartSize,
-//            x + heartSize,
-//            y + heartSize);
+    private static float CalculateSpiralAngle(float progress) =>
+        progress * MathF.Tau * SPIRAL_ROTATIONS;
 
-//        if (!IsRenderAreaVisible(canvas, heartBounds.Left, heartBounds.Top,
-//            heartBounds.Width, heartBounds.Height)) return;
+    private static float CalculateSpiralRadius(
+        float progress,
+        float maxRadius,
+        float magnitude)
+    {
+        float radiusStart = maxRadius * RADIUS_START_FACTOR;
+        float radiusEnd = maxRadius * RADIUS_END_FACTOR;
 
-//        byte alpha = (byte)MathF.Min(magnitude * ALPHA_MULTIPLIER * 255f, 255f);
-//        heartPaint.Color = basePaint.Color.WithAlpha(alpha);
+        float exponentialProgress = MathF.Pow(progress, EXPONENTIAL_PROGRESS_POWER);
+        float baseRadius = Lerp(radiusStart, radiusEnd, exponentialProgress);
 
-//        if (_currentSettings.HeartSides > 0)
-//        {
-//            DrawSimplifiedHeart(
-//                canvas,
-//                x,
-//                y,
-//                heartSize,
-//                heartPath,
-//                heartPaint,
-//                glowPaint,
-//                alpha);
-//        }
-//        else
-//        {
-//            DrawCachedHeart(
-//                canvas,
-//                x,
-//                y,
-//                heartSize,
-//                heartPaint,
-//                glowPaint,
-//                alpha);
-//        }
-//    }
+        baseRadius += progress * maxRadius * SPIRAL_EXPANSION_RATE;
+        baseRadius *= (1f + magnitude * MAGNITUDE_RADIUS_FACTOR);
 
-//    private void DrawSimplifiedHeart(
-//        SKCanvas canvas,
-//        float x,
-//        float y,
-//        float size,
-//        SKPath path,
-//        SKPaint heartPaint,
-//        SKPaint? glowPaint,
-//        byte alpha)
-//    {
-//        CreatePolygonHeartPath(path, x, y, size);
+        return baseRadius;
+    }
 
-//        if (glowPaint != null)
-//        {
-//            glowPaint.Color = heartPaint.Color.WithAlpha(
-//                (byte)(alpha / GLOW_ALPHA_DIVISOR));
-//            glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
-//                SKBlurStyle.Normal,
-//                size * GLOW_INTENSITY * (1 - _currentSettings.SimplificationFactor));
-//            canvas.DrawPath(path, glowPaint);
-//        }
+    private static SKPoint CalculatePositionFromPolar(
+        SKPoint center,
+        float radius,
+        float angle)
+    {
+        float x = radius * MathF.Cos(angle);
+        float y = radius * MathF.Sin(angle) * (1f - Y_OFFSET_FACTOR);
 
-//        canvas.DrawPath(path, heartPaint);
-//    }
+        return new SKPoint(center.X + x, center.Y + y);
+    }
 
-//    private void CreatePolygonHeartPath(
-//        SKPath path,
-//        float x,
-//        float y,
-//        float size)
-//    {
-//        path.Reset();
-//        float angleStep = 2 * MathF.PI / _currentSettings.HeartSides;
-//        path.MoveTo(x, y + size / 2);
+    private (float Size, float PulseFactor) CalculateHeartSize(
+        float progress,
+        float magnitude,
+        float sizeMultiplier,
+        float angle)
+    {
+        float pulseFactor = CalculatePulseFactor(magnitude, angle);
+        float sizeDecay = CalculateSizeDecay(progress);
+        float size = magnitude * sizeMultiplier * pulseFactor * sizeDecay;
 
-//        for (int i = 0; i < _currentSettings.HeartSides; i++)
-//        {
-//            float angle = i * angleStep;
-//            float radius = size * (1 + HEART_RADIUS_VARIATION * Sin(angle * 2)) *
-//                (1 - _currentSettings.SimplificationFactor * SIMPLIFICATION_RADIUS_FACTOR);
-//            float px = x + Cos(angle) * radius;
-//            float py = y + Sin(angle) * radius - size * HEART_Y_OFFSET_FACTOR;
-//            path.LineTo(px, py);
-//        }
+        return (size, pulseFactor);
+    }
 
-//        path.Close();
-//    }
+    private float CalculatePulseFactor(float magnitude, float angle)
+    {
+        float pulsePhase = _animationTime * PULSE_FREQUENCY + angle;
+        return 1f + MathF.Sin(pulsePhase) * PULSE_AMPLITUDE * magnitude;
+    }
 
-//    private void DrawCachedHeart(
-//        SKCanvas canvas,
-//        float x,
-//        float y,
-//        float size,
-//        SKPaint heartPaint,
-//        SKPaint? glowPaint,
-//        byte alpha)
-//    {
-//        if (_cachedHeartPicture == null) return;
+    private static float CalculateSizeDecay(float progress) =>
+        1f - progress * SIZE_DECAY_FACTOR;
 
-//        canvas.Save();
-//        try
-//        {
-//            canvas.Translate(x, y);
-//            canvas.Scale(size, size);
+    private bool IsHeartSpacingSufficient(HeartElement newHeart)
+    {
+        if (_heartCache.Count == 0)
+            return true;
 
-//            if (glowPaint != null)
-//            {
-//                glowPaint.Color = heartPaint.Color.WithAlpha(
-//                    (byte)(alpha / GLOW_ALPHA_DIVISOR));
-//                glowPaint.MaskFilter = SKMaskFilter.CreateBlur(
-//                    SKBlurStyle.Normal,
-//                    size * GLOW_INTENSITY);
-//                canvas.DrawPicture(_cachedHeartPicture, glowPaint);
-//            }
+        float minSpacing = newHeart.Size * MIN_HEART_SPACING;
 
-//            canvas.DrawPicture(_cachedHeartPicture, heartPaint);
-//        }
-//        finally
-//        {
-//            canvas.Restore();
-//        }
-//    }
+        return !_heartCache.Any(existingHeart =>
+            CalculateDistance(newHeart.Position, existingHeart.Position) < minSpacing);
+    }
 
-//    private void InvalidateCachedResources()
-//    {
-//        _cachedHeartPicture?.Dispose();
-//        _cachedHeartPicture = null;
-//        RequestRedraw();
-//    }
+    private static float CalculateDistance(SKPoint p1, SKPoint p2)
+    {
+        float dx = p2.X - p1.X;
+        float dy = p2.Y - p1.Y;
+        return MathF.Sqrt(dx * dx + dy * dy);
+    }
 
-//    protected override void CleanupUnusedResources()
-//    {
-//        if (_cachedHeartPicture != null && !RequiresRedraw())
-//        {
-//            _cachedHeartPicture.Dispose();
-//            _cachedHeartPicture = null;
-//        }
-//    }
+    private void RenderGlowLayer(
+        SKCanvas canvas,
+        HeartData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        if (settings.GlowAlpha == 0) return;
 
-//    protected override void OnDispose()
-//    {
-//        _cachedHeartPicture?.Dispose();
-//        _cachedHeartPicture = null;
-//        _cosValues = _sinValues = [];
-//        base.OnDispose();
-//        LogDebug("Disposed");
-//    }
-//}
+        float glowIntensity = GetAdaptiveGlowIntensity();
+        var glowColor = basePaint.Color.WithAlpha(settings.GlowAlpha);
+        var glowPaint = CreatePaint(glowColor, SKPaintStyle.Fill);
+
+        using var blurFilter = SKMaskFilter.CreateBlur(
+            SKBlurStyle.Normal,
+            settings.GlowRadius);
+        glowPaint.MaskFilter = blurFilter;
+
+        try
+        {
+            RenderGlowHearts(canvas, data.Hearts, glowIntensity, glowPaint, settings);
+        }
+        finally
+        {
+            ReturnPaint(glowPaint);
+        }
+    }
+
+    private void RenderGlowHearts(
+        SKCanvas canvas,
+        List<HeartElement> hearts,
+        float glowIntensity,
+        SKPaint glowPaint,
+        QualitySettings settings)
+    {
+        foreach (var heart in hearts)
+        {
+            float glowSize = heart.Size * (1f + glowIntensity);
+            RenderHeart(canvas, heart.Position, glowSize, glowPaint, settings);
+        }
+    }
+
+    private void RenderHeartLayer(
+        SKCanvas canvas,
+        HeartData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        var heartPaint = CreatePaint(basePaint.Color, SKPaintStyle.Fill);
+
+        try
+        {
+            RenderHearts(canvas, data.Hearts, basePaint.Color, heartPaint, settings);
+        }
+        finally
+        {
+            ReturnPaint(heartPaint);
+        }
+    }
+
+    private void RenderHearts(
+        SKCanvas canvas,
+        List<HeartElement> hearts,
+        SKColor baseColor,
+        SKPaint heartPaint,
+        QualitySettings settings)
+    {
+        foreach (var heart in hearts)
+        {
+            byte alpha = CalculateAlpha(heart.Magnitude);
+            heartPaint.Color = baseColor.WithAlpha(alpha);
+
+            RenderHeart(canvas, heart.Position, heart.Size, heartPaint, settings);
+        }
+    }
+
+    private void RenderHeart(
+        SKCanvas canvas,
+        SKPoint position,
+        float size,
+        SKPaint paint,
+        QualitySettings settings)
+    {
+        if (settings.SimplificationLevel > 0)
+        {
+            RenderSimplifiedHeart(
+                canvas,
+                position,
+                size,
+                paint,
+                settings.SimplificationLevel);
+        }
+        else
+        {
+            RenderDetailedHeart(canvas, position, size, paint);
+        }
+    }
+
+    private void RenderSimplifiedHeart(
+        SKCanvas canvas,
+        SKPoint position,
+        float size,
+        SKPaint paint,
+        int simplificationLevel)
+    {
+        float radius = size * SIMPLIFIED_HEART_RADIUS_FACTOR;
+
+        if (simplificationLevel >= 2)
+        {
+            canvas.DrawCircle(position, radius, paint);
+        }
+        else
+        {
+            RenderPath(canvas, path =>
+            {
+                CreateSimplifiedHeartPath(path, position, radius);
+            }, paint);
+        }
+    }
+
+    private void RenderDetailedHeart(
+        SKCanvas canvas,
+        SKPoint position,
+        float size,
+        SKPaint paint)
+    {
+        RenderPath(canvas, path =>
+        {
+            CreateDetailedHeartPath(path, position, size);
+        }, paint);
+    }
+
+    private static void CreateSimplifiedHeartPath(
+        SKPath path,
+        SKPoint center,
+        float radius)
+    {
+        float x = center.X;
+        float y = center.Y;
+        float r = radius;
+
+        path.MoveTo(x, y + r);
+        path.CubicTo(
+            x - r, y,
+            x - r, y - r * 0.5f,
+            x, y);
+        path.CubicTo(
+            x + r, y - r * 0.5f,
+            x + r, y,
+            x, y + r);
+        path.Close();
+    }
+
+    private static void CreateDetailedHeartPath(
+        SKPath path,
+        SKPoint center,
+        float size)
+    {
+        float scale = size * HEART_SCALE;
+        float x = center.X;
+        float y = center.Y;
+
+        path.MoveTo(x, y + 0.3f * scale);
+
+        path.CubicTo(
+            x - 0.5f * scale, y - 0.3f * scale,
+            x - 1f * scale, y + 0.1f * scale,
+            x - 1f * scale, y + 0.5f * scale);
+
+        path.CubicTo(
+            x - 1f * scale, y + 0.9f * scale,
+            x - 0.5f * scale, y + 1.3f * scale,
+            x, y + 1.8f * scale);
+
+        path.CubicTo(
+            x + 0.5f * scale, y + 1.3f * scale,
+            x + 1f * scale, y + 0.9f * scale,
+            x + 1f * scale, y + 0.5f * scale);
+
+        path.CubicTo(
+            x + 1f * scale, y + 0.1f * scale,
+            x + 0.5f * scale, y - 0.3f * scale,
+            x, y + 0.3f * scale);
+
+        path.Close();
+    }
+
+    private float GetAdaptiveSizeMultiplier() =>
+        IsOverlayActive ? SIZE_MULTIPLIER_OVERLAY : SIZE_MULTIPLIER;
+
+    private float GetAdaptiveGlowIntensity() =>
+        IsOverlayActive ? GLOW_INTENSITY_OVERLAY : GLOW_INTENSITY;
+
+    protected override int GetMaxBarsForQuality() => Quality switch
+    {
+        RenderQuality.Low => 100,
+        RenderQuality.Medium => 200,
+        RenderQuality.High => 300,
+        _ => 200
+    };
+
+    protected override void OnQualitySettingsApplied()
+    {
+        base.OnQualitySettingsApplied();
+
+        float smoothingFactor = Quality switch
+        {
+            RenderQuality.Low => 0.4f,
+            RenderQuality.Medium => 0.3f,
+            RenderQuality.High => 0.25f,
+            _ => 0.3f
+        };
+
+        if (IsOverlayActive)
+            smoothingFactor *= 1.2f;
+
+        SetProcessingSmoothingFactor(smoothingFactor);
+
+        _heartCache.Clear();
+
+        RequestRedraw();
+    }
+
+    protected override void OnDispose()
+    {
+        _heartCache.Clear();
+        _animationTime = 0f;
+        base.OnDispose();
+    }
+
+    protected override void CleanupUnusedResources()
+    {
+        base.CleanupUnusedResources();
+
+        if (_heartCache.Count > GetMaxBarsForQuality() * 2)
+        {
+            _heartCache.Clear();
+        }
+    }
+
+    private record HeartData(
+        List<HeartElement> Hearts,
+        SKPoint Center,
+        float AnimationPhase);
+
+    private record HeartElement(
+        SKPoint Position,
+        float Size,
+        float Magnitude,
+        float Angle,
+        float PulseFactor);
+
+    private record SpiralPosition(
+        SKPoint Position,
+        float Angle);
+}
