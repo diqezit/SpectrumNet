@@ -1,425 +1,428 @@
-﻿//#nullable enable
-
-//using static System.MathF;
-//using static SpectrumNet.SN.Visualization.Renderers.SphereRenderer.Constants;
-
-//namespace SpectrumNet.SN.Visualization.Renderers;
-
-//public sealed class SphereRenderer : EffectSpectrumRenderer
-//{
-//    private const string LogPrefix = nameof(SphereRenderer);
-
-//    private static readonly Lazy<SphereRenderer> _instance =
-//        new(() => new SphereRenderer());
-
-//    private SphereRenderer() { }
-
-//    public static SphereRenderer GetInstance() => _instance.Value;
-
-//    public static class Constants
-//    {
-//        public const float
-//            MIN_MAGNITUDE = 0.01f,
-//            MAX_INTENSITY_MULTIPLIER = 3f,
-//            MIN_ALPHA = 0.1f,
-//            PI_OVER_180 = MathF.PI / 180f,
-//            DEFAULT_RADIUS = 40f,
-//            MIN_RADIUS = 1.0f,
-//            DEFAULT_SPACING = 10f,
-//            ALPHA_THRESHOLD = 0.1f,
-//            MIN_CIRCLE_SIZE = 2f,
-//            SPACING_FACTOR = 0.2f;
-
-//        public const int
-//            DEFAULT_COUNT = 8,
-//            BATCH_SIZE = 128,
-//            MAX_ALPHA_GROUPS = 5,
-//            MIN_SPHERE_COUNT = 4,
-//            MAX_SPHERE_COUNT = 64;
-
-//        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
-//        {
-//            [RenderQuality.Low] = new(
-//                SmoothingFactor: 0.1f,
-//                UseAntialiasing: false,
-//                UseAdvancedEffects: false,
-//                SphereSegments: 0
-//            ),
-//            [RenderQuality.Medium] = new(
-//                SmoothingFactor: 0.2f,
-//                UseAntialiasing: true,
-//                UseAdvancedEffects: true,
-//                SphereSegments: 0
-//            ),
-//            [RenderQuality.High] = new(
-//                SmoothingFactor: 0.3f,
-//                UseAntialiasing: true,
-//                UseAdvancedEffects: true,
-//                SphereSegments: 8
-//            )
-//        };
-
-//        public static readonly Dictionary<bool, SphereConfig> ConfigPresets = new()
-//        {
-//            [false] = new(DEFAULT_RADIUS, DEFAULT_SPACING, DEFAULT_COUNT),
-//            [true] = new(20f, 5f, 16)
-//        };
-
-//        public record QualitySettings(
-//            float SmoothingFactor,
-//            bool UseAntialiasing,
-//            bool UseAdvancedEffects,
-//            int SphereSegments
-//        );
-
-//        public record SphereConfig(
-//            float Radius,
-//            float Spacing,
-//            int Count
-//        );
-//    }
-
-//    private static readonly SKColor[] GradientColors = [SKColors.White, SKColors.Transparent];
-//    private static readonly float[] GradientPositions = [0.0f, 1.0f];
-
-//    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
-//    private SphereConfig _currentConfig = ConfigPresets[false];
-
-//    private float[]? _cosValues;
-//    private float[]? _sinValues;
-//    private float[]? _currentAlphas;
-//    private float[]? _processedSpectrum;
-
-//    protected override void OnInitialize()
-//    {
-//        UpdateConfiguration(ConfigPresets[false]);
-//        LogDebug("Initialized");
-//    }
-
-//    protected override void OnConfigurationChanged()
-//    {
-//        UpdateConfiguration(ConfigPresets[IsOverlayActive]);
-//        RequestRedraw();
-//    }
-
-//    protected override void OnQualitySettingsApplied()
-//    {
-//        _currentSettings = QualityPresets[Quality];
-//        SetProcessingSmoothingFactor(_currentSettings.SmoothingFactor);
-//        LogDebug($"Quality changed to {Quality}");
-//    }
-
-//    private void UpdateConfiguration(SphereConfig config)
-//    {
-//        _currentConfig = config with { Radius = MathF.Max(MIN_RADIUS, config.Radius) };
-//        EnsureArrayCapacity(ref _currentAlphas, _currentConfig.Count);
-//        PrecomputeTrigValues();
-//    }
-
-//    protected override void RenderEffect(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        float barWidth,
-//        float barSpacing,
-//        int barCount,
-//        SKPaint paint)
-//    {
-//        RenderSphereEffect(canvas, spectrum, info, barSpacing, barCount, paint);
-//    }
-
-//    private void RenderSphereEffect(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        float barSpacing,
-//        int barCount,
-//        SKPaint paint)
-//    {
-//        AdjustConfigurationForCanvas(barCount, barSpacing, info.Width, info.Height);
-//        ProcessSpectrumData(spectrum);
-//        RenderSpheres(canvas, spectrum, info, paint);
-//    }
-
-//    private void AdjustConfigurationForCanvas(
-//        int barCount,
-//        float barSpacing,
-//        int canvasWidth,
-//        int canvasHeight)
-//    {
-//        float radius = MathF.Max(5f, DEFAULT_RADIUS - barCount * 0.2f + barSpacing * 0.5f);
-//        float spacing = MathF.Max(2f, DEFAULT_SPACING - barCount * 0.1f + barSpacing * 0.3f);
-//        int count = Clamp(barCount / 2, MIN_SPHERE_COUNT, MAX_SPHERE_COUNT);
-
-//        float maxRadius = MathF.Min(canvasWidth, canvasHeight) / 2f - (radius + spacing);
-//        radius = MathF.Max(MIN_RADIUS, MathF.Min(radius, maxRadius));
-
-//        _currentConfig = new SphereConfig(radius, spacing, count);
-//        EnsureArrayCapacity(ref _currentAlphas, count);
-//        PrecomputeTrigValues();
-//    }
-
-//    private void ProcessSpectrumData(float[] spectrum)
-//    {
-//        int sphereCount = (int)MathF.Min(spectrum.Length, _currentConfig.Count);
-//        EnsureProcessedSpectrumCapacity(sphereCount);
-
-//        if (_processedSpectrum == null) return;
-
-//        ScaleSpectrum(spectrum, _processedSpectrum, sphereCount);
-//        UpdateAlphas(sphereCount);
-//    }
-
-//    private void RenderSpheres(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        SKPaint paint)
-//    {
-//        if (_processedSpectrum == null || !AreArraysValid()) return;
-
-//        int sphereCount = (int)MathF.Min(spectrum.Length, _currentConfig.Count);
-//        float centerX = info.Width / 2f;
-//        float centerY = info.Height / 2f;
-//        float maxRadius = info.Height / 2f - (_currentConfig.Radius + _currentConfig.Spacing);
-
-//        var alphaGroups = GetAlphaGroups(sphereCount);
-
-//        if (_currentSettings.SphereSegments > 0 && UseAdvancedEffects)
-//            RenderHighQualitySpheres(canvas, _processedSpectrum, alphaGroups, paint, centerX, centerY, maxRadius);
-//        else
-//            RenderSimpleSpheres(canvas, _processedSpectrum, alphaGroups, paint, centerX, centerY, maxRadius);
-//    }
-
-//    private void RenderHighQualitySpheres(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        AlphaGroup[] alphaGroups,
-//        SKPaint paint,
-//        float centerX,
-//        float centerY,
-//        float maxRadius)
-//    {
-//        foreach (var group in alphaGroups)
-//        {
-//            if (group.End <= group.Start) continue;
-
-//            using var groupPaint = CreateHighQualityPaint(paint, group.Alpha);
-//            RenderSphereGroup(canvas, spectrum, group, groupPaint, centerX, centerY, maxRadius);
-//        }
-//    }
-
-//    private void RenderSimpleSpheres(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        AlphaGroup[] alphaGroups,
-//        SKPaint paint,
-//        float centerX,
-//        float centerY,
-//        float maxRadius)
-//    {
-//        using var spherePaint = CreateStandardPaint(paint.Color);
-
-//        foreach (var group in alphaGroups)
-//        {
-//            if (group.End <= group.Start) continue;
-
-//            spherePaint.Color = paint.Color.WithAlpha((byte)(255 * group.Alpha));
-//            RenderSphereGroup(canvas, spectrum, group, spherePaint, centerX, centerY, maxRadius);
-//        }
-//    }
-
-//    private void RenderSphereGroup(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        AlphaGroup group,
-//        SKPaint paint,
-//        float centerX,
-//        float centerY,
-//        float maxRadius)
-//    {
-//        for (int i = group.Start; i < group.End; i++)
-//        {
-//            if (spectrum[i] < MIN_MAGNITUDE) continue;
-
-//            var position = CalculateSpherePosition(i, centerX, centerY, maxRadius);
-//            float size = CalculateSphereSize(spectrum[i]);
-
-//            if (IsRenderAreaVisible(canvas, position.x, position.y, size * 2, size * 2))
-//                DrawSphere(canvas, position, size, paint);
-//        }
-//    }
-
-//    private (float x, float y) CalculateSpherePosition(
-//        int index,
-//        float centerX,
-//        float centerY,
-//        float radius)
-//    {
-//        if (_cosValues == null || _sinValues == null) return (centerX, centerY);
-//        return (centerX + _cosValues[index] * radius, centerY + _sinValues[index] * radius);
-//    }
-
-//    private float CalculateSphereSize(float magnitude) =>
-//        MathF.Max(magnitude * _currentConfig.Radius, MIN_CIRCLE_SIZE) + _currentConfig.Spacing * SPACING_FACTOR;
-
-//    private static void DrawSphere(
-//        SKCanvas canvas,
-//        (float x, float y) position,
-//        float size,
-//        SKPaint paint)
-//    {
-//        if (paint.Shader != null)
-//        {
-//            canvas.Save();
-//            canvas.Translate(position.x, position.y);
-//            canvas.Scale(size);
-//            canvas.DrawCircle(0, 0, 1.0f, paint);
-//            canvas.Restore();
-//        }
-//        else
-//        {
-//            canvas.DrawCircle(position.x, position.y, size, paint);
-//        }
-//    }
-
-//    private SKPaint CreateHighQualityPaint(SKPaint basePaint, float alpha)
-//    {
-//        var centerColor = basePaint.Color.WithAlpha((byte)(255 * alpha));
-//        var edgeColor = basePaint.Color.WithAlpha(0);
-
-//        var colors = new[] { centerColor, edgeColor };
-
-//        var shader = SKShader.CreateRadialGradient(
-//            new SKPoint(0, 0),
-//            1.0f,
-//            colors,
-//            GradientPositions,
-//            SKShaderTileMode.Clamp
-//        );
-
-//        var paint = GetPaint();
-//        paint.Shader = shader;
-//        paint.IsAntialias = UseAntiAlias;
-//        return paint;
-//    }
-
-//    private AlphaGroup[] GetAlphaGroups(int length)
-//    {
-//        if (_currentAlphas == null || length == 0) return [];
-
-//        var groups = new List<AlphaGroup>(MAX_ALPHA_GROUPS);
-//        int currentStart = 0;
-//        float currentAlpha = _currentAlphas[0];
-
-//        for (int i = 1; i < length; i++)
-//        {
-//            if (MathF.Abs(_currentAlphas[i] - currentAlpha) > ALPHA_THRESHOLD ||
-//                groups.Count >= MAX_ALPHA_GROUPS - 1)
-//            {
-//                groups.Add(new AlphaGroup(currentStart, i, currentAlpha));
-//                currentStart = i;
-//                currentAlpha = _currentAlphas[i];
-//            }
-//        }
-
-//        groups.Add(new AlphaGroup(currentStart, length, currentAlpha));
-//        return [.. groups];
-//    }
-
-//    private void UpdateAlphas(int length)
-//    {
-//        if (_processedSpectrum == null || _currentAlphas == null) return;
-
-//        for (int i = 0; i < length; i++)
-//        {
-//            float targetAlpha = MathF.Max(MIN_ALPHA, _processedSpectrum[i] * MAX_INTENSITY_MULTIPLIER);
-//            _currentAlphas[i] += (targetAlpha - _currentAlphas[i]) * _currentSettings.SmoothingFactor;
-//        }
-//    }
-
-//    private void PrecomputeTrigValues()
-//    {
-//        int count = _currentConfig.Count;
-//        EnsureArrayCapacity(ref _cosValues, count);
-//        EnsureArrayCapacity(ref _sinValues, count);
-
-//        float angleStep = 360f / count * PI_OVER_180;
-
-//        for (int i = 0; i < count; i++)
-//        {
-//            float angle = i * angleStep;
-//            _cosValues![i] = Cos(angle);
-//            _sinValues![i] = Sin(angle);
-//        }
-//    }
-
-//    private bool AreArraysValid()
-//    {
-//        int required = _currentConfig.Count;
-//        return _cosValues?.Length >= required &&
-//               _sinValues?.Length >= required &&
-//               _currentAlphas?.Length >= required;
-//    }
-
-//    private static void EnsureArrayCapacity<T>(ref T[]? array, int requiredSize) where T : struct
-//    {
-//        if (array == null || array.Length < requiredSize)
-//            array = new T[requiredSize];
-//    }
-
-//    private void EnsureProcessedSpectrumCapacity(int requiredSize)
-//    {
-//        if (_processedSpectrum?.Length >= requiredSize) return;
-
-//        if (_processedSpectrum != null)
-//            ArrayPool<float>.Shared.Return(_processedSpectrum);
-
-//        _processedSpectrum = ArrayPool<float>.Shared.Rent(requiredSize);
-//    }
-
-//    private static void ScaleSpectrum(float[] source, float[] target, int targetCount)
-//    {
-//        float blockSize = source.Length / (float)targetCount;
-
-//        for (int i = 0; i < targetCount; i++)
-//        {
-//            int start = (int)(blockSize * i);
-//            int end = (int)MathF.Min((int)(blockSize * (i + 1)), source.Length);
-
-//            target[i] = end > start ? CalculateAverage(source, start, end) : 0;
-//        }
-//    }
-
-//    private static float CalculateAverage(float[] source, int start, int end)
-//    {
-//        float sum = 0;
-//        for (int i = start; i < end; i++)
-//            sum += source[i];
-//        return sum / (end - start);
-//    }
-
-//    protected override void CleanupUnusedResources()
-//    {
-//        if (_processedSpectrum != null && _processedSpectrum.All(v => v < MIN_MAGNITUDE))
-//        {
-//            ArrayPool<float>.Shared.Return(_processedSpectrum);
-//            _processedSpectrum = null;
-//        }
-//    }
-
-//    protected override void OnDispose()
-//    {
-//        if (_processedSpectrum != null)
-//            ArrayPool<float>.Shared.Return(_processedSpectrum);
-
-//        _cosValues = null;
-//        _sinValues = null;
-//        _currentAlphas = null;
-//        _processedSpectrum = null;
-
-//        LogDebug("Disposed");
-//    }
-
-//    private readonly record struct AlphaGroup(int Start, int End, float Alpha);
-//}
+﻿#nullable enable
+
+namespace SpectrumNet.SN.Visualization.Renderers;
+
+public sealed class SphereRenderer : EffectSpectrumRenderer<SphereRenderer.QualitySettings>
+{
+    private static readonly Lazy<SphereRenderer> _instance =
+        new(() => new SphereRenderer());
+
+    public static SphereRenderer GetInstance() => _instance.Value;
+
+    private const float MIN_MAGNITUDE = 0.01f,
+        MAX_INTENSITY_MULTIPLIER = 3f,
+        MIN_ALPHA = 0.1f,
+        PI_OVER_180 = MathF.PI / 180f,
+        DEFAULT_RADIUS = 40f,
+        DEFAULT_RADIUS_OVERLAY = 20f,
+        MIN_RADIUS = 1.0f,
+        DEFAULT_SPACING = 10f,
+        DEFAULT_SPACING_OVERLAY = 5f,
+        ALPHA_THRESHOLD = 0.1f,
+        MIN_CIRCLE_SIZE = 2f,
+        SPACING_FACTOR = 0.2f,
+        RADIUS_REDUCTION_FACTOR = 0.2f,
+        SPACING_REDUCTION_FACTOR = 0.1f,
+        RADIUS_SPACING_FACTOR = 0.5f,
+        SPACING_SPACING_FACTOR = 0.3f;
+
+    private const int DEFAULT_COUNT = 8,
+        DEFAULT_COUNT_OVERLAY = 16,
+        MAX_ALPHA_GROUPS = 5,
+        MIN_SPHERE_COUNT = 4,
+        MAX_SPHERE_COUNT = 64,
+        SPHERE_COUNT_DIVISOR = 2;
+
+    private static readonly float[] _gradientPositions = [0.0f, 1.0f];
+
+    private float _currentRadius = DEFAULT_RADIUS;
+    private float _currentSpacing = DEFAULT_SPACING;
+    private int _currentCount = DEFAULT_COUNT;
+    private float[]? _cosValues;
+    private float[]? _sinValues;
+    private float[]? _currentAlphas;
+
+    public sealed class QualitySettings
+    {
+        public bool UseGradient { get; init; }
+        public bool UseHighQualityBlending { get; init; }
+        public float SmoothingFactor { get; init; }
+        public float ResponseSpeed { get; init; }
+    }
+
+    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
+        QualitySettingsPresets
+    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    {
+        [RenderQuality.Low] = new()
+        {
+            UseGradient = false,
+            UseHighQualityBlending = false,
+            SmoothingFactor = 0.1f,
+            ResponseSpeed = 0.15f
+        },
+        [RenderQuality.Medium] = new()
+        {
+            UseGradient = true,
+            UseHighQualityBlending = false,
+            SmoothingFactor = 0.2f,
+            ResponseSpeed = 0.2f
+        },
+        [RenderQuality.High] = new()
+        {
+            UseGradient = true,
+            UseHighQualityBlending = true,
+            SmoothingFactor = 0.3f,
+            ResponseSpeed = 0.25f
+        }
+    };
+
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
+    {
+        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+            return;
+
+        var (isValid, processedSpectrum) = ProcessSpectrum(
+            spectrum,
+            renderParams.EffectiveBarCount,
+            applyTemporalSmoothing: true);
+
+        if (!isValid || processedSpectrum == null)
+            return;
+
+        var sphereData = CalculateSphereData(
+            processedSpectrum,
+            info,
+            renderParams);
+
+        if (!ValidateSphereData(sphereData))
+            return;
+
+        RenderSphereVisualization(
+            canvas,
+            sphereData,
+            passedInPaint);
+    }
+
+    private SphereRenderData CalculateSphereData(
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams)
+    {
+        UpdateConfiguration(renderParams.EffectiveBarCount, renderParams.BarSpacing, info);
+        UpdateAlphas(spectrum);
+
+        int sphereCount = Min(spectrum.Length, _currentCount);
+        float maxRadius = CalculateMaxRadius(info.Width, info.Height);
+
+        var alphaGroups = CalculateAlphaGroups(sphereCount);
+
+        return new SphereRenderData(
+            Spectrum: spectrum,
+            CenterX: info.Width / 2f,
+            CenterY: info.Height / 2f,
+            MaxRadius: maxRadius,
+            SphereCount: sphereCount,
+            AlphaGroups: alphaGroups);
+    }
+
+    private bool ValidateSphereData(SphereRenderData data)
+    {
+        return data.SphereCount > 0 &&
+               data.MaxRadius > 0 &&
+               data.AlphaGroups.Length > 0 &&
+               _cosValues != null &&
+               _sinValues != null &&
+               _currentAlphas != null;
+    }
+
+    private void RenderSphereVisualization(
+        SKCanvas canvas,
+        SphereRenderData data,
+        SKPaint basePaint)
+    {
+        var settings = CurrentQualitySettings!;
+
+        RenderWithOverlay(canvas, () =>
+        {
+            if (UseAdvancedEffects && settings.UseGradient)
+                RenderGradientSpheres(canvas, data, basePaint, settings);
+            else
+                RenderSolidSpheres(canvas, data, basePaint);
+        });
+    }
+
+    private void RenderGradientSpheres(
+        SKCanvas canvas,
+        SphereRenderData data,
+        SKPaint basePaint,
+        QualitySettings settings)
+    {
+        foreach (var group in data.AlphaGroups)
+        {
+            if (group.Alpha < MIN_ALPHA) continue;
+
+            using var shader = CreateRadialGradientShader(basePaint.Color, group.Alpha);
+            var spherePaint = CreatePaint(basePaint.Color, SKPaintStyle.Fill, shader);
+
+            try
+            {
+                RenderSphereGroup(canvas, data, group, spherePaint, useTransform: true);
+            }
+            finally
+            {
+                ReturnPaint(spherePaint);
+            }
+        }
+    }
+
+    private void RenderSolidSpheres(
+        SKCanvas canvas,
+        SphereRenderData data,
+        SKPaint basePaint)
+    {
+        var spherePaint = CreatePaint(basePaint.Color, SKPaintStyle.Fill);
+
+        try
+        {
+            foreach (var group in data.AlphaGroups)
+            {
+                if (group.Alpha < MIN_ALPHA) continue;
+
+                spherePaint.Color = basePaint.Color.WithAlpha(CalculateAlpha(group.Alpha));
+                RenderSphereGroup(canvas, data, group, spherePaint, useTransform: false);
+            }
+        }
+        finally
+        {
+            ReturnPaint(spherePaint);
+        }
+    }
+
+    private void RenderSphereGroup(
+        SKCanvas canvas,
+        SphereRenderData data,
+        AlphaGroup group,
+        SKPaint paint,
+        bool useTransform)
+    {
+        for (int i = group.Start; i < group.End && i < data.SphereCount; i++)
+        {
+            if (data.Spectrum[i] < MIN_MAGNITUDE) continue;
+
+            var (x, y) = CalculateSpherePosition(i, data.CenterX, data.CenterY, data.MaxRadius);
+            float size = CalculateSphereSize(data.Spectrum[i]);
+
+            var bounds = new SKRect(x - size, y - size, x + size, y + size);
+
+            if (!IsAreaVisible(canvas, bounds)) continue;
+
+            if (useTransform)
+            {
+                canvas.Save();
+                canvas.Translate(x, y);
+                canvas.Scale(size);
+                canvas.DrawCircle(0, 0, 1.0f, paint);
+                canvas.Restore();
+            }
+            else
+            {
+                canvas.DrawCircle(x, y, size, paint);
+            }
+        }
+    }
+
+    private (float x, float y) CalculateSpherePosition(
+        int index,
+        float centerX,
+        float centerY,
+        float radius)
+    {
+        if (_cosValues == null || _sinValues == null || index >= _cosValues.Length)
+            return (centerX, centerY);
+
+        return (
+            centerX + _cosValues[index] * radius,
+            centerY + _sinValues[index] * radius);
+    }
+
+    private float CalculateSphereSize(float magnitude) =>
+        Max(magnitude * _currentRadius, MIN_CIRCLE_SIZE) + _currentSpacing * SPACING_FACTOR;
+
+    private float CalculateMaxRadius(float width, float height) =>
+        Min(width, height) / 2f - _currentRadius - _currentSpacing;
+
+    private static SKShader CreateRadialGradientShader(SKColor baseColor, float alpha) =>
+        SKShader.CreateRadialGradient(
+            new SKPoint(0, 0),
+            1.0f,
+            [
+                baseColor.WithAlpha((byte)(255 * alpha)),
+                baseColor.WithAlpha(0)
+            ],
+            _gradientPositions,
+            SKShaderTileMode.Clamp);
+
+    private AlphaGroup[] CalculateAlphaGroups(int count)
+    {
+        if (_currentAlphas == null || count == 0)
+            return [];
+
+        var groups = new List<AlphaGroup>(MAX_ALPHA_GROUPS);
+        int currentStart = 0;
+        float currentAlpha = _currentAlphas[0];
+
+        for (int i = 1; i < count && i < _currentAlphas.Length; i++)
+        {
+            if (Abs(_currentAlphas[i] - currentAlpha) > ALPHA_THRESHOLD ||
+                groups.Count >= MAX_ALPHA_GROUPS - 1)
+            {
+                groups.Add(new AlphaGroup(currentStart, i, currentAlpha));
+                currentStart = i;
+                currentAlpha = _currentAlphas[i];
+            }
+        }
+
+        groups.Add(new AlphaGroup(currentStart, count, currentAlpha));
+        return [.. groups];
+    }
+
+    private void UpdateAlphas(float[] spectrum)
+    {
+        if (_currentAlphas == null) return;
+
+        var settings = CurrentQualitySettings!;
+        int length = Min(spectrum.Length, _currentAlphas.Length);
+
+        for (int i = 0; i < length; i++)
+        {
+            float targetAlpha = Max(MIN_ALPHA, spectrum[i] * MAX_INTENSITY_MULTIPLIER);
+            _currentAlphas[i] = Lerp(_currentAlphas[i], targetAlpha, settings.ResponseSpeed);
+        }
+    }
+
+    private void UpdateConfiguration(int barCount, float barSpacing, SKImageInfo info)
+    {
+        float radius = CalculateAdaptiveRadius(barCount, barSpacing);
+        float spacing = CalculateAdaptiveSpacing(barCount, barSpacing);
+        int count = CalculateAdaptiveCount(barCount);
+
+        float maxPossibleRadius = Min(info.Width, info.Height) / 2f - (radius + spacing);
+        radius = Max(MIN_RADIUS, Min(radius, maxPossibleRadius));
+
+        if (_currentRadius != radius || _currentSpacing != spacing || _currentCount != count)
+        {
+            _currentRadius = radius;
+            _currentSpacing = spacing;
+            _currentCount = Clamp(count, MIN_SPHERE_COUNT, MAX_SPHERE_COUNT);
+
+            EnsureArraysInitialized();
+            PrecomputeTrigValues();
+        }
+    }
+
+    private float CalculateAdaptiveRadius(int barCount, float barSpacing)
+    {
+        float baseRadius = IsOverlayActive ? DEFAULT_RADIUS_OVERLAY : DEFAULT_RADIUS;
+        return Max(5f, baseRadius - barCount * RADIUS_REDUCTION_FACTOR + barSpacing * RADIUS_SPACING_FACTOR);
+    }
+
+    private float CalculateAdaptiveSpacing(int barCount, float barSpacing)
+    {
+        float baseSpacing = IsOverlayActive ? DEFAULT_SPACING_OVERLAY : DEFAULT_SPACING;
+        return Max(2f, baseSpacing - barCount * SPACING_REDUCTION_FACTOR + barSpacing * SPACING_SPACING_FACTOR);
+    }
+
+    private int CalculateAdaptiveCount(int barCount)
+    {
+        int baseCount = IsOverlayActive ? DEFAULT_COUNT_OVERLAY : DEFAULT_COUNT;
+        return Max(baseCount, barCount / SPHERE_COUNT_DIVISOR);
+    }
+
+    private void EnsureArraysInitialized()
+    {
+        if (_cosValues == null || _cosValues.Length < _currentCount)
+            _cosValues = new float[_currentCount];
+
+        if (_sinValues == null || _sinValues.Length < _currentCount)
+            _sinValues = new float[_currentCount];
+
+        if (_currentAlphas == null || _currentAlphas.Length < _currentCount)
+        {
+            _currentAlphas = new float[_currentCount];
+            Array.Fill(_currentAlphas, MIN_ALPHA);
+        }
+    }
+
+    private void PrecomputeTrigValues()
+    {
+        if (_cosValues == null || _sinValues == null) return;
+
+        float angleStep = 360f / _currentCount * PI_OVER_180;
+
+        for (int i = 0; i < _currentCount && i < _cosValues.Length; i++)
+        {
+            float angle = i * angleStep;
+            _cosValues[i] = MathF.Cos(angle);
+            _sinValues[i] = MathF.Sin(angle);
+        }
+    }
+
+    protected override int GetMaxBarsForQuality() => Quality switch
+    {
+        RenderQuality.Low => 32,
+        RenderQuality.Medium => 64,
+        RenderQuality.High => 128,
+        _ => 64
+    };
+
+    protected override void OnQualitySettingsApplied()
+    {
+        base.OnQualitySettingsApplied();
+
+        float smoothingFactor = Quality switch
+        {
+            RenderQuality.Low => 0.4f,
+            RenderQuality.Medium => 0.3f,
+            RenderQuality.High => 0.25f,
+            _ => 0.3f
+        };
+
+        if (IsOverlayActive)
+            smoothingFactor *= 1.2f;
+
+        SetProcessingSmoothingFactor(smoothingFactor);
+
+        EnsureArraysInitialized();
+        PrecomputeTrigValues();
+
+        RequestRedraw();
+    }
+
+    protected override void OnDispose()
+    {
+        _cosValues = null;
+        _sinValues = null;
+        _currentAlphas = null;
+        _currentRadius = DEFAULT_RADIUS;
+        _currentSpacing = DEFAULT_SPACING;
+        _currentCount = DEFAULT_COUNT;
+
+        base.OnDispose();
+    }
+
+    private record SphereRenderData(
+        float[] Spectrum,
+        float CenterX,
+        float CenterY,
+        float MaxRadius,
+        int SphereCount,
+        AlphaGroup[] AlphaGroups);
+
+    private readonly record struct AlphaGroup(int Start, int End, float Alpha);
+}

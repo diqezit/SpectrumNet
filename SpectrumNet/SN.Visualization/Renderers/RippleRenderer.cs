@@ -1,285 +1,390 @@
-﻿//#nullable enable
+﻿#nullable enable
 
-//using static SpectrumNet.SN.Visualization.Renderers.RippleRenderer.Constants;
-//using static System.MathF;
+namespace SpectrumNet.SN.Visualization.Renderers;
 
-//namespace SpectrumNet.SN.Visualization.Renderers;
+public sealed class RippleRenderer : EffectSpectrumRenderer<RippleRenderer.QualitySettings>
+{
+    private static readonly Lazy<RippleRenderer> _instance =
+        new(() => new RippleRenderer());
 
-//public sealed class RippleRenderer : EffectSpectrumRenderer
-//{
-//    private const string LogPrefix = nameof(RippleRenderer);
+    public static RippleRenderer GetInstance() => _instance.Value;
 
-//    private static readonly Lazy<RippleRenderer> _instance =
-//        new(() => new RippleRenderer());
+    private const float BASE_RIPPLE_RADIUS = 300f,
+        RIPPLE_SPEED = 150f,
+        BASE_RIPPLE_SPAWN_RATE = 0.1f,
+        BASE_RIPPLE_WIDTH = 3f,
+        SPAWN_DISTANCE_BASE = 100f,
+        MAGNITUDE_RADIUS_SCALE = 200f,
+        FADE_START_THRESHOLD = 0.8f,
+        FADE_RANGE = 0.2f;
 
-//    private RippleRenderer() { }
+    private const float COLOR_ROTATION_SPEED = 0.5f,
+        SATURATION_BASE = 80f,
+        SATURATION_RANGE = 20f,
+        BRIGHTNESS_BASE = 70f,
+        BRIGHTNESS_RANGE = 30f,
+        HUE_DEGREES = 360f,
+        COLOR_WRAP = 1f;
 
-//    public static RippleRenderer GetInstance() => _instance.Value;
+    private const float MIN_SPAWN_MAGNITUDE = 0.15f,
+        BAND_ANGLE_STEP = 45f;
 
-//    public static class Constants
-//    {
-//        public const float
-//            BASE_RIPPLE_RADIUS = 300f,
-//            RIPPLE_SPEED = 150f,
-//            BASE_RIPPLE_SPAWN_RATE = 0.1f,
-//            BASE_RIPPLE_WIDTH = 3f,
-//            FADE_DISTANCE = 50f,
-//            COLOR_ROTATION_SPEED = 0.5f,
-//            MIN_SPAWN_MAGNITUDE = 0.15f,
-//            MAGNITUDE_RADIUS_SCALE = 200f,
-//            BAND_ANGLE_STEP = 45f,
-//            SPAWN_DISTANCE_BASE = 100f,
-//            SATURATION_BASE = 80f,
-//            SATURATION_RANGE = 20f,
-//            BRIGHTNESS_BASE = 70f,
-//            BRIGHTNESS_RANGE = 30f,
-//            HUE_DEGREES = 360f,
-//            COLOR_WRAP = 1f,
-//            FADE_START_THRESHOLD = 0.8f,
-//            FADE_RANGE = 0.2f;
+    private const int SPECTRUM_BANDS = 8,
+        BASE_MAX_RIPPLES_LOW = 20,
+        BASE_MAX_RIPPLES_MEDIUM = 40,
+        BASE_MAX_RIPPLES_HIGH = 60;
 
-//        public const int
-//            BASE_MAX_RIPPLES_LOW = 20,
-//            BASE_MAX_RIPPLES_MEDIUM = 40,
-//            BASE_MAX_RIPPLES_HIGH = 60,
-//            SPECTRUM_BANDS = 8;
+    private readonly List<RippleData> _ripples = new(BASE_MAX_RIPPLES_HIGH);
+    private readonly float[] _bandMagnitudes = new float[SPECTRUM_BANDS];
+    private float _lastSpawnTime;
+    private float _colorRotation;
+    private float _animationTime;
 
-//        public static readonly Dictionary<RenderQuality, QualitySettings> QualityPresets = new()
-//        {
-//            [RenderQuality.Low] = new(
-//                BaseMaxRipples: BASE_MAX_RIPPLES_LOW,
-//                StrokeWidth: BASE_RIPPLE_WIDTH * 0.8f,
-//                SpawnRate: BASE_RIPPLE_SPAWN_RATE * 2f
-//            ),
-//            [RenderQuality.Medium] = new(
-//                BaseMaxRipples: BASE_MAX_RIPPLES_MEDIUM,
-//                StrokeWidth: BASE_RIPPLE_WIDTH,
-//                SpawnRate: BASE_RIPPLE_SPAWN_RATE
-//            ),
-//            [RenderQuality.High] = new(
-//                BaseMaxRipples: BASE_MAX_RIPPLES_HIGH,
-//                StrokeWidth: BASE_RIPPLE_WIDTH * 1.2f,
-//                SpawnRate: BASE_RIPPLE_SPAWN_RATE * 0.8f
-//            )
-//        };
+    public sealed class QualitySettings
+    {
+        public int MaxRipples { get; init; }
+        public float StrokeWidth { get; init; }
+        public float SpawnRate { get; init; }
+        public bool UseColorRotation { get; init; }
+        public bool UseAdaptiveMaxRadius { get; init; }
+    }
 
-//        public record QualitySettings(
-//            int BaseMaxRipples,
-//            float StrokeWidth,
-//            float SpawnRate
-//        );
-//    }
+    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
+        QualitySettingsPresets
+    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    {
+        [RenderQuality.Low] = new()
+        {
+            MaxRipples = BASE_MAX_RIPPLES_LOW,
+            StrokeWidth = BASE_RIPPLE_WIDTH * 0.8f,
+            SpawnRate = BASE_RIPPLE_SPAWN_RATE * 2f,
+            UseColorRotation = false,
+            UseAdaptiveMaxRadius = false
+        },
+        [RenderQuality.Medium] = new()
+        {
+            MaxRipples = BASE_MAX_RIPPLES_MEDIUM,
+            StrokeWidth = BASE_RIPPLE_WIDTH,
+            SpawnRate = BASE_RIPPLE_SPAWN_RATE,
+            UseColorRotation = true,
+            UseAdaptiveMaxRadius = true
+        },
+        [RenderQuality.High] = new()
+        {
+            MaxRipples = BASE_MAX_RIPPLES_HIGH,
+            StrokeWidth = BASE_RIPPLE_WIDTH * 1.2f,
+            SpawnRate = BASE_RIPPLE_SPAWN_RATE * 0.8f,
+            UseColorRotation = true,
+            UseAdaptiveMaxRadius = true
+        }
+    };
 
-//    private readonly List<Ripple> _ripples = new(BASE_MAX_RIPPLES_HIGH);
-//    private readonly float[] _bandMagnitudes = new float[SPECTRUM_BANDS];
-//    private float _lastSpawnTime;
-//    private float _colorRotation;
-//    private QualitySettings _currentSettings = QualityPresets[RenderQuality.Medium];
+    protected override void RenderEffect(
+        SKCanvas canvas,
+        float[] spectrum,
+        SKImageInfo info,
+        RenderParameters renderParams,
+        SKPaint passedInPaint)
+    {
+        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+            return;
 
-//    private readonly SKPaint _ripplePaint = new()
-//    {
-//        Style = SKPaintStyle.Stroke,
-//        StrokeWidth = BASE_RIPPLE_WIDTH,
-//        IsAntialias = true
-//    };
+        var (isValid, processedSpectrum) = ProcessSpectrum(
+            spectrum,
+            renderParams.EffectiveBarCount,
+            applyTemporalSmoothing: true);
 
-//    protected override void OnInitialize()
-//    {
-//        base.OnInitialize();
-//        LogDebug("Initialized");
-//    }
+        if (!isValid || processedSpectrum == null)
+            return;
 
-//    protected override void OnQualitySettingsApplied()
-//    {
-//        _currentSettings = QualityPresets[Quality];
-//        _ripplePaint.StrokeWidth = _currentSettings.StrokeWidth;
-//        _ripplePaint.IsAntialias = UseAntiAlias;
-//    }
+        var renderData = CalculateRenderData(
+            processedSpectrum,
+            info,
+            passedInPaint.Color);
 
-//    protected override void RenderEffect(
-//        SKCanvas canvas,
-//        float[] spectrum,
-//        SKImageInfo info,
-//        float barWidth,
-//        float barSpacing,
-//        int barCount,
-//        SKPaint paint)
-//    {
-//        float deltaTime = GetAnimationDeltaTime();
-//        float currentTime = GetAnimationTime();
+        if (!ValidateRenderData(renderData))
+            return;
 
-//        UpdateBandMagnitudes(spectrum, barCount);
-//        UpdateRipples(deltaTime);
-//        TrySpawnNewRipples(currentTime, info, paint.Color);
-//        RenderRipples(canvas);
-//        UpdateColorRotation(deltaTime);
-//    }
+        RenderVisualization(canvas, renderData);
+    }
 
-//    private void UpdateBandMagnitudes(float[] spectrum, int barCount)
-//    {
-//        if (spectrum.Length == 0) return;
+    private RenderData CalculateRenderData(
+        float[] spectrum,
+        SKImageInfo info,
+        SKColor baseColor)
+    {
+        UpdateAnimationTime();
+        UpdateBandMagnitudes(spectrum);
+        UpdateRipples(1f / 60f);
+        TrySpawnNewRipples(info, baseColor);
+        UpdateColorRotation(1f / 60f);
 
-//        int bandSize = CalculateBandSize(spectrum.Length, barCount);
+        var boundingBox = CalculateBoundingBox(info);
 
-//        for (int i = 0; i < SPECTRUM_BANDS; i++)
-//            _bandMagnitudes[i] = CalculateBandMagnitude(spectrum, i, bandSize);
-//    }
+        return new RenderData(
+            Ripples: _ripples,
+            BoundingBox: boundingBox,
+            Width: info.Width,
+            Height: info.Height,
+            ColorRotation: _colorRotation,
+            AverageIntensity: CalculateAverageIntensity(spectrum));
+    }
 
-//    private static int CalculateBandSize(int spectrumLength, int barCount) =>
-//        Max(1, Min(spectrumLength, barCount) / SPECTRUM_BANDS);
+    private static bool ValidateRenderData(RenderData data) =>
+        data.Width > 0 &&
+        data.Height > 0 &&
+        data.BoundingBox.Width > 0 &&
+        data.BoundingBox.Height > 0;
 
-//    private static float CalculateBandMagnitude(float[] spectrum, int bandIndex, int bandSize)
-//    {
-//        int start = bandIndex * bandSize;
-//        int end = Min((bandIndex + 1) * bandSize, spectrum.Length);
+    private void RenderVisualization(
+        SKCanvas canvas,
+        RenderData data)
+    {
+        var settings = CurrentQualitySettings!;
 
-//        float sum = 0;
-//        for (int j = start; j < end; j++)
-//            sum += spectrum[j];
+        if (!IsAreaVisible(canvas, data.BoundingBox))
+            return;
 
-//        return sum / Max(1, end - start);
-//    }
+        RenderWithOverlay(canvas, () => RenderRipplesLayer(canvas, data, settings));
+    }
 
-//    private void UpdateRipples(float deltaTime)
-//    {
-//        float speed = RIPPLE_SPEED * deltaTime;
+    private void UpdateAnimationTime() => _animationTime += 1f / 60f;
 
-//        for (int i = _ripples.Count - 1; i >= 0; i--)
-//        {
-//            var ripple = _ripples[i];
-//            ripple.Radius += speed;
+    private void UpdateBandMagnitudes(float[] spectrum)
+    {
+        if (spectrum.Length == 0) return;
 
-//            if (IsRippleExpired(ripple))
-//                _ripples.RemoveAt(i);
-//        }
-//    }
+        int bandSize = CalculateBandSize(spectrum.Length);
 
-//    private static bool IsRippleExpired(Ripple ripple) =>
-//        ripple.Radius > ripple.MaxRadius;
+        for (int i = 0; i < SPECTRUM_BANDS; i++)
+            _bandMagnitudes[i] = CalculateBandMagnitude(spectrum, i, bandSize);
+    }
 
-//    private void TrySpawnNewRipples(float currentTime, SKImageInfo info, SKColor baseColor)
-//    {
-//        if (!CanSpawnRipples(currentTime))
-//            return;
+    private static int CalculateBandSize(int spectrumLength) =>
+        (int)MathF.Max(1, spectrumLength / SPECTRUM_BANDS);
 
-//        float centerX = info.Width * 0.5f;
-//        float centerY = info.Height * 0.5f;
+    private static float CalculateBandMagnitude(float[] spectrum, int bandIndex, int bandSize)
+    {
+        int start = bandIndex * bandSize;
+        int end = (int)MathF.Min((bandIndex + 1) * bandSize, spectrum.Length);
 
-//        SpawnRipplesForBands(centerX, centerY, baseColor);
-//        _lastSpawnTime = currentTime;
-//    }
+        float sum = 0;
+        for (int j = start; j < end; j++)
+            sum += spectrum[j];
 
-//    private bool CanSpawnRipples(float currentTime) =>
-//        currentTime - _lastSpawnTime >= _currentSettings.SpawnRate &&
-//        _ripples.Count < _currentSettings.BaseMaxRipples;
+        return sum / MathF.Max(1, end - start);
+    }
 
-//    private void SpawnRipplesForBands(float centerX, float centerY, SKColor baseColor)
-//    {
-//        for (int i = 0; i < SPECTRUM_BANDS; i++)
-//        {
-//            if (!ShouldSpawnRippleForBand(i))
-//                continue;
+    private static float CalculateAverageIntensity(float[] spectrum)
+    {
+        if (spectrum.Length == 0)
+            return 0f;
 
-//            var ripple = CreateRippleForBand(i, centerX, centerY, baseColor);
-//            _ripples.Add(ripple);
-//        }
-//    }
+        float sum = 0f;
+        for (int i = 0; i < spectrum.Length; i++)
+            sum += spectrum[i];
 
-//    private bool ShouldSpawnRippleForBand(int bandIndex) =>
-//        _bandMagnitudes[bandIndex] >= MIN_SPAWN_MAGNITUDE &&
-//        _ripples.Count < _currentSettings.BaseMaxRipples;
+        return sum / spectrum.Length;
+    }
 
-//    private Ripple CreateRippleForBand(int bandIndex, float centerX, float centerY, SKColor baseColor)
-//    {
-//        float angle = CalculateBandAngle(bandIndex);
-//        float distance = CalculateSpawnDistance(bandIndex);
-//        float maxRadius = CalculateMaxRadius(bandIndex);
+    private void UpdateRipples(float deltaTime)
+    {
+        float speed = RIPPLE_SPEED * deltaTime;
 
-//        return new Ripple
-//        {
-//            X = centerX + Cos(angle) * distance,
-//            Y = centerY + Sin(angle) * distance,
-//            Radius = 0,
-//            MaxRadius = maxRadius,
-//            Magnitude = _bandMagnitudes[bandIndex],
-//            ColorHue = CalculateColorHue(bandIndex),
-//            BaseColor = baseColor
-//        };
-//    }
+        for (int i = _ripples.Count - 1; i >= 0; i--)
+        {
+            var ripple = _ripples[i];
+            float newRadius = ripple.Radius + speed;
 
-//    private static float CalculateBandAngle(int bandIndex) =>
-//        bandIndex * BAND_ANGLE_STEP * MathF.PI / 180f;
+            if (newRadius > ripple.MaxRadius)
+                _ripples.RemoveAt(i);
+            else
+                _ripples[i] = ripple with { Radius = newRadius };
+        }
+    }
 
-//    private float CalculateSpawnDistance(int bandIndex) =>
-//        SPAWN_DISTANCE_BASE + _bandMagnitudes[bandIndex] * SPAWN_DISTANCE_BASE;
+    private void TrySpawnNewRipples(SKImageInfo info, SKColor baseColor)
+    {
+        if (!CanSpawnRipples())
+            return;
 
-//    private float CalculateMaxRadius(int bandIndex) =>
-//        BASE_RIPPLE_RADIUS + _bandMagnitudes[bandIndex] * MAGNITUDE_RADIUS_SCALE;
+        float centerX = info.Width * 0.5f;
+        float centerY = info.Height * 0.5f;
 
-//    private float CalculateColorHue(int bandIndex) =>
-//        (_colorRotation + bandIndex / (float)SPECTRUM_BANDS) % COLOR_WRAP;
+        SpawnRipplesForBands(centerX, centerY, baseColor);
+        _lastSpawnTime = _animationTime;
+    }
 
-//    private void RenderRipples(SKCanvas canvas)
-//    {
-//        foreach (var ripple in _ripples)
-//        {
-//            float alpha = CalculateRippleAlpha(ripple);
-//            if (alpha <= 0) continue;
+    private bool CanSpawnRipples() =>
+        _animationTime - _lastSpawnTime >= CurrentQualitySettings!.SpawnRate &&
+        _ripples.Count < CurrentQualitySettings.MaxRipples;
 
-//            SKColor color = CalculateRippleColor(ripple);
-//            DrawRipple(canvas, ripple, color, alpha);
-//        }
-//    }
+    private void SpawnRipplesForBands(float centerX, float centerY, SKColor baseColor)
+    {
+        for (int i = 0; i < SPECTRUM_BANDS; i++)
+        {
+            if (!ShouldSpawnRippleForBand(i))
+                continue;
 
-//    private static float CalculateRippleAlpha(Ripple ripple)
-//    {
-//        float progress = ripple.Radius / ripple.MaxRadius;
-//        float alpha = ripple.Magnitude;
+            var ripple = CreateRippleForBand(i, centerX, centerY, baseColor);
+            _ripples.Add(ripple);
+        }
+    }
 
-//        if (progress > FADE_START_THRESHOLD)
-//        {
-//            float fadeProgress = (progress - FADE_START_THRESHOLD) / FADE_RANGE;
-//            alpha *= 1f - fadeProgress;
-//        }
+    private bool ShouldSpawnRippleForBand(int bandIndex) =>
+        _bandMagnitudes[bandIndex] >= MIN_SPAWN_MAGNITUDE &&
+        _ripples.Count < CurrentQualitySettings!.MaxRipples;
 
-//        return alpha;
-//    }
+    private RippleData CreateRippleForBand(int bandIndex, float centerX, float centerY, SKColor baseColor)
+    {
+        float angle = CalculateBandAngle(bandIndex);
+        float distance = CalculateSpawnDistance(bandIndex);
+        float maxRadius = CalculateMaxRadius(bandIndex);
 
-//    private static SKColor CalculateRippleColor(Ripple ripple)
-//    {
-//        float saturation = SATURATION_BASE + ripple.Magnitude * SATURATION_RANGE;
-//        float brightness = BRIGHTNESS_BASE + ripple.Magnitude * BRIGHTNESS_RANGE;
-//        return SKColor.FromHsv(ripple.ColorHue * HUE_DEGREES, saturation, brightness);
-//    }
+        return new RippleData(
+            X: centerX + MathF.Cos(angle) * distance,
+            Y: centerY + MathF.Sin(angle) * distance,
+            Radius: 0,
+            MaxRadius: maxRadius,
+            Magnitude: _bandMagnitudes[bandIndex],
+            ColorHue: CalculateColorHue(bandIndex),
+            BaseColor: baseColor);
+    }
 
-//    private void DrawRipple(SKCanvas canvas, Ripple ripple, SKColor color, float alpha)
-//    {
-//        _ripplePaint.Color = color.WithAlpha((byte)(alpha * 255));
-//        canvas.DrawCircle(ripple.X, ripple.Y, ripple.Radius, _ripplePaint);
-//    }
+    private static SKRect CalculateBoundingBox(SKImageInfo info) =>
+        new(0, 0, info.Width, info.Height);
 
-//    private void UpdateColorRotation(float deltaTime)
-//    {
-//        _colorRotation += deltaTime * COLOR_ROTATION_SPEED;
-//        if (_colorRotation > COLOR_WRAP)
-//            _colorRotation -= COLOR_WRAP;
-//    }
+    private static float CalculateBandAngle(int bandIndex) =>
+        bandIndex * BAND_ANGLE_STEP * MathF.PI / 180f;
 
-//    protected override void OnDispose()
-//    {
-//        _ripplePaint?.Dispose();
-//        _ripples.Clear();
-//        base.OnDispose();
-//    }
+    private float CalculateSpawnDistance(int bandIndex) =>
+        SPAWN_DISTANCE_BASE + _bandMagnitudes[bandIndex] * SPAWN_DISTANCE_BASE;
 
-//    private class Ripple
-//    {
-//        public float X { get; set; }
-//        public float Y { get; set; }
-//        public float Radius { get; set; }
-//        public float MaxRadius { get; set; }
-//        public float Magnitude { get; set; }
-//        public float ColorHue { get; set; }
-//        public SKColor BaseColor { get; set; }
-//    }
-//}
+    private float CalculateMaxRadius(int bandIndex)
+    {
+        if (CurrentQualitySettings!.UseAdaptiveMaxRadius)
+            return BASE_RIPPLE_RADIUS + _bandMagnitudes[bandIndex] * MAGNITUDE_RADIUS_SCALE;
+        else
+            return BASE_RIPPLE_RADIUS;
+    }
+
+    private float CalculateColorHue(int bandIndex)
+    {
+        if (CurrentQualitySettings!.UseColorRotation)
+            return (_colorRotation + bandIndex / (float)SPECTRUM_BANDS) % COLOR_WRAP;
+        else
+            return (bandIndex / (float)SPECTRUM_BANDS) % COLOR_WRAP;
+    }
+
+    private void UpdateColorRotation(float deltaTime)
+    {
+        if (!CurrentQualitySettings!.UseColorRotation)
+            return;
+
+        _colorRotation += deltaTime * COLOR_ROTATION_SPEED;
+        if (_colorRotation > COLOR_WRAP)
+            _colorRotation -= COLOR_WRAP;
+    }
+
+    private static float CalculateRippleAlpha(RippleData ripple)
+    {
+        float progress = ripple.Radius / ripple.MaxRadius;
+        float alpha = ripple.Magnitude;
+
+        if (progress > FADE_START_THRESHOLD)
+        {
+            float fadeProgress = (progress - FADE_START_THRESHOLD) / FADE_RANGE;
+            alpha *= 1f - fadeProgress;
+        }
+
+        return alpha;
+    }
+
+    private static SKColor CalculateRippleColor(RippleData ripple)
+    {
+        float saturation = SATURATION_BASE + ripple.Magnitude * SATURATION_RANGE;
+        float brightness = BRIGHTNESS_BASE + ripple.Magnitude * BRIGHTNESS_RANGE;
+        return SKColor.FromHsv(ripple.ColorHue * HUE_DEGREES, saturation, brightness);
+    }
+
+    private void RenderRipplesLayer(SKCanvas canvas, RenderData data, QualitySettings settings)
+    {
+        foreach (var ripple in data.Ripples)
+        {
+            float alpha = CalculateRippleAlpha(ripple);
+            if (alpha <= 0) continue;
+
+            SKColor color = CalculateRippleColor(ripple);
+            DrawRipple(canvas, ripple, color, alpha, settings.StrokeWidth);
+        }
+    }
+
+    private void DrawRipple(SKCanvas canvas, RippleData ripple, SKColor color, float alpha, float strokeWidth)
+    {
+        var paint = CreatePaint(color.WithAlpha(CalculateAlpha(alpha)), SKPaintStyle.Stroke);
+        paint.StrokeWidth = strokeWidth;
+        paint.IsAntialias = UseAntiAlias;
+
+        try
+        {
+            canvas.DrawCircle(ripple.X, ripple.Y, ripple.Radius, paint);
+        }
+        finally
+        {
+            ReturnPaint(paint);
+        }
+    }
+
+    protected override int GetMaxBarsForQuality() => Quality switch
+    {
+        RenderQuality.Low => 32,
+        RenderQuality.Medium => 64,
+        RenderQuality.High => 128,
+        _ => 64
+    };
+
+    protected override void OnQualitySettingsApplied()
+    {
+        base.OnQualitySettingsApplied();
+
+        float smoothingFactor = Quality switch
+        {
+            RenderQuality.Low => 0.4f,
+            RenderQuality.Medium => 0.3f,
+            RenderQuality.High => 0.25f,
+            _ => 0.3f
+        };
+
+        if (IsOverlayActive)
+            smoothingFactor *= 1.2f;
+
+        SetProcessingSmoothingFactor(smoothingFactor);
+        RequestRedraw();
+    }
+
+    protected override void OnDispose()
+    {
+        _ripples.Clear();
+        _animationTime = 0f;
+        _lastSpawnTime = 0f;
+        _colorRotation = 0f;
+        base.OnDispose();
+    }
+
+    private record RippleData(
+        float X,
+        float Y,
+        float Radius,
+        float MaxRadius,
+        float Magnitude,
+        float ColorHue,
+        SKColor BaseColor);
+
+    private record RenderData(
+        List<RippleData> Ripples,
+        SKRect BoundingBox,
+        int Width,
+        int Height,
+        float ColorRotation,
+        float AverageIntensity);
+}
