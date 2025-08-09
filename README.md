@@ -3,67 +3,108 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8.0](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com)
 
-SpectrumNet transforms real-time audio input into dynamic visual spectrums using C#/WPF. Combines advanced signal processing with modern rendering for immersive audio visualization.
+**SpectrumNet** is a high-performance audio visualizer for Windows that transforms any system audio into a captivating, real-time spectral display. Built with C#, WPF, and .NET 8, it combines advanced signal processing with a powerful rendering engine to create immersive visual experiences.
 
-
-![Menu](https://github.com/user-attachments/assets/9e3159f3-09da-472f-a357-7beb663b69df)
-![Visualisation](https://github.com/user-attachments/assets/a480ce47-28a2-4462-a717-29fef8fcf029)
 ![Intro](https://github.com/user-attachments/assets/82777947-28cb-4d22-a9e3-166294801efb)
-![Performance Settings](https://github.com/user-attachments/assets/260d3634-b1e9-4765-97a3-927aa06404a7)
 
 ## ✨ Key Features
 
-### 🎧 Audio Processing
-- Real-time system audio capture via WASAPI loopback
-- Multi-window FFT analysis (Hann/Hamming/Blackman)
-- Flexible spectrum scaling: Linear/Logarithmic/Mel/Bark
+### 🎧 Advanced Audio Processing
+- **Real-time System Audio Capture:** Captures desktop audio directly using WASAPI loopback—no extra configuration needed.
+- **Multiple FFT Window Functions:** Choose between Hann, Hamming, and Blackman windows to fine-tune the spectral analysis.
+- **Flexible Frequency Scaling:** Visualize sound across Linear, Logarithmic, Mel, and Bark frequency scales.
 
-### 🎨 Visualization Engine
-- **20+ Render Styles**:
-  - Bars: Vertical, Circular, LED Meter
-  - Waveforms: Gradient, Heartbeat, Waterfall
-  - Particles: Fire, Raindrop, Text Effects
-  - Advanced: Voronoi diagrams, Spectrum fractals
-- Dynamic color palettes with gradient effects
-- Quality presets (Low/Medium/High) with manual override
+### 🎨 Powerful Visualization Engine
+- **20+ Unique Render Styles:** A vast collection of visualizers, including:
+  - **Bars:** Vertical, Circular, LED Meter
+  - **Waveforms:** Gradient Line, Heartbeat, Waterfall
+  - **Particles:** Fire, Raindrop, Text Effects
+  - **Advanced:** Voronoi Diagrams, Spectrum Fractals
+- **Dynamic Color Palettes:** Customize your visualizer with beautiful gradient effects and pre-built themes.
+- **Adjustable Quality Presets:** Instantly switch between Low, Medium, and High quality settings, with options for manual override to balance performance and visuals.
 
-### ⚙️ Customization & Control
-- Display modes: Windowed/Always-on-Top overlay
-- Configurable hotkeys (Capture start/stop, Mode toggle)
-- Real-time adjustment of spectrum sensitivity/range
+### ⚙️ Customization and Control
+- **Flexible Display Modes:** Use in a standard window or as an **Always-on-Top** overlay for seamless integration with your desktop.
+- **Configurable Hotkeys:** Control the application without interrupting your workflow (`Start/Stop Capture`, `Toggle Overlay`, `Open Panel`).
+- **Real-time Adjustments:** Fine-tune spectrum sensitivity, range, and other parameters on the fly with an interactive control panel.
 
-## 🚀 Quick Start
+## 📸 Visual Showcase
 
-1. Launch SpectrumNet.exe
-2. Click **Start Capture** to begin audio analysis
-3. Use hotkeys:
-   - `Ctrl+O`: Toggle overlay mode
-   - `Space`: Start/stop visualization
-   - `Ctrl+P`: Open control panel
-4. Adjust settings via interactive preview
+| Main View | Overlay Mode |
+| :---: | :---: |
+| ![Visualisation](https://github.com/user-attachments/assets/a480ce47-28a2-4462-a717-29fef8fcf029) | ![Overlay Mode](https://github.com/user-attachments/assets/bc2052b7-0294-4698-825d-6b2a27fc27d5) |
+| **Menu & Performance Settings** | **Visual Settings Panel** |
+| ![Menu](https://github.com/user-attachments/assets/9e3159f3-09da-472f-a357-7beb663b69df) | ![Visual Settings](https://github.com/user-attachments/assets/b7e5397d-7de5-479f-b2ca-412f57cefa80) |
+
+![Demo Visualization](https://github.com/user-attachments/assets/52eac8ad-b97c-4395-a998-2fb35c1ca5aa)
+
+## 🚀 Getting Started (For Users)
+
+1.  **Download the latest version** from the [**Releases**](https://github.com/diqezit/SpectrumNet/releases) page.
+2.  Unzip the archive and run `SpectrumNet.exe`.
+3.  Click **"Start Capture"** to begin visualizing your system's audio.
+4.  Use the controls and hotkeys to customize your experience:
+    - `Space`: Start or stop the visualization.
+    - `Ctrl + O`: Toggle the always-on-top overlay mode.
+    - `Ctrl + P`: Show or hide the main control panel.
+
+## 🛠️ Building from Source (For Developers)
+
+### Prerequisites
+- [Visual Studio 2022](https://visualstudio.microsoft.com/)
+- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+
+### Steps
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/diqezit/SpectrumNet.git
+    ```
+2.  **Open the solution file** (`.sln`) in Visual Studio.
+3.  **Restore NuGet packages** (this should happen automatically).
+4.  **Build and run** the project in `Debug` or `Release` mode.
+
+## 💻 Technology Stack
+- **Framework:** .NET 8.0
+- **UI:** WPF (Windows Presentation Foundation)
+- **Rendering:** SkiaSharp for high-performance 2D graphics.
+- **Audio Capture:** WASAPI Loopback (via a .NET wrapper like CSCore or NAudio).
 
 ## ⚠️ Known Issues
 
-### Transparency Rendering Issues (Intel GPUs)
-**Symptoms**:
-- Partial loss of window transparency
-- Visual artifacts in overlay mode
-- Interface flickering
+### Transparency Rendering Issues on Intel GPUs
+Some users with older or integrated Intel GPUs may experience rendering artifacts in overlay mode.
 
-**Common Cases**:
-- Intel HD Graphics (pre-2021 models)
-- Hybrid graphics systems
-- Drivers older than 2021
+**Symptoms**:
+- Partial or complete loss of window transparency.
+- Flickering or visual glitches when interacting with the interface.
+- Poor performance in overlay mode.
+
+**Affected Hardware**:
+- Primarily observed on Intel HD/UHD Graphics (pre-2021 models).
+- Laptops with hybrid graphics systems (NVIDIA Optimus).
+- Systems with outdated graphics drivers.
 
 **Workaround**:
-1. Force dedicated GPU usage via driver settings
-2. Disable OpenGL acceleration:
-   ```xaml
-   <!-- Replace in XAML -->
-   <skia:SKElement /> <!-- Instead of SKGLElement -->
+1.  **Force Dedicated GPU**: In your NVIDIA or AMD control panel, set `SpectrumNet.exe` to always use the high-performance dedicated GPU.
+2.  **(For Developers) Force Software Rendering**: As a last resort, you can disable hardware acceleration by replacing `SKGLElement` with `SKElement` in the relevant XAML files. This will use CPU-based rendering, which is slower but more compatible.
+    ```xaml
+    <!-- In the visualizer's XAML, replace the hardware-accelerated element: -->
+    <skia:SKElement /> 
+    
+    <!-- Instead of: -->
+    <!-- <skia:SKGLElement /> -->
+    ```
 
-   
-![Demo Visualization](https://github.com/user-attachments/assets/52eac8ad-b97c-4395-a998-2fb35c1ca5aa)
-![Overlay Mode](https://github.com/user-attachments/assets/bc2052b7-0294-4698-825d-6b2a27fc27d5)
-![Visual Settings](https://github.com/user-attachments/assets/b7e5397d-7de5-479f-b2ca-412f57cefa80)
+## 🤝 Contributing
 
+Contributions are welcome! If you have an idea for a new feature, a bug fix, or a new visualizer style, feel free to fork the repository, make your changes, and submit a pull request.
+
+1.  Fork the Project
+2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4.  Push to the Branch (`git push origin feature/AmazingFeature`)
+5.  Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
