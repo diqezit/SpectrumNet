@@ -1,0 +1,52 @@
+﻿<Application x:Class="SpectrumNet.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:SpectrumNet"
+             xmlns:service="clr-namespace:SpectrumNet.SN.Themes"
+             xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="SN.Themes/Resources/CommonConstants.xaml"/>
+
+                <ResourceDictionary Source="SN.Themes/Resources/BaseStyles.xaml"/>
+
+                <ResourceDictionary Source="SN.Themes/Resources/Animations.xaml"/>
+
+                <ResourceDictionary Source="SN.Themes/Resources/Converters.xaml"/>
+
+                <ResourceDictionary Source="SN.Themes/Resources/DarkTheme.xaml"/>
+
+                <ResourceDictionary Source="SN.Themes/Resources/TextStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/ButtonStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/ComboboxStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/SliderStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/CheckBoxStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/ScrollBarStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/WindowStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/GroupBoxStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/TabControlStyles.xaml"/>
+                <ResourceDictionary Source="SN.Themes/Resources/SpecialStyles.xaml"/>
+                
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
+            <Style TargetType="Thumb" BasedOn="{StaticResource ScrollBarThumbStyle}"/>
+            <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}"/>
+            <Style TargetType="TextBox" BasedOn="{StaticResource ModernTextBoxStyle}"/>
+            <Style TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}"/>
+            <Style TargetType="ComboBox" BasedOn="{StaticResource ModernComboBoxStyle}"/>
+            <Style TargetType="Slider" BasedOn="{StaticResource ModernSliderStyle}"/>
+            <Style TargetType="CheckBox" BasedOn="{StaticResource ModernCheckBoxStyle}"/>
+            <Style TargetType="ToolTip" BasedOn="{StaticResource ToolTipStyle}"/>
+            <Style TargetType="ProgressBar" BasedOn="{StaticResource ModernProgressBarStyle}"/>
+            <Style TargetType="skia:SKGLElement">
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
+                <Setter Property="UseLayoutRounding" Value="True"/>
+            </Style>
+            
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

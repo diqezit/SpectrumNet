@@ -1,0 +1,199 @@
+﻿<Window
+    x:Class="SpectrumNet.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:sk="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
+    xmlns:local="clr-namespace:SpectrumNet"
+    xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+    Title="Spectrum Analyzer"
+    Width="640" Height="480"
+    MinWidth="640" MinHeight="480"
+    WindowStartupLocation="CenterScreen"
+    Background="Transparent"
+    AllowsTransparency="True"
+    WindowStyle="None"
+    ResizeMode="CanResize"
+    StateChanged="OnStateChanged"
+    MouseDoubleClick="OnWindowMouseDoubleClick">
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome
+            CaptionHeight="0"
+            CornerRadius="0"
+            GlassFrameThickness="0"
+            ResizeBorderThickness="6" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Border
+        Background="{DynamicResource WindowBackgroundBrush}"
+        BorderBrush="{DynamicResource WindowBorderBrush}"
+        BorderThickness="1"
+        CornerRadius="12">
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="50" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border
+                Grid.Row="0"
+                Style="{DynamicResource TitleBarBorderStyle}"
+                CornerRadius="12,12,0,0"
+                MouseLeftButtonDown="OnWindowDrag">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <ToggleButton
+                        x:Name="ThemeToggleButton"
+                        Focusable="False"
+                        Grid.Column="0"
+                        Style="{DynamicResource ThemeSwitchStyle}"
+                        Margin="24,0,0,0"
+                        ToolTip="Toggle theme (light/dark)"
+                        Checked="OnThemeToggleButtonChanged"
+                        Unchecked="OnThemeToggleButtonChanged" />
+
+                    <StackPanel
+                        Grid.Column="1"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                        <ContentControl
+                            Content="Spectrum Analyzer"
+                            Style="{DynamicResource SpectrumAnalyserTitleStyle}" />
+
+                        <TextBlock
+                            FontSize="16"
+                            Cursor="Hand"
+                            Margin="6,0,0,0"
+                            ToolTipService.ShowDuration="30000">
+                            <Hyperlink
+                                NavigateUri="https://github.com/diqezit/SpectrumNet"
+                                RequestNavigate="Hyperlink_RequestNavigate">
+                                <TextBlock Text="ⓘ"/>
+                                <Hyperlink.Style>
+                                    <Style TargetType="Hyperlink">
+                                        <Setter Property="TextDecorations" Value="{x:Null}"/>
+                                        <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TextBlock}}"/>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Hyperlink.Style>
+                            </Hyperlink>
+                            <TextBlock.ToolTip>
+                                <StackPanel>
+                                    <TextBlock Text="Authors:" FontWeight="Bold" />
+                                    <TextBlock Text="• Diqezit — Lead Developer" />
+                                    <TextBlock Text="• haker2550 — Lead Tester" />
+                                    <TextBlock Text="github.com/diqezit/SpectrumNet" />
+                                </StackPanel>
+                            </TextBlock.ToolTip>
+                        </TextBlock>
+                    </StackPanel>
+
+                    <StackPanel
+                        Grid.Column="2"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Margin="0,0,12,0">
+
+                        <Button
+                            x:Name="OpenControlPanelButton"
+                            Focusable="False"
+                            Style="{DynamicResource WindowControlButtonStyle}"
+                            Width="30" Height="30"
+                            Margin="0,0,6,0"
+                            ToolTip="Open control panel"
+                            Click="OnButtonClick">
+                            <Viewbox Width="20" Height="20" Stretch="Uniform">
+                                <Path
+                                    Stroke="White"
+                                    StrokeThickness="2"
+                                    StrokeLineJoin="Round"
+                                    StrokeStartLineCap="Round"
+                                    StrokeEndLineCap="Round"
+                                    Fill="Transparent"
+                                    Data="M9.5,3
+                                          A6.5,6.5 0 1 1 9.5,16
+                                          A6.5,6.5 0 0 1 9.5,3
+                                          M9.5,6
+                                          A3.5,3.5 0 1 0 9.5,13
+                                          A3.5,3.5 0 0 0 9.5,6
+                                          M9.5,0 L9.5,2
+                                          M9.5,17 L9.5,19
+                                          M0,9.5 L2,9.5
+                                          M17,9.5 L19,9.5
+                                          M2.8,2.8 L4.2,4.2
+                                          M14.8,14.8 L16.2,16.2
+                                          M2.8,16.2 L4.2,14.8
+                                          M14.8,4.2 L16.2,2.8" />
+                            </Viewbox>
+                        </Button>
+
+                        <Button
+                            x:Name="MinimizeButton"
+                            Style="{DynamicResource WindowControlButtonStyle}"
+                            ToolTip="Minimize"
+                            Click="OnButtonClick">
+                            <Path
+                                Data="M4,10 H16"
+                                Stroke="White"
+                                StrokeThickness="2"
+                                StrokeStartLineCap="Round"
+                                StrokeEndLineCap="Round" />
+                        </Button>
+
+                        <Button
+                            x:Name="MaximizeButton"
+                            Style="{DynamicResource WindowControlButtonStyle}"
+                            ToolTip="Maximize/Restore"
+                            Click="OnButtonClick">
+                            <Path
+                                x:Name="MaximizeIcon"
+                                Data="M4,4 H16 V16 H4 Z"
+                                Stroke="White"
+                                StrokeThickness="2"
+                                StrokeLineJoin="Round"
+                                StrokeStartLineCap="Square"
+                                StrokeEndLineCap="Square"
+                                Fill="Transparent" />
+                        </Button>
+
+                        <Button
+                            x:Name="CloseButton"
+                            Style="{DynamicResource WindowCloseButtonStyle}"
+                            ToolTip="Close"
+                            Click="OnButtonClick">
+                            <Path
+                                Data="M3,3 L17,17 M17,3 L3,17"
+                                Stroke="White"
+                                StrokeThickness="2" />
+                        </Button>
+
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border
+                Grid.Row="1"
+                x:Name="SpectrumContainer"
+                Background="{DynamicResource SurfaceBrush}"
+                CornerRadius="16"
+                Margin="24">
+                <sk:SKElement
+                    x:Name="spectrumCanvas"
+                    Margin="16"
+                    PaintSurface="OnPaintSurface" />
+            </Border>
+
+        </Grid>
+    </Border>
+</Window>

@@ -1,0 +1,211 @@
+﻿<ResourceDictionary 
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- =================== -->
+    <!-- СТИЛИ CHECKBOX     -->
+    <!-- =================== -->
+
+    <!-- Современный стиль для чекбокса -->
+    <Style x:Key="ModernCheckBoxStyle" TargetType="CheckBox" BasedOn="{StaticResource InteractiveControlBaseStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource CheckBoxForegroundBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border x:Name="CheckBoxBorder"
+                            Width="18" Height="18"
+                            CornerRadius="{StaticResource CornerRadiusSmall}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{StaticResource StandardBorderThickness}"
+                            Margin="0,0,8,0">
+                            <Path x:Name="CheckMark"
+                                Data="M3,9 L7,13 L15,5"
+                                Stroke="{DynamicResource AccentBrush}"
+                                StrokeThickness="2"
+                                StrokeEndLineCap="Round"
+                                StrokeStartLineCap="Round"
+                                Opacity="0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"/>
+                        </Border>
+
+                        <ContentPresenter 
+                            Grid.Column="1"
+                            Content="{TemplateBinding Content}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            RecognizesAccessKey="True"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="CheckMark" Property="Opacity" Value="1"/>
+                            <Setter TargetName="CheckBoxBorder" Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
+                            <Setter TargetName="CheckBoxBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CheckBoxBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="CheckBoxBorder" Property="Background" Value="{DynamicResource ButtonPressedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="CheckBoxBorder" Property="Opacity" Value="0.5"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Переключатель (toggle switch) -->
+    <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
+        <Setter Property="Width" Value="48"/>
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border x:Name="SwitchBackground"
+                            Width="48" Height="24"
+                            CornerRadius="12"
+                            Background="{DynamicResource SliderBackgroundBrush}"
+                            BorderBrush="{DynamicResource SliderBorderBrush}"
+                            BorderThickness="1">
+                            <Grid>
+                                <Border x:Name="SwitchThumb"
+                                    Width="18" Height="18"
+                                    CornerRadius="9"
+                                    Background="{DynamicResource TextPrimaryBrush}"
+                                    Margin="3,0,0,0"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform x:Name="ThumbTransform"/>
+                                    </Border.RenderTransform>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <ContentPresenter 
+                            Grid.Column="1"
+                            Margin="8,0,0,0"
+                            VerticalAlignment="Center"
+                            Content="{TemplateBinding Content}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SwitchBackground" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="SwitchThumb" Property="Background" Value="White"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation
+                                            Storyboard.TargetName="ThumbTransform"
+                                            Storyboard.TargetProperty="X"
+                                            To="24"
+                                            Duration="{StaticResource QuickAnimationDuration}"
+                                            EasingFunction="{StaticResource StandardEaseInOut}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation
+                                            Storyboard.TargetName="ThumbTransform"
+                                            Storyboard.TargetProperty="X"
+                                            To="0"
+                                            Duration="{StaticResource QuickAnimationDuration}"
+                                            EasingFunction="{StaticResource StandardEaseInOut}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="SwitchBackground" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="SwitchBackground" Property="Opacity" Value="0.5"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- RadioButton стиль -->
+    <Style x:Key="ModernRadioButtonStyle" TargetType="RadioButton" BasedOn="{StaticResource InteractiveControlBaseStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Ellipse x:Name="RadioBorder"
+                            Width="18" Height="18"
+                            StrokeThickness="{StaticResource StandardBorderThickness}"
+                            Stroke="{TemplateBinding BorderBrush}"
+                            Fill="{TemplateBinding Background}"
+                            Margin="0,0,8,0"/>
+
+                        <Ellipse x:Name="RadioFill"
+                            Width="8" Height="8"
+                            Fill="{DynamicResource AccentBrush}"
+                            Margin="0,0,8,0"
+                            Opacity="0"/>
+
+                        <ContentPresenter 
+                            Grid.Column="1"
+                            Content="{TemplateBinding Content}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            RecognizesAccessKey="True"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="RadioFill" Property="Opacity" Value="1"/>
+                            <Setter TargetName="RadioBorder" Property="Stroke" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="RadioBorder" Property="Stroke" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="RadioBorder" Property="Fill" Value="{DynamicResource ButtonPressedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="RadioBorder" Property="Opacity" Value="0.5"/>
+                            <Setter TargetName="RadioFill" Property="Opacity" Value="0.5"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>
