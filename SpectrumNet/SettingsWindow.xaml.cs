@@ -1,6 +1,5 @@
 ﻿#nullable enable
 
-using SpectrumNet.SN.Settings.Models;
 using TabControl = System.Windows.Controls.TabControl;
 using TabItem = System.Windows.Controls.TabItem;
 
@@ -107,10 +106,8 @@ public partial class SettingsWindow : Window
         UnsubscribeFromEvents();
     }
 
-    private void OnCloseButton_Click(object sender, RoutedEventArgs e)
-    {
+    private void OnCloseButton_Click(object sender, RoutedEventArgs e) =>
         Close();
-    }
 
     private void OnApplyButton_Click(object sender, RoutedEventArgs e)
     {
@@ -120,10 +117,7 @@ public partial class SettingsWindow : Window
 
     private void OnResetButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ConfirmSettingsReset())
-        {
-            ResetToDefaults();
-        }
+        if (ConfirmSettingsReset()) ResetToDefaults();
     }
 
     private void TabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -147,7 +141,7 @@ public partial class SettingsWindow : Window
         {
             if (MainTabControl?.SelectedItem is TabItem selectedTab)
                 ConnectLazyInitialization(selectedTab);
-            
+
         }), DispatcherPriority.Background);
     }
 
@@ -161,7 +155,7 @@ public partial class SettingsWindow : Window
     {
         if (sender is KeyBindingControl control)
             EnsureControlInitialized(control);
-        
+
     }
 
     private void OnKeyBindingChanged(object? sender, Key newKey)
@@ -247,9 +241,7 @@ public partial class SettingsWindow : Window
         try
         {
             if (_keyBindingManager.SetKeyForAction(control.ActionName, Key.None))
-            {
                 control.CurrentKey = Key.None;
-            }
         }
         finally
         {
@@ -273,10 +265,11 @@ public partial class SettingsWindow : Window
 
         try
         {
-            if (_keyBindingManager.SetKeyForAction(control.ActionName, newKey, force: existingAction != null))
-            {
+            if (_keyBindingManager.SetKeyForAction(
+                control.ActionName,
+                newKey,
+                force: existingAction != null))
                 control.CurrentKey = newKey;
-            }
         }
         finally
         {
@@ -301,9 +294,7 @@ public partial class SettingsWindow : Window
                 {
                     var currentKey = _keyBindingManager.GetKeyForAction(control.ActionName);
                     if (control.CurrentKey != currentKey)
-                    {
                         control.CurrentKey = currentKey;
-                    }
                 }
             }
         }
@@ -375,7 +366,7 @@ public partial class SettingsWindow : Window
 
     private void BackupCurrentSettings() =>
         _originalValues = CreateBackupDictionary(GetSettingsToBackup());
-    
+
     private (string, object?)[] GetSettingsToBackup() =>
     [
         ("Particles", _settings.Particles),
@@ -438,9 +429,7 @@ public partial class SettingsWindow : Window
     public void EnsureWindowVisible()
     {
         if (!IsWindowOnScreen())
-        {
             ResetWindowPosition();
-        }
     }
 
     private bool IsWindowOnScreen() =>
@@ -454,7 +443,7 @@ public partial class SettingsWindow : Window
 
     private void ResetWindowPosition() =>
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-    
+
     private static MessageBoxResult ShowUnsavedChangesDialog() =>
         MessageBox.Show(
             "You have unsaved changes. Do you want to save them before closing?",

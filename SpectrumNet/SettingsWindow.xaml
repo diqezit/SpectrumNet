@@ -350,108 +350,127 @@
                         </TabItem>
 
                         <TabItem Header="Key Bindings">
+                            <TabItem.Resources>
+                                <Style TargetType="{x:Type controls:KeyBindingControl}">
+                                    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                    <Setter Property="Margin" Value="0,4"/>
+                                    <Setter Property="MinHeight" Value="32"/>
+                                </Style>
+
+                                <!-- Enable wrapping so long messages fit (e.g., "Press any key to continue") -->
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextWrapping" Value="Wrap"/>
+                                    <Setter Property="TextTrimming" Value="None"/>
+                                    <Setter Property="VerticalAlignment" Value="Center"/>
+                                </Style>
+
+                                <Style x:Key="ModernButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+                                    <Setter Property="FontSize" Value="14"/>
+                                    <Setter Property="Padding" Value="12,4"/>
+                                    <Setter Property="MinHeight" Value="28"/>
+                                </Style>
+
+                                <Style TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+                                    <Setter Property="FontSize" Value="14"/>
+                                    <Setter Property="Padding" Value="12,4"/>
+                                    <Setter Property="MinWidth" Value="44"/>
+                                    <Setter Property="MinHeight" Value="28"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="Content" Value="Change">
+                                            <Setter Property="MinWidth" Value="96"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TabItem.Resources>
+
                             <Grid>
-                                <ScrollViewer VerticalScrollBarVisibility="Auto" 
-                                      HorizontalScrollBarVisibility="Hidden"
-                                      Margin="0,0,0,0">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
                                     <StackPanel Margin="16,8,16,8">
-                                        <GroupBox Header="Navigation" 
-                                              Style="{DynamicResource SettingsGroupBoxStyle}" 
-                                              Margin="0,0,0,8">
+                                        <GroupBox Header="Navigation"
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}"
+                                                  Margin="0,0,0,8">
                                             <StackPanel Margin="8">
-                                                <controls:KeyBindingControl 
-                                                        Tag="NextRenderer" 
-                                                        Description="Next Renderer"
-                                                        Loaded="KeyBindingControl_Loaded"
-                                                        Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                        Tag="PreviousRenderer" 
-                                                        Description="Previous Renderer"
-                                                        Loaded="KeyBindingControl_Loaded"
-                                                        Margin="0,2"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="NextRenderer"
+                                                    Description="Next Renderer"
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="PreviousRenderer"
+                                                    Description="Previous Renderer"
+                                                    Loaded="KeyBindingControl_Loaded"/>
                                             </StackPanel>
                                         </GroupBox>
 
-                                        <GroupBox Header="Quality Control" 
-                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                        <GroupBox Header="Quality Control"
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}"
                                                   Margin="0,0,0,8">
                                             <StackPanel Margin="8">
-                                                <controls:KeyBindingControl 
-                                                    Tag="QualityLow" 
+                                                <controls:KeyBindingControl
+                                                    Tag="QualityLow"
                                                     Description="Low Quality"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                    Tag="QualityMedium" 
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="QualityMedium"
                                                     Description="Medium Quality"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                    Tag="QualityHigh" 
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="QualityHigh"
                                                     Description="High Quality"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
+                                                    Loaded="KeyBindingControl_Loaded"/>
                                             </StackPanel>
                                         </GroupBox>
 
-                                        <GroupBox Header="Interface" 
-                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                        <GroupBox Header="Interface"
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}"
                                                   Margin="0,0,0,8">
                                             <StackPanel Margin="8">
-                                                <controls:KeyBindingControl 
-                                                    Tag="ToggleOverlay" 
+                                                <controls:KeyBindingControl
+                                                    Tag="ToggleOverlay"
                                                     Description="Toggle Overlay"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                    Tag="ToggleControlPanel" 
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="ToggleControlPanel"
                                                     Description="Toggle Control Panel"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                    Tag="ClosePopup" 
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="ClosePopup"
                                                     Description="Close Popup"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
+                                                    Loaded="KeyBindingControl_Loaded"/>
                                             </StackPanel>
                                         </GroupBox>
 
-                                        <GroupBox Header="Visualization" 
-                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                        <GroupBox Header="Visualization"
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}"
                                                   Margin="0,0,0,8">
                                             <StackPanel Margin="8">
-                                                <controls:KeyBindingControl 
-                                                    Tag="IncreaseBarCount" 
+                                                <controls:KeyBindingControl
+                                                    Tag="IncreaseBarCount"
                                                     Description="Increase Bar Count"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                    Tag="DecreaseBarCount" 
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="DecreaseBarCount"
                                                     Description="Decrease Bar Count"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                    Tag="IncreaseBarSpacing" 
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="IncreaseBarSpacing"
                                                     Description="Increase Bar Spacing"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
-                                                <controls:KeyBindingControl 
-                                                    Tag="DecreaseBarSpacing" 
+                                                    Loaded="KeyBindingControl_Loaded"/>
+                                                <controls:KeyBindingControl
+                                                    Tag="DecreaseBarSpacing"
                                                     Description="Decrease Bar Spacing"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
+                                                    Loaded="KeyBindingControl_Loaded"/>
                                             </StackPanel>
                                         </GroupBox>
 
-                                        <GroupBox Header="Recording" 
-                                                  Style="{DynamicResource SettingsGroupBoxStyle}" 
+                                        <GroupBox Header="Recording"
+                                                  Style="{DynamicResource SettingsGroupBoxStyle}"
                                                   Margin="0,0,0,8">
                                             <StackPanel Margin="8">
-                                                <controls:KeyBindingControl 
-                                                    Tag="ToggleRecording" 
+                                                <controls:KeyBindingControl
+                                                    Tag="ToggleRecording"
                                                     Description="Toggle Recording"
-                                                    Loaded="KeyBindingControl_Loaded"
-                                                    Margin="0,2"/>
+                                                    Loaded="KeyBindingControl_Loaded"/>
                                             </StackPanel>
                                         </GroupBox>
                                     </StackPanel>
