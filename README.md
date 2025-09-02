@@ -1,3 +1,4 @@
+
 # SpectrumNet - Real-Time Audio Spectrum Visualizer
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -6,6 +7,15 @@
 **SpectrumNet** is a high-performance audio visualizer for Windows that transforms any system audio into a captivating, real-time spectral display. Built with C#, WPF, and .NET 8, it combines advanced signal processing with a powerful rendering engine to create immersive visual experiences.
 
 ![Intro](https://github.com/user-attachments/assets/82777947-28cb-4d22-a9e3-166294801efb)
+
+> ### 🚀 Now Available in C++!
+>
+> For users seeking maximum performance and a lighter footprint, a native C++ version of this project is now available! **[SpectrumCpp](https://github.com/diqezit/SpectrumCpp)** is built from the ground up with Win32 and Direct2D for raw speed and efficiency.
+>
+> **Check out SpectrumCpp if you:**
+> - Need the absolute best performance, especially in overlay mode.
+> - Prefer a minimal, dependency-free executable.
+> - Are interested in native Windows development with C++.
 
 ## ✨ Key Features
 
