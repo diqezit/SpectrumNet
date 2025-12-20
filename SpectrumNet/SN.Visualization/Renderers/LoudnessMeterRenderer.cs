@@ -1,684 +1,312 @@
-﻿#nullable enable
-
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer<LoudnessMeterRenderer.QualitySettings>
+public sealed class LoudnessMeterRenderer : EffectSpectrumRenderer<LoudnessMeterRenderer.QS>
 {
-    private static readonly Lazy<LoudnessMeterRenderer> _instance =
-        new(() => new LoudnessMeterRenderer());
+    private const float
+        MinL = 0.001f,
+        MedL = 0.4f,
+        AtkN = 0.6f,
+        RelN = 0.2f,
+        AtkOv = 0.8f,
+        RelOv = 0.3f,
+        PkG = 0.015f,
+        PkD = 0.95f,
+        HoldMs = 300f,
+        PkH = 3f,
+        PkBw = 0.8f,
+        EdgeW = 4f,
+        Pad = 20f,
+        Rr = 8f,
+        OutBw = 2.5f,
+        InBw = 1.8f,
+        FillBw = 1.2f,
+        MarkW = 12f,
+        MarkH = 2.5f,
+        MarkBw = 0.8f;
 
-    public static LoudnessMeterRenderer GetInstance() => _instance.Value;
+    private const byte
+        BgA = 45,
+        OutA = 140,
+        InA = 80,
+        FillA = 100,
+        MarkA = 85,
+        MarkBA = 120,
+        PkA = 230,
+        PkBA = 255,
+        EdgeA = 255;
 
-    private const float MIN_LOUDNESS_THRESHOLD = 0.001f,
-        MEDIUM_LOUDNESS_THRESHOLD = 0.4f;
+    private static readonly float[] DefPos = [0f, 0.5f, 1.0f];
 
-    private const float SMOOTHING_FACTOR_ATTACK_NORMAL = 0.6f,
-        SMOOTHING_FACTOR_RELEASE_NORMAL = 0.2f,
-        SMOOTHING_FACTOR_ATTACK_OVERLAY = 0.8f,
-        SMOOTHING_FACTOR_RELEASE_OVERLAY = 0.3f;
-
-    private const float PEAK_GRAVITY = 0.015f,
-        PEAK_VELOCITY_DAMPING = 0.95f,
-        PEAK_CAPTURE_THRESHOLD = 0.02f,
-        PEAK_HOLD_TIME_MS = 300f,
-        PEAK_INDICATOR_HEIGHT = 3f,
-        PEAK_INDICATOR_BORDER_WIDTH = 0.8f,
-        EDGE_INDICATOR_WIDTH = 4f;
-
-    private const float METER_PADDING = 20f,
-        METER_CORNER_RADIUS = 8f,
-        OUTER_BORDER_WIDTH = 2.5f,
-        INNER_BORDER_WIDTH = 1.8f,
-        FILL_BORDER_WIDTH = 1.2f;
-
-    private const float MARKER_WIDTH = 12f,
-        MARKER_HEIGHT = 2.5f,
-        MARKER_BORDER_WIDTH = 0.8f;
-
-    private const float GLOW_HEIGHT_FACTOR_LOW = 0f,
-        GLOW_HEIGHT_FACTOR_MEDIUM = 0.35f,
-        GLOW_HEIGHT_FACTOR_HIGH = 0.6f,
-        GRADIENT_ALPHA_FACTOR_LOW = 0.85f,
-        GRADIENT_ALPHA_FACTOR_MEDIUM = 0.95f,
-        GRADIENT_ALPHA_FACTOR_HIGH = 1.0f,
-        DYNAMIC_GRADIENT_FACTOR_LOW = 0f,
-        DYNAMIC_GRADIENT_FACTOR_MEDIUM = 0.7f,
-        DYNAMIC_GRADIENT_FACTOR_HIGH = 1.0f,
-        GLOW_INTENSITY_LOW = 0f,
-        GLOW_INTENSITY_MEDIUM = 0.5f,
-        GLOW_INTENSITY_HIGH = 0.7f,
-        BLUR_SIGMA_LOW = 0f,
-        BLUR_SIGMA_MEDIUM = 8f,
-        BLUR_SIGMA_HIGH = 12f;
-
-    private const byte BACKGROUND_ALPHA = 45,
-        OUTER_BORDER_ALPHA = 140,
-        INNER_BORDER_ALPHA = 80,
-        FILL_BORDER_ALPHA = 100,
-        MARKER_ALPHA = 85,
-        MARKER_BORDER_ALPHA = 120,
-        PEAK_ALPHA = 230,
-        PEAK_BORDER_ALPHA = 255,
-        EDGE_ALPHA = 255;
-
-    private static readonly float[] _defaultColorPositions = [0f, 0.5f, 1.0f];
-    private static readonly float[] _markerPositions =
+    private static readonly float[] MarkPos =
         [0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f];
 
-    private float _currentLoudness;
-    private float _peakValue;
-    private float _peakTimer;
-    private float _peakVelocity;
-    private int _currentWidth;
-    private int _currentHeight;
-    private readonly float _peakHoldTime = PEAK_HOLD_TIME_MS / 1000f;
+    private float _l;
+    private PeakTracker _pk;
+    private readonly float _hold = HoldMs / 1000f;
 
-    public sealed class QualitySettings
+    private DimCache _d;
+
+    private readonly float[] _pos3 = new float[3];
+    private readonly SKColor[] _cols3 = new SKColor[3];
+
+    private static readonly IReadOnlyDictionary<RenderQuality, QS> _pre =
+        new Dictionary<RenderQuality, QS>
+        {
+            [RenderQuality.Low] = new(false, false, false, false, false, 0f, 0f, 0f, 0.85f, 0f),
+            [RenderQuality.Medium] = new(true, true, true, true, false, 0.5f, 8f, 0.35f, 0.95f, 0.7f),
+            [RenderQuality.High] = new(true, true, true, true, true, 0.7f, 12f, 0.6f, 1.0f, 1.0f)
+        };
+
+    public sealed record QS(
+        bool Glow,
+        bool Markers,
+        bool InBorder,
+        bool FillBorder,
+        bool MarkBorder,
+        float GlowI,
+        float Blur,
+        float GlowH,
+        float GradA,
+        float DynGrad);
+
+    protected override IReadOnlyDictionary<RenderQuality, QS> QualitySettingsPresets => _pre;
+    protected override int GetMaxBarsForQuality() => GetBarsForQuality(32, 64, 128);
+
+    protected override void OnQualitySettingsApplied()
     {
-        public bool UseGlow { get; init; }
-        public bool UseMarkers { get; init; }
-        public bool UseInnerBorder { get; init; }
-        public bool UseFillBorder { get; init; }
-        public bool UseMarkerBorders { get; init; }
-        public float GlowIntensity { get; init; }
-        public float BlurSigma { get; init; }
-        public float GlowHeightFactor { get; init; }
-        public float GradientAlphaFactor { get; init; }
-        public float DynamicGradientFactor { get; init; }
+        base.OnQualitySettingsApplied();
+        ApplyStandardQualitySmoothing();
+        _pk.Reset();
     }
 
-    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
-        QualitySettingsPresets
-    { get; } = new Dictionary<RenderQuality, QualitySettings>
+    protected override void OnDispose()
     {
-        [RenderQuality.Low] = new()
-        {
-            UseGlow = false,
-            UseMarkers = false,
-            UseInnerBorder = false,
-            UseFillBorder = false,
-            UseMarkerBorders = false,
-            GlowIntensity = GLOW_INTENSITY_LOW,
-            BlurSigma = BLUR_SIGMA_LOW,
-            GlowHeightFactor = GLOW_HEIGHT_FACTOR_LOW,
-            GradientAlphaFactor = GRADIENT_ALPHA_FACTOR_LOW,
-            DynamicGradientFactor = DYNAMIC_GRADIENT_FACTOR_LOW
-        },
-        [RenderQuality.Medium] = new()
-        {
-            UseGlow = true,
-            UseMarkers = true,
-            UseInnerBorder = true,
-            UseFillBorder = true,
-            UseMarkerBorders = false,
-            GlowIntensity = GLOW_INTENSITY_MEDIUM,
-            BlurSigma = BLUR_SIGMA_MEDIUM,
-            GlowHeightFactor = GLOW_HEIGHT_FACTOR_MEDIUM,
-            GradientAlphaFactor = GRADIENT_ALPHA_FACTOR_MEDIUM,
-            DynamicGradientFactor = DYNAMIC_GRADIENT_FACTOR_MEDIUM
-        },
-        [RenderQuality.High] = new()
-        {
-            UseGlow = true,
-            UseMarkers = true,
-            UseInnerBorder = true,
-            UseFillBorder = true,
-            UseMarkerBorders = true,
-            GlowIntensity = GLOW_INTENSITY_HIGH,
-            BlurSigma = BLUR_SIGMA_HIGH,
-            GlowHeightFactor = GLOW_HEIGHT_FACTOR_HIGH,
-            GradientAlphaFactor = GRADIENT_ALPHA_FACTOR_HIGH,
-            DynamicGradientFactor = DYNAMIC_GRADIENT_FACTOR_HIGH
-        }
-    };
+        _l = 0f;
+        _pk.Reset();
+        _d = default;
+        base.OnDispose();
+    }
 
     protected override void RenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
+        SKCanvas c,
+        float[] spec,
         SKImageInfo info,
-        RenderParameters renderParams,
-        SKPaint passedInPaint)
+        RenderParameters rp,
+        SKPaint paint)
     {
-        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
+        if (CurrentQualitySettings is not { } s)
             return;
 
-        var (isValid, processedSpectrum) = ProcessSpectrum(
-            spectrum,
-            renderParams.EffectiveBarCount,
-            applyTemporalSmoothing: true);
+        if (_d.Changed(info))
+            RequestRedraw();
 
-        if (!isValid || processedSpectrum == null)
-            return;
+        float loud = UpdL(spec);
+        _pk.UpdateWithGravity(loud, _hold, DeltaTime, PkG, PkD);
 
-        var meterData = CalculateMeterData(processedSpectrum, info);
+        var r = new SKRect(Pad, Pad, info.Width - Pad, info.Height - Pad);
 
-        if (!ValidateMeterData(meterData))
-            return;
+        DrawBg(c, r);
+        DrawOutBorder(c, r);
 
-        RenderMeterVisualization(
-            canvas,
-            meterData,
-            renderParams,
-            passedInPaint);
-    }
-
-    private MeterData CalculateMeterData(float[] spectrum, SKImageInfo info)
-    {
-        UpdateDimensions(info);
-        float loudness = CalculateAndSmoothLoudness(spectrum);
-        UpdatePeakPhysics(loudness, 1f / 60f);
-
-        var meterRect = CalculateMeterRect(info);
-
-        return new MeterData(
-            Loudness: loudness,
-            PeakPosition: _peakValue,
-            MeterRect: meterRect,
-            Width: info.Width,
-            Height: info.Height);
-    }
-
-    private static SKRect CalculateMeterRect(SKImageInfo info) =>
-        new(
-            METER_PADDING,
-            METER_PADDING,
-            info.Width - METER_PADDING,
-            info.Height - METER_PADDING);
-
-    private static bool ValidateMeterData(MeterData data) =>
-        data.MeterRect.Width > 0 &&
-        data.MeterRect.Height > 0;
-
-    private void RenderMeterVisualization(
-        SKCanvas canvas,
-        MeterData data,
-        RenderParameters renderParams,
-        SKPaint basePaint)
-    {
-        var settings = CurrentQualitySettings!;
-
-        DrawMeterBackground(canvas, data.MeterRect);
-        DrawOuterBorder(canvas, data.MeterRect);
-
-        RenderWithOverlay(canvas, () =>
-        {
-            canvas.Save();
-            canvas.ClipRoundRect(
-                new SKRoundRect(data.MeterRect, METER_CORNER_RADIUS),
-                SKClipOperation.Intersect);
-
-            try
-            {
-                if (UseAdvancedEffects && settings.UseMarkers)
-                    RenderMarkersLayer(canvas, data.MeterRect, settings);
-
-                if (data.Loudness >= MIN_LOUDNESS_THRESHOLD)
-                    RenderFillLayer(canvas, data, settings);
-
-                if (settings.UseInnerBorder)
-                    RenderInnerBorderLayer(canvas, data.MeterRect);
-
-                if (data.PeakPosition > MIN_LOUDNESS_THRESHOLD)
-                    RenderPeakLayer(canvas, data, settings);
-            }
-            finally
-            {
-                canvas.Restore();
-            }
-        });
-    }
-
-    private void DrawMeterBackground(SKCanvas canvas, SKRect rect)
-    {
-        var backgroundPaint = CreatePaint(
-            new SKColor(20, 20, 20, BACKGROUND_ALPHA),
-            SKPaintStyle.Fill);
+        int sc = c.Save();
+        c.ClipRoundRect(new SKRoundRect(r, Rr), SKClipOperation.Intersect);
 
         try
         {
-            canvas.DrawRoundRect(
-                rect,
-                METER_CORNER_RADIUS,
-                METER_CORNER_RADIUS,
-                backgroundPaint);
+            if (UseAdvancedEffects && s.Markers)
+                DrawMarks(c, r, s);
+
+            if (loud >= MinL)
+                DrawFill(c, r, loud, s);
+
+            if (s.InBorder)
+                DrawInBorder(c, r);
+
+            if (_pk.Value > MinL)
+                DrawPeak(c, r, s);
         }
         finally
         {
-            ReturnPaint(backgroundPaint);
+            c.RestoreToCount(sc);
         }
     }
 
-    private void DrawOuterBorder(SKCanvas canvas, SKRect rect)
+    private float UpdL(float[] spec)
     {
-        var borderPaint = CreatePaint(
-            new SKColor(120, 120, 120, OUTER_BORDER_ALPHA),
-            SKPaintStyle.Stroke);
-        borderPaint.StrokeWidth = OUTER_BORDER_WIDTH;
-        borderPaint.IsAntialias = true;
+        float raw = CalculateAverageLoudness(spec);
+        float atk = SelectByOverlay(AtkN, AtkOv);
+        float rel = SelectByOverlay(RelN, RelOv);
 
-        try
-        {
-            canvas.DrawRoundRect(
-                rect,
-                METER_CORNER_RADIUS,
-                METER_CORNER_RADIUS,
-                borderPaint);
-        }
-        finally
-        {
-            ReturnPaint(borderPaint);
-        }
+        _l = Clamp(SmoothWithAttackRelease(_l, raw, atk, rel), 0f, 1f);
+        return _l;
     }
 
-    private void RenderMarkersLayer(SKCanvas canvas, SKRect meterRect, QualitySettings settings)
-    {
-        var markerPaint = CreatePaint(
-            new SKColor(120, 120, 120, MARKER_ALPHA),
-            SKPaintStyle.Fill);
-        markerPaint.IsAntialias = true;
+    private void DrawBg(SKCanvas c, SKRect r) =>
+        WithPaint(new SKColor(20, 20, 20, BgA), Fill, p =>
+            c.DrawRoundRect(r, Rr, Rr, p));
 
-        var borderPaint = settings.UseMarkerBorders
-            ? CreatePaint(new SKColor(160, 160, 160, MARKER_BORDER_ALPHA), SKPaintStyle.Stroke)
+    private void DrawOutBorder(SKCanvas c, SKRect r)
+    {
+        SKPaint p = CreatePaint(new SKColor(120, 120, 120, OutA), Stroke);
+        p.StrokeWidth = OutBw;
+
+        try { c.DrawRoundRect(r, Rr, Rr, p); }
+        finally { ReturnPaint(p); }
+    }
+
+    private void DrawMarks(SKCanvas c, SKRect r, QS s)
+    {
+        SKPaint mp = CreatePaint(new SKColor(120, 120, 120, MarkA), Fill);
+
+        SKPaint? bp = s.MarkBorder
+            ? CreatePaint(new SKColor(160, 160, 160, MarkBA), Stroke)
             : null;
 
-        if (borderPaint != null)
-        {
-            borderPaint.StrokeWidth = MARKER_BORDER_WIDTH;
-            borderPaint.IsAntialias = true;
-        }
+        if (bp != null)
+            bp.StrokeWidth = MarkBw;
 
         try
         {
-            foreach (float position in _markerPositions)
+            for (int i = 0; i < MarkPos.Length; i++)
             {
-                var (leftRect, rightRect) = CalculateMarkerRects(meterRect, position);
+                float pos = MarkPos[i];
+                float y = r.Bottom - r.Height * pos;
 
-                canvas.DrawRect(leftRect, markerPaint);
-                canvas.DrawRect(rightRect, markerPaint);
+                var l = new SKRect(r.Left, y - MarkH / 2f, r.Left + MarkW, y + MarkH / 2f);
+                var rr = new SKRect(r.Right - MarkW, y - MarkH / 2f, r.Right, y + MarkH / 2f);
 
-                if (borderPaint != null)
+                c.DrawRect(l, mp);
+                c.DrawRect(rr, mp);
+
+                if (bp != null)
                 {
-                    canvas.DrawRect(leftRect, borderPaint);
-                    canvas.DrawRect(rightRect, borderPaint);
+                    c.DrawRect(l, bp);
+                    c.DrawRect(rr, bp);
                 }
             }
         }
         finally
         {
-            ReturnPaint(markerPaint);
-            if (borderPaint != null)
-                ReturnPaint(borderPaint);
+            ReturnPaint(mp);
+            if (bp != null) ReturnPaint(bp);
         }
     }
 
-    private static (SKRect Left, SKRect Right) CalculateMarkerRects(SKRect meterRect, float position)
+    private void DrawFill(SKCanvas c, SKRect r, float loud, QS s)
     {
-        float y = meterRect.Bottom - (meterRect.Height * position);
+        float h = r.Height * loud;
 
-        var leftRect = new SKRect(
-            meterRect.Left,
-            y - MARKER_HEIGHT / 2,
-            meterRect.Left + MARKER_WIDTH,
-            y + MARKER_HEIGHT / 2);
+        DrawGradFill(c, r, h, loud, s);
 
-        var rightRect = new SKRect(
-            meterRect.Right - MARKER_WIDTH,
-            y - MARKER_HEIGHT / 2,
-            meterRect.Right,
-            y + MARKER_HEIGHT / 2);
+        if (UseAdvancedEffects && s.Glow && loud > MedL)
+            DrawGlow(c, r, h, loud, s);
 
-        return (leftRect, rightRect);
+        if (s.FillBorder)
+            DrawFillBorder(c, r, h);
     }
 
-    private void RenderFillLayer(SKCanvas canvas, MeterData data, QualitySettings settings)
+    private void DrawGradFill(SKCanvas c, SKRect r, float h, float loud, QS s)
     {
-        float meterHeight = data.MeterRect.Height * data.Loudness;
+        byte a = CalculateAlpha(s.GradA);
 
-        RenderLoudnessFill(canvas, data, meterHeight, settings);
+        _cols3[0] = SKColors.Green.WithAlpha(a);
+        _cols3[1] = SKColors.Yellow.WithAlpha(a);
+        _cols3[2] = SKColors.Red.WithAlpha(a);
 
-        if (UseAdvancedEffects && settings.UseGlow && data.Loudness > MEDIUM_LOUDNESS_THRESHOLD)
-            RenderGlowEffect(canvas, data, meterHeight, settings);
+        float[] pos;
 
-        if (settings.UseFillBorder)
-            RenderFillBorder(canvas, data, meterHeight);
-    }
-
-    private void RenderLoudnessFill(
-        SKCanvas canvas,
-        MeterData data,
-        float meterHeight,
-        QualitySettings settings)
-    {
-        using var shader = CreateLoudnessGradientShader(data, settings);
-        var fillPaint = CreatePaint(SKColors.Black, SKPaintStyle.Fill, shader);
-        fillPaint.IsAntialias = true;
-
-        try
+        if (UseAdvancedEffects && s.DynGrad > 0f)
         {
-            canvas.DrawRect(
-                data.MeterRect.Left,
-                data.MeterRect.Bottom - meterHeight,
-                data.MeterRect.Width,
-                meterHeight,
-                fillPaint);
-        }
-        finally
-        {
-            ReturnPaint(fillPaint);
-        }
-    }
-
-    private void RenderGlowEffect(
-        SKCanvas canvas,
-        MeterData data,
-        float meterHeight,
-        QualitySettings settings)
-    {
-        float glowHeight = meterHeight * settings.GlowHeightFactor;
-        var glowColor = CalculateGlowColor(data.Loudness, settings);
-
-        using var blurFilter = SKMaskFilter.CreateBlur(
-            SKBlurStyle.Normal,
-            settings.BlurSigma);
-
-        var glowPaint = CreatePaint(glowColor, SKPaintStyle.Fill);
-        glowPaint.MaskFilter = blurFilter;
-        glowPaint.IsAntialias = true;
-
-        try
-        {
-            canvas.DrawRect(
-                data.MeterRect.Left,
-                data.MeterRect.Bottom - meterHeight,
-                data.MeterRect.Width,
-                glowHeight,
-                glowPaint);
-        }
-        finally
-        {
-            ReturnPaint(glowPaint);
-        }
-    }
-
-    private void RenderFillBorder(SKCanvas canvas, MeterData data, float meterHeight)
-    {
-        float fillTop = data.MeterRect.Bottom - meterHeight;
-
-        var borderPaint = CreatePaint(
-            new SKColor(220, 220, 220, FILL_BORDER_ALPHA),
-            SKPaintStyle.Stroke);
-        borderPaint.StrokeWidth = FILL_BORDER_WIDTH;
-        borderPaint.IsAntialias = true;
-
-        try
-        {
-            RenderPath(canvas, path =>
-            {
-                path.MoveTo(data.MeterRect.Left, fillTop);
-                path.LineTo(data.MeterRect.Right, fillTop);
-                path.LineTo(data.MeterRect.Right, data.MeterRect.Bottom);
-                path.LineTo(data.MeterRect.Left, data.MeterRect.Bottom);
-                path.Close();
-            }, borderPaint);
-        }
-        finally
-        {
-            ReturnPaint(borderPaint);
-        }
-    }
-
-    private void RenderInnerBorderLayer(SKCanvas canvas, SKRect rect)
-    {
-        var innerRect = rect;
-        innerRect.Inflate(-INNER_BORDER_WIDTH, -INNER_BORDER_WIDTH);
-
-        var innerBorderPaint = CreatePaint(
-            new SKColor(170, 170, 170, INNER_BORDER_ALPHA),
-            SKPaintStyle.Stroke);
-        innerBorderPaint.StrokeWidth = INNER_BORDER_WIDTH;
-        innerBorderPaint.IsAntialias = true;
-
-        try
-        {
-            canvas.DrawRoundRect(
-                innerRect,
-                METER_CORNER_RADIUS - INNER_BORDER_WIDTH,
-                METER_CORNER_RADIUS - INNER_BORDER_WIDTH,
-                innerBorderPaint);
-        }
-        finally
-        {
-            ReturnPaint(innerBorderPaint);
-        }
-    }
-
-    private void RenderPeakLayer(SKCanvas canvas, MeterData data, QualitySettings settings)
-    {
-        float peakY = data.MeterRect.Bottom - (data.MeterRect.Height * data.PeakPosition);
-
-        RenderPeakIndicator(canvas, data.MeterRect, peakY);
-
-        if (UseAdvancedEffects && settings.UseMarkers)
-            RenderPeakEdgeIndicators(canvas, data.MeterRect, peakY);
-    }
-
-    private void RenderPeakIndicator(SKCanvas canvas, SKRect meterRect, float peakY)
-    {
-        var peakPaint = CreatePaint(
-            SKColors.White.WithAlpha(PEAK_ALPHA),
-            SKPaintStyle.Fill);
-        peakPaint.IsAntialias = true;
-
-        try
-        {
-            canvas.DrawRect(
-                meterRect.Left,
-                peakY - PEAK_INDICATOR_HEIGHT / 2,
-                meterRect.Width,
-                PEAK_INDICATOR_HEIGHT,
-                peakPaint);
-        }
-        finally
-        {
-            ReturnPaint(peakPaint);
-        }
-
-        var borderPaint = CreatePaint(
-            SKColors.White.WithAlpha(PEAK_BORDER_ALPHA),
-            SKPaintStyle.Stroke);
-        borderPaint.StrokeWidth = PEAK_INDICATOR_BORDER_WIDTH;
-        borderPaint.IsAntialias = true;
-
-        try
-        {
-            canvas.DrawLine(
-                meterRect.Left,
-                peakY,
-                meterRect.Right,
-                peakY,
-                borderPaint);
-        }
-        finally
-        {
-            ReturnPaint(borderPaint);
-        }
-    }
-
-    private void RenderPeakEdgeIndicators(SKCanvas canvas, SKRect meterRect, float peakY)
-    {
-        var edgePaint = CreatePaint(
-            SKColors.White.WithAlpha(EDGE_ALPHA),
-            SKPaintStyle.Fill);
-        edgePaint.IsAntialias = true;
-
-        try
-        {
-            canvas.DrawRect(
-                meterRect.Left,
-                peakY - PEAK_INDICATOR_HEIGHT,
-                EDGE_INDICATOR_WIDTH,
-                PEAK_INDICATOR_HEIGHT * 2,
-                edgePaint);
-
-            canvas.DrawRect(
-                meterRect.Right - EDGE_INDICATOR_WIDTH,
-                peakY - PEAK_INDICATOR_HEIGHT,
-                EDGE_INDICATOR_WIDTH,
-                PEAK_INDICATOR_HEIGHT * 2,
-                edgePaint);
-        }
-        finally
-        {
-            ReturnPaint(edgePaint);
-        }
-    }
-
-    private void UpdateDimensions(SKImageInfo info)
-    {
-        if (_currentWidth != info.Width || _currentHeight != info.Height)
-        {
-            _currentWidth = info.Width;
-            _currentHeight = info.Height;
-            RequestRedraw();
-        }
-    }
-
-    private void UpdatePeakPhysics(float loudness, float deltaTime)
-    {
-        if (loudness > _peakValue + PEAK_CAPTURE_THRESHOLD)
-        {
-            _peakValue = loudness;
-            _peakTimer = _peakHoldTime;
-            _peakVelocity = 0f;
-        }
-        else if (_peakTimer > 0)
-        {
-            _peakTimer -= deltaTime;
+            _pos3[0] = 0f;
+            _pos3[1] = Clamp(loud * s.DynGrad, 0.2f, 0.8f);
+            _pos3[2] = 1f;
+            pos = _pos3;
         }
         else
         {
-            _peakVelocity += PEAK_GRAVITY;
-            _peakVelocity *= PEAK_VELOCITY_DAMPING;
+            pos = DefPos;
+        }
 
-            float newPeakValue = MathF.Max(0, _peakValue - _peakVelocity);
-            _peakValue = MathF.Max(newPeakValue, _currentLoudness);
+        WithShader(SKColors.Black, Fill, () =>
+            SKShader.CreateLinearGradient(
+                new SKPoint(r.Left, r.Bottom),
+                new SKPoint(r.Left, r.Top),
+                _cols3,
+                pos,
+                SKShaderTileMode.Clamp),
+            p => c.DrawRect(r.Left, r.Bottom - h, r.Width, h, p));
+    }
+
+    private void DrawGlow(SKCanvas c, SKRect r, float h, float loud, QS s)
+    {
+        float gh = h * s.GlowH;
+        float norm = Clamp((loud - MedL) / (1f - MedL), 0f, 1f);
+
+        byte g = (byte)(255f * (1f - norm));
+        var col = new SKColor(255, g, 0);
+
+        byte a = (byte)(255f * s.GlowI * norm);
+
+        WithBlur(col.WithAlpha(a), Fill, s.Blur, p =>
+            c.DrawRect(r.Left, r.Bottom - h, r.Width, gh, p));
+    }
+
+    private void DrawFillBorder(SKCanvas c, SKRect r, float h)
+    {
+        float top = r.Bottom - h;
+
+        SKPaint p = CreatePaint(new SKColor(220, 220, 220, FillA), Stroke);
+        p.StrokeWidth = FillBw;
+
+        try
+        {
+            RenderPath(c, path =>
+            {
+                path.MoveTo(r.Left, top);
+                path.LineTo(r.Right, top);
+                path.LineTo(r.Right, r.Bottom);
+                path.LineTo(r.Left, r.Bottom);
+                path.Close();
+            }, p);
+        }
+        finally
+        {
+            ReturnPaint(p);
         }
     }
 
-    private float CalculateAndSmoothLoudness(float[] spectrum)
+    private void DrawInBorder(SKCanvas c, SKRect r)
     {
-        float rawLoudness = CalculateLoudness(spectrum);
+        SKRect ir = r;
+        ir.Inflate(-InBw, -InBw);
 
-        float effectiveSmoothingFactor = rawLoudness > _currentLoudness
-            ? (IsOverlayActive ? SMOOTHING_FACTOR_ATTACK_OVERLAY : SMOOTHING_FACTOR_ATTACK_NORMAL)
-            : (IsOverlayActive ? SMOOTHING_FACTOR_RELEASE_OVERLAY : SMOOTHING_FACTOR_RELEASE_NORMAL);
+        SKPaint p = CreatePaint(new SKColor(170, 170, 170, InA), Stroke);
+        p.StrokeWidth = InBw;
 
-        float smoothedLoudness = Lerp(_currentLoudness, rawLoudness, effectiveSmoothingFactor);
-        _currentLoudness = Clamp(smoothedLoudness, 0f, 1f);
-
-        return _currentLoudness;
+        try { c.DrawRoundRect(ir, Rr - InBw, Rr - InBw, p); }
+        finally { ReturnPaint(p); }
     }
 
-    private static float CalculateLoudness(float[] spectrum)
+    private void DrawPeak(SKCanvas c, SKRect r, QS s)
     {
-        if (spectrum.Length == 0) return 0f;
+        float y = r.Bottom - r.Height * _pk.Value;
 
-        float sum = 0f;
-        for (int i = 0; i < spectrum.Length; i++)
-            sum += MathF.Abs(spectrum[i]);
+        WithPaint(SKColors.White.WithAlpha(PkA), Fill, p =>
+            c.DrawRect(r.Left, y - PkH / 2f, r.Width, PkH, p));
 
-        return Clamp(sum / spectrum.Length, 0f, 1f);
-    }
+        SKPaint bp = CreatePaint(SKColors.White.WithAlpha(PkBA), Stroke);
+        bp.StrokeWidth = PkBw;
 
-    private SKShader CreateLoudnessGradientShader(MeterData data, QualitySettings settings)
-    {
-        byte alpha = CalculateAlpha(settings.GradientAlphaFactor);
+        try { c.DrawLine(r.Left, y, r.Right, y, bp); }
+        finally { ReturnPaint(bp); }
 
-        var gradientColors = new[]
+        if (UseAdvancedEffects && s.Markers)
         {
-            SKColors.Green.WithAlpha(alpha),
-            SKColors.Yellow.WithAlpha(alpha),
-            SKColors.Red.WithAlpha(alpha)
-        };
-
-        float[] colorPositions = UseAdvancedEffects && settings.DynamicGradientFactor > 0
-            ? [0f, Clamp(data.Loudness * settings.DynamicGradientFactor, 0.2f, 0.8f), 1.0f]
-            : _defaultColorPositions;
-
-        return SKShader.CreateLinearGradient(
-            new SKPoint(data.MeterRect.Left, data.MeterRect.Bottom),
-            new SKPoint(data.MeterRect.Left, data.MeterRect.Top),
-            gradientColors,
-            colorPositions,
-            SKShaderTileMode.Clamp);
+            WithPaint(SKColors.White.WithAlpha(EdgeA), Fill, p =>
+            {
+                c.DrawRect(r.Left, y - PkH, EdgeW, PkH * 2f, p);
+                c.DrawRect(r.Right - EdgeW, y - PkH, EdgeW, PkH * 2f, p);
+            });
+        }
     }
-
-    private static SKColor CalculateGlowColor(float loudness, QualitySettings settings)
-    {
-        float normalizedLoudness = Clamp(
-            (loudness - MEDIUM_LOUDNESS_THRESHOLD) / (1.0f - MEDIUM_LOUDNESS_THRESHOLD),
-            0f,
-            1f);
-
-        byte interpolatedG = (byte)(255 * (1f - normalizedLoudness));
-        var interpolatedColor = new SKColor(255, interpolatedG, 0);
-        byte finalAlpha = (byte)(255 * settings.GlowIntensity * normalizedLoudness);
-
-        return interpolatedColor.WithAlpha(finalAlpha);
-    }
-
-    protected override int GetMaxBarsForQuality() => Quality switch
-    {
-        RenderQuality.Low => 32,
-        RenderQuality.Medium => 64,
-        RenderQuality.High => 128,
-        _ => 64
-    };
-
-    protected override void OnQualitySettingsApplied()
-    {
-        base.OnQualitySettingsApplied();
-
-        float smoothingFactor = Quality switch
-        {
-            RenderQuality.Low => 0.4f,
-            RenderQuality.Medium => 0.3f,
-            RenderQuality.High => 0.25f,
-            _ => 0.3f
-        };
-
-        if (IsOverlayActive)
-            smoothingFactor *= 1.2f;
-
-        SetProcessingSmoothingFactor(smoothingFactor);
-
-        ResetPeakState();
-        RequestRedraw();
-    }
-
-    private void ResetPeakState()
-    {
-        _peakValue = 0f;
-        _peakVelocity = 0f;
-        _peakTimer = 0f;
-    }
-
-    protected override void OnDispose()
-    {
-        _currentLoudness = 0f;
-        _peakValue = 0f;
-        _peakVelocity = 0f;
-        _peakTimer = 0f;
-        _currentWidth = 0;
-        _currentHeight = 0;
-
-        base.OnDispose();
-    }
-
-    private record MeterData(
-        float Loudness,
-        float PeakPosition,
-        SKRect MeterRect,
-        int Width,
-        int Height);
 }

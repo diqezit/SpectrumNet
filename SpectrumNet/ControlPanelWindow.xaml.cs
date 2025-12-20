@@ -1,250 +1,95 @@
-﻿#nullable enable
-
 namespace SpectrumNet;
 
-public partial class ControlPanelWindow : Window, IDisposable
+public partial class ControlPanelWindow : Window
 {
-    private const string LogPrefix = nameof(ControlPanelWindow);
+    private readonly AppController _ctrl;
 
-    private readonly IMainController _controller;
-    private readonly IThemes _themeManager;
-    private readonly Dictionary<string, Action> _buttonActions;
-    private readonly Dictionary<string, Action<double>> _sliderActions;
-    private readonly Dictionary<(string Name, Type ItemType), Action<object>> _comboBoxActions;
-    private readonly Dictionary<string, Action<bool>> _checkBoxActions;
-    private readonly ISmartLogger _logger = Instance;
-    private bool _isDisposed;
-    private readonly bool _isInitializingControls = true;
-
-    public ControlPanelWindow(IMainController controller)
+    public ControlPanelWindow(AppController c)
     {
-        ArgumentNullException.ThrowIfNull(controller);
-        _controller = controller;
-        _themeManager = ThemeManager.Instance;
+        _ctrl = c ?? throw new ArgumentNullException(nameof(c));
+
         InitializeComponent();
+        DataContext = _ctrl;
 
-        _buttonActions = CreateButtonActionsMap();
-        _sliderActions = CreateSliderActionsMap();
-        _comboBoxActions = CreateComboBoxActionsMap();
-        _checkBoxActions = CreateCheckBoxActionsMap();
-
-        DataContext = _controller;
-
-        MouseDoubleClick += (s, e) => _controller.InputController.HandleMouseDoubleClick(s, e);
-        KeyDown += (s, e) => _controller.InputController.HandleKeyDown(e, Keyboard.FocusedElement);
-
-        SetupGainControlsPopup();
-        SetInitialComboBoxSelections();
-        _isInitializingControls = false;
-
-        _controller.InputController.RegisterWindow(this);
-        _themeManager.RegisterWindow(this);
+        _ctrl.Input.RegisterWindow(this);
+        Theme.Instance.RegisterWindow(this);
     }
 
-    private void SetInitialComboBoxSelections()
+    private void OnButtonClick(object s, RoutedEventArgs e)
     {
-        if (RenderQualityComboBox is not null)
+        if (s is not Button { Name: var n }) return;
+
+        switch (n)
         {
-            RenderQualityComboBox.SelectedItem = _controller.RenderQuality;
-        }
-        if (RenderStyleComboBox is not null)
-        {
-            RenderStyleComboBox.SelectedItem = _controller.SelectedDrawingType;
-        }
-        if (FftWindowTypeComboBox is not null)
-        {
-            FftWindowTypeComboBox.SelectedItem = _controller.WindowType;
-        }
-        if (ScaleTypeComboBox is not null)
-        {
-            ScaleTypeComboBox.SelectedItem = _controller.ScaleType;
-        }
-    }
+            case nameof(CloseButton):
+                Close();
+                break;
 
-    private void SetupGainControlsPopup() =>
-        _logger.Safe(() => HandleSetupGainControlsPopup(), LogPrefix, "Error setting up gain controls popup");
+            case nameof(StartCaptureButton):
+                _ = _ctrl.Audio.StartCaptureAsync();
+                break;
 
-    private void HandleSetupGainControlsPopup()
-    {
-        if (GainControlsPopup is null) return;
+            case nameof(StopCaptureButton):
+                _ = _ctrl.Audio.StopCaptureAsync();
+                break;
 
-        GainControlsPopup.Opened += OnGainControlsPopupOpened;
-        GainControlsPopup.Closed += OnGainControlsPopupClosed;
-        GainControlsPopup.MouseDown += OnGainControlsPopupMouseDown;
-    }
+            case nameof(OverlayButton):
+                _ctrl.UI.ToggleOverlay();
+                break;
 
-    private void OnGainControlsPopupOpened(object? sender, EventArgs e) =>
-        Mouse.Capture(GainControlsPopup, CaptureMode.SubTree);
+            case nameof(OpenSettingsButton):
+                new SettingsWindow().ShowDialog();
+                break;
 
-    private void OnGainControlsPopupClosed(object? sender, EventArgs e) =>
-        Mouse.Capture(null);
-
-    private void OnGainControlsPopupMouseDown(object sender, MouseButtonEventArgs e) =>
-        _logger.Safe(() => HandleGainControlsPopupMouseDown(sender, e), LogPrefix, "Error handling gain controls popup mouse down");
-
-    private void HandleGainControlsPopupMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.OriginalSource is FrameworkElement { Name: "GainControlsPopup" })
-        {
-            _controller.IsPopupOpen = false;
-            e.Handled = true;
+            case nameof(OpenPopupButton):
+                _ctrl.UI.IsPopupOpen = true;
+                break;
         }
     }
 
-    private void OnButtonClick(object sender, RoutedEventArgs e) =>
-        _logger.Safe(() => HandleButtonClick(sender, e), LogPrefix, "Error handling button click");
-
-    private void HandleButtonClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Name: var btnName } button && _buttonActions.TryGetValue(btnName, out var action))
-        {
-            action();
-        }
-    }
-
-    private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
-        _logger.Safe(() => HandleSliderValueChanged(sender, e), LogPrefix, "Error handling slider change");
-
-    private void HandleSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (!IsLoaded || sender is not Slider slider) return;
-
-        if (_sliderActions.TryGetValue(slider.Name, out var action))
-        {
-            action(slider.Value);
-        }
-    }
-
-    private void OnComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e) =>
-        _logger.Safe(() => HandleComboBoxSelectionChanged(sender, e), LogPrefix, "Error handling selection change");
-
-    private void HandleComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_isInitializingControls)
-            return;
-
-        if (sender is not ComboBox { SelectedItem: var selectedItem } comboBox || selectedItem is null)
-            return;
-
-        var key = (comboBox.Name, selectedItem.GetType());
-        if (_comboBoxActions.TryGetValue(key, out var action))
-        {
-            action(selectedItem);
-        }
-    }
-
-    private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
-        _logger.Safe(() => HandleTitleBarMouseLeftButtonDown(sender, e), LogPrefix, "Error handling window drag");
-
-    private void HandleTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void OnTitleBarMouseLeftButtonDown(object s, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
 
-        var mousePos = e.GetPosition(TitleBar);
-        var closeButtonBounds = CloseButton.TransformToAncestor(TitleBar)
-            .TransformBounds(new Rect(0, 0, CloseButton.ActualWidth, CloseButton.ActualHeight));
+        Rect b = CloseButton
+            .TransformToAncestor(TitleBar)
+            .TransformBounds(new Rect(
+                0,
+                0,
+                CloseButton.ActualWidth,
+                CloseButton.ActualHeight));
 
-        if (!closeButtonBounds.Contains(mousePos))
+        if (!b.Contains(e.GetPosition(TitleBar)))
             DragMove();
     }
 
-    private void OnFavoriteButtonClick(object sender, RoutedEventArgs e) =>
-        _logger.Safe(() => HandleFavoriteButtonClick(sender, e), LogPrefix, "Error handling favorite button click");
-
-    private void HandleFavoriteButtonClick(object sender, RoutedEventArgs e)
+    private void OnFavoriteButtonClick(object s, RoutedEventArgs e)
     {
-        if (sender is Button button && button.Tag is RenderStyle style)
+        if (s is not Button { Tag: RenderStyle st }) return;
+
+        ImmutableArray<RenderStyle> f = SettingsService.Instance.Current.General.FavoriteRenderers;
+
+        SettingsService.Instance.UpdateGeneral(g => g with
         {
-            var favorites = Settings.Instance.General.FavoriteRenderers;
-            bool isFavorite = favorites.Contains(style);
+            FavoriteRenderers = f.Contains(st) ? f.Remove(st) : f.Add(st)
+        });
 
-            if (isFavorite)
-                favorites.Remove(style);
-            else
-                favorites.Add(style);
-
-            SettingsWindow.Instance.SaveSettings();
-            _controller.OnPropertyChanged(nameof(_controller.OrderedDrawingTypes));
-            var currentSelection = RenderStyleComboBox.SelectedItem;
-
-            RenderStyleComboBox.ItemsSource = null;
-            RenderStyleComboBox.ItemsSource = _controller.OrderedDrawingTypes;
-            RenderStyleComboBox.SelectedItem = currentSelection;
-            RenderStyleComboBox.UpdateLayout();
-        }
+        _ctrl.View.RefreshOrderedDrawingTypes();
     }
 
-    private Dictionary<string, Action> CreateButtonActionsMap() => new()
-    {
-        ["CloseButton"] = () =>
-        {
-            _controller.InputController.UnregisterWindow(this);
-            Close();
-        },
-        ["StartCaptureButton"] = () => _ = _controller.StartCaptureAsync(),
-        ["StopCaptureButton"] = () => _ = _controller.StopCaptureAsync(),
-        ["OverlayButton"] = () =>
-        {
-            if (_controller.IsOverlayActive)
-                _controller.CloseOverlay();
-            else
-                _controller.OpenOverlay();
-        },
-        ["OpenSettingsButton"] = () => new SettingsWindow().ShowDialog(),
-        ["OpenPopupButton"] = () => _controller.IsPopupOpen = true
-    };
+    private void ClosePopup() => _ctrl.UI.IsPopupOpen = false;
 
-    private Dictionary<string, Action<double>> CreateSliderActionsMap() => new()
-    {
-        ["barSpacingSlider"] = value => _controller.BarSpacing = value,
-        ["barCountSlider"] = value => _controller.BarCount = (int)value,
-        ["minDbLevelSlider"] = value => _controller.MinDbLevel = (float)value,
-        ["maxDbLevelSlider"] = value => _controller.MaxDbLevel = (float)value,
-        ["amplificationFactorSlider"] = value => _controller.AmplificationFactor = (float)value
-    };
+    private void OnClosePopup(object s, RoutedEventArgs e) => ClosePopup();
 
-    private Dictionary<(string Name, Type ItemType), Action<object>> CreateComboBoxActionsMap() => new()
-    {
-        [("RenderStyleComboBox", typeof(RenderStyle))] = item => _controller.SelectedDrawingType = (RenderStyle)item,
-        [("FftWindowTypeComboBox", typeof(FftWindowType))] = item => _controller.WindowType = (FftWindowType)item,
-        [("ScaleTypeComboBox", typeof(SpectrumScale))] = item => _controller.ScaleType = (SpectrumScale)item,
-        [("RenderQualityComboBox", typeof(RenderQuality))] = item => _controller.RenderQuality = (RenderQuality)item
-    };
+    private void OnOverlayMouseDown(object s, MouseButtonEventArgs e) =>
+        ClosePopup();
 
-    private Dictionary<string, Action<bool>> CreateCheckBoxActionsMap() => new()
-    {
-        ["ShowPerformanceInfoCheckBox"] = value => _controller.ShowPerformanceInfo = value,
-        ["OverlayTopmostCheckBox"] = value => _controller.IsOverlayTopmost = value
-    };
-
-    public void Dispose()
-    {
-        if (_isDisposed) return;
-
-        _logger.Safe(() => HandleDispose(), LogPrefix, "Error during dispose");
-        GC.SuppressFinalize(this);
-    }
-
-    private void HandleDispose()
-    {
-        _controller.InputController.UnregisterWindow(this);
-
-        if (GainControlsPopup is not null)
-        {
-            GainControlsPopup.Opened -= OnGainControlsPopupOpened;
-            GainControlsPopup.Closed -= OnGainControlsPopupClosed;
-            GainControlsPopup.MouseDown -= OnGainControlsPopupMouseDown;
-        }
-
-        _isDisposed = true;
-    }
+    private void OnPopupMouseDown(object s, MouseButtonEventArgs e) =>
+        e.Handled = true;
 
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
-        _themeManager.UnregisterWindow(this);
-        Dispose();
+        Theme.Instance.UnregisterWindow(this);
     }
-
-    ~ControlPanelWindow() => Dispose();
 }

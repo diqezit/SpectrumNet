@@ -1,88 +1,291 @@
-﻿<ResourceDictionary 
+<ResourceDictionary 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- =================== -->
-    <!-- СПЕЦИАЛЬНЫЕ СТИЛИ  -->
-    <!-- =================== -->
-
-    <!-- Стиль для заголовка "Spectrum Analyser" -->
     <Style x:Key="SpectrumAnalyserTitleStyle" TargetType="ContentControl">
+        <Setter Property="FontSize" Value="32"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContentControl">
-                    <Grid>
-                        <TextBlock 
-                            Text="{TemplateBinding Content}"
-                            FontSize="22" FontWeight="Bold" FontFamily="Segoe UI"
-                            Foreground="{DynamicResource TitleGlowBrush}"
-                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                            Margin="0,1,0,0">
+                    <Grid Margin="0,8">
+                        <!-- Ambient Background Glow -->
+                        <Border x:Name="AmbientGlow"
+                                Height="60"
+                                VerticalAlignment="Center"
+                                CornerRadius="30"
+                                Opacity="0.15">
+                            <Border.Background>
+                                <RadialGradientBrush GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.8" RadiusY="0.8">
+                                    <GradientStop Color="{DynamicResource AccentColor}" Offset="0"/>
+                                    <GradientStop Color="Transparent" Offset="1"/>
+                                </RadialGradientBrush>
+                            </Border.Background>
+                        </Border>
+
+                        <!-- Deep Outer Glow Layer -->
+                        <TextBlock x:Name="DeepGlow"
+                                   Text="{TemplateBinding Content}"
+                                   FontSize="{TemplateBinding FontSize}"
+                                   FontWeight="{TemplateBinding FontWeight}"
+                                   FontFamily="{TemplateBinding FontFamily}"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Opacity="0.2">
                             <TextBlock.Effect>
-                                <BlurEffect Radius="5"/>
+                                <BlurEffect Radius="30"/>
                             </TextBlock.Effect>
                         </TextBlock>
 
+                        <!-- Mid Glow Layer -->
+                        <TextBlock x:Name="MidGlow"
+                                   Text="{TemplateBinding Content}"
+                                   FontSize="{TemplateBinding FontSize}"
+                                   FontWeight="{TemplateBinding FontWeight}"
+                                   FontFamily="{TemplateBinding FontFamily}"
+                                   Foreground="{DynamicResource TitleGlowBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Opacity="0.4">
+                            <TextBlock.Effect>
+                                <BlurEffect Radius="15"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+
+                        <!-- Inner Glow Layer -->
+                        <TextBlock x:Name="InnerGlow"
+                                   Text="{TemplateBinding Content}"
+                                   FontSize="{TemplateBinding FontSize}"
+                                   FontWeight="{TemplateBinding FontWeight}"
+                                   FontFamily="{TemplateBinding FontFamily}"
+                                   Foreground="White"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Opacity="0.5">
+                            <TextBlock.Effect>
+                                <BlurEffect Radius="6"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+
+                        <!-- Shadow Layer -->
+                        <TextBlock x:Name="ShadowText"
+                                   Text="{TemplateBinding Content}"
+                                   FontSize="{TemplateBinding FontSize}"
+                                   FontWeight="{TemplateBinding FontWeight}"
+                                   FontFamily="{TemplateBinding FontFamily}"
+                                   Foreground="#40000000"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   RenderTransformOrigin="0.5,0.5">
+                            <TextBlock.RenderTransform>
+                                <TranslateTransform X="2" Y="2"/>
+                            </TextBlock.RenderTransform>
+                            <TextBlock.Effect>
+                                <BlurEffect Radius="3"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+
+                        <!-- Main Text with Premium Gradient -->
                         <TextBlock x:Name="MainText"
-                            Text="{TemplateBinding Content}"
-                            FontSize="22" FontWeight="Bold" FontFamily="Segoe UI"
-                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                                   Text="{TemplateBinding Content}"
+                                   FontSize="{TemplateBinding FontSize}"
+                                   FontWeight="{TemplateBinding FontWeight}"
+                                   FontFamily="{TemplateBinding FontFamily}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   RenderTransformOrigin="0.5,0.5">
+                            <TextBlock.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform x:Name="TextScale" ScaleX="1" ScaleY="1"/>
+                                    <TranslateTransform x:Name="TextTranslate" X="0" Y="0"/>
+                                </TransformGroup>
+                            </TextBlock.RenderTransform>
                             <TextBlock.Foreground>
                                 <LinearGradientBrush x:Name="TextGradient" StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop x:Name="GradientStop1" Color="{DynamicResource TitleGradientColor1}" Offset="0"/>
-                                    <GradientStop x:Name="GradientStop2" Color="{DynamicResource TitleGradientColor2}" Offset="0.5"/>
-                                    <GradientStop x:Name="GradientStop3" Color="{DynamicResource TitleGradientColor3}" Offset="1"/>
+                                    <GradientStop x:Name="Grad1" Color="{DynamicResource TitleGradientColor1}" Offset="0"/>
+                                    <GradientStop x:Name="Grad2" Color="{DynamicResource TitleGradientColor2}" Offset="0.35"/>
+                                    <GradientStop x:Name="Grad3" Color="{DynamicResource TitleGradientColor3}" Offset="0.65"/>
+                                    <GradientStop x:Name="Grad4" Color="{DynamicResource TitleGradientColor4}" Offset="1"/>
                                 </LinearGradientBrush>
                             </TextBlock.Foreground>
-                            <TextBlock.Effect>
-                                <DropShadowEffect 
-                                    ShadowDepth="1" BlurRadius="3" Opacity="0.5" 
-                                    Color="{DynamicResource TitleShadowColor}"/>
-                            </TextBlock.Effect>
                         </TextBlock>
 
+                        <!-- Highlight Overlay -->
+                        <TextBlock x:Name="HighlightText"
+                                   Text="{TemplateBinding Content}"
+                                   FontSize="{TemplateBinding FontSize}"
+                                   FontWeight="{TemplateBinding FontWeight}"
+                                   FontFamily="{TemplateBinding FontFamily}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Opacity="0.3"
+                                   RenderTransformOrigin="0.5,0.5">
+                            <TextBlock.RenderTransform>
+                                <TranslateTransform X="-0.5" Y="-0.5"/>
+                            </TextBlock.RenderTransform>
+                            <TextBlock.Foreground>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#FFFFFFFF" Offset="0"/>
+                                    <GradientStop Color="#00FFFFFF" Offset="0.5"/>
+                                </LinearGradientBrush>
+                            </TextBlock.Foreground>
+                        </TextBlock>
+
+                        <!-- Animated Underline -->
                         <Border x:Name="Underline"
-                            Height="1" Width="0" 
-                            Margin="0,28,0,0" 
-                            HorizontalAlignment="Center">
+                                Height="3"
+                                VerticalAlignment="Bottom"
+                                Margin="40,0,40,-8"
+                                CornerRadius="2"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="UnderlineScale" ScaleX="0" ScaleY="1"/>
+                            </Border.RenderTransform>
                             <Border.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                    <GradientStop Color="{DynamicResource TitleUnderlineTransparent}" Offset="0"/>
-                                    <GradientStop Color="{DynamicResource TitleUnderlineSolid}" Offset="0.5"/>
-                                    <GradientStop Color="{DynamicResource TitleUnderlineTransparent}" Offset="1"/>
+                                <LinearGradientBrush x:Name="UnderlineGradient" StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="Transparent" Offset="0"/>
+                                    <GradientStop Color="{DynamicResource AccentColor}" Offset="0.2"/>
+                                    <GradientStop Color="{DynamicResource AccentColor}" Offset="0.8"/>
+                                    <GradientStop Color="Transparent" Offset="1"/>
                                 </LinearGradientBrush>
                             </Border.Background>
                         </Border>
+
+                        <!-- Sparkle Effects - FIXED: Using numeric values instead of percentages -->
+                        <Canvas x:Name="SparkleCanvas" IsHitTestVisible="False" HorizontalAlignment="Center">
+                            <Ellipse x:Name="Sparkle1" Width="4" Height="4" Fill="White" 
+                                     Canvas.Left="-80" Canvas.Top="5" Opacity="0">
+                                <Ellipse.Effect>
+                                    <BlurEffect Radius="2"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+                            <Ellipse x:Name="Sparkle2" Width="3" Height="3" Fill="White" 
+                                     Canvas.Left="70" Canvas.Top="8" Opacity="0">
+                                <Ellipse.Effect>
+                                    <BlurEffect Radius="1.5"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+                            <Ellipse x:Name="Sparkle3" Width="5" Height="5" Fill="White" 
+                                     Canvas.Left="0" Canvas.Top="-5" Opacity="0">
+                                <Ellipse.Effect>
+                                    <BlurEffect Radius="2"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+                        </Canvas>
                     </Grid>
+
                     <ControlTemplate.Triggers>
-                        <EventTrigger RoutedEvent="ContentControl.Loaded">
+                        <EventTrigger RoutedEvent="Loaded">
                             <BeginStoryboard>
                                 <Storyboard>
-                                    <PointAnimation 
-                                        Storyboard.TargetName="TextGradient"
-                                        Storyboard.TargetProperty="StartPoint"
-                                        From="0,0" To="1,0" 
-                                        Duration="0:0:5" 
-                                        RepeatBehavior="Forever" 
-                                        AutoReverse="True"/>
-                                    <PointAnimation 
-                                        Storyboard.TargetName="TextGradient"
-                                        Storyboard.TargetProperty="EndPoint"
-                                        From="1,1" To="0,1" 
-                                        Duration="0:0:5" 
-                                        RepeatBehavior="Forever" 
-                                        AutoReverse="True"/>
+                                    <!-- Text Scale Animation -->
+                                    <DoubleAnimation Storyboard.TargetName="TextScale"
+                                                     Storyboard.TargetProperty="ScaleX"
+                                                     From="0.7" To="1"
+                                                     Duration="0:0:0.6">
+                                        <DoubleAnimation.EasingFunction>
+                                            <ElasticEase EasingMode="EaseOut" Oscillations="1" Springiness="4"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="TextScale"
+                                                     Storyboard.TargetProperty="ScaleY"
+                                                     From="0.7" To="1"
+                                                     Duration="0:0:0.6">
+                                        <DoubleAnimation.EasingFunction>
+                                            <ElasticEase EasingMode="EaseOut" Oscillations="1" Springiness="4"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
 
-                                    <DoubleAnimation 
-                                        Storyboard.TargetName="Underline"
-                                        Storyboard.TargetProperty="Width"
-                                        From="0" To="180" 
-                                        Duration="0:0:0.5"
-                                        BeginTime="0:0:0.2">
+                                    <!-- Underline Reveal -->
+                                    <DoubleAnimation Storyboard.TargetName="UnderlineScale"
+                                                     Storyboard.TargetProperty="ScaleX"
+                                                     From="0" To="1"
+                                                     Duration="0:0:0.5"
+                                                     BeginTime="0:0:0.3">
                                         <DoubleAnimation.EasingFunction>
                                             <CubicEase EasingMode="EaseOut"/>
                                         </DoubleAnimation.EasingFunction>
                                     </DoubleAnimation>
+
+                                    <!-- Gradient Animation -->
+                                    <PointAnimation Storyboard.TargetName="TextGradient"
+                                                    Storyboard.TargetProperty="StartPoint"
+                                                    From="0,0" To="2,0"
+                                                    Duration="0:0:4"
+                                                    RepeatBehavior="Forever"/>
+                                    <PointAnimation Storyboard.TargetName="TextGradient"
+                                                    Storyboard.TargetProperty="EndPoint"
+                                                    From="1,1" To="3,1"
+                                                    Duration="0:0:4"
+                                                    RepeatBehavior="Forever"/>
+
+                                    <!-- Glow Pulsing -->
+                                    <DoubleAnimation Storyboard.TargetName="DeepGlow"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.15" To="0.35"
+                                                     Duration="0:0:2.5"
+                                                     RepeatBehavior="Forever"
+                                                     AutoReverse="True">
+                                        <DoubleAnimation.EasingFunction>
+                                            <SineEase EasingMode="EaseInOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="MidGlow"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.3" To="0.55"
+                                                     Duration="0:0:2"
+                                                     RepeatBehavior="Forever"
+                                                     AutoReverse="True"
+                                                     BeginTime="0:0:0.5">
+                                        <DoubleAnimation.EasingFunction>
+                                            <SineEase EasingMode="EaseInOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="InnerGlow"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.4" To="0.7"
+                                                     Duration="0:0:1.5"
+                                                     RepeatBehavior="Forever"
+                                                     AutoReverse="True"
+                                                     BeginTime="0:0:0.25">
+                                        <DoubleAnimation.EasingFunction>
+                                            <SineEase EasingMode="EaseInOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+
+                                    <!-- Ambient Glow Pulse -->
+                                    <DoubleAnimation Storyboard.TargetName="AmbientGlow"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.1" To="0.25"
+                                                     Duration="0:0:3"
+                                                     RepeatBehavior="Forever"
+                                                     AutoReverse="True"/>
+
+                                    <!-- Sparkle Animations -->
+                                    <DoubleAnimation Storyboard.TargetName="Sparkle1"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0" To="1"
+                                                     Duration="0:0:0.3"
+                                                     BeginTime="0:0:0.8"
+                                                     AutoReverse="True"
+                                                     RepeatBehavior="Forever"/>
+                                    <DoubleAnimation Storyboard.TargetName="Sparkle2"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0" To="1"
+                                                     Duration="0:0:0.4"
+                                                     BeginTime="0:0:1.2"
+                                                     AutoReverse="True"
+                                                     RepeatBehavior="Forever"/>
+                                    <DoubleAnimation Storyboard.TargetName="Sparkle3"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0" To="1"
+                                                     Duration="0:0:0.35"
+                                                     BeginTime="0:0:0.5"
+                                                     AutoReverse="True"
+                                                     RepeatBehavior="Forever"/>
                                 </Storyboard>
                             </BeginStoryboard>
                         </EventTrigger>
@@ -92,355 +295,857 @@
         </Setter>
     </Style>
 
-    <!-- Стиль переключателя темы (ThemeSwitch) -->
+    <Style x:Key="ToolTipStyle" TargetType="ToolTip">
+        <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="HasDropShadow" Value="True"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border x:Name="TooltipBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#40000000" 
+                                              BlurRadius="12" 
+                                              ShadowDepth="4" 
+                                              Opacity="0.3"/>
+                        </Border.Effect>
+                        <Grid>
+                            <!-- Top Shine -->
+                            <Border CornerRadius="7"
+                                    Margin="-1,-1,-1,0"
+                                    Height="16"
+                                    VerticalAlignment="Top"
+                                    Opacity="0.4">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#30FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <ContentPresenter HorizontalAlignment="Left"
+                                              VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Default ToolTip Style -->
+    <Style TargetType="ToolTip" BasedOn="{StaticResource ToolTipStyle}"/>
+
+    <!-- Enhanced Sun with detailed rays -->
+    <Geometry x:Key="SunCoreGeometry">
+        M8,8 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0
+    </Geometry>
+
+    <Geometry x:Key="SunRaysGeometry">
+        M8,0.5 L8,2.5
+        M8,13.5 L8,15.5
+        M0.5,8 L2.5,8
+        M13.5,8 L15.5,8
+        M2.2,2.2 L3.8,3.8
+        M12.2,12.2 L13.8,13.8
+        M2.2,13.8 L3.8,12.2
+        M12.2,3.8 L13.8,2.2
+    </Geometry>
+
+    <Geometry x:Key="SunRaysSecondaryGeometry">
+        M8,2 L8,3.5
+        M8,12.5 L8,14
+        M2,8 L3.5,8
+        M12.5,8 L14,8
+        M3.2,3.2 L4.3,4.3
+        M11.7,11.7 L12.8,12.8
+        M3.2,12.8 L4.3,11.7
+        M11.7,4.3 L12.8,3.2
+    </Geometry>
+
+    <!-- Enhanced Moon with crescent -->
+    <Geometry x:Key="MoonGeometry">
+        M11,3.5 A5,5 0 1 1 11,12.5 A3.5,5 0 0 0 11,3.5 Z
+    </Geometry>
+
+    <Geometry x:Key="MoonCraterGeometry">
+        M6.5,6 A0.8,0.8 0 1 1 6.5,6.01
+        M8.5,9 A0.5,0.5 0 1 1 8.5,9.01
+        M5,10 A0.6,0.6 0 1 1 5,10.01
+    </Geometry>
+
+    <!-- Stars with different sizes -->
+    <Geometry x:Key="Star1Geometry">M4,5 L4.8,2.5 L5.6,5 L8.1,5.8 L5.6,6.6 L4.8,9.1 L4,6.6 L1.5,5.8 Z</Geometry>
+    <Geometry x:Key="Star2Geometry">M12,2.5 L12.5,1 L13,2.5 L14.5,3 L13,3.5 L12.5,5 L12,3.5 L10.5,3 Z</Geometry>
+    <Geometry x:Key="Star3Geometry">M14,8 L14.4,6.8 L14.8,8 L16,8.4 L14.8,8.8 L14.4,10 L14,8.8 L12.8,8.4 Z</Geometry>
+    <Geometry x:Key="Star4Geometry">M2,11 L2.3,10.1 L2.6,11 L3.5,11.3 L2.6,11.6 L2.3,12.5 L2,11.6 L1.1,11.3 Z</Geometry>
+    <Geometry x:Key="Star5Geometry">M10,13 L10.2,12.4 L10.4,13 L11,13.2 L10.4,13.4 L10.2,14 L10,13.4 L9.4,13.2 Z</Geometry>
+
+    <!-- Shooting Star -->
+    <Geometry x:Key="ShootingStarGeometry">M0,0 L8,3 L10,2 L2,0 Z</Geometry>
+
     <Style x:Key="ThemeSwitchStyle" TargetType="ToggleButton">
-        <Setter Property="Width" Value="56"/>
-        <Setter Property="Height" Value="28"/>
-        <Setter Property="Background" Value="#FFE0E0E0"/>
-        <Setter Property="Foreground" Value="#FF000000"/>
-        <Setter Property="BorderBrush" Value="#FF808080"/>
-        <Setter Property="BorderThickness" Value="{StaticResource StandardBorderThickness}"/>
-        <Setter Property="Padding" Value="3"/>
-        <Setter Property="HorizontalAlignment" Value="Center"/>
-        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Width" Value="72"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="Background" Value="{DynamicResource DaySkyBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="2"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Grid>
-                        <Border x:Name="SwitchBorder"
-                            Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="14"
-                            Padding="{TemplateBinding Padding}">
-                            <Border x:Name="InnerGlow" 
-                                Background="Transparent" 
-                                CornerRadius="12.5" 
-                                Opacity="0">
-                                <Border.Effect>
-                                    <BlurEffect Radius="8"/>
-                                </Border.Effect>
-                            </Border>
+                        <!-- Outer Glow -->
+                        <Border x:Name="OuterGlow"
+                                CornerRadius="20"
+                                Margin="-4"
+                                Opacity="0.3">
+                            <Border.Background>
+                                <RadialGradientBrush>
+                                    <GradientStop Color="#60FFEB3B" Offset="0"/>
+                                    <GradientStop Color="#00FFEB3B" Offset="1"/>
+                                </RadialGradientBrush>
+                            </Border.Background>
                         </Border>
 
-                        <Grid x:Name="ToggleIndicator"
-                            Width="22" Height="22"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center"
-                            Margin="3,0,0,0">
-                            <Ellipse x:Name="IndicatorBackground">
+                        <!-- Main Track -->
+                        <Border x:Name="SwitchTrack"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="18"
+                                SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#40000000" BlurRadius="8" ShadowDepth="2" Opacity="0.3"/>
+                            </Border.Effect>
+                            <Grid ClipToBounds="True">
+                                <!-- Inner Shadow -->
+                                <Border CornerRadius="16" Margin="1">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#20000000" Offset="0"/>
+                                            <GradientStop Color="#00000000" Offset="0.3"/>
+                                            <GradientStop Color="#00000000" Offset="0.7"/>
+                                            <GradientStop Color="#15FFFFFF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+
+                                <!-- Top Shine -->
+                                <Border Height="14"
+                                        VerticalAlignment="Top"
+                                        Margin="3,3,3,0"
+                                        CornerRadius="12,12,0,0"
+                                        Opacity="0.5">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#60FFFFFF" Offset="0"/>
+                                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Cloud Layer (Day Mode) -->
+                        <Canvas x:Name="CloudsCanvas" 
+                                Opacity="0.6" 
+                                IsHitTestVisible="False"
+                                ClipToBounds="True"
+                                Margin="3">
+                            <Path x:Name="Cloud1" 
+                                  Data="M42,18 A4,4 0 0 1 50,18 A3,3 0 0 1 55,20 A2.5,2.5 0 0 1 54,25 L40,25 A3,3 0 0 1 38,21 A2.5,2.5 0 0 1 42,18 Z"
+                                  Fill="#90FFFFFF"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <TranslateTransform x:Name="Cloud1Translate" X="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+                            <Path x:Name="Cloud2"
+                                  Data="M50,10 A3,3 0 0 1 56,10 A2.5,2.5 0 0 1 60,12 A2,2 0 0 1 59,16 L48,16 A2.5,2.5 0 0 1 46,13 A2,2 0 0 1 50,10 Z"
+                                  Fill="#70FFFFFF"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <TranslateTransform x:Name="Cloud2Translate" X="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+                        </Canvas>
+
+                        <!-- Stars Layer (Night Mode) -->
+                        <Canvas x:Name="StarsLayer" 
+                                Opacity="0" 
+                                IsHitTestVisible="False"
+                                Margin="3">
+                            <Path x:Name="Star1" 
+                                  Fill="White" 
+                                  Data="{StaticResource Star1Geometry}"
+                                  Canvas.Left="35" Canvas.Top="5"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <ScaleTransform x:Name="Star1Scale" ScaleX="0" ScaleY="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+                            <Path x:Name="Star2" 
+                                  Fill="#E0E0E0" 
+                                  Data="{StaticResource Star2Geometry}"
+                                  Canvas.Left="48" Canvas.Top="2"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <ScaleTransform x:Name="Star2Scale" ScaleX="0" ScaleY="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+                            <Path x:Name="Star3" 
+                                  Fill="#BDBDBD" 
+                                  Data="{StaticResource Star3Geometry}"
+                                  Canvas.Left="55" Canvas.Top="12"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <ScaleTransform x:Name="Star3Scale" ScaleX="0" ScaleY="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+                            <Path x:Name="Star4" 
+                                  Fill="#9E9E9E" 
+                                  Data="{StaticResource Star4Geometry}"
+                                  Canvas.Left="38" Canvas.Top="22"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <ScaleTransform x:Name="Star4Scale" ScaleX="0" ScaleY="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+                            <Path x:Name="Star5" 
+                                  Fill="#BDBDBD" 
+                                  Data="{StaticResource Star5Geometry}"
+                                  Canvas.Left="50" Canvas.Top="25"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <ScaleTransform x:Name="Star5Scale" ScaleX="0" ScaleY="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+
+                            <!-- Shooting Star -->
+                            <Path x:Name="ShootingStar"
+                                  Data="{StaticResource ShootingStarGeometry}"
+                                  Canvas.Left="40" Canvas.Top="8"
+                                  Opacity="0"
+                                  RenderTransformOrigin="0,0.5">
+                                <Path.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="#FFFFFFFF" Offset="0"/>
+                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Path.Fill>
+                                <Path.RenderTransform>
+                                    <TranslateTransform x:Name="ShootingStarTranslate" X="0" Y="0"/>
+                                </Path.RenderTransform>
+                            </Path>
+                        </Canvas>
+
+                        <!-- Thumb Container -->
+                        <Grid x:Name="ThumbContainer"
+                              Width="30"
+                              Height="30"
+                              HorizontalAlignment="Left"
+                              VerticalAlignment="Center"
+                              Margin="3,0,0,0">
+                            <Grid.RenderTransform>
+                                <TranslateTransform x:Name="ThumbTransform" X="0"/>
+                            </Grid.RenderTransform>
+
+                            <!-- Sun Glow -->
+                            <Ellipse x:Name="SunGlow"
+                                     Width="42"
+                                     Height="42"
+                                     Margin="-6"
+                                     Fill="{DynamicResource SunGlowBrush}"
+                                     Opacity="0.6"/>
+
+                            <!-- Moon Glow -->
+                            <Ellipse x:Name="MoonGlow"
+                                     Width="40"
+                                     Height="40"
+                                     Margin="-5"
+                                     Fill="{DynamicResource MoonGlowBrush}"
+                                     Opacity="0"/>
+
+                            <!-- Thumb Background -->
+                            <Ellipse x:Name="ThumbOuter">
                                 <Ellipse.Fill>
-                                    <RadialGradientBrush>
-                                        <GradientStop x:Name="IndicatorGradientStop1" Color="#FFFFF176" Offset="0"/>
-                                        <GradientStop x:Name="IndicatorGradientStop2" Color="#FFFFB74D" Offset="1"/>
+                                    <RadialGradientBrush x:Name="ThumbGradient" GradientOrigin="0.3,0.3" Center="0.4,0.4">
+                                        <GradientStop x:Name="ThumbGrad1" Color="#FFFFF9C4" Offset="0"/>
+                                        <GradientStop x:Name="ThumbGrad2" Color="#FFFFEB3B" Offset="0.3"/>
+                                        <GradientStop x:Name="ThumbGrad3" Color="#FFFFC107" Offset="0.6"/>
+                                        <GradientStop x:Name="ThumbGrad4" Color="#FFFF9800" Offset="1"/>
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                                 <Ellipse.Effect>
-                                    <DropShadowEffect x:Name="IndicatorShadow" 
-                                        ShadowDepth="1" BlurRadius="3" 
-                                        Opacity="0.3" Color="#FF000000"/>
+                                    <DropShadowEffect x:Name="ThumbShadow" 
+                                                      Color="#80FF9800" 
+                                                      BlurRadius="12" 
+                                                      ShadowDepth="0" 
+                                                      Opacity="0.5"/>
                                 </Ellipse.Effect>
                             </Ellipse>
 
-                            <Path x:Name="SunIndicator"
-                                Width="16" Height="16"
-                                StrokeLineJoin="Round"
-                                StrokeEndLineCap="Round"
-                                StrokeStartLineCap="Round"
-                                Opacity="1"
-                                RenderTransformOrigin="0.5,0.5">
-                                <Path.RenderTransform>
-                                    <TransformGroup>
-                                        <ScaleTransform x:Name="SunScaleTransform" ScaleX="1" ScaleY="1"/>
-                                        <RotateTransform x:Name="SunRotateTransform" Angle="0"/>
-                                    </TransformGroup>
-                                </Path.RenderTransform>
-                                <Path.Fill>
-                                    <RadialGradientBrush GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
-                                        <GradientStop Color="#FFFFF200" Offset="0"/>
-                                        <GradientStop Color="#FFFF9800" Offset="1"/>
+                            <!-- Thumb Highlight -->
+                            <Ellipse x:Name="ThumbHighlight"
+                                     Width="20"
+                                     Height="20"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Top"
+                                     Margin="3,3,0,0"
+                                     Opacity="0.6">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush GradientOrigin="0.3,0.3">
+                                        <GradientStop Color="#80FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
                                     </RadialGradientBrush>
-                                </Path.Fill>
-                                <Path.Stroke>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                        <GradientStop Color="#FFFF9800" Offset="0"/>
-                                        <GradientStop Color="#FFFF5722" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Path.Stroke>
-                                <Path.StrokeThickness>0.7</Path.StrokeThickness>
-                                <Path.Data>
-                                    <GeometryGroup>
-                                        <EllipseGeometry Center="8,8" RadiusX="4" RadiusY="4"/>
-                                        <LineGeometry StartPoint="8,1" EndPoint="8,3"/>
-                                        <LineGeometry StartPoint="8,13" EndPoint="8,15"/>
-                                        <LineGeometry StartPoint="1,8" EndPoint="3,8"/>
-                                        <LineGeometry StartPoint="13,8" EndPoint="15,8"/>
-                                        <LineGeometry StartPoint="3.1,3.1" EndPoint="4.5,4.5"/>
-                                        <LineGeometry StartPoint="11.5,11.5" EndPoint="12.9,12.9"/>
-                                        <LineGeometry StartPoint="3.1,12.9" EndPoint="4.5,11.5"/>
-                                        <LineGeometry StartPoint="11.5,4.5" EndPoint="12.9,3.1"/>
-                                    </GeometryGroup>
-                                </Path.Data>
-                                <Path.Effect>
-                                    <DropShadowEffect x:Name="SunGlowEffect" 
-                                        ShadowDepth="0" BlurRadius="5" 
-                                        Opacity="0.7" Color="#FFFF9800"/>
-                                </Path.Effect>
-                            </Path>
+                                </Ellipse.Fill>
+                            </Ellipse>
 
-                            <Path x:Name="MoonIndicator"
-                                Width="16" Height="16"
-                                StrokeLineJoin="Round"
-                                StrokeEndLineCap="Round"
-                                Opacity="0"
-                                RenderTransformOrigin="0.5,0.5">
-                                <Path.RenderTransform>
+                            <!-- Sun Icon -->
+                            <Canvas x:Name="SunIconCanvas"
+                                    Width="20" Height="20"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    RenderTransformOrigin="0.5,0.5">
+                                <Canvas.RenderTransform>
                                     <TransformGroup>
-                                        <ScaleTransform x:Name="MoonScaleTransform" ScaleX="0.8" ScaleY="0.8"/>
-                                        <RotateTransform x:Name="MoonRotateTransform" Angle="-30"/>
+                                        <ScaleTransform x:Name="SunScale" ScaleX="1" ScaleY="1"/>
+                                        <RotateTransform x:Name="SunRotate" Angle="0"/>
                                     </TransformGroup>
-                                </Path.RenderTransform>
-                                <Path.Fill>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                        <GradientStop Color="#FF9FA8DA" Offset="0"/>
-                                        <GradientStop Color="#FF5C6BC0" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Path.Fill>
-                                <Path.Stroke>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                        <GradientStop Color="#FF3F51B5" Offset="0"/>
-                                        <GradientStop Color="#FF303F9F" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Path.Stroke>
-                                <Path.StrokeThickness>0.7</Path.StrokeThickness>
-                                <Path.Data>
-                                    <PathGeometry>
-                                        <PathFigure StartPoint="12,3">
-                                            <PathFigure.Segments>
-                                                <ArcSegment Point="12,13" Size="5,5" IsLargeArc="True" SweepDirection="Clockwise"/>
-                                                <ArcSegment Point="6,8" Size="4.5,6" IsLargeArc="False" SweepDirection="Clockwise"/>
-                                                <ArcSegment Point="12,3" Size="6,5" IsLargeArc="False" SweepDirection="Clockwise"/>
-                                            </PathFigure.Segments>
-                                        </PathFigure>
-                                    </PathGeometry>
-                                </Path.Data>
-                                <Path.Effect>
-                                    <DropShadowEffect x:Name="MoonGlowEffect" 
-                                        Color="#FF9FA8DA" BlurRadius="5" 
-                                        ShadowDepth="0" Opacity="0.5"/>
-                                </Path.Effect>
-                            </Path>
+                                </Canvas.RenderTransform>
 
-                            <Canvas x:Name="StarsCanvas" Opacity="0">
-                                <Path x:Name="Star1" 
-                                    Fill="#FFFFFFFF" 
-                                    Data="M3,3 L3.5,1 L4,3 L6,3.5 L4,4 L3.5,6 L3,4 L1,3.5 Z" 
-                                    RenderTransformOrigin="0.5,0.5">
+                                <!-- Sun Core -->
+                                <Ellipse Width="10" Height="10" 
+                                         Canvas.Left="5" Canvas.Top="5"
+                                         Fill="{DynamicResource SunCoreBrush}"/>
+
+                                <!-- Sun Rays Primary -->
+                                <Path x:Name="SunRays"
+                                      Data="{StaticResource SunRaysGeometry}"
+                                      Stroke="{DynamicResource SunRaysBrush}"
+                                      StrokeThickness="2"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      Canvas.Left="2" Canvas.Top="2"/>
+
+                                <!-- Sun Rays Secondary (for animation) -->
+                                <Path x:Name="SunRaysSecondary"
+                                      Data="{StaticResource SunRaysSecondaryGeometry}"
+                                      Stroke="#80FFEB3B"
+                                      StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      Canvas.Left="2" Canvas.Top="2"
+                                      Opacity="0.5"
+                                      RenderTransformOrigin="0.5,0.5">
                                     <Path.RenderTransform>
-                                        <ScaleTransform x:Name="Star1Scale" ScaleX="1" ScaleY="1"/>
+                                        <RotateTransform x:Name="SunRaysSecondaryRotate" Angle="22.5"/>
                                     </Path.RenderTransform>
-                                    <Path.Effect>
-                                        <DropShadowEffect Color="#FFFFFFFF" BlurRadius="2" ShadowDepth="0" Opacity="0.8"/>
-                                    </Path.Effect>
-                                </Path>
-                                <Path x:Name="Star2" 
-                                    Fill="#FFF5F5F5" 
-                                    Data="M10,1 L10.3,0 L10.6,1 L11.5,1.3 L10.6,1.6 L10.3,2.5 L10,1.6 L9,1.3 Z" 
-                                    RenderTransformOrigin="0.5,0.5">
-                                    <Path.RenderTransform>
-                                        <ScaleTransform x:Name="Star2Scale" ScaleX="1" ScaleY="1"/>
-                                    </Path.RenderTransform>
-                                    <Path.Effect>
-                                        <DropShadowEffect Color="#FFFFFFFF" BlurRadius="1.5" ShadowDepth="0" Opacity="0.7"/>
-                                    </Path.Effect>
                                 </Path>
                             </Canvas>
 
-                            <Grid.RenderTransform>
-                                <TranslateTransform x:Name="IndicatorTransform"/>
-                            </Grid.RenderTransform>
+                            <!-- Moon Icon -->
+                            <Canvas x:Name="MoonIconCanvas"
+                                    Width="20" Height="20"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Opacity="0"
+                                    RenderTransformOrigin="0.5,0.5">
+                                <Canvas.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="MoonScale" ScaleX="0.5" ScaleY="0.5"/>
+                                        <RotateTransform x:Name="MoonRotate" Angle="-90"/>
+                                    </TransformGroup>
+                                </Canvas.RenderTransform>
+
+                                <!-- Moon Body -->
+                                <Path Data="{StaticResource MoonGeometry}"
+                                      Fill="{DynamicResource MoonSurfaceBrush}"
+                                      Stroke="#50000000"
+                                      StrokeThickness="0.5"
+                                      Canvas.Left="1" Canvas.Top="2"/>
+
+                                <!-- Moon Craters -->
+                                <Path Data="{StaticResource MoonCraterGeometry}"
+                                      Fill="{DynamicResource MoonCraterBrush}"
+                                      Canvas.Left="1" Canvas.Top="2"/>
+
+                                <!-- Moon Highlight -->
+                                <Ellipse Width="4" Height="6"
+                                         Canvas.Left="4" Canvas.Top="4"
+                                         Opacity="0.3">
+                                    <Ellipse.Fill>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#FFFFFF" Offset="0"/>
+                                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Ellipse.Fill>
+                                </Ellipse>
+                            </Canvas>
                         </Grid>
+
+                        <!-- Focus Ring -->
+                        <Border x:Name="FocusRing"
+                                CornerRadius="20"
+                                BorderBrush="{DynamicResource AccentBrush}"
+                                BorderThickness="2"
+                                Margin="-4"
+                                Opacity="0"/>
                     </Grid>
+
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsChecked" Value="True">
+                        <!-- Loaded Animation -->
+                        <EventTrigger RoutedEvent="Loaded">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <!-- Sun Rotation -->
+                                    <DoubleAnimation Storyboard.TargetName="SunRotate"
+                                                     Storyboard.TargetProperty="Angle"
+                                                     From="0" To="360"
+                                                     Duration="0:0:20"
+                                                     RepeatBehavior="Forever"/>
+                                    <DoubleAnimation Storyboard.TargetName="SunRaysSecondaryRotate"
+                                                     Storyboard.TargetProperty="Angle"
+                                                     From="22.5" To="-337.5"
+                                                     Duration="0:0:15"
+                                                     RepeatBehavior="Forever"/>
+
+                                    <!-- Sun Glow Pulse -->
+                                    <DoubleAnimation Storyboard.TargetName="SunGlow"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     From="0.4" To="0.8"
+                                                     Duration="0:0:2"
+                                                     RepeatBehavior="Forever"
+                                                     AutoReverse="True"/>
+
+                                    <!-- Cloud Animation -->
+                                    <DoubleAnimation Storyboard.TargetName="Cloud1Translate"
+                                                     Storyboard.TargetProperty="X"
+                                                     From="-5" To="5"
+                                                     Duration="0:0:4"
+                                                     RepeatBehavior="Forever"
+                                                     AutoReverse="True"/>
+                                    <DoubleAnimation Storyboard.TargetName="Cloud2Translate"
+                                                     Storyboard.TargetProperty="X"
+                                                     From="3" To="-3"
+                                                     Duration="0:0:3"
+                                                     RepeatBehavior="Forever"
+                                                     AutoReverse="True"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+
+                        <!-- Hover State -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                             <Trigger.EnterActions>
-                                <BeginStoryboard x:Name="DarkThemeAnimation">
+                                <BeginStoryboard>
                                     <Storyboard>
-                                        <!-- Группа основных анимаций -->
-                                        <ParallelTimeline>
-                                            <!-- Анимация индикатора -->
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="IndicatorTransform"
-                                                Storyboard.TargetProperty="X"
-                                                To="28" Duration="{StaticResource StandardAnimationDuration}"
-                                                EasingFunction="{StaticResource StandardEaseInOut}"/>
-
-                                            <!-- Анимация фона -->
-                                            <ColorAnimation 
-                                                Storyboard.TargetName="SwitchBorder"
-                                                Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                To="#FF3F51B5" Duration="{StaticResource StandardAnimationDuration}"/>
-
-                                            <!-- Анимация свечения -->
-                                            <ColorAnimation 
-                                                Storyboard.TargetName="InnerGlow"
-                                                Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                To="#7F5C6BC0" Duration="{StaticResource StandardAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="InnerGlow"
-                                                Storyboard.TargetProperty="Opacity"
-                                                To="1" Duration="{StaticResource StandardAnimationDuration}"/>
-                                        </ParallelTimeline>
-
-                                        <!-- Анимация исчезновения солнца -->
-                                        <ParallelTimeline>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunIndicator"
-                                                Storyboard.TargetProperty="Opacity"
-                                                To="0" Duration="{StaticResource QuickAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunRotateTransform"
-                                                Storyboard.TargetProperty="Angle"
-                                                To="90" Duration="{StaticResource QuickAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunScaleTransform"
-                                                Storyboard.TargetProperty="ScaleX"
-                                                To="0.5" Duration="{StaticResource QuickAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunScaleTransform"
-                                                Storyboard.TargetProperty="ScaleY"
-                                                To="0.5" Duration="{StaticResource QuickAnimationDuration}"/>
-                                        </ParallelTimeline>
-
-                                        <!-- Анимация появления луны -->
-                                        <ParallelTimeline BeginTime="0:0:0.2">
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="MoonIndicator"
-                                                Storyboard.TargetProperty="Opacity"
-                                                From="0" To="1" Duration="{StaticResource QuickAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="MoonRotateTransform"
-                                                Storyboard.TargetProperty="Angle"
-                                                From="-30" To="0" Duration="{StaticResource StandardAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="MoonScaleTransform"
-                                                Storyboard.TargetProperty="ScaleX"
-                                                From="0.8" To="1" Duration="{StaticResource StandardAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="MoonScaleTransform"
-                                                Storyboard.TargetProperty="ScaleY"
-                                                From="0.8" To="1" Duration="{StaticResource StandardAnimationDuration}"/>
-                                        </ParallelTimeline>
-
-                                        <!-- Анимация появления звезд -->
-                                        <DoubleAnimation 
-                                            Storyboard.TargetName="StarsCanvas"
-                                            Storyboard.TargetProperty="Opacity"
-                                            From="0" To="1"
-                                            BeginTime="0:0:0.3"
-                                            Duration="{StaticResource QuickAnimationDuration}"/>
-
-                                        <!-- Анимация цвета индикатора -->
-                                        <ColorAnimation 
-                                            Storyboard.TargetName="IndicatorGradientStop1"
-                                            Storyboard.TargetProperty="Color"
-                                            To="#FF7986CB" Duration="{StaticResource StandardAnimationDuration}"/>
-
-                                        <ColorAnimation 
-                                            Storyboard.TargetName="IndicatorGradientStop2"
-                                            Storyboard.TargetProperty="Color"
-                                            To="#FF5C6BC0" Duration="{StaticResource StandardAnimationDuration}"/>
-
-                                        <ColorAnimation 
-                                            Storyboard.TargetName="IndicatorShadow"
-                                            Storyboard.TargetProperty="Color"
-                                            To="#FF303F9F" Duration="{StaticResource StandardAnimationDuration}"/>
+                                        <DoubleAnimation Storyboard.TargetName="OuterGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.5"
+                                                         Duration="0:0:0.2"/>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
-                                <BeginStoryboard x:Name="LightThemeAnimation">
+                                <BeginStoryboard>
                                     <Storyboard>
-                                        <!-- Группа основных анимаций -->
-                                        <ParallelTimeline>
-                                            <!-- Анимация индикатора -->
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="IndicatorTransform"
-                                                Storyboard.TargetProperty="X"
-                                                To="0" Duration="{StaticResource StandardAnimationDuration}"
-                                                EasingFunction="{StaticResource StandardEaseInOut}"/>
-
-                                            <!-- Анимация фона -->
-                                            <ColorAnimation 
-                                                Storyboard.TargetName="SwitchBorder"
-                                                Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                To="#FFE0E0E0" Duration="{StaticResource StandardAnimationDuration}"/>
-
-                                            <!-- Анимация свечения -->
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="InnerGlow"
-                                                Storyboard.TargetProperty="Opacity"
-                                                To="0" Duration="{StaticResource QuickAnimationDuration}"/>
-                                        </ParallelTimeline>
-
-                                        <!-- Остановка анимации звезд -->
-                                        <ParallelTimeline>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="StarsCanvas"
-                                                Storyboard.TargetProperty="Opacity"
-                                                To="0" Duration="{StaticResource QuickAnimationDuration}"/>
-                                        </ParallelTimeline>
-
-                                        <!-- Анимация исчезновения луны -->
-                                        <ParallelTimeline>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="MoonIndicator"
-                                                Storyboard.TargetProperty="Opacity"
-                                                To="0" Duration="{StaticResource QuickAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="MoonRotateTransform"
-                                                Storyboard.TargetProperty="Angle"
-                                                To="30" Duration="{StaticResource QuickAnimationDuration}"/>
-                                        </ParallelTimeline>
-
-                                        <!-- Анимация появления солнца -->
-                                        <ParallelTimeline BeginTime="0:0:0.2">
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunIndicator"
-                                                Storyboard.TargetProperty="Opacity"
-                                                From="0" To="1" Duration="{StaticResource QuickAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunRotateTransform"
-                                                Storyboard.TargetProperty="Angle"
-                                                From="-90" To="0" Duration="{StaticResource StandardAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunScaleTransform"
-                                                Storyboard.TargetProperty="ScaleX"
-                                                From="0.5" To="1" Duration="{StaticResource StandardAnimationDuration}"/>
-                                            <DoubleAnimation 
-                                                Storyboard.TargetName="SunScaleTransform"
-                                                Storyboard.TargetProperty="ScaleY"
-                                                From="0.5" To="1" Duration="{StaticResource StandardAnimationDuration}"/>
-                                        </ParallelTimeline>
-
-                                        <!-- Анимация цвета индикатора -->
-                                        <ColorAnimation 
-                                            Storyboard.TargetName="IndicatorGradientStop1"
-                                            Storyboard.TargetProperty="Color"
-                                            To="#FFFFF176" Duration="{StaticResource StandardAnimationDuration}"/>
-
-                                        <ColorAnimation 
-                                            Storyboard.TargetName="IndicatorGradientStop2"
-                                            Storyboard.TargetProperty="Color"
-                                            To="#FFFFB74D" Duration="{StaticResource StandardAnimationDuration}"/>
-
-                                        <ColorAnimation 
-                                            Storyboard.TargetName="IndicatorShadow"
-                                            Storyboard.TargetProperty="Color"
-                                            To="#FF000000" Duration="{StaticResource StandardAnimationDuration}"/>
+                                        <DoubleAnimation Storyboard.TargetName="OuterGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.3"
+                                                         Duration="0:0:0.2"/>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
+                        </Trigger>
+
+                        <!-- Focus State -->
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+
+                        <!-- Checked State (Night Mode) -->
+                        <Trigger Property="IsChecked" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <!-- Thumb Movement -->
+                                        <DoubleAnimation Storyboard.TargetName="ThumbTransform"
+                                                         Storyboard.TargetProperty="X"
+                                                         To="36"
+                                                         Duration="0:0:0.4">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="0.3"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+
+                                        <!-- Sky Transition -->
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[0].(GradientStop.Color)"
+                                                        To="#FF0D1B2A"
+                                                        Duration="0:0:0.5"/>
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[1].(GradientStop.Color)"
+                                                        To="#FF1B263B"
+                                                        Duration="0:0:0.5"/>
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[2].(GradientStop.Color)"
+                                                        To="#FF1A237E"
+                                                        Duration="0:0:0.5"/>
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[3].(GradientStop.Color)"
+                                                        To="#FF283593"
+                                                        Duration="0:0:0.5"/>
+
+                                        <!-- Outer Glow Change -->
+                                        <ColorAnimation Storyboard.TargetName="OuterGlow"
+                                                        Storyboard.TargetProperty="(Border.Background).(RadialGradientBrush.GradientStops)[0].(GradientStop.Color)"
+                                                        To="#60C5CAE9"
+                                                        Duration="0:0:0.4"/>
+
+                                        <!-- Hide Clouds -->
+                                        <DoubleAnimation Storyboard.TargetName="CloudsCanvas"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0"
+                                                         Duration="0:0:0.25"/>
+
+                                        <!-- Show Stars -->
+                                        <DoubleAnimation Storyboard.TargetName="StarsLayer"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1"
+                                                         Duration="0:0:0.3"
+                                                         BeginTime="0:0:0.2"/>
+
+                                        <!-- Star Pop-in Animations -->
+                                        <DoubleAnimation Storyboard.TargetName="Star1Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.3">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star1Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.3">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star2Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.35">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star2Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.35">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star3Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.4">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star3Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.4">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star4Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.45">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star4Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.45">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star5Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.5">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Star5Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1" Duration="0:0:0.25" BeginTime="0:0:0.5">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="1"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+
+                                        <!-- Sun to Moon Transition -->
+                                        <DoubleAnimation Storyboard.TargetName="SunIconCanvas"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0.3"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0.3"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0"
+                                                         Duration="0:0:0.2"/>
+
+                                        <DoubleAnimation Storyboard.TargetName="MoonIconCanvas"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1"
+                                                         Duration="0:0:0.25"
+                                                         BeginTime="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1"
+                                                         Duration="0:0:0.4"
+                                                         BeginTime="0:0:0.1">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="0.5"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1"
+                                                         Duration="0:0:0.4"
+                                                         BeginTime="0:0:0.1">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="0.5"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="MoonRotate"
+                                                         Storyboard.TargetProperty="Angle"
+                                                         To="0"
+                                                         Duration="0:0:0.5"
+                                                         BeginTime="0:0:0.1">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="0.4"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="MoonGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.7"
+                                                         Duration="0:0:0.3"
+                                                         BeginTime="0:0:0.2"/>
+
+                                        <!-- Thumb Color Transition -->
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad1"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FFFAFAFA"
+                                                        Duration="0:0:0.4"/>
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad2"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FFE8EAF6"
+                                                        Duration="0:0:0.4"/>
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad3"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FFC5CAE9"
+                                                        Duration="0:0:0.4"/>
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad4"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FF7986CB"
+                                                        Duration="0:0:0.4"/>
+
+                                        <!-- Shadow Color -->
+                                        <ColorAnimation Storyboard.TargetName="ThumbShadow"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#80C5CAE9"
+                                                        Duration="0:0:0.4"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <!-- Thumb Movement Back -->
+                                        <DoubleAnimation Storyboard.TargetName="ThumbTransform"
+                                                         Storyboard.TargetProperty="X"
+                                                         To="0"
+                                                         Duration="0:0:0.4">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="0.3"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+
+                                        <!-- Sky Transition Back -->
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[0].(GradientStop.Color)"
+                                                        To="#FF87CEEB"
+                                                        Duration="0:0:0.5"/>
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[1].(GradientStop.Color)"
+                                                        To="#FFB3E5FC"
+                                                        Duration="0:0:0.5"/>
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[2].(GradientStop.Color)"
+                                                        To="#FFE1F5FE"
+                                                        Duration="0:0:0.5"/>
+                                        <ColorAnimation Storyboard.TargetName="SwitchTrack"
+                                                        Storyboard.TargetProperty="(Border.Background).(GradientBrush.GradientStops)[3].(GradientStop.Color)"
+                                                        To="#FFF5FBFF"
+                                                        Duration="0:0:0.5"/>
+
+                                        <!-- Outer Glow Change Back -->
+                                        <ColorAnimation Storyboard.TargetName="OuterGlow"
+                                                        Storyboard.TargetProperty="(Border.Background).(RadialGradientBrush.GradientStops)[0].(GradientStop.Color)"
+                                                        To="#60FFEB3B"
+                                                        Duration="0:0:0.4"/>
+
+                                        <!-- Hide Stars -->
+                                        <DoubleAnimation Storyboard.TargetName="StarsLayer"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star1Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star1Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star2Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star2Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star3Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star3Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star4Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star4Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star5Scale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="Star5Scale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0" Duration="0:0:0.15"/>
+
+                                        <!-- Show Clouds -->
+                                        <DoubleAnimation Storyboard.TargetName="CloudsCanvas"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.6"
+                                                         Duration="0:0:0.3"
+                                                         BeginTime="0:0:0.2"/>
+
+                                        <!-- Moon to Sun Transition -->
+                                        <DoubleAnimation Storyboard.TargetName="MoonIconCanvas"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0.5"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0.5"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonRotate"
+                                                         Storyboard.TargetProperty="Angle"
+                                                         To="-90"
+                                                         Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="MoonGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0"
+                                                         Duration="0:0:0.2"/>
+
+                                        <DoubleAnimation Storyboard.TargetName="SunIconCanvas"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1"
+                                                         Duration="0:0:0.25"
+                                                         BeginTime="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="SunScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1"
+                                                         Duration="0:0:0.4"
+                                                         BeginTime="0:0:0.1">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="0.5"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="SunScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1"
+                                                         Duration="0:0:0.4"
+                                                         BeginTime="0:0:0.1">
+                                            <DoubleAnimation.EasingFunction>
+                                                <BackEase EasingMode="EaseOut" Amplitude="0.5"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="SunGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.6"
+                                                         Duration="0:0:0.3"
+                                                         BeginTime="0:0:0.2"/>
+
+                                        <!-- Thumb Color Transition Back -->
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad1"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FFFFF9C4"
+                                                        Duration="0:0:0.4"/>
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad2"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FFFFEB3B"
+                                                        Duration="0:0:0.4"/>
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad3"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FFFFC107"
+                                                        Duration="0:0:0.4"/>
+                                        <ColorAnimation Storyboard.TargetName="ThumbGrad4"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#FFFF9800"
+                                                        Duration="0:0:0.4"/>
+
+                                        <!-- Shadow Color Back -->
+                                        <ColorAnimation Storyboard.TargetName="ThumbShadow"
+                                                        Storyboard.TargetProperty="Color"
+                                                        To="#80FF9800"
+                                                        Duration="0:0:0.4"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+
+                        <!-- Disabled State -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -448,61 +1153,98 @@
         </Setter>
     </Style>
 
-    <!-- Стиль для информационных подсказок -->
-    <Style x:Key="ToolTipStyle" TargetType="ToolTip">
-        <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Style x:Key="ModernProgressBarStyle" TargetType="ProgressBar">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="8,4"/>
-        <Setter Property="HasDropShadow" Value="True"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Height" Value="10"/>
+        <Setter Property="MinHeight" Value="6"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="ToolTip">
-                    <Border Background="{TemplateBinding Background}"
-                        BorderBrush="{TemplateBinding BorderBrush}"
-                        BorderThickness="{TemplateBinding BorderThickness}"
-                        CornerRadius="{StaticResource CornerRadiusSmall}"
-                        Padding="{TemplateBinding Padding}">
-                        <ContentPresenter Content="{TemplateBinding Content}"/>
-                    </Border>
+                <ControlTemplate TargetType="ProgressBar">
+                    <Grid SnapsToDevicePixels="True">
+                        <Border x:Name="PART_Track"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5">
+                            <Grid>
+                                <Border CornerRadius="5" Opacity="0.4">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#15000000" Offset="0"/>
+                                            <GradientStop Color="#05000000" Offset="0.5"/>
+                                            <GradientStop Color="#10000000" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <Border x:Name="PART_Indicator"
+                                HorizontalAlignment="Left"
+                                CornerRadius="5"
+                                Background="{TemplateBinding Foreground}">
+                            <Grid ClipToBounds="True">
+                                <Border CornerRadius="5">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#50FFFFFF" Offset="0"/>
+                                            <GradientStop Color="#00FFFFFF" Offset="0.4"/>
+                                            <GradientStop Color="#00000000" Offset="0.6"/>
+                                            <GradientStop Color="#20000000" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+
+                                <Border x:Name="ShineEffect"
+                                        Width="80"
+                                        HorizontalAlignment="Left"
+                                        CornerRadius="5"
+                                        Opacity="0.5"
+                                        RenderTransformOrigin="0.5,0.5">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#00FFFFFF" Offset="0"/>
+                                            <GradientStop Color="#60FFFFFF" Offset="0.4"/>
+                                            <GradientStop Color="#60FFFFFF" Offset="0.6"/>
+                                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                    <Border.RenderTransform>
+                                        <TranslateTransform x:Name="ShineTransform" X="-80"/>
+                                    </Border.RenderTransform>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsIndeterminate" Value="False">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard RepeatBehavior="Forever">
+                                        <DoubleAnimation Storyboard.TargetName="ShineTransform"
+                                                         Storyboard.TargetProperty="X"
+                                                         From="-80" To="500"
+                                                         Duration="0:0:1.5"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
 
-    <!-- Стиль для прогресс-бара -->
-    <Style x:Key="ModernProgressBarStyle" TargetType="ProgressBar">
-        <Setter Property="Foreground" Value="{DynamicResource ProgressBarForegroundBrush}"/>
-        <Setter Property="Background" Value="{DynamicResource ProgressBarBackgroundBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource ProgressBarBorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
+    <Style x:Key="LargeProgressBarStyle" TargetType="ProgressBar" BasedOn="{StaticResource ModernProgressBarStyle}">
         <Setter Property="Height" Value="20"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="ProgressBar">
-                    <Border x:Name="ProgressBarRoot"
-                        Background="{TemplateBinding Background}"
-                        BorderBrush="{TemplateBinding BorderBrush}"
-                        BorderThickness="{TemplateBinding BorderThickness}"
-                        CornerRadius="{StaticResource CornerRadiusMedium}">
-                        <Grid x:Name="PART_Track">
-                            <Border x:Name="PART_Indicator"
-                                Background="{TemplateBinding Foreground}"
-                                CornerRadius="{StaticResource CornerRadiusMedium}"
-                                HorizontalAlignment="Left">
-                                <Border.Effect>
-                                    <DropShadowEffect Color="{Binding Color, Source={DynamicResource AccentBrush}}" 
-                                        BlurRadius="8" 
-                                        ShadowDepth="0" 
-                                        Opacity="0.3"/>
-                                </Border.Effect>
-                            </Border>
-                        </Grid>
-                    </Border>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+    </Style>
+
+    <Style x:Key="ThinProgressBarStyle" TargetType="ProgressBar" BasedOn="{StaticResource ModernProgressBarStyle}">
+        <Setter Property="Height" Value="4"/>
     </Style>
 
 </ResourceDictionary>

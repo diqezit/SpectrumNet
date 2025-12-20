@@ -1,4 +1,4 @@
-﻿#nullable enable 
+#nullable enable 
 
 namespace SpectrumNet.SN.Shared.Converters;
 
@@ -22,7 +22,7 @@ public class PaletteNameToBrushConverter : IValueConverter
             {
                 var (skColor, _) = BrushesProvider.GetColorAndBrush(paletteName);
                 return new SolidColorBrush(
-                    System.Windows.Media.Color.FromArgb(
+                    Color.FromArgb(
                         skColor.Alpha, skColor.Red, skColor.Green, skColor.Blue));
             }
             catch (Exception)

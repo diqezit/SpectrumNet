@@ -1,100 +1,83 @@
-﻿#nullable enable
-
 namespace SpectrumNet.SN.Shared.Logging;
 
-public class SmartLogger : ISmartLogger
+public interface ISmartLogger
 {
-    private const string
-        LogDirectoryPath = "logs",
-        LatestLogFileName = "latest.log",
-        OutputTemplate = "{Timestamp:HH:mm:ss} [{Level:u3}] [T:{ThreadId}] [{Source}] {Message}{NewLine}{Exception}";
+    void Log(LogLevel level, string source, string message, bool forceLog = false);
+    void Debug(string source, string message);
+    void Info(string source, string message);
+    void Warning(string source, string message);
+    void Error(string source, string message);
+    void Error(string source, string message, Exception ex);
+    void Fatal(string source, string message);
 
-    private const int
-        MaxFileSizeMB = 5,
-        RetainedFileCount = 10;
+    bool Safe(Action action, string source, string errorMessage);
+    Task<bool> SafeAsync(Func<Task> action, string source, string errorMessage);
+    T SafeResult<T>(Func<T> func, T defaultValue, string source, string errorMessage);
+}
 
-    private static readonly SmartLogger _instance = new();
-    public static SmartLogger Instance => _instance;
+public sealed class SmartLogger : ISmartLogger
+{
+    private const string LogDir = "logs";
+    private const string LatestLog = "latest.log";
+    private const string Template = "{Timestamp:HH:mm:ss} [{Level:u3}] [T:{ThreadId}] [{Source}] {Message}{NewLine}{Exception}";
+    private const int MaxSizeMB = 5;
+    private const int RetainCount = 10;
 
-    // Инициализация логгера
-    public static void Initialize()
+    private static readonly Lazy<SmartLogger> _lazy = new(() =>
     {
-        Instance.Safe(() =>
+        var logger = new SmartLogger();
+        logger.Init();
+        return logger;
+    });
+
+    public static SmartLogger Instance => _lazy.Value;
+
+    private SmartLogger() { }
+
+    private void Init()
+    {
+        try
         {
-            EnsureLogDirectoryExists();
-            TryDeleteLatestLog();
+            EnsureLogDir();
+            DeleteLatest();
             ConfigureLogger();
-            LogStartupInfo();
-        }, nameof(SmartLogger), "Error initializing logging");
+            LogStartup();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Logger init failed: {ex.Message}");
+        }
     }
 
-    #region ISmartLogger Implementation
-
     public void Log(LogLevel level, string source, string message, bool forceLog = false) =>
-        ForContext("Source", source).Write(ToSerilogLevel(level), message);
+        ForContext("Source", source).Write(ToSerilog(level), message);
 
-    public void Debug(string source, string message) =>
-        Log(LogLevel.Debug, source, message);
-
-    public void Info(string source, string message) =>
-        Log(LogLevel.Information, source, message);
-
-    public void Warning(string source, string message) =>
-        Log(LogLevel.Warning, source, message);
-
-    public void Error(string source, string message) =>
-        Log(LogLevel.Error, source, message);
+    public void Debug(string source, string message) => Log(LogLevel.Debug, source, message);
+    public void Info(string source, string message) => Log(LogLevel.Information, source, message);
+    public void Warning(string source, string message) => Log(LogLevel.Warning, source, message);
+    public void Error(string source, string message) => Log(LogLevel.Error, source, message);
+    public void Fatal(string source, string message) => Log(LogLevel.Fatal, source, message);
 
     public void Error(string source, string message, Exception ex) =>
         ForContext("Source", source).Error(ex, message);
 
-    public void Fatal(string source, string message) =>
-        Log(LogLevel.Fatal, source, message);
-
     public bool Safe(Action action, string source, string errorMessage)
     {
-        try
-        {
-            action();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Error(source, errorMessage, ex);
-            return false;
-        }
+        try { action(); return true; }
+        catch (Exception ex) { Error(source, errorMessage, ex); return false; }
     }
 
-    public async Task<bool> SafeAsync(Func<Task> asyncAction, string source, string errorMessage)
+    public async Task<bool> SafeAsync(Func<Task> action, string source, string errorMessage)
     {
-        try
-        {
-            await asyncAction();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Error(source, errorMessage, ex);
-            return false;
-        }
+        try { await action(); return true; }
+        catch (Exception ex) { Error(source, errorMessage, ex); return false; }
     }
 
     public T SafeResult<T>(Func<T> func, T defaultValue, string source, string errorMessage)
     {
-        try
-        {
-            return func();
-        }
-        catch (Exception ex)
-        {
-            Error(source, errorMessage, ex);
-            return defaultValue;
-        }
+        try { return func(); }
+        catch (Exception ex) { Error(source, errorMessage, ex); return defaultValue; }
     }
-
-    #endregion
-
-    #region Private Implementation Methods
 
     private static void ConfigureLogger()
     {
@@ -103,55 +86,48 @@ public class SmartLogger : ISmartLogger
             .Enrich.FromLogContext()
             .Enrich.With(new ThreadEnricher())
             .WriteTo.File(
-                Path.Combine(LogDirectoryPath, LatestLogFileName),
-                fileSizeLimitBytes: MaxFileSizeMB * 1024 * 1024,
+                Path.Combine(LogDir, LatestLog),
+                fileSizeLimitBytes: MaxSizeMB * 1024 * 1024,
                 rollOnFileSizeLimit: true,
-                retainedFileCountLimit: RetainedFileCount,
-                outputTemplate: OutputTemplate,
-                rollingInterval: RollingInterval.Infinite
-            )
+                retainedFileCountLimit: RetainCount,
+                outputTemplate: Template,
+                rollingInterval: RollingInterval.Infinite)
             .CreateLogger();
     }
 
-    private static void LogStartupInfo()
+    private void LogStartup()
     {
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "Unknown";
-        _instance.Info(nameof(SmartLogger), $"Application 'SpectrumNet' version '{version}' started");
+        string ver = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "Unknown";
+        Info(nameof(SmartLogger), $"Application 'SpectrumNet' version '{ver}' started");
     }
 
-    private static LogEventLevel ToSerilogLevel(LogLevel level) =>
-        level switch
-        {
-            LogLevel.Trace => LogEventLevel.Verbose,
-            LogLevel.Debug => LogEventLevel.Debug,
-            LogLevel.Information => LogEventLevel.Information,
-            LogLevel.Warning => LogEventLevel.Warning,
-            LogLevel.Error => LogEventLevel.Error,
-            LogLevel.Fatal => LogEventLevel.Fatal,
-            _ => LogEventLevel.Information
-        };
-
-    private static void EnsureLogDirectoryExists()
+    private static LogEventLevel ToSerilog(LogLevel level) => level switch
     {
-        if (!Directory.Exists(LogDirectoryPath))
-            Directory.CreateDirectory(LogDirectoryPath);
+        LogLevel.Trace => LogEventLevel.Verbose,
+        LogLevel.Debug => LogEventLevel.Debug,
+        LogLevel.Information => LogEventLevel.Information,
+        LogLevel.Warning => LogEventLevel.Warning,
+        LogLevel.Error => LogEventLevel.Error,
+        LogLevel.Fatal => LogEventLevel.Fatal,
+        _ => LogEventLevel.Information
+    };
+
+    private static void EnsureLogDir()
+    {
+        if (!Directory.Exists(LogDir))
+            Directory.CreateDirectory(LogDir);
     }
 
-    private static void TryDeleteLatestLog()
+    private static void DeleteLatest()
     {
-        var latestLogPath = Path.Combine(LogDirectoryPath, LatestLogFileName);
-        if (File.Exists(latestLogPath))
-            File.Delete(latestLogPath);
+        string path = Path.Combine(LogDir, LatestLog);
+        if (File.Exists(path))
+            File.Delete(path);
     }
 
-    private class ThreadEnricher : ILogEventEnricher
+    private sealed class ThreadEnricher : ILogEventEnricher
     {
-        public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
-        {
-            var threadId = CurrentManagedThreadId;
-            logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("ThreadId", threadId));
-        }
+        public void Enrich(LogEvent evt, ILogEventPropertyFactory factory) =>
+            evt.AddPropertyIfAbsent(factory.CreateProperty("ThreadId", CurrentManagedThreadId));
     }
-
-    #endregion
 }

@@ -1,659 +1,1195 @@
-﻿<Window
+<Window
     x:Class="SpectrumNet.ControlPanelWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="clr-namespace:SpectrumNet"
     xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     Title="Control Panel"
-    Height="400" Width="650"
+    Height="440" Width="720"
+    MinHeight="440" MinWidth="720"
     WindowStartupLocation="CenterOwner"
     Background="Transparent"
     AllowsTransparency="True"
     WindowStyle="None"
-    ResizeMode="NoResize"
-    BorderBrush="{DynamicResource WindowBorderBrush}">
+    ResizeMode="NoResize">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
+        <Geometry x:Key="IconPlay">M9,7 L9,17 L18,12 Z</Geometry>
+        <Geometry x:Key="IconStop">M8,8 H16 V16 H8 Z</Geometry>
+
+        <Geometry x:Key="IconOverlay">
+            M6.5,7.5 H17.5 V16.5 H6.5 Z
+            M8.75,9.75 H15.25 V14.25 H8.75 Z
+        </Geometry>
+
+        <Geometry x:Key="IconSettings">
+            M12,8.1 A3.9,3.9 0 1 1 12,15.9 A3.9,3.9 0 0 1 12,8.1
+            M12,2.8 L12,5
+            M12,19 L12,21.2
+            M2.8,12 L5,12
+            M19,12 L21.2,12
+            M5.15,5.15 L6.75,6.75
+            M17.25,17.25 L18.85,18.85
+            M5.15,18.85 L6.75,17.25
+            M17.25,6.75 L18.85,5.15
+        </Geometry>
+
+        <Geometry x:Key="IconGain">
+            M6,19.2 V14
+            M6,14 A2.6,2.6 0 1 1 6,8.8 A2.6,2.6 0 0 1 6,14
+            M12,19.2 V16
+            M12,16 A2.6,2.6 0 1 1 12,10.8 A2.6,2.6 0 0 1 12,16
+            M18,19.2 V13
+            M18,13 A2.6,2.6 0 1 1 18,7.8 A2.6,2.6 0 0 1 18,13
+        </Geometry>
+
+        <Geometry x:Key="IconRender">
+            M6,18 H18
+            M7.5,18 V12
+            M11,18 V9
+            M14.5,18 V13.5
+            M18,6 H6
+        </Geometry>
+
+        <Geometry x:Key="IconAudio">
+            M6,16 V12
+            M9.5,18 V10
+            M13,16 V8
+            M16.5,14 V6
+        </Geometry>
+
+        <Geometry x:Key="IconApp">
+            M7,5 H17 A2,2 0 0 1 19,7 V17 A2,2 0 0 1 17,19 H7 A2,2 0 0 1 5,17 V7 A2,2 0 0 1 7,5 Z
+            M7.5,8.3 H16.5
+            M8.8,11.4 H15.2
+            M8.8,14.3 H15.2
+            M8.8,17 H12.7
+        </Geometry>
+
+        <Geometry x:Key="IconClose">M7,7 L17,17 M17,7 L7,17</Geometry>
+
+        <Geometry x:Key="IconMinDb">
+            M6,12 L12,18 L18,12
+            M12,18 V6
+        </Geometry>
+
+        <Geometry x:Key="IconMaxDb">
+            M6,12 L12,6 L18,12
+            M12,6 V18
+        </Geometry>
+
+        <Geometry x:Key="IconAmp">
+            M6,16 V12
+            M9.5,18 V10
+            M13,16 V8
+            M16.5,14 V6
+        </Geometry>
+
+        <Geometry x:Key="IconOverlayTop">
+            M7,7 H17 V19 H7 Z
+            M7,7 V5 H17 V7
+            M12,10 V16
+            M10.6,11.4 L12,10 L13.4,11.4
+        </Geometry>
+
+        <Geometry x:Key="IconFps">
+            M12,6 A7,7 0 1 1 12,20 A7,7 0 0 1 12,6
+            M12,12 L16.8,10.1
+        </Geometry>
+
+        <Geometry x:Key="IconClock">
+            M12,6 A7,7 0 1 1 12,20 A7,7 0 0 1 12,6
+            M12,9 V12.3 L14.8,13.8
+        </Geometry>
+    </Window.Resources>
 
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome
-            CaptionHeight="24"
+            CaptionHeight="0"
             CornerRadius="0"
             GlassFrameThickness="0"
-            ResizeBorderThickness="6"/>
+            ResizeBorderThickness="0"/>
     </shell:WindowChrome.WindowChrome>
 
     <Border
         Background="{DynamicResource WindowBackgroundBrush}"
         BorderBrush="{DynamicResource WindowBorderBrush}"
         BorderThickness="1"
-        CornerRadius="10">
+        CornerRadius="14">
 
-        <Grid>
+        <Grid KeyboardNavigation.TabNavigation="Cycle">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="52"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
             <Border
                 x:Name="TitleBar"
-                Height="38"
-                VerticalAlignment="Top"
+                Grid.Row="0"
                 Style="{DynamicResource TitleBarBorderStyle}"
-                CornerRadius="10,10,0,0"
+                CornerRadius="14,14,0,0"
                 MouseLeftButtonDown="OnTitleBarMouseLeftButtonDown">
-                <Grid>
+
+                <Grid Margin="16,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock
-                        Grid.Column="0"
-                        Text="Control Panel"
-                        FontSize="16" FontWeight="Bold"
-                        Foreground="White"
-                        VerticalAlignment="Center"
-                        Margin="16,0,0,0"/>
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
 
-                    <Button
-                        x:Name="CloseButton"
-                        Grid.Column="1"
-                        Style="{DynamicResource WindowCloseButtonStyle}"
-                        Width="32" Height="32"
-                        Margin="0,0,10,0"
-                        Cursor="Hand"
-                        Click="OnButtonClick"
-                        WindowChrome.IsHitTestVisibleInChrome="True">
-                        <Path
-                            Data="M6,6L14,14M14,6L6,14"
-                            Stroke="White"
-                            StrokeThickness="1.5"
-                            StrokeEndLineCap="Round"
-                            StrokeStartLineCap="Round"/>
+                        <Border Width="36" Height="36"
+                                CornerRadius="8"
+                                Background="{DynamicResource WindowControlHoverBrush}"
+                                Opacity="0.6"
+                                Margin="0,0,12,0">
+                            <Path Width="20" Height="20"
+                                  Stroke="{DynamicResource WindowForegroundBrush}"
+                                  StrokeThickness="2"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"
+                                  Fill="Transparent"
+                                  Stretch="Uniform"
+                                  Data="{StaticResource IconSettings}"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"/>
+                        </Border>
+
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="Control Panel"
+                                       FontSize="17"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource WindowForegroundBrush}"/>
+                            <TextBlock Text="Audio Visualization Settings"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource WindowForegroundBrush}"
+                                       Opacity="0.75"
+                                       Margin="0,1,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Button x:Name="CloseButton"
+                            Grid.Column="1"
+                            Style="{DynamicResource WindowCloseButtonStyle}"
+                            Width="36" Height="36"
+                            Click="OnButtonClick"
+                            ToolTip="Close"
+                            WindowChrome.IsHitTestVisibleInChrome="True"
+                            Foreground="{DynamicResource WindowForegroundBrush}">
+                        <Path Width="12" Height="12"
+                              Data="{StaticResource IconClose}"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="2.2"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round"
+                              Fill="Transparent"
+                              Stretch="Uniform"/>
                     </Button>
                 </Grid>
             </Border>
 
-            <Border
-                x:Name="ControlPanel"
-                Background="{DynamicResource SurfaceBrush}"
-                CornerRadius="0,0,10,10"
-                Padding="8"
-                Margin="0,38,0,0">
+            <Border Grid.Row="1"
+                    Background="{DynamicResource SurfaceBrush}"
+                    CornerRadius="0,0,14,14"
+                    Padding="16">
+
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="12"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <StackPanel
-                        Grid.Row="0"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Center"
-                        Margin="0,0,0,6">
-
-                        <Button
-                            x:Name="StartCaptureButton"
-                            Style="{DynamicResource ModernButtonStyle}"
-                            Width="118" Height="34"
-                            Margin="0,0,5,0"
-                            IsEnabled="{Binding CanStartCapture}"
-                            Click="OnButtonClick"
-                            ToolTip="Start audio capture">
-                            <StackPanel Orientation="Horizontal">
-                                <Path
-                                    Width="14" Height="14"
-                                    Margin="0,0,5,0"
-                                    Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                    Stretch="Uniform"
-                                    Data="M6,3C5.4,3,5,3.4,5,4V16C5,16.6,5.4,17,6,17C6.2,17,6.4,16.9,6.6,16.8L16.6,10.8C17.1,10.5,17.2,9.8,16.9,9.4C16.8,9.2,16.7,9.1,16.6,9L6.6,3.2C6.4,3.1,6.2,3,6,3Z"/>
-                                <TextBlock Text="Start" FontWeight="SemiBold"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button
-                            x:Name="StopCaptureButton"
-                            Style="{DynamicResource ModernButtonStyle}"
-                            Width="118" Height="34"
-                            Margin="0,0,5,0"
-                            IsEnabled="{Binding IsRecording}"
-                            Click="OnButtonClick"
-                            ToolTip="Stop audio capture">
-                            <StackPanel Orientation="Horizontal">
-                                <Path
-                                    Width="14" Height="14"
-                                    Margin="0,0,5,0"
-                                    Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                    Stretch="Uniform"
-                                    Data="M10,3C13.866,3,17,6.134,17,10C17,13.866,13.866,17,10,17C6.134,17,3,13.866,3,10C3,6.134,6.134,3,10,3ZM7.5,7.5C7.224,7.5,7,7.724,7,8L7,12C7,12.276,7.224,12.5,7.5,12.5L12.5,12.5C12.776,12.5,13,12.276,13,12L13,8C13,7.724,12.776,7.5,12.5,7.5L7.5,7.5Z"/>
-                                <TextBlock Text="Stop" FontWeight="SemiBold"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button
-                            x:Name="OverlayButton"
-                            Style="{DynamicResource ModernButtonStyle}"
-                            Width="118" Height="34"
-                            Margin="0,0,5,0"
-                            Click="OnButtonClick"
-                            ToolTip="Toggle visualization overlay">
-                            <StackPanel Orientation="Horizontal">
-                                <Path
-                                    Width="14" Height="14"
-                                    Margin="0,0,5,0"
-                                    Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                    Data="M3,14L10,2L17,14L10,10Z"
-                                    Stretch="Uniform"/>
-                                <TextBlock Text="Overlay" FontWeight="SemiBold"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button
-                            x:Name="OpenSettingsButton"
-                            Style="{DynamicResource ModernButtonStyle}"
-                            Width="118" Height="34"
-                            Margin="0,0,5,0"
-                            Click="OnButtonClick"
-                            ToolTip="Open application settings">
-                            <StackPanel Orientation="Horizontal">
-                                <Path
-                                    Width="14" Height="14"
-                                    Margin="0,0,5,0"
-                                    Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                    Stretch="Uniform"
-                                    Data="M9,2L11,2L11,4C11,4,12.2,4.4,13,5L14.5,3.5L16,5L14.5,6.5C15.1,7.3,15.5,8.5,15.5,8.5L17.5,8.5L17.5,10.5L15.5,10.5C15.5,10.5,15.1,11.7,14.5,12.5L16,14L14.5,15.5L13,14C12.2,14.6,11,15,11,15L11,17L9,17L9,15C9,15,7.8,14.6,7,14L5.5,15.5L4,14L5.5,12.5C4.9,11.7,4.5,10.5,4.5,10.5L2.5,10.5L2.5,8.5L4.5,8.5C4.5,8.5,4.9,7.3,5.5,6.5L4,5L5.5,3.5L7,5C7.8,4.4,9,4,9,4L9,2ZM10,7C8.3,7,7,8.3,7,10C7,11.7,8.3,13,10,13C11.7,13,13,11.7,13,10C13,8.3,11.7,7,10,7Z"/>
-                                <TextBlock Text="Settings" FontWeight="SemiBold"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button
-                            x:Name="OpenPopupButton"
-                            Style="{DynamicResource ModernButtonStyle}"
-                            Width="118" Height="34"
-                            Click="OnButtonClick"
-                            ToolTip="Open audio gain controls">
-                            <StackPanel Orientation="Horizontal">
-                                <Path
-                                    Width="14" Height="14"
-                                    Margin="0,0,5,0"
-                                    Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                    Stretch="Uniform"
-                                    Data="M3,17H17V15H3V17ZM8,13H12V5C12,4.45,11.55,4,11,4H9C8.45,4,8,4.45,8,5V13ZM4,13H6V9C6,8.45,5.55,8,5,8H5C4.45,8,4,8.45,4,9V13ZM14,13H16V7C16,6.45,15.55,6,15,6H15C14.45,6,14,6.45,14,7V13Z"/>
-                                <TextBlock Text="Gain" FontWeight="SemiBold"/>
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-
-                    <Grid Grid.Row="1" Margin="0,4,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-
-                        <Border
-                            Grid.Column="0"
+                    <Border Grid.Row="0"
                             Background="{DynamicResource ControlsPanelBackgroundBrush}"
-                            BorderBrush="{DynamicResource WindowBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8"
-                            Margin="0,0,4,0">
-                            <StackPanel>
-                                <TextBlock
-                                    Text="Rendering Settings"
-                                    FontSize="13" FontWeight="Bold"
-                                    Foreground="{DynamicResource TextPrimaryBrush}"
-                                    HorizontalAlignment="Center"
-                                    Margin="0,0,0,6"/>
+                            CornerRadius="12"
+                            Padding="12">
 
-                                <Grid Margin="0,0,0,5">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock
-                                        Grid.Row="0" Text="Renderer:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                        Margin="0,0,0,2"/>
-                                    <ComboBox
-                                        x:Name="RenderStyleComboBox"
-                                        Grid.Row="1"
-                                        Style="{DynamicResource ModernComboBoxStyle}"
-                                        Height="26"
-                                        HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                        ItemsSource="{Binding OrderedDrawingTypes}"
-                                        SelectedItem="{Binding SelectedDrawingType, Mode=TwoWay}"
-                                        SelectionChanged="OnComboBoxSelectionChanged">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <Button
-                                                        x:Name="favoriteButton"
-                                                        Tag="{Binding}"
-                                                        Style="{DynamicResource FavoriteButtonStyle}"
-                                                        Click="OnFavoriteButtonClick"/>
-                                                    <TextBlock
-                                                        Text="{Binding}"
-                                                        VerticalAlignment="Center"
-                                                        Margin="3,0,0,0"/>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                </Grid>
-
-                                <Grid Margin="0,0,0,5">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock
-                                        Grid.Row="0" Text="Paint:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                        Margin="0,0,0,2"/>
-                                    <ComboBox
-                                        x:Name="StyleComboBox"
-                                        Grid.Row="1"
-                                        Style="{DynamicResource ModernComboBoxStyle}"
-                                        Height="26"
-                                        HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                        ItemsSource="{Binding AvailablePalettes.Keys}"
-                                        SelectedItem="{Binding SelectedStyle, Mode=TwoWay}"
-                                        SelectionChanged="OnComboBoxSelectionChanged">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                    <Rectangle
-                                                        Width="10" Height="10"
-                                                        Margin="0,0,4,0"
-                                                        Stroke="Black"
-                                                        StrokeThickness="1"
-                                                        Fill="{Binding Converter={StaticResource PaletteNameToBrushConverter}}"/>
-                                                    <TextBlock
-                                                        Text="{Binding}"
-                                                        VerticalAlignment="Center"/>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                </Grid>
-
-                                <Grid Margin="0,0,0,5">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock
-                                        Grid.Row="0" Text="Interval:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                        Margin="0,0,0,2"/>
-                                    <Slider
-                                        x:Name="barSpacingSlider"
-                                        Grid.Row="1"
-                                        Style="{DynamicResource ModernSliderStyle}"
-                                        Height="16"
-                                        Minimum="1" Maximum="15"
-                                        Value="{Binding BarSpacing, Mode=TwoWay}"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderValueChanged"/>
-                                </Grid>
-
-                                <Grid Margin="0,0,0,5">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock
-                                        Grid.Row="0" Text="Strips:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                        Margin="0,0,0,2"
-                                        ToolTip="Number of visualization strips"/>
-                                    <Slider
-                                        x:Name="barCountSlider"
-                                        Grid.Row="1"
-                                        Style="{DynamicResource ModernSliderStyle}"
-                                        Height="16"
-                                        Minimum="10" Maximum="500"
-                                        Value="{Binding BarCount, Mode=TwoWay}"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderValueChanged"/>
-                                </Grid>
-
-                                <Grid Margin="0,0,0,0">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock
-                                        Grid.Row="0" Text="Quality:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                        Margin="0,0,0,2"
-                                        ToolTip="Render quality setting"/>
-                                    <ComboBox
-                                        x:Name="RenderQualityComboBox"
-                                        Grid.Row="1"
-                                        Style="{DynamicResource ModernComboBoxStyle}"
-                                        Height="26"
-                                        HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                        ItemsSource="{Binding AvailableRenderQualities}"
-                                        SelectedItem="{Binding RenderQuality, Mode=TwoWay}"
-                                        SelectionChanged="OnComboBoxSelectionChanged"/>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <Border
-                            Grid.Column="1"
-                            Background="{DynamicResource ControlsPanelBackgroundBrush}"
-                            BorderBrush="{DynamicResource WindowBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8"
-                            Margin="4,0,4,0">
-                            <StackPanel>
-                                <TextBlock
-                                    Text="Audio Settings"
-                                    FontSize="13" FontWeight="Bold"
-                                    Foreground="{DynamicResource TextPrimaryBrush}"
-                                    HorizontalAlignment="Center"
-                                    Margin="0,0,0,6"/>
-
-                                <Grid Margin="0,0,0,5">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock
-                                        Grid.Row="0" Text="Window FFT:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                        Margin="0,0,0,2"
-                                        ToolTip="FFT window function type"/>
-                                    <ComboBox
-                                        x:Name="FftWindowTypeComboBox"
-                                        Grid.Row="1"
-                                        Style="{DynamicResource ModernComboBoxStyle}"
-                                        Height="26"
-                                        HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                        ItemsSource="{Binding AvailableFftWindowTypes}"
-                                        SelectedItem="{Binding WindowType, Mode=TwoWay}"
-                                        SelectionChanged="OnComboBoxSelectionChanged"/>
-                                </Grid>
-
-                                <Grid Margin="0,0,0,0">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock
-                                        Grid.Row="0" Text="Scale Type:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                        Margin="0,0,0,2"
-                                        ToolTip="Frequency scale type"/>
-                                    <ComboBox
-                                        x:Name="ScaleTypeComboBox"
-                                        Grid.Row="1"
-                                        Style="{DynamicResource ModernComboBoxStyle}"
-                                        Height="26"
-                                        HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                        ItemsSource="{Binding AvailableScaleTypes}"
-                                        SelectedItem="{Binding ScaleType, Mode=TwoWay}"
-                                        SelectionChanged="OnComboBoxSelectionChanged"/>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <Border
-                            Grid.Column="2"
-                            Background="{DynamicResource ControlsPanelBackgroundBrush}"
-                            BorderBrush="{DynamicResource WindowBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8"
-                            Margin="4,0,0,0">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-
-                                <TextBlock
-                                    Grid.Row="0"
-                                    Text="Application Settings"
-                                    FontSize="13" FontWeight="Bold"
-                                    Foreground="{DynamicResource TextPrimaryBrush}"
-                                    HorizontalAlignment="Center"
-                                    Margin="0,0,0,6"/>
-
-                                <Grid Grid.Row="1" Margin="0,0,0,5">
+                        <UniformGrid Columns="5" Rows="1">
+                            <Button x:Name="StartCaptureButton"
+                                    Style="{DynamicResource AccentButtonStyle}"
+                                    Height="44"
+                                    Margin="6,0"
+                                    IsEnabled="{Binding CanStartCapture}"
+                                    Click="OnButtonClick"
+                                    ToolTip="Start audio capture">
+                                <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-
-                                    <TextBlock
-                                        Grid.Column="0"
-                                        Text="Overlay:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                    <CheckBox
-                                        Grid.Column="1"
-                                        Style="{DynamicResource ModernCheckBoxStyle}"
-                                        IsChecked="{Binding IsOverlayTopmost, Mode=TwoWay}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"
-                                        Margin="0,0,0,0"
-                                        ToolTip="Keep the visualization overlay always on top of other windows">
-                                        <TextBlock Text="Topmost" TextWrapping="NoWrap"/>
-                                    </CheckBox>
+                                    <Border Grid.Column="0"
+                                            Width="28" Height="28"
+                                            CornerRadius="6"
+                                            Background="{DynamicResource ButtonHoverBackgroundBrush}"
+                                            Opacity="0.35"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center">
+                                        <Path Width="14" Height="14"
+                                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              Stretch="Uniform"
+                                              Data="{StaticResource IconPlay}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="Start"
+                                               FontWeight="SemiBold"
+                                               FontSize="14"
+                                               VerticalAlignment="Center"/>
                                 </Grid>
+                            </Button>
 
-                                <Grid Grid.Row="2" Margin="0,0,0,5">
+                            <Button x:Name="StopCaptureButton"
+                                    Style="{DynamicResource DangerButtonStyle}"
+                                    Height="44"
+                                    Margin="6,0"
+                                    IsEnabled="{Binding IsRecording}"
+                                    Click="OnButtonClick"
+                                    ToolTip="Stop audio capture">
+                                <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-
-                                    <TextBlock
-                                        Grid.Column="0"
-                                        Text="FPS:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                    <CheckBox
-                                        Grid.Column="1"
-                                        Style="{DynamicResource ModernCheckBoxStyle}"
-                                        IsChecked="{Binding ShowPerformanceInfo, Mode=TwoWay}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"
-                                        Margin="0,0,0,0"
-                                        ToolTip="Display frames per second counter on the visualization">
-                                        <TextBlock Text="Show counter" TextWrapping="NoWrap"/>
-                                    </CheckBox>
+                                    <Border Grid.Column="0"
+                                            Width="28" Height="28"
+                                            CornerRadius="6"
+                                            Background="{DynamicResource ButtonHoverBackgroundBrush}"
+                                            Opacity="0.35"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center">
+                                        <Path Width="12" Height="12"
+                                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              Stretch="Uniform"
+                                              Data="{StaticResource IconStop}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="Stop"
+                                               FontWeight="SemiBold"
+                                               FontSize="14"
+                                               VerticalAlignment="Center"/>
                                 </Grid>
+                            </Button>
 
-                                <Grid Grid.Row="3">
+                            <Button x:Name="OverlayButton"
+                                    Style="{DynamicResource ModernButtonStyle}"
+                                    Height="44"
+                                    Margin="6,0"
+                                    Click="OnButtonClick"
+                                    ToolTip="Toggle visualization overlay">
+                                <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-
-                                    <TextBlock
-                                        Grid.Column="0"
-                                        Text="Limit FPS:"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                    <CheckBox
-                                        x:Name="LimitFpsCheckBox"
-                                        Grid.Column="1"
-                                        Style="{DynamicResource ModernCheckBoxStyle}"
-                                        IsChecked="{Binding LimitFpsTo60, Mode=TwoWay}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"
-                                        Margin="0,0,0,0"
-                                        ToolTip="Limit rendering to 60 frames per second (only in Window Mode)">
-                                        <TextBlock Text="To 60" TextWrapping="NoWrap"/>
-                                    </CheckBox>
+                                    <Border Grid.Column="0"
+                                            Width="28" Height="28"
+                                            CornerRadius="6"
+                                            Background="{DynamicResource HoverBackgroundBrush}"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center">
+                                        <Path Width="16" Height="16"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              StrokeThickness="2"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Fill="Transparent"
+                                              Stretch="Uniform"
+                                              Data="{StaticResource IconOverlay}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="Overlay"
+                                               FontWeight="SemiBold"
+                                               FontSize="14"
+                                               VerticalAlignment="Center"/>
                                 </Grid>
-                            </Grid>
-                        </Border>
-                    </Grid>
-                </Grid>
-            </Border>
+                            </Button>
 
-            <Popup
-                x:Name="GainControlsPopup"
-                Placement="Center"
-                StaysOpen="False"
-                AllowsTransparency="True"
-                IsOpen="{Binding IsPopupOpen, Mode=TwoWay}">
-                <Border
-                    Background="{DynamicResource DarkSurfaceBrush}"
-                    BorderBrush="{DynamicResource DarkPopupBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8"
-                    Padding="12"
-                    Width="340"
-                    RenderTransformOrigin="0.5,0.5">
-                    <Border.RenderTransform>
-                        <ScaleTransform ScaleX="0.7" ScaleY="0.7"/>
-                    </Border.RenderTransform>
-                    <Border.Triggers>
-                        <EventTrigger RoutedEvent="Loaded">
-                            <BeginStoryboard>
-                                <Storyboard>
-                                    <DoubleAnimation
-                                        Storyboard.TargetProperty="Opacity"
-                                        From="0" To="1"
-                                        Duration="{StaticResource StandardAnimationDuration}"
-                                        EasingFunction="{StaticResource StandardEaseOut}"/>
-                                    <DoubleAnimation
-                                        Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)"
-                                        From="0.7" To="1"
-                                        Duration="{StaticResource StandardAnimationDuration}"
-                                        EasingFunction="{StaticResource StandardEaseOut}"/>
-                                    <DoubleAnimation
-                                        Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)"
-                                        From="0.7" To="1"
-                                        Duration="{StaticResource StandardAnimationDuration}"
-                                        EasingFunction="{StaticResource StandardEaseOut}"/>
-                                </Storyboard>
-                            </BeginStoryboard>
-                        </EventTrigger>
-                    </Border.Triggers>
-                    <StackPanel>
-                        <TextBlock
-                            Text="Gain Settings"
-                            FontSize="16" FontWeight="Bold"
-                            Foreground="{DynamicResource LightTextPrimaryBrush}"
-                            Margin="0,0,0,8"/>
+                            <Button x:Name="OpenSettingsButton"
+                                    Style="{DynamicResource ModernButtonStyle}"
+                                    Height="44"
+                                    Margin="6,0"
+                                    Click="OnButtonClick"
+                                    ToolTip="Open application settings">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Width="28" Height="28"
+                                            CornerRadius="6"
+                                            Background="{DynamicResource HoverBackgroundBrush}"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center">
+                                        <Path Width="16" Height="16"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              StrokeThickness="2"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Fill="Transparent"
+                                              Stretch="Uniform"
+                                              Data="{StaticResource IconSettings}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="Settings"
+                                               FontWeight="SemiBold"
+                                               FontSize="14"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                            </Button>
 
-                        <Grid Margin="0,0,0,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="38"/>
-                            </Grid.ColumnDefinitions>
+                            <Button x:Name="OpenPopupButton"
+                                    Style="{DynamicResource ModernButtonStyle}"
+                                    Height="44"
+                                    Margin="6,0"
+                                    Click="OnButtonClick"
+                                    ToolTip="Open audio gain controls">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Width="28" Height="28"
+                                            CornerRadius="6"
+                                            Background="{DynamicResource HoverBackgroundBrush}"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center">
+                                        <Path Width="16" Height="16"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              StrokeThickness="2"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Fill="Transparent"
+                                              Stretch="Uniform"
+                                              Data="{StaticResource IconGain}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="Gain"
+                                               FontWeight="SemiBold"
+                                               FontSize="14"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                            </Button>
+                        </UniformGrid>
+                    </Border>
 
-                            <TextBlock
-                                Grid.Column="0"
-                                Text="Min dB level:"
-                                Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                Margin="0,0,6,0"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Center"
-                                ToolTip="Minimum decibel level for visualization"/>
-
-                            <Slider
-                                x:Name="minDbLevelSlider"
-                                Grid.Column="1"
-                                Style="{DynamicResource ModernSliderStyle}"
-                                Height="16"
-                                Minimum="-200" Maximum="0"
-                                Value="{Binding MinDbLevel, Mode=TwoWay}"
-                                VerticalAlignment="Center"
-                                ValueChanged="OnSliderValueChanged"/>
-
-                            <TextBlock
-                                Grid.Column="2"
-                                Text="{Binding MinDbLevel, StringFormat='{}{0:F0}'}"
-                                Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                FontWeight="Medium"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"/>
-                        </Grid>
-
-                        <Grid Margin="0,0,0,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="38"/>
-                            </Grid.ColumnDefinitions>
-
-                            <TextBlock
-                                Grid.Column="0"
-                                Text="Max dB level:"
-                                Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                Margin="0,0,6,0"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Center"
-                                ToolTip="Maximum decibel level for visualization"/>
-
-                            <Slider
-                                x:Name="maxDbLevelSlider"
-                                Grid.Column="1"
-                                Style="{DynamicResource ModernSliderStyle}"
-                                Height="16"
-                                Minimum="-100" Maximum="0"
-                                Value="{Binding MaxDbLevel, Mode=TwoWay}"
-                                VerticalAlignment="Center"
-                                ValueChanged="OnSliderValueChanged"/>
-
-                            <TextBlock
-                                Grid.Column="2"
-                                Text="{Binding MaxDbLevel, StringFormat='{}{0:F0}'}"
-                                Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                FontWeight="Medium"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"/>
-                        </Grid>
+                    <ScrollViewer Grid.Row="2"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  CanContentScroll="True">
 
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100"/>
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="38"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock
-                                Grid.Column="0"
-                                Text="Amplification:"
-                                Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                Margin="0,0,6,0"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Center"
-                                ToolTip="Audio signal amplification factor"/>
+                            <!-- RENDERING -->
+                            <Border Grid.Column="0"
+                                    Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    MinWidth="200">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
 
-                            <Slider
-                                x:Name="amplificationFactorSlider"
-                                Grid.Column="1"
-                                Style="{DynamicResource ModernSliderStyle}"
-                                Height="16"
-                                Minimum="0.01" Maximum="5"
-                                Value="{Binding AmplificationFactor, Mode=TwoWay}"
-                                VerticalAlignment="Center"
-                                ValueChanged="OnSliderValueChanged"/>
+                                    <Border Grid.Row="0"
+                                            Background="{DynamicResource BackgroundBrush}"
+                                            CornerRadius="12,12,0,0"
+                                            Padding="14,12">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Width="32" Height="32"
+                                                    CornerRadius="8"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    Margin="0,0,12,0">
+                                                <Path Width="16" Height="16"
+                                                      Stroke="{DynamicResource SliderThumbAccentBrush}"
+                                                      StrokeThickness="2"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Fill="Transparent"
+                                                      Stretch="Uniform"
+                                                      Data="{StaticResource IconRender}"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Rendering"
+                                                           FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                <TextBlock Text="Visual settings"
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
 
-                            <TextBlock
-                                Grid.Column="2"
-                                Text="{Binding AmplificationFactor, StringFormat='{}{0:F2}'}"
-                                Foreground="{DynamicResource LightTextPrimaryBrush}"
-                                FontWeight="Medium"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Row="1" Margin="14">
+
+                                        <TextBlock Text="Renderer"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Margin="0,0,0,8"/>
+
+                                        <ComboBox x:Name="RenderStyleComboBox"
+                                                  Style="{DynamicResource ModernComboBoxStyle}"
+                                                  Height="36"
+                                                  Margin="0,0,0,14"
+                                                  ItemsSource="{Binding View.OrderedDrawingTypes}"
+                                                  SelectedItem="{Binding View.SelectedDrawingType, Mode=TwoWay}">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <Button Grid.Column="0"
+                                                                Tag="{Binding}"
+                                                                Style="{DynamicResource FavoriteButtonStyle}"
+                                                                Click="OnFavoriteButtonClick"
+                                                                VerticalAlignment="Center"/>
+
+                                                        <Viewbox Grid.Column="1"
+                                                                 Stretch="Uniform"
+                                                                 StretchDirection="DownOnly"
+                                                                 HorizontalAlignment="Stretch"
+                                                                 VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding}"
+                                                                       Margin="8,0,0,0"
+                                                                       VerticalAlignment="Center"
+                                                                       TextWrapping="NoWrap"
+                                                                       TextTrimming="None"
+                                                                       TextAlignment="Left"/>
+                                                        </Viewbox>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+
+                                        <TextBlock Text="Paint"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Margin="0,0,0,8"/>
+
+                                        <ComboBox Style="{DynamicResource ModernComboBoxStyle}"
+                                                  Height="36"
+                                                  Margin="0,0,0,14"
+                                                  ItemsSource="{Binding View.AvailablePalettes.Keys}"
+                                                  SelectedItem="{Binding View.SelectedStyle, Mode=TwoWay}">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid VerticalAlignment="Center">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <Border Grid.Column="0"
+                                                                Width="16" Height="16"
+                                                                Margin="0,0,10,0"
+                                                                CornerRadius="4"
+                                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                                BorderThickness="1"
+                                                                Background="{Binding Converter={StaticResource PaletteNameToBrushConverter}}"/>
+
+                                                        <Viewbox Grid.Column="1"
+                                                                 Stretch="Uniform"
+                                                                 StretchDirection="DownOnly"
+                                                                 HorizontalAlignment="Stretch"
+                                                                 VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding}"
+                                                                       VerticalAlignment="Center"
+                                                                       TextWrapping="NoWrap"
+                                                                       TextTrimming="None"
+                                                                       TextAlignment="Left"/>
+                                                        </Viewbox>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Column="0"
+                                                       Text="Interval"
+                                                       FontSize="12"
+                                                       FontWeight="Medium"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <Border Grid.Column="1"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="4"
+                                                    Padding="8,3">
+                                                <TextBlock Text="{Binding View.BarSpacing, StringFormat='{}{0:F0}'}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource SliderThumbAccentBrush}"/>
+                                            </Border>
+                                        </Grid>
+                                        <Slider Style="{DynamicResource ModernSliderStyle}"
+                                                Height="24"
+                                                Margin="0,0,0,14"
+                                                Minimum="1" Maximum="15"
+                                                Value="{Binding View.BarSpacing, Mode=TwoWay}"/>
+
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Column="0"
+                                                       Text="Strips"
+                                                       FontSize="12"
+                                                       FontWeight="Medium"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       ToolTip="Number of visualization strips"/>
+                                            <Border Grid.Column="1"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="4"
+                                                    Padding="8,3">
+                                                <TextBlock Text="{Binding View.BarCount, StringFormat='{}{0:F0}'}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource SliderThumbAccentBrush}"/>
+                                            </Border>
+                                        </Grid>
+                                        <Slider Style="{DynamicResource ModernSliderStyle}"
+                                                Height="24"
+                                                Margin="0,0,0,14"
+                                                Minimum="10" Maximum="500"
+                                                Value="{Binding View.BarCount, Mode=TwoWay}"/>
+
+                                        <TextBlock Text="Quality"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Margin="0,0,0,8"
+                                                   ToolTip="Render quality setting"/>
+
+                                        <ComboBox Style="{DynamicResource ModernComboBoxStyle}"
+                                                  Height="36"
+                                                  ItemsSource="{Binding View.AvailableRenderQualities}"
+                                                  SelectedItem="{Binding View.RenderQuality, Mode=TwoWay}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- AUDIO -->
+                            <Border Grid.Column="2"
+                                    Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    MinWidth="200">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Border Grid.Row="0"
+                                            Background="{DynamicResource BackgroundBrush}"
+                                            CornerRadius="12,12,0,0"
+                                            Padding="14,12">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Width="32" Height="32"
+                                                    CornerRadius="8"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    Margin="0,0,12,0">
+                                                <Path Width="16" Height="16"
+                                                      Stroke="{DynamicResource SliderThumbAccentBrush}"
+                                                      StrokeThickness="2"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Fill="Transparent"
+                                                      Stretch="Uniform"
+                                                      Data="{StaticResource IconAudio}"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Audio"
+                                                           FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                <TextBlock Text="Processing settings"
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <StackPanel Grid.Row="1" Margin="14">
+                                        <TextBlock Text="Window FFT"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Margin="0,0,0,8"
+                                                   ToolTip="FFT window function type"/>
+                                        <ComboBox Style="{DynamicResource ModernComboBoxStyle}"
+                                                  Height="36"
+                                                  Margin="0,0,0,14"
+                                                  ItemsSource="{Binding View.AvailableFftWindowTypes}"
+                                                  SelectedItem="{Binding WindowType, Mode=TwoWay}"/>
+
+                                        <TextBlock Text="Scale Type"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Margin="0,0,0,8"
+                                                   ToolTip="Frequency scale type"/>
+                                        <ComboBox Style="{DynamicResource ModernComboBoxStyle}"
+                                                  Height="36"
+                                                  Margin="0,0,0,14"
+                                                  ItemsSource="{Binding View.AvailableScaleTypes}"
+                                                  SelectedItem="{Binding ScaleType, Mode=TwoWay}"/>
+
+                                        <TextBlock Text="Stereo Mode"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Margin="0,0,0,8"
+                                                   ToolTip="Audio channel processing mode"/>
+                                        <ComboBox Style="{DynamicResource ModernComboBoxStyle}"
+                                                  Height="36"
+                                                  ItemsSource="{Binding View.AvailableStereoModes}"
+                                                  SelectedItem="{Binding Audio.StereoMode, Mode=TwoWay}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- APPLICATION -->
+                            <Border Grid.Column="4"
+                                    Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    MinWidth="200">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Border Grid.Row="0"
+                                            Background="{DynamicResource BackgroundBrush}"
+                                            CornerRadius="12,12,0,0"
+                                            Padding="14,12">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Width="32" Height="32"
+                                                    CornerRadius="8"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    Margin="0,0,12,0">
+                                                <Path Width="16" Height="16"
+                                                      Stroke="{DynamicResource SliderThumbAccentBrush}"
+                                                      StrokeThickness="2"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Fill="Transparent"
+                                                      Stretch="Uniform"
+                                                      Data="{StaticResource IconApp}"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Application"
+                                                           FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                <TextBlock Text="General settings"
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <StackPanel Grid.Row="1" Margin="14">
+
+                                        <Border Background="{DynamicResource BackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="12"
+                                                Margin="0,0,0,10">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <Border Grid.Column="0"
+                                                        Width="36" Height="36"
+                                                        CornerRadius="8"
+                                                        Background="{DynamicResource HoverBackgroundBrush}"
+                                                        Margin="0,0,12,0">
+                                                    <Path Width="20" Height="20"
+                                                          Stroke="{DynamicResource TextSecondaryBrush}"
+                                                          StrokeThickness="2"
+                                                          StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round"
+                                                          StrokeLineJoin="Round"
+                                                          Fill="Transparent"
+                                                          Stretch="Uniform"
+                                                          Data="{StaticResource IconOverlayTop}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                                </Border>
+
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="Overlay: Topmost"
+                                                               FontWeight="Medium"
+                                                               FontSize="13"
+                                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                                               TextWrapping="Wrap"/>
+                                                    <TextBlock Text="Keep overlay always on top"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Margin="0,2,0,0"
+                                                               TextWrapping="Wrap"/>
+                                                </StackPanel>
+
+                                                <CheckBox Grid.Column="2"
+                                                          Style="{DynamicResource ModernCheckBoxStyle}"
+                                                          IsChecked="{Binding UI.IsOverlayTopmost, Mode=TwoWay}"
+                                                          VerticalAlignment="Center"
+                                                          ToolTip="Keep the overlay always on top"/>
+                                            </Grid>
+                                        </Border>
+
+                                        <Border Background="{DynamicResource BackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="12"
+                                                Margin="0,0,0,10">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <Border Grid.Column="0"
+                                                        Width="36" Height="36"
+                                                        CornerRadius="8"
+                                                        Background="{DynamicResource HoverBackgroundBrush}"
+                                                        Margin="0,0,12,0">
+                                                    <Path Width="20" Height="20"
+                                                          Stroke="{DynamicResource TextSecondaryBrush}"
+                                                          StrokeThickness="2"
+                                                          StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round"
+                                                          StrokeLineJoin="Round"
+                                                          Fill="Transparent"
+                                                          Stretch="Uniform"
+                                                          Data="{StaticResource IconFps}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                                </Border>
+
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="FPS: Show counter"
+                                                               FontWeight="Medium"
+                                                               FontSize="13"
+                                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                                               TextWrapping="Wrap"/>
+                                                    <TextBlock Text="Display FPS counter"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Margin="0,2,0,0"
+                                                               TextWrapping="Wrap"/>
+                                                </StackPanel>
+
+                                                <CheckBox Grid.Column="2"
+                                                          Style="{DynamicResource ModernCheckBoxStyle}"
+                                                          IsChecked="{Binding View.ShowPerformanceInfo, Mode=TwoWay}"
+                                                          VerticalAlignment="Center"
+                                                          ToolTip="Display FPS counter"/>
+                                            </Grid>
+                                        </Border>
+
+                                        <Border Background="{DynamicResource BackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="12">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <Border Grid.Column="0"
+                                                        Width="36" Height="36"
+                                                        CornerRadius="8"
+                                                        Background="{DynamicResource HoverBackgroundBrush}"
+                                                        Margin="0,0,12,0">
+                                                    <Path Width="20" Height="20"
+                                                          Stroke="{DynamicResource TextSecondaryBrush}"
+                                                          StrokeThickness="2"
+                                                          StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round"
+                                                          StrokeLineJoin="Round"
+                                                          Fill="Transparent"
+                                                          Stretch="Uniform"
+                                                          Data="{StaticResource IconClock}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                                </Border>
+
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="Limit FPS: 60"
+                                                               FontWeight="Medium"
+                                                               FontSize="13"
+                                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                                               TextWrapping="Wrap"/>
+                                                    <TextBlock Text="Window mode only"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Margin="0,2,0,0"
+                                                               TextWrapping="Wrap"/>
+                                                </StackPanel>
+
+                                                <CheckBox Grid.Column="2"
+                                                          Style="{DynamicResource ModernCheckBoxStyle}"
+                                                          IsChecked="{Binding LimitFpsTo60, Mode=TwoWay}"
+                                                          VerticalAlignment="Center"
+                                                          ToolTip="Limit to 60 FPS (Window Mode only)"/>
+                                            </Grid>
+                                        </Border>
+
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
                         </Grid>
-                    </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <Grid Grid.RowSpan="2"
+                  Panel.ZIndex="100"
+                  Visibility="{Binding UI.IsPopupOpen, Converter={StaticResource BooleanToVisibilityConverter}}"
+                  MouseDown="OnOverlayMouseDown">
+
+                <Border Background="{DynamicResource OverlayBackgroundBrush}"/>
+
+                <Border HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="16"
+                        Width="420"
+                        MaxHeight="380"
+                        MouseDown="OnPopupMouseDown">
+
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0"
+                                Background="{DynamicResource ControlsPanelBackgroundBrush}"
+                                CornerRadius="16,16,0,0"
+                                Padding="18,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <Border Width="40" Height="40"
+                                            CornerRadius="10"
+                                            Background="{DynamicResource AccentBrush}"
+                                            Margin="0,0,14,0">
+                                        <Path Width="20" Height="20"
+                                              Stroke="{DynamicResource SliderThumbAccentBrush}"
+                                              StrokeThickness="2.2"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Fill="Transparent"
+                                              Stretch="Uniform"
+                                              Data="{StaticResource IconGain}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                    </Border>
+
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="Gain Settings"
+                                                   FontSize="18"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock Text="Adjust audio levels"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <Button Grid.Column="1"
+                                        HorizontalAlignment="Right"
+                                        Style="{DynamicResource WindowCloseButtonStyle}"
+                                        Width="34" Height="34"
+                                        Click="OnClosePopup"
+                                        Foreground="{DynamicResource TextPrimaryBrush}">
+                                    <Path Width="12" Height="12"
+                                          Data="{StaticResource IconClose}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2.2"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          Fill="Transparent"
+                                          Stretch="Uniform"/>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="16">
+
+                            <StackPanel>
+
+                                <Border Background="{DynamicResource BackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="14"
+                                        Margin="0,0,0,10">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="10"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                                <Border Width="32" Height="32"
+                                                        CornerRadius="8"
+                                                        Background="{DynamicResource HoverBackgroundBrush}"
+                                                        Margin="0,0,10,0">
+                                                    <Path Width="16" Height="16"
+                                                          Stroke="{DynamicResource TextSecondaryBrush}"
+                                                          StrokeThickness="2"
+                                                          StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round"
+                                                          StrokeLineJoin="Round"
+                                                          Fill="Transparent"
+                                                          Stretch="Uniform"
+                                                          Data="{StaticResource IconMinDb}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock Text="Min dB level"
+                                                           FontSize="14"
+                                                           FontWeight="Medium"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <Border Grid.Column="1"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="6"
+                                                    Padding="10,5"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Audio.MinDbLevel, StringFormat='{}{0:F0} dB'}"
+                                                           FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource SliderThumbAccentBrush}"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <Slider Grid.Row="2"
+                                                Style="{DynamicResource ModernSliderStyle}"
+                                                Height="26"
+                                                Minimum="-200" Maximum="0"
+                                                Value="{Binding Audio.MinDbLevel, Mode=TwoWay}"/>
+                                    </Grid>
+                                </Border>
+
+                                <Border Background="{DynamicResource BackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="14"
+                                        Margin="0,0,0,10">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="10"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                                <Border Width="32" Height="32"
+                                                        CornerRadius="8"
+                                                        Background="{DynamicResource HoverBackgroundBrush}"
+                                                        Margin="0,0,10,0">
+                                                    <Path Width="16" Height="16"
+                                                          Stroke="{DynamicResource TextSecondaryBrush}"
+                                                          StrokeThickness="2"
+                                                          StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round"
+                                                          StrokeLineJoin="Round"
+                                                          Fill="Transparent"
+                                                          Stretch="Uniform"
+                                                          Data="{StaticResource IconMaxDb}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock Text="Max dB level"
+                                                           FontSize="14"
+                                                           FontWeight="Medium"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <Border Grid.Column="1"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="6"
+                                                    Padding="10,5"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Audio.MaxDbLevel, StringFormat='{}{0:F0} dB'}"
+                                                           FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource SliderThumbAccentBrush}"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <Slider Grid.Row="2"
+                                                Style="{DynamicResource ModernSliderStyle}"
+                                                Height="26"
+                                                Minimum="-100" Maximum="0"
+                                                Value="{Binding Audio.MaxDbLevel, Mode=TwoWay}"/>
+                                    </Grid>
+                                </Border>
+
+                                <Border Background="{DynamicResource BackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="14">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="10"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                                <Border Width="32" Height="32"
+                                                        CornerRadius="8"
+                                                        Background="{DynamicResource HoverBackgroundBrush}"
+                                                        Margin="0,0,10,0">
+                                                    <Path Width="16" Height="16"
+                                                          Stroke="{DynamicResource TextSecondaryBrush}"
+                                                          StrokeThickness="2"
+                                                          StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round"
+                                                          StrokeLineJoin="Round"
+                                                          Fill="Transparent"
+                                                          Stretch="Uniform"
+                                                          Data="{StaticResource IconAmp}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock Text="Amplification"
+                                                           FontSize="14"
+                                                           FontWeight="Medium"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <Border Grid.Column="1"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="6"
+                                                    Padding="10,5"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Audio.AmplificationFactor, StringFormat='{}{0:F2}x'}"
+                                                           FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource SliderThumbAccentBrush}"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <Slider Grid.Row="2"
+                                                Style="{DynamicResource ModernSliderStyle}"
+                                                Height="26"
+                                                Minimum="0.01" Maximum="5"
+                                                Value="{Binding Audio.AmplificationFactor, Mode=TwoWay}"/>
+                                    </Grid>
+                                </Border>
+
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
                 </Border>
-            </Popup>
+            </Grid>
+
         </Grid>
     </Border>
 </Window>

@@ -1,54 +1,160 @@
-﻿<ResourceDictionary 
+<ResourceDictionary 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:SpectrumNet.SN.Themes">
 
-    <!-- =================== -->
-    <!-- СТИЛИ ОКНА         -->
-    <!-- =================== -->
+    <LinearGradientBrush x:Key="PremiumLightTitleBarBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF6366F1" Offset="0"/>
+        <GradientStop Color="#FF8B5CF6" Offset="0.5"/>
+        <GradientStop Color="#FFA855F7" Offset="1"/>
+    </LinearGradientBrush>
 
-    <!-- Стиль панели заголовка с поддержкой переключения темы -->
+    <LinearGradientBrush x:Key="PremiumDarkTitleBarBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF1E1B4B" Offset="0"/>
+        <GradientStop Color="#FF312E81" Offset="0.5"/>
+        <GradientStop Color="#FF3730A3" Offset="1"/>
+    </LinearGradientBrush>
+
     <Style x:Key="TitleBarBorderStyle" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource LightTitleBarGradientBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource PremiumLightTitleBarBrush}"/>
         <Style.Triggers>
-            <DataTrigger Binding="{Binding Source={x:Static local:ThemeManager.Instance}, Path=IsDarkTheme}" Value="True">
-                <Setter Property="Background" Value="{DynamicResource DarkTitleBarGradientBrush}"/>
+            <DataTrigger Binding="{Binding Source={x:Static local:Theme.Instance}, Path=IsDarkTheme}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource PremiumDarkTitleBarBrush}"/>
             </DataTrigger>
         </Style.Triggers>
     </Style>
 
-    <!-- Стиль кнопок управления окном -->
-    <Style x:Key="WindowControlButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
-        <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="40"/>
+    
+    <Geometry x:Key="MinimizeIcon">M0,6 L12,6</Geometry>
+    <Geometry x:Key="MaximizeIcon">M1,1 L11,1 L11,11 L1,11 Z</Geometry>
+    <Geometry x:Key="RestoreIcon">M3,0 L12,0 L12,9 L11,9 L11,1 L3,1 Z M0,3 L9,3 L9,12 L0,12 Z</Geometry>
+    <Geometry x:Key="CloseIcon">M0,0 L12,12 M12,0 L0,12</Geometry>
+
+    <Style x:Key="WindowControlButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="46"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Ellipse x:Name="ButtonBackground" Fill="Transparent"/>
-                        <ContentPresenter x:Name="ContentPresenter"
-                            HorizontalAlignment="Center" 
-                            VerticalAlignment="Center"/>
+                        <Border x:Name="BackgroundBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="0">
+                            <Grid>
+                                <Border x:Name="HoverHighlight"
+                                        Opacity="0"
+                                        CornerRadius="0">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#30FFFFFF" Offset="0"/>
+                                            <GradientStop Color="#10FFFFFF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+
+                                <Grid HorizontalAlignment="Center" 
+                                      VerticalAlignment="Center"
+                                      RenderTransformOrigin="0.5,0.5">
+                                    <Grid.RenderTransform>
+                                        <ScaleTransform x:Name="IconScale" ScaleX="1" ScaleY="1"/>
+                                    </Grid.RenderTransform>
+
+                                    <ContentPresenter x:Name="IconGlow" Opacity="0">
+                                        <ContentPresenter.Effect>
+                                            <BlurEffect Radius="4"/>
+                                        </ContentPresenter.Effect>
+                                    </ContentPresenter>
+
+                                    <ContentPresenter x:Name="IconContent"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border x:Name="RippleBorder"
+                                Background="Transparent"
+                                CornerRadius="0"
+                                ClipToBounds="True">
+                            <Ellipse x:Name="RippleEllipse"
+                                     Fill="#20FFFFFF"
+                                     Width="0" Height="0"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Opacity="0"/>
+                        </Border>
                     </Grid>
+
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource WindowControlHoverBrush}"/>
-                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
-                                <Setter.Value>
-                                    <ScaleTransform ScaleX="1.1" ScaleY="1.1" CenterX="10" CenterY="10"/>
-                                </Setter.Value>
-                            </Setter>
+                            <Setter TargetName="BackgroundBorder" Property="Background" Value="#20FFFFFF"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="HoverHighlight"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1.15" Duration="0:0:0.15">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1.15" Duration="0:0:0.15">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="IconGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.5" Duration="0:0:0.2"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="HoverHighlight"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.2"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
+
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource WindowControlPressedBrush}"/>
-                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
-                                <Setter.Value>
-                                    <ScaleTransform ScaleX="0.9" ScaleY="0.9" CenterX="10" CenterY="10"/>
-                                </Setter.Value>
-                            </Setter>
+                            <Setter TargetName="BackgroundBorder" Property="Background" Value="#30FFFFFF"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0.9" Duration="0:0:0.08"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0.9" Duration="0:0:0.08"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
                         </Trigger>
+
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="ContentPresenter" Property="Opacity" Value="0.4"/>
+                            <Setter Property="Opacity" Value="0.4"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -56,36 +162,119 @@
         </Setter>
     </Style>
 
-    <!-- Стиль кнопки закрытия окна -->
     <Style x:Key="WindowCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowControlButtonStyle}">
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Ellipse x:Name="ButtonBackground" Fill="Transparent"/>
-                        <ContentPresenter x:Name="ContentPresenter"
-                            HorizontalAlignment="Center" 
-                            VerticalAlignment="Center"/>
+                        <Border x:Name="BackgroundBorder"
+                                Background="Transparent"
+                                CornerRadius="0,8,0,0">
+                            <Grid>
+                                <Border x:Name="HoverHighlight"
+                                        Opacity="0"
+                                        CornerRadius="0,8,0,0">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#FF6B6B" Offset="0"/>
+                                            <GradientStop Color="#EF4444" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+
+                                <Grid HorizontalAlignment="Center" 
+                                      VerticalAlignment="Center"
+                                      RenderTransformOrigin="0.5,0.5">
+                                    <Grid.RenderTransform>
+                                        <TransformGroup>
+                                            <ScaleTransform x:Name="IconScale" ScaleX="1" ScaleY="1"/>
+                                            <RotateTransform x:Name="IconRotate" Angle="0"/>
+                                        </TransformGroup>
+                                    </Grid.RenderTransform>
+
+                                    <ContentPresenter x:Name="IconGlow" Opacity="0">
+                                        <ContentPresenter.Effect>
+                                            <BlurEffect Radius="4"/>
+                                        </ContentPresenter.Effect>
+                                    </ContentPresenter>
+
+                                    <ContentPresenter x:Name="IconContent"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
                     </Grid>
+
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource CloseButtonHoverBrush}"/>
-                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
-                                <Setter.Value>
-                                    <ScaleTransform ScaleX="1.1" ScaleY="1.1" CenterX="10" CenterY="10"/>
-                                </Setter.Value>
-                            </Setter>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="HoverHighlight"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1.2" Duration="0:0:0.15">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1.2" Duration="0:0:0.15">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="IconRotate"
+                                                         Storyboard.TargetProperty="Angle"
+                                                         To="90" Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="IconGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.6" Duration="0:0:0.2"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="HoverHighlight"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="1" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="1" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconRotate"
+                                                         Storyboard.TargetProperty="Angle"
+                                                         To="0" Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconGlow"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.2"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
+
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="ButtonBackground" Property="Fill" Value="{DynamicResource CloseButtonPressedBrush}"/>
-                            <Setter TargetName="ContentPresenter" Property="RenderTransform">
-                                <Setter.Value>
-                                    <ScaleTransform ScaleX="0.9" ScaleY="0.9" CenterX="10" CenterY="10"/>
-                                </Setter.Value>
-                            </Setter>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="ContentPresenter" Property="Opacity" Value="0.4"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleX"
+                                                         To="0.85" Duration="0:0:0.08"/>
+                                        <DoubleAnimation Storyboard.TargetName="IconScale"
+                                                         Storyboard.TargetProperty="ScaleY"
+                                                         To="0.85" Duration="0:0:0.08"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -93,7 +282,6 @@
         </Setter>
     </Style>
 
-    <!-- Стиль основного окна -->
     <Style x:Key="ModernWindowStyle" TargetType="Window">
         <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource WindowForegroundBrush}"/>
@@ -101,68 +289,150 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="WindowChrome.WindowChrome">
             <Setter.Value>
-                <WindowChrome
-                    CaptionHeight="40"
-                    ResizeBorderThickness="5"
-                    UseAeroCaptionButtons="False"
-                    GlassFrameThickness="0"
-                    CornerRadius="0"/>
+                <WindowChrome CaptionHeight="44" 
+                              ResizeBorderThickness="6" 
+                              UseAeroCaptionButtons="False" 
+                              GlassFrameThickness="0" 
+                              CornerRadius="12"/>
             </Setter.Value>
         </Setter>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Window">
                     <Border x:Name="WindowBorder"
-                        Background="{TemplateBinding Background}"
-                        BorderBrush="{TemplateBinding BorderBrush}"
-                        BorderThickness="{TemplateBinding BorderThickness}"
-                        CornerRadius="{StaticResource CornerRadiusLarge}">
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="12">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#40000000" 
+                                              BlurRadius="20" 
+                                              ShadowDepth="4" 
+                                              Opacity="0.4"/>
+                        </Border.Effect>
+
                         <Grid>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="40"/>
+                                <RowDefinition Height="44"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
 
-                            <!-- Title Bar -->
                             <Border Grid.Row="0"
-                                Background="{DynamicResource TitleBarBackgroundBrush}"
-                                CornerRadius="{StaticResource CornerRadiusLarge}"
-                                WindowChrome.IsHitTestVisibleInChrome="True">
+                                    x:Name="TitleBar"
+                                    Style="{StaticResource TitleBarBorderStyle}"
+                                    CornerRadius="11,11,0,0"
+                                    WindowChrome.IsHitTestVisibleInChrome="True">
                                 <Grid>
-                                    <TextBlock Text="{TemplateBinding Title}"
-                                        Foreground="White"
-                                        FontWeight="SemiBold"
-                                        VerticalAlignment="Center"
-                                        HorizontalAlignment="Center"/>
+                                    <Border CornerRadius="11,11,0,0" Opacity="0.3">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#40FFFFFF" Offset="0"/>
+                                                <GradientStop Color="#00FFFFFF" Offset="0.5"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
 
-                                    <StackPanel Orientation="Horizontal"
-                                        HorizontalAlignment="Right"
-                                        VerticalAlignment="Top">
+                                    <StackPanel Orientation="Horizontal" 
+                                                Margin="16,0,0,0" 
+                                                VerticalAlignment="Center">
+                                        <Border Width="24" Height="24" 
+                                                CornerRadius="6" 
+                                                Background="#30FFFFFF"
+                                                Margin="0,0,12,0">
+                                            <TextBlock Text="🎵" 
+                                                       FontSize="14" 
+                                                       HorizontalAlignment="Center" 
+                                                       VerticalAlignment="Center"/>
+                                        </Border>
+
+                                        <TextBlock Text="{TemplateBinding Title}"
+                                                   Foreground="White" 
+                                                   FontWeight="SemiBold"
+                                                   FontSize="14"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Effect>
+                                                <DropShadowEffect Color="#40000000" 
+                                                                  BlurRadius="4" 
+                                                                  ShadowDepth="1"/>
+                                            </TextBlock.Effect>
+                                        </TextBlock>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" 
+                                                HorizontalAlignment="Right" 
+                                                VerticalAlignment="Top">
                                         <Button Style="{StaticResource WindowControlButtonStyle}"
-                                            Content="–" 
-                                            WindowChrome.IsHitTestVisibleInChrome="True"
-                                            Command="{x:Static SystemCommands.MinimizeWindowCommand}"/>
-                                        <Button Style="{StaticResource WindowControlButtonStyle}"
-                                            Content="□" 
-                                            WindowChrome.IsHitTestVisibleInChrome="True"
-                                            Command="{x:Static SystemCommands.MaximizeWindowCommand}"/>
+                                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                                Command="{x:Static SystemCommands.MinimizeWindowCommand}"
+                                                ToolTip="Minimize">
+                                            <Path Data="{StaticResource MinimizeIcon}"
+                                                  Stroke="White"
+                                                  StrokeThickness="1.5"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  Width="12" Height="12"
+                                                  Stretch="Uniform"/>
+                                        </Button>
+
+                                        <Button x:Name="MaximizeRestoreButton"
+                                                Style="{StaticResource WindowControlButtonStyle}"
+                                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                                Command="{x:Static SystemCommands.MaximizeWindowCommand}"
+                                                ToolTip="Maximize">
+                                            <Path x:Name="MaximizeRestoreIcon"
+                                                  Data="{StaticResource MaximizeIcon}"
+                                                  Stroke="White"
+                                                  StrokeThickness="1.2"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  Width="12" Height="12"
+                                                  Stretch="Uniform"/>
+                                        </Button>
+
                                         <Button Style="{StaticResource WindowCloseButtonStyle}"
-                                            Content="×" 
-                                            FontSize="20"
-                                            WindowChrome.IsHitTestVisibleInChrome="True"
-                                            Command="{x:Static SystemCommands.CloseWindowCommand}"/>
+                                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                                Command="{x:Static SystemCommands.CloseWindowCommand}"
+                                                ToolTip="Close">
+                                            <Path Data="{StaticResource CloseIcon}"
+                                                  Stroke="White"
+                                                  StrokeThickness="1.5"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  Width="12" Height="12"
+                                                  Stretch="Uniform"/>
+                                        </Button>
                                     </StackPanel>
                                 </Grid>
                             </Border>
 
-                            <!-- Content -->
-                            <ContentPresenter Grid.Row="1"/>
+                            <Border Grid.Row="1"
+                                    Background="{DynamicResource BackgroundBrush}"
+                                    CornerRadius="0,0,11,11">
+                                <ContentPresenter/>
+                            </Border>
                         </Grid>
                     </Border>
+
                     <ControlTemplate.Triggers>
                         <Trigger Property="WindowState" Value="Maximized">
                             <Setter TargetName="WindowBorder" Property="Padding" Value="8"/>
                             <Setter TargetName="WindowBorder" Property="CornerRadius" Value="0"/>
+                            <Setter TargetName="TitleBar" Property="CornerRadius" Value="0"/>
+                            <Setter TargetName="MaximizeRestoreIcon" Property="Data" Value="{StaticResource RestoreIcon}"/>
+                            <Setter TargetName="MaximizeRestoreButton" Property="Command" Value="{x:Static SystemCommands.RestoreWindowCommand}"/>
+                            <Setter TargetName="MaximizeRestoreButton" Property="ToolTip" Value="Restore"/>
+                        </Trigger>
+
+                        <Trigger Property="IsActive" Value="False">
+                            <Setter TargetName="TitleBar" Property="Opacity" Value="0.85"/>
+                            <Setter TargetName="WindowBorder" Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#20000000" 
+                                                      BlurRadius="12" 
+                                                      ShadowDepth="2" 
+                                                      Opacity="0.3"/>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -170,15 +440,21 @@
         </Setter>
     </Style>
 
-    <!-- Стиль дочернего окна -->
     <Style x:Key="ChildWindowStyle" TargetType="Window" BasedOn="{StaticResource ModernWindowStyle}">
         <Setter Property="ShowInTaskbar" Value="False"/>
         <Setter Property="SizeToContent" Value="WidthAndHeight"/>
         <Setter Property="ResizeMode" Value="NoResize"/>
-        <Setter Property="WindowStartupLocation" Value="CenterOwner"/>
+        <Setter Property="WindowChrome.WindowChrome">
+            <Setter.Value>
+                <WindowChrome CaptionHeight="40" 
+                              ResizeBorderThickness="0" 
+                              UseAeroCaptionButtons="False" 
+                              GlassFrameThickness="0" 
+                              CornerRadius="12"/>
+            </Setter.Value>
+        </Setter>
     </Style>
 
-    <!-- Стиль диалогового окна -->
     <Style x:Key="DialogWindowStyle" TargetType="Window" BasedOn="{StaticResource ChildWindowStyle}">
         <Setter Property="MaxWidth" Value="500"/>
         <Setter Property="MaxHeight" Value="400"/>

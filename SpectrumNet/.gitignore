@@ -1,1 +1,52 @@
+# Test project
 /SpectrumNetXUnit/
+
+# Build outputs
+bin/
+obj/
+out/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# NuGet
+packages/
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+# Temp files
+*.tmp
+*.temp
+*.log
+*.cache
+~$*
+
+# OS files
+Thumbs.db
+ehthumbs.db
+.DS_Store
+
+# Publish
+publish/
+PublishProfiles/

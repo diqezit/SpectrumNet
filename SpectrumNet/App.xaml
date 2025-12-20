@@ -1,24 +1,18 @@
-﻿<Application x:Class="SpectrumNet.App"
+<Application x:Class="SpectrumNet.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:SpectrumNet"
              xmlns:service="clr-namespace:SpectrumNet.SN.Themes"
              xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
-             xmlns:sys="clr-namespace:System;assembly=mscorlib"
-             StartupUri="MainWindow.xaml">
+             xmlns:sys="clr-namespace:System;assembly=mscorlib">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="SN.Themes/Resources/CommonConstants.xaml"/>
-
                 <ResourceDictionary Source="SN.Themes/Resources/BaseStyles.xaml"/>
-
                 <ResourceDictionary Source="SN.Themes/Resources/Animations.xaml"/>
-
                 <ResourceDictionary Source="SN.Themes/Resources/Converters.xaml"/>
-
                 <ResourceDictionary Source="SN.Themes/Resources/DarkTheme.xaml"/>
-
                 <ResourceDictionary Source="SN.Themes/Resources/TextStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/ButtonStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/ComboboxStyles.xaml"/>
@@ -29,7 +23,6 @@
                 <ResourceDictionary Source="SN.Themes/Resources/GroupBoxStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/TabControlStyles.xaml"/>
                 <ResourceDictionary Source="SN.Themes/Resources/SpecialStyles.xaml"/>
-                
             </ResourceDictionary.MergedDictionaries>
 
             <Style TargetType="ScrollBar" BasedOn="{StaticResource ModernScrollBarStyle}"/>
@@ -46,7 +39,6 @@
                 <Setter Property="SnapsToDevicePixels" Value="True"/>
                 <Setter Property="UseLayoutRounding" Value="True"/>
             </Style>
-            
         </ResourceDictionary>
     </Application.Resources>
 </Application>

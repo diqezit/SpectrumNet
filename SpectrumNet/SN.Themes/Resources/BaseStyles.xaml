@@ -1,32 +1,22 @@
-﻿<ResourceDictionary 
+<ResourceDictionary 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- =================== -->
-    <!-- БАЗОВЫЕ СТИЛИ      -->
-    <!-- =================== -->
-
-    <!-- Базовый стиль для кнопок -->
-    <Style x:Key="BaseButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Style x:Key="InteractiveControlBaseStyle" TargetType="Control">
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="Regular"/>
         <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     </Style>
 
-    <!-- Базовый стиль для интерактивных контролов -->
-    <Style x:Key="InteractiveControlBaseStyle">
-        <Setter Property="Control.Cursor" Value="Hand"/>
-        <Setter Property="Control.FontSize" Value="14"/>
-        <Setter Property="Control.FontWeight" Value="Regular"/>
-        <Setter Property="Control.FontFamily" Value="Segoe UI"/>
-        <Setter Property="Control.VerticalContentAlignment" Value="Center"/>
-        <Setter Property="Control.FocusVisualStyle" Value="{x:Null}"/>
+    <Style x:Key="BaseButtonStyle" TargetType="Button" BasedOn="{StaticResource InteractiveControlBaseStyle}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
     </Style>
 
-    <!-- Базовый стиль для TextBlock -->
     <Style x:Key="BaseTextBlockStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Segoe UI"/>
         <Setter Property="FontSize" Value="14"/>
@@ -35,21 +25,18 @@
         <Setter Property="TextOptions.TextRenderingMode" Value="ClearType"/>
     </Style>
 
-    <!-- Стиль для заголовков -->
     <Style x:Key="TitleTextBlockStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="20"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Margin" Value="0,0,0,16"/>
     </Style>
 
-    <!-- Стиль для подзаголовков -->
     <Style x:Key="SubtitleTextBlockStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="16"/>
         <Setter Property="FontWeight" Value="Medium"/>
         <Setter Property="Margin" Value="0,0,0,8"/>
     </Style>
 
-    <!-- Стиль для меток -->
     <Style x:Key="LabelTextBlockStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>

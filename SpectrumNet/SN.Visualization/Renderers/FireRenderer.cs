@@ -1,497 +1,202 @@
-﻿#nullable enable
-
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class FireRenderer : EffectSpectrumRenderer<FireRenderer.QualitySettings>
+public sealed class FireRenderer : EffectSpectrumRenderer<FireRenderer.QS>
 {
-    private static readonly Lazy<FireRenderer> _instance =
-        new(() => new FireRenderer());
+    private const float Px = 8f, PxOv = 5f, Spread = 0.4f, An = 0.06f, Wst = 0.25f, Wspd = 2.5f,
+        MinI = 0.02f, Cool0 = 0.12f, CoolH = 0.4f, S2 = 0.9f, S3 = 0.75f, P1 = 0.95f, P2 = 0.8f,
+        Rc = 0.5f, K0 = 4f, K1 = 8f, Im = 1.3f, Wvar = 0.1f;
+    private const int H0 = 40, H0Ov = 28, Src = 4, MinW = 10;
 
-    public static FireRenderer GetInstance() => _instance.Value;
-
-    private const float PIXEL_SIZE = 8f,
-        PIXEL_SIZE_OVERLAY = 5f,
-        FLAME_DECAY_RATE = 0.93f,
-        FLAME_SPREAD = 0.4f,
-        ANIMATION_SPEED = 0.06f,
-        WIND_STRENGTH = 0.25f,
-        WIND_SPEED = 2.5f,
-        MIN_INTENSITY = 0.02f,
-        COOLING_BASE = 0.12f,
-        COOLING_HEIGHT_FACTOR = 0.4f,
-        SOURCE_INTENSITY_SECONDARY = 0.9f,
-        SOURCE_INTENSITY_TERTIARY = 0.75f,
-        SOURCE_PROBABILITY = 0.95f,
-        SOURCE_PROBABILITY_SECONDARY = 0.8f,
-        SPREAD_RANDOMNESS = 0.5f,
-        SMOOTH_KERNEL_CENTER = 4f,
-        SMOOTH_KERNEL_TOTAL = 8f,
-        INTENSITY_MULTIPLIER = 1.3f,
-        WIND_VARIANCE = 0.1f;
-
-    private const int FIRE_GRID_HEIGHT = 40,
-        FIRE_GRID_HEIGHT_OVERLAY = 28,
-        SOURCE_ROWS = 4,
-        MIN_GRID_WIDTH = 10;
-
-    private static readonly SKColor[] _fireColors =
+    private static readonly SKColor[] Cols =
     [
-        SKColors.Black,
-        new SKColor(24, 0, 0),
-        new SKColor(48, 0, 0),
-        new SKColor(96, 0, 0),
-        new SKColor(144, 0, 0),
-        new SKColor(192, 0, 0),
-        new SKColor(224, 0, 0),
-        SKColors.Red,
-        new SKColor(255, 48, 0),
-        new SKColor(255, 96, 0),
-        new SKColor(255, 144, 0),
-        SKColors.Orange,
-        new SKColor(255, 192, 0),
-        new SKColor(255, 224, 0),
-        SKColors.Yellow,
-        new SKColor(255, 255, 192),
-        SKColors.White
+        SKColors.Black, new(24, 0, 0), new(48, 0, 0), new(96, 0, 0), new(144, 0, 0),
+        new(192, 0, 0), new(224, 0, 0), SKColors.Red, new(255, 48, 0), new(255, 96, 0),
+        new(255, 144, 0), SKColors.Orange, new(255, 192, 0), new(255, 224, 0),
+        SKColors.Yellow, new(255, 255, 192), SKColors.White
     ];
 
-    private readonly Random _random = new();
-    private float[,] _fireGrid = new float[0, 0];
-    private float[,] _coolingMap = new float[0, 0];
-    private float _animationTime;
-    private int _currentGridWidth;
-    private int _currentGridHeight;
+    private float[,] _fire = new float[0, 0];
+    private float[,] _cool = new float[0, 0];
+    private float[,] _tmp = new float[0, 0];
+    private float _t;
+    private int _w, _h;
 
-    public sealed class QualitySettings
-    {
-        public float CoolingRate { get; init; }
-        public float SpreadChance { get; init; }
-        public bool UseSmoothing { get; init; }
-        public bool UseWind { get; init; }
-        public int ColorLevels { get; init; }
-        public float IntensityBoost { get; init; }
-        public float DecayRate { get; init; }
-    }
-
-    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
-        QualitySettingsPresets
-    { get; } = new Dictionary<RenderQuality, QualitySettings>
-    {
-        [RenderQuality.Low] = new()
+    private static readonly IReadOnlyDictionary<RenderQuality, QS> _pre =
+        new Dictionary<RenderQuality, QS>
         {
-            CoolingRate = 0.06f,
-            SpreadChance = 0.25f,
-            UseSmoothing = false,
-            UseWind = false,
-            ColorLevels = 8,
-            IntensityBoost = 1.0f,
-            DecayRate = 0.91f
-        },
-        [RenderQuality.Medium] = new()
-        {
-            CoolingRate = 0.045f,
-            SpreadChance = 0.35f,
-            UseSmoothing = true,
-            UseWind = true,
-            ColorLevels = 12,
-            IntensityBoost = 1.15f,
-            DecayRate = 0.93f
-        },
-        [RenderQuality.High] = new()
-        {
-            CoolingRate = 0.035f,
-            SpreadChance = 0.45f,
-            UseSmoothing = true,
-            UseWind = true,
-            ColorLevels = 17,
-            IntensityBoost = 1.25f,
-            DecayRate = 0.94f
-        }
-    };
+            [RenderQuality.Low] = new(0.06f, 0.25f, false, false, 8, 1.0f, 0.91f),
+            [RenderQuality.Medium] = new(0.045f, 0.35f, true, true, 12, 1.15f, 0.93f),
+            [RenderQuality.High] = new(0.035f, 0.45f, true, true, 17, 1.25f, 0.94f)
+        };
 
-    protected override void RenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        RenderParameters renderParams,
-        SKPaint passedInPaint)
-    {
-        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
-            return;
+    public sealed record QS(float Cr, float Sc, bool Sm, bool Wind, int Lv, float Boost, float Dec);
 
-        var (isValid, processedSpectrum) = ProcessSpectrum(
-            spectrum,
-            renderParams.EffectiveBarCount,
-            applyTemporalSmoothing: true);
+    protected override IReadOnlyDictionary<RenderQuality, QS> QualitySettingsPresets => _pre;
 
-        if (!isValid || processedSpectrum == null)
-            return;
-
-        var fireData = CalculateFireData(
-            processedSpectrum,
-            info,
-            renderParams);
-
-        if (!ValidateFireData(fireData))
-            return;
-
-        RenderFireVisualization(
-            canvas,
-            fireData,
-            renderParams,
-            passedInPaint);
-    }
-
-    private FireData CalculateFireData(
-        float[] spectrum,
-        SKImageInfo info,
-        RenderParameters renderParams)
-    {
-        var settings = CurrentQualitySettings!;
-
-        UpdateAnimation();
-
-        int gridHeight = GetGridHeight();
-        float pixelSize = GetPixelSize();
-        int gridWidth = Math.Max(MIN_GRID_WIDTH, (int)(info.Width / pixelSize));
-
-        EnsureGridSize(gridWidth, gridHeight);
-        UpdateFireSimulation(spectrum, renderParams, settings);
-
-        return new FireData(
-            Grid: (float[,])_fireGrid.Clone(),
-            GridWidth: gridWidth,
-            GridHeight: gridHeight,
-            PixelSize: pixelSize,
-            CanvasHeight: info.Height);
-    }
-
-    private static bool ValidateFireData(FireData data) =>
-        data.Grid != null &&
-        data.GridWidth > 0 &&
-        data.GridHeight > 0 &&
-        data.PixelSize > 0 &&
-        data.CanvasHeight > 0;
-
-    private void RenderFireVisualization(
-        SKCanvas canvas,
-        FireData data,
-        RenderParameters renderParams,
-        SKPaint passedInPaint)
-    {
-        var settings = CurrentQualitySettings!;
-
-        RenderWithOverlay(canvas, () =>
-        {
-            RenderPixelFire(canvas, data, settings);
-        });
-    }
-
-    private void UpdateAnimation()
-    {
-        _animationTime += ANIMATION_SPEED;
-        if (_animationTime > MathF.Tau)
-            _animationTime -= MathF.Tau;
-    }
-
-    private void EnsureGridSize(int width, int height)
-    {
-        if (_fireGrid.GetLength(0) != width || _fireGrid.GetLength(1) != height)
-        {
-            _fireGrid = new float[width, height];
-            _coolingMap = new float[width, height];
-            _currentGridWidth = width;
-            _currentGridHeight = height;
-
-            InitializeCoolingMap();
-        }
-    }
-
-    private void InitializeCoolingMap()
-    {
-        for (int x = 0; x < _currentGridWidth; x++)
-        {
-            for (int y = 0; y < _currentGridHeight; y++)
-            {
-                float heightFactor = (float)y / _currentGridHeight;
-                float randomFactor = (float)_random.NextDouble() * COOLING_BASE;
-                float positionVariance = MathF.Sin(x * 0.15f) * 0.08f;
-
-                _coolingMap[x, y] = randomFactor +
-                    heightFactor * COOLING_HEIGHT_FACTOR +
-                    positionVariance;
-            }
-        }
-    }
-
-    private void UpdateFireSimulation(
-        float[] spectrum,
-        RenderParameters renderParams,
-        QualitySettings settings)
-    {
-        SetFireSource(spectrum, renderParams, settings);
-        PropagateFireUpward(settings);
-
-        if (settings.UseSmoothing)
-            SmoothFireGrid();
-    }
-
-    private void SetFireSource(
-        float[] spectrum,
-        RenderParameters renderParams,
-        QualitySettings settings)
-    {
-        float pixelSize = GetPixelSize();
-
-        for (int i = 0; i < spectrum.Length && i < renderParams.EffectiveBarCount; i++)
-        {
-            float boostedIntensity = spectrum[i] * settings.IntensityBoost * INTENSITY_MULTIPLIER;
-            if (boostedIntensity < MIN_INTENSITY) continue;
-
-            var (startX, endX) = CalculateBarPixelRange(i, renderParams, pixelSize);
-            SetBarFireSource(startX, endX, boostedIntensity);
-        }
-    }
-
-    private (int startX, int endX) CalculateBarPixelRange(
-        int barIndex,
-        RenderParameters renderParams,
-        float pixelSize)
-    {
-        float xStart = (renderParams.StartOffset +
-            barIndex * (renderParams.BarWidth + renderParams.BarSpacing)) / pixelSize;
-        float xEnd = xStart + renderParams.BarWidth / pixelSize;
-
-        int startX = Math.Max(0, (int)xStart);
-        int endX = Math.Min(_currentGridWidth - 1, (int)xEnd);
-
-        return (startX, endX);
-    }
-
-    private void SetBarFireSource(int startX, int endX, float intensity)
-    {
-        int bottomRow = _currentGridHeight - 1;
-
-        for (int x = startX; x <= endX; x++)
-        {
-            _fireGrid[x, bottomRow] = intensity;
-
-            if (bottomRow > 0 && _random.NextDouble() < SOURCE_PROBABILITY)
-                _fireGrid[x, bottomRow - 1] = intensity * SOURCE_INTENSITY_SECONDARY;
-
-            if (bottomRow > 1 && _random.NextDouble() < SOURCE_PROBABILITY_SECONDARY)
-                _fireGrid[x, bottomRow - 2] = intensity * SOURCE_INTENSITY_TERTIARY;
-
-            for (int row = 3; row < SOURCE_ROWS && bottomRow - row >= 0; row++)
-                if (_random.NextDouble() < SOURCE_PROBABILITY_SECONDARY * (1f - row * 0.2f))
-                    _fireGrid[x, bottomRow - row] = intensity * (1f - row * 0.15f);
-        }
-    }
-
-    private void PropagateFireUpward(QualitySettings settings)
-    {
-        for (int y = 0; y < _currentGridHeight - SOURCE_ROWS; y++)
-            for (int x = 0; x < _currentGridWidth; x++)
-                UpdateFireCell(x, y, settings);
-    }
-
-    private void UpdateFireCell(int x, int y, QualitySettings settings)
-    {
-        float cooling = _coolingMap[x, y] * settings.CoolingRate;
-        float windOffset = CalculateWindOffset(y, settings);
-        float heat = CalculateHeatFromBelow(x, y, windOffset);
-
-        heat = ApplyFirePhysics(heat, cooling, settings);
-        _fireGrid[x, y] = Math.Max(0, Math.Min(1, heat));
-    }
-
-    private float CalculateWindOffset(int y, QualitySettings settings)
-    {
-        if (!settings.UseWind) return 0f;
-
-        float heightFactor = 1f - (float)y / _currentGridHeight;
-        float windPhase = _animationTime * WIND_SPEED + y * WIND_VARIANCE;
-
-        return MathF.Sin(windPhase) * WIND_STRENGTH * heightFactor;
-    }
-
-    private float CalculateHeatFromBelow(int x, int y, float windOffset)
-    {
-        float heat = 0f;
-        int samples = 0;
-
-        for (int dx = -1; dx <= 1; dx++)
-        {
-            int sourceX = x + dx + (int)windOffset;
-            sourceX = Math.Clamp(sourceX, 0, _currentGridWidth - 1);
-
-            if (y + 1 < _currentGridHeight)
-            {
-                heat += _fireGrid[sourceX, y + 1];
-                samples++;
-            }
-        }
-
-        return samples > 0 ? heat / samples : 0f;
-    }
-
-    private float ApplyFirePhysics(float heat, float cooling, QualitySettings settings)
-    {
-        heat *= settings.DecayRate;
-        heat -= cooling;
-
-        if (_random.NextDouble() < settings.SpreadChance)
-        {
-            float spread = ((float)_random.NextDouble() - SPREAD_RANDOMNESS) * FLAME_SPREAD;
-            heat += spread * heat;
-        }
-
-        return heat;
-    }
-
-    private void SmoothFireGrid()
-    {
-        var tempGrid = new float[_currentGridWidth, _currentGridHeight];
-
-        for (int x = 1; x < _currentGridWidth - 1; x++)
-            for (int y = 1; y < _currentGridHeight - 1; y++)
-                tempGrid[x, y] = CalculateSmoothedValue(x, y);
-
-        CopySmoothedValues(tempGrid);
-    }
-
-    private float CalculateSmoothedValue(int x, int y)
-    {
-        float sum = _fireGrid[x, y] * SMOOTH_KERNEL_CENTER +
-            _fireGrid[x - 1, y] +
-            _fireGrid[x + 1, y] +
-            _fireGrid[x, y - 1] +
-            _fireGrid[x, y + 1];
-
-        return sum / SMOOTH_KERNEL_TOTAL;
-    }
-
-    private void CopySmoothedValues(float[,] tempGrid)
-    {
-        for (int x = 1; x < _currentGridWidth - 1; x++)
-            for (int y = 1; y < _currentGridHeight - 1; y++)
-                _fireGrid[x, y] = tempGrid[x, y];
-    }
-
-    private void RenderPixelFire(
-        SKCanvas canvas,
-        FireData data,
-        QualitySettings settings)
-    {
-        var pixelPaint = CreatePaint(SKColors.Red, SKPaintStyle.Fill);
-
-        try
-        {
-            RenderFirePixels(canvas, data, settings, pixelPaint);
-        }
-        finally
-        {
-            ReturnPaint(pixelPaint);
-        }
-    }
-
-    private void RenderFirePixels(
-        SKCanvas canvas,
-        FireData data,
-        QualitySettings settings,
-        SKPaint pixelPaint)
-    {
-        for (int x = 0; x < data.GridWidth; x++)
-            for (int y = 0; y < data.GridHeight; y++)
-                RenderSinglePixel(canvas, data, x, y, settings, pixelPaint);
-    }
-
-    private void RenderSinglePixel(
-        SKCanvas canvas,
-        FireData data,
-        int x,
-        int y,
-        QualitySettings settings,
-        SKPaint pixelPaint)
-    {
-        float intensity = data.Grid[x, y];
-        if (intensity < 0.01f) return;
-
-        var color = GetFireColor(intensity, settings.ColorLevels);
-        pixelPaint.Color = color;
-
-        float pixelX = x * data.PixelSize;
-        float pixelY = data.CanvasHeight - (data.GridHeight - y) * data.PixelSize;
-
-        canvas.DrawRect(
-            pixelX,
-            pixelY,
-            data.PixelSize,
-            data.PixelSize,
-            pixelPaint);
-    }
-
-    private static SKColor GetFireColor(float intensity, int colorLevels)
-    {
-        float normalizedIntensity = Math.Clamp(intensity, 0f, 1f);
-        int colorIndex = (int)(normalizedIntensity * (colorLevels - 1));
-        colorIndex = Math.Clamp(colorIndex, 0, _fireColors.Length - 1);
-
-        byte alpha = CalculateAlpha(normalizedIntensity);
-        return _fireColors[colorIndex].WithAlpha(alpha);
-    }
-
-    private float GetPixelSize() =>
-        IsOverlayActive ? PIXEL_SIZE_OVERLAY : PIXEL_SIZE;
-
-    private int GetGridHeight() =>
-        IsOverlayActive ? FIRE_GRID_HEIGHT_OVERLAY : FIRE_GRID_HEIGHT;
-
-    protected override int GetMaxBarsForQuality() => Quality switch
-    {
-        RenderQuality.Low => 50,
-        RenderQuality.Medium => 100,
-        RenderQuality.High => 150,
-        _ => 100
-    };
+    protected override int GetMaxBarsForQuality() => GetBarsForQuality(50, 100, 150);
 
     protected override void OnQualitySettingsApplied()
     {
         base.OnQualitySettingsApplied();
-
-        float smoothingFactor = Quality switch
-        {
-            RenderQuality.Low => 0.4f,
-            RenderQuality.Medium => 0.3f,
-            RenderQuality.High => 0.25f,
-            _ => 0.3f
-        };
-
-        if (IsOverlayActive)
-            smoothingFactor *= 1.2f;
-
-        SetProcessingSmoothingFactor(smoothingFactor);
-
-        _fireGrid = new float[0, 0];
-        _coolingMap = new float[0, 0];
-
-        RequestRedraw();
+        ApplyStandardQualitySmoothing();
+        _fire = new float[0, 0];
+        _cool = new float[0, 0];
+        _tmp = new float[0, 0];
     }
 
     protected override void OnDispose()
     {
-        _fireGrid = new float[0, 0];
-        _coolingMap = new float[0, 0];
-        _animationTime = 0f;
-        _currentGridWidth = 0;
-        _currentGridHeight = 0;
+        _fire = new float[0, 0];
+        _cool = new float[0, 0];
+        _tmp = new float[0, 0];
+        _t = 0f;
+        _w = _h = 0;
         base.OnDispose();
     }
 
-    private record FireData(
-        float[,] Grid,
-        int GridWidth,
-        int GridHeight,
-        float PixelSize,
-        float CanvasHeight);
+    protected override void RenderEffect(SKCanvas c, float[] s, SKImageInfo info, RenderParameters rp, SKPaint paint)
+    {
+        if (CurrentQualitySettings is not { } qs) return;
+
+        _t += An;
+        if (_t > Tau) _t -= Tau;
+
+        int gh = SelectByOverlay(H0, H0Ov);
+        float px = SelectByOverlay(Px, PxOv);
+        int gw = Max(MinW, (int)(info.Width / px));
+
+        Ens(gw, gh);
+        Sim(s, rp, qs, px);
+        Draw(c, gw, gh, px, info.Height, qs);
+    }
+
+    private void Ens(int w, int h)
+    {
+        if (_fire.GetLength(0) == w && _fire.GetLength(1) == h) return;
+
+        _fire = new float[w, h];
+        _cool = new float[w, h];
+        _tmp = new float[w, h];
+
+        _w = w;
+        _h = h;
+
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+            {
+                float hf = (float)y / h;
+                _cool[x, y] = RandFloat() * Cool0 + hf * CoolH + (float)Sin(x * 0.15f) * 0.08f;
+            }
+    }
+
+    private void Sim(float[] s, RenderParameters rp, QS qs, float px)
+    {
+        SrcHeat(s, rp, qs, px);
+        UpdHeat(qs);
+        if (qs.Sm) Sm();
+    }
+
+    private void SrcHeat(float[] s, RenderParameters rp, QS qs, float px)
+    {
+        int n = Min(rp.EffectiveBarCount, s.Length);
+
+        for (int i = 0; i < n; i++)
+        {
+            float v = s[i] * qs.Boost * Im;
+            if (v < MinI) continue;
+
+            float x0 = (rp.StartOffset + i * (rp.BarWidth + rp.BarSpacing)) / px;
+            float x1 = x0 + rp.BarWidth / px;
+
+            int a = Clamp((int)x0, 0, _w - 1);
+            int b = Clamp((int)x1, 0, _w - 1);
+            int y = _h - 1;
+
+            for (int x = a; x <= b; x++)
+            {
+                _fire[x, y] = v;
+
+                if (y > 0 && RandChance(P1)) _fire[x, y - 1] = v * S2;
+                if (y > 1 && RandChance(P2)) _fire[x, y - 2] = v * S3;
+
+                for (int r = 3; r < Src && y - r >= 0; r++)
+                {
+                    float p = P2 * (1f - r * 0.2f);
+                    if (RandChance(p)) _fire[x, y - r] = v * (1f - r * 0.15f);
+                }
+            }
+        }
+    }
+
+    private void UpdHeat(QS qs)
+    {
+        for (int y = 0; y < _h - Src; y++)
+            for (int x = 0; x < _w; x++)
+            {
+                float cool = _cool[x, y] * qs.Cr;
+
+                float wind = 0f;
+                if (qs.Wind)
+                {
+                    float hf = 1f - (float)y / _h;
+                    wind = (float)Sin(_t * Wspd + y * Wvar) * Wst * hf;
+                }
+
+                float heat = 0f;
+                int cnt = 0;
+
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    int sx = Clamp(x + dx + (int)wind, 0, _w - 1);
+                    heat += _fire[sx, y + 1];
+                    cnt++;
+                }
+
+                heat = cnt > 0 ? heat / cnt : 0f;
+                heat *= qs.Dec;
+                heat -= cool;
+
+                if (RandChance(qs.Sc))
+                {
+                    float sp = (RandFloat() - Rc) * Spread;
+                    heat += sp * heat;
+                }
+
+                _fire[x, y] = Clamp(heat, 0f, 1f);
+            }
+    }
+
+    private void Sm()
+    {
+        for (int x = 1; x < _w - 1; x++)
+            for (int y = 1; y < _h - 1; y++)
+                _tmp[x, y] = (_fire[x, y] * K0 + _fire[x - 1, y] + _fire[x + 1, y] + _fire[x, y - 1] + _fire[x, y + 1]) / K1;
+
+        for (int x = 1; x < _w - 1; x++)
+            for (int y = 1; y < _h - 1; y++)
+                _fire[x, y] = _tmp[x, y];
+    }
+
+    private void Draw(SKCanvas c, int w, int h, float px, float ch, QS qs)
+    {
+        WithPaint(SKColors.Red, Fill, p =>
+        {
+            for (int x = 0; x < w; x++)
+                for (int y = 0; y < h; y++)
+                {
+                    float v = _fire[x, y];
+                    if (v < 0.01f) continue;
+
+                    float nv = Clamp(v, 0f, 1f);
+                    int i = Clamp((int)(nv * (qs.Lv - 1)), 0, Cols.Length - 1);
+
+                    p.Color = Cols[i].WithAlpha(CalculateAlpha(nv));
+
+                    float xx = x * px;
+                    float yy = ch - (h - y) * px;
+
+                    c.DrawRect(xx, yy, px, px, p);
+                }
+        });
+    }
 }

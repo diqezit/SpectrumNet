@@ -1,178 +1,240 @@
-﻿#nullable enable
-
-using SpectrumNet.SN.Settings.Constants;
-
 namespace SpectrumNet.SN.Settings;
 
-public class Settings : ISettings
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class SliderAttribute(
+    int order = int.MaxValue,
+    double min = double.NaN,
+    double max = double.NaN,
+    string? description = null) : Attribute
 {
-    private static readonly Lazy<Settings> _instance = new(() => new());
-    public static Settings Instance => _instance.Value;
+    public int Order { get; } = order;
+    public string? Description { get; } = description;
+    public double Min { get; } = min;
+    public double Max { get; } = max;
+    public double AutoMaxMultiplier { get; init; } = 3.0;
+}
 
-    private ParticleSettings _particles = new();
-    private RaindropSettings _raindrops = new();
-    private WindowSettings _window = new();
-    private VisualizationSettings _visualization = new();
-    private AudioSettings _audio = new();
-    private GeneralSettings _general = new();
-    private KeyBindingSettings _keyBindings = new();
+public record ParticlesConfig
+{
+    [Slider(0, 100, 5000, "Max particles.")]
+    public int MaxParticles { get; init; } = 600;
 
-    public ParticleSettings Particles
-    {
-        get => _particles;
-        set => SetProperty(ref _particles, value);
-    }
+    [Slider(1, 0.5, 10.0, "Lifetime (sec).")]
+    public float ParticleLife { get; init; } = 3.0f;
 
-    public RaindropSettings Raindrops
-    {
-        get => _raindrops;
-        set => SetProperty(ref _raindrops, value);
-    }
+    [Slider(2, 0.005, 0.1, "Decay rate.")]
+    public float ParticleLifeDecay { get; init; } = 0.016f;
+}
 
-    public WindowSettings Window
-    {
-        get => _window;
-        set => SetProperty(ref _window, value);
-    }
+public record RaindropsConfig
+{
+    [Slider(0, 50, 1000)]
+    public int MaxRaindrops { get; init; } = 200;
 
-    public VisualizationSettings Visualization
-    {
-        get => _visualization;
-        set => SetProperty(ref _visualization, value);
-    }
+    [Slider(1, 1, 30)]
+    public float BaseFallSpeed { get; init; } = 12f;
+}
 
-    public AudioSettings Audio
-    {
-        get => _audio;
-        set => SetProperty(ref _audio, value);
-    }
+public record WindowConfig
+{
+    public double Left { get; init; } = 100;
+    public double Top { get; init; } = 100;
+    public double Width { get; init; } = 800;
+    public double Height { get; init; } = 600;
+    public WindowState State { get; init; } = WindowState.Normal;
+    public bool IsControlPanelVisible { get; init; } = true;
+}
 
-    public GeneralSettings General
-    {
-        get => _general;
-        set => SetProperty(ref _general, value);
-    }
+public record VisualizationConfig
+{
+    public RenderStyle SelectedRenderStyle { get; init; } = RenderStyle.Bars;
+    public FftWindowType SelectedFftWindowType { get; init; } = FftWindowType.Hann;
+    public SpectrumScale SelectedScaleType { get; init; } = SpectrumScale.Linear;
+    public StereoMode SelectedStereoMode { get; init; } = StereoMode.Mid;
+    public RenderQuality SelectedRenderQuality { get; init; } = RenderQuality.Medium;
+    public int BarCount { get; init; } = 60;
+    public double BarSpacing { get; init; } = 4;
+    public string SelectedPalette { get; init; } = "Solid";
+    public bool ShowPerformanceInfo { get; init; } = true;
+}
 
-    public KeyBindingSettings KeyBindings
-    {
-        get => _keyBindings;
-        set => SetProperty(ref _keyBindings, value);
-    }
+public record AudioConfig
+{
+    public float MinDbLevel { get; init; } = -130f;
+    public float MaxDbLevel { get; init; } = -20f;
+    public float AmplificationFactor { get; init; } = 2.0f;
+}
 
-    [JsonIgnore]
-    private PropertyChangedEventHandler? _propertyChanged;
+public record GeneralConfig
+{
+    public bool IsOverlayTopmost { get; init; } = true;
+    public bool IsDarkTheme { get; init; } = true;
+    public bool LimitFpsTo60 { get; init; }
+    public ImmutableArray<RenderStyle> FavoriteRenderers { get; init; } = [];
+}
 
-    public event PropertyChangedEventHandler? PropertyChanged
-    {
-        add => _propertyChanged += value;
-        remove => _propertyChanged -= value;
-    }
-
-    public event EventHandler<string>? SettingsChanged;
-
-    public void LoadSettings(string? filePath = null)
-    {
-        string settingsPath = filePath ?? GetSettingsFilePath();
-
-        if (!File.Exists(settingsPath))
-            return;
-
-        var content = File.ReadAllText(settingsPath);
-        var jsonSettings = new JsonSerializerSettings
+public record KeyBindingsConfig
+{
+    public ImmutableSortedDictionary<string, Key> Bindings { get; init; } =
+        new Dictionary<string, Key>
         {
-            Converters = new JsonConverter[] { new StringEnumConverter() }
-        };
+            ["ClosePopup"] = Key.Escape,
+            ["DecreaseBarCount"] = Key.Left,
+            ["DecreaseBarSpacing"] = Key.Down,
+            ["IncreaseBarCount"] = Key.Right,
+            ["IncreaseBarSpacing"] = Key.Up,
+            ["NextRenderer"] = Key.X,
+            ["PreviousRenderer"] = Key.Z,
+            ["QualityHigh"] = Key.E,
+            ["QualityLow"] = Key.Q,
+            ["QualityMedium"] = Key.W,
+            ["ToggleControlPanel"] = Key.P,
+            ["ToggleOverlay"] = Key.O,
+            ["ToggleRecording"] = Key.Space,
+        }.ToImmutableSortedDictionary(StringComparer.Ordinal);
 
-        var loadedSettings = JsonConvert.DeserializeObject<Settings>(content, jsonSettings);
-        if (loadedSettings != null)
+    public Key GetKey(string action) =>
+        Bindings.GetValueOrDefault(action, Key.None);
+
+    public KeyBindingsConfig SetKey(string action, Key key) =>
+        this with { Bindings = Bindings.SetItem(action, key) };
+}
+
+public sealed record AppSettingsConfig
+{
+    public AudioConfig Audio { get; init; } = new();
+    public GeneralConfig General { get; init; } = new();
+    public KeyBindingsConfig KeyBindings { get; init; } = new();
+    public ParticlesConfig Particles { get; init; } = new();
+    public RaindropsConfig Raindrops { get; init; } = new();
+    public VisualizationConfig Visualization { get; init; } = new();
+    public WindowConfig Window { get; init; } = new();
+}
+
+public interface ISettingsService
+{
+    AppSettingsConfig Current { get; }
+    IGainParametersProvider GainParameters { get; }
+    event Action<AppSettingsConfig>? Changed;
+
+    void Apply(AppSettingsConfig config);
+    void Load();
+    void Reset();
+
+    void UpdateVisualization(Func<VisualizationConfig, VisualizationConfig> updater);
+    void UpdateAudio(Func<AudioConfig, AudioConfig> updater);
+    void UpdateWindow(Func<WindowConfig, WindowConfig> updater);
+    void UpdateGeneral(Func<GeneralConfig, GeneralConfig> updater);
+    void UpdateParticles(Func<ParticlesConfig, ParticlesConfig> updater);
+    void UpdateRaindrops(Func<RaindropsConfig, RaindropsConfig> updater);
+    void UpdateKeyBindings(Func<KeyBindingsConfig, KeyBindingsConfig> updater);
+}
+
+public sealed class SettingsService : ISettingsService
+{
+    private const string LP = nameof(SettingsService);
+    private const string FileName = "settings.json";
+    private const string AppFolder = "SpectrumNet";
+
+    private static readonly JsonSerializerSettings JsonCfg = new()
+    {
+        Formatting = Formatting.Indented,
+        Converters = { new StringEnumConverter() }
+    };
+
+    private static readonly Lazy<SettingsService> _lazy = new(() => new SettingsService());
+    public static SettingsService Instance => _lazy.Value;
+
+    private readonly ISmartLogger _log = SmartLogger.Instance;
+    private readonly GainParameters _gain;
+
+    public AppSettingsConfig Current { get; private set; } = new();
+    public IGainParametersProvider GainParameters => _gain;
+
+    public event Action<AppSettingsConfig>? Changed;
+
+    private SettingsService()
+    {
+        _gain = new GainParameters(null);
+        Load();
+    }
+
+    public void Apply(AppSettingsConfig cfg)
+    {
+        Current = cfg;
+        SyncGain();
+        Save();
+        Changed?.Invoke(Current);
+    }
+
+    public void Load()
+    {
+        string path = GetPath();
+        if (!File.Exists(path)) { Reset(); return; }
+
+        try
         {
-            ApplySettings(loadedSettings);
-            ValidateKeyBindings();
-            SettingsChanged?.Invoke(this, "LoadSettings");
+            string json = File.ReadAllText(path);
+            Apply(JsonConvert.DeserializeObject<AppSettingsConfig>(json, JsonCfg) ?? new());
+        }
+        catch (Exception ex)
+        {
+            _log.Log(LogLevel.Error, LP, $"Load failed: {ex.Message}");
+            Reset();
         }
     }
 
-    public void SaveSettings(string? filePath = null)
-    {
-        string settingsPath = filePath ?? EnsureSettingsDirectory();
+    public void Reset() => Apply(new());
 
-        var json = JsonConvert.SerializeObject(this, new JsonSerializerSettings
+    public void UpdateVisualization(Func<VisualizationConfig, VisualizationConfig> u) =>
+        Apply(Current with { Visualization = u(Current.Visualization) });
+
+    public void UpdateAudio(Func<AudioConfig, AudioConfig> u) =>
+        Apply(Current with { Audio = u(Current.Audio) });
+
+    public void UpdateWindow(Func<WindowConfig, WindowConfig> u) =>
+        Apply(Current with { Window = u(Current.Window) });
+
+    public void UpdateGeneral(Func<GeneralConfig, GeneralConfig> u) =>
+        Apply(Current with { General = u(Current.General) });
+
+    public void UpdateParticles(Func<ParticlesConfig, ParticlesConfig> u) =>
+        Apply(Current with { Particles = u(Current.Particles) });
+
+    public void UpdateRaindrops(Func<RaindropsConfig, RaindropsConfig> u) =>
+        Apply(Current with { Raindrops = u(Current.Raindrops) });
+
+    public void UpdateKeyBindings(Func<KeyBindingsConfig, KeyBindingsConfig> u) =>
+        Apply(Current with { KeyBindings = u(Current.KeyBindings) });
+
+    private void Save()
+    {
+        try
         {
-            Formatting = Formatting.Indented,
-            ContractResolver = new DefaultContractResolver
-            {
-                NamingStrategy = new CamelCaseNamingStrategy()
-            },
-            Converters = new JsonConverter[] { new StringEnumConverter() }
-        });
-
-        File.WriteAllText(settingsPath, json);
-        File.WriteAllText("settings.json", json);
-
-        SettingsChanged?.Invoke(this, "SaveSettings");
+            string path = GetPath(ensureDir: true);
+            File.WriteAllText(path, JsonConvert.SerializeObject(Current, JsonCfg));
+        }
+        catch (Exception ex)
+        {
+            _log.Log(LogLevel.Error, LP, $"Save failed: {ex.Message}");
+        }
     }
 
-    public void ResetToDefaults()
+    private void SyncGain()
     {
-        Particles = new ParticleSettings();
-        Raindrops = new RaindropSettings();
-        Window = new WindowSettings();
-        Visualization = new VisualizationSettings();
-        Audio = new AudioSettings();
-        General = new GeneralSettings();
-        KeyBindings = new KeyBindingSettings();
-
-        SettingsChanged?.Invoke(this, "ResetToDefaults");
+        _gain.AmplificationFactor = Current.Audio.AmplificationFactor;
+        _gain.MaxDbValue = Current.Audio.MaxDbLevel;
+        _gain.MinDbValue = Current.Audio.MinDbLevel;
     }
 
-    protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
+    private static string GetPath(bool ensureDir = false)
     {
-        if (Equals(field, value)) return false;
+        string local = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, FileName);
+        if (File.Exists(local)) return local;
 
-        field = value;
-        OnPropertyChanged(propertyName);
-        return true;
-    }
+        string folder = Path.Combine(GetFolderPath(SpecialFolder.ApplicationData), AppFolder);
+        if (ensureDir) Directory.CreateDirectory(folder);
 
-    protected virtual void OnPropertyChanged(string propertyName) =>
-        _propertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-
-    private void ApplySettings(Settings source)
-    {
-        Particles = source.Particles ?? new ParticleSettings();
-        Raindrops = source.Raindrops ?? new RaindropSettings();
-        Window = source.Window ?? new WindowSettings();
-        Visualization = source.Visualization ?? new VisualizationSettings();
-        Audio = source.Audio ?? new AudioSettings();
-        General = source.General ?? new GeneralSettings();
-        KeyBindings = source.KeyBindings ?? new KeyBindingSettings();
-    }
-
-    private void ValidateKeyBindings()
-    {
-        var keyBindingManager = new KeyBindingManager(this);
-        keyBindingManager.ValidateAndFixConflicts();
-    }
-
-    private static string GetSettingsFilePath()
-    {
-        string appDataPath = GetFolderPath(SpecialFolder.ApplicationData);
-        string settingsPath = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER, DefaultSettings.SETTINGS_FILE);
-
-        if (!File.Exists(settingsPath) && File.Exists("settings.json"))
-            settingsPath = "settings.json";
-
-        return settingsPath;
-    }
-
-    private static string EnsureSettingsDirectory()
-    {
-        string appDataPath = GetFolderPath(SpecialFolder.ApplicationData);
-        string appFolder = Path.Combine(appDataPath, DefaultSettings.APP_FOLDER);
-
-        if (!Directory.Exists(appFolder))
-            Directory.CreateDirectory(appFolder);
-
-        return Path.Combine(appFolder, DefaultSettings.SETTINGS_FILE);
+        return Path.Combine(folder, FileName);
     }
 }

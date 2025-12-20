@@ -1,75 +1,88 @@
-﻿#nullable enable
-
 namespace SpectrumNet.SN.Shared.Colors;
 
-public sealed class SpectrumBrushes : IBrushProvider, IDisposable
+public interface IBrushProvider
 {
-    private static readonly Lazy<SpectrumBrushes> _instance =
-        new(() => new SpectrumBrushes());
+    (SKColor Color, SKPaint Brush) GetColorAndBrush(string paletteName);
+    IReadOnlyDictionary<string, Palette> RegisteredPalettes { get; }
+}
 
-    private readonly ConcurrentDictionary<string, Palette> _palettes = new(StringComparer.OrdinalIgnoreCase);
-    private readonly IColorDefinitionProvider _colorDefinitionProvider;
+public interface IPalette : IDisposable
+{
+    string Name { get; }
+    SKColor Color { get; }
+    SKPaint Brush { get; }
+}
+
+public sealed class Palette : IPalette
+{
     private bool _disposed;
 
-    public static SpectrumBrushes Instance => _instance.Value;
+    public string Name { get; }
+    public SKColor Color { get; }
+    public SKPaint Brush { get; }
 
-    public IReadOnlyDictionary<string, Palette> RegisteredPalettes => _palettes;
-
-    public SpectrumBrushes(IColorDefinitionProvider? colorDefinitionProvider = null)
+    public Palette(string name, SKColor color)
     {
-        _colorDefinitionProvider = colorDefinitionProvider ?? new ColorDefinitionProvider();
-        RegisterFromDefinitions();
-    }
-
-    public (SKColor Color, SKPaint Brush) GetColorAndBrush(string paletteName)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (string.IsNullOrWhiteSpace(paletteName))
-            throw new ArgumentException("Palette name cannot be empty", nameof(paletteName));
-
-        if (!_palettes.TryGetValue(paletteName, out var palette))
-        {
-            var colorDefinitions = _colorDefinitionProvider.GetColorDefinitions();
-            if (colorDefinitions.TryGetValue(paletteName, out var color))
-            {
-                palette = new Palette(paletteName, color);
-                _palettes[paletteName] = palette;
-            }
-            else
-                throw new KeyNotFoundException($"Palette '{paletteName}' not registered");
-        }
-        return (palette.Color, palette.Brush);
-    }
-
-    public void Register(Palette palette)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        ArgumentNullException.ThrowIfNull(palette);
-
-        if (string.IsNullOrWhiteSpace(palette.Name))
-            throw new ArgumentException("Palette name cannot be empty", nameof(palette));
-
-        _palettes[palette.Name] = palette;
+        Name = name ?? throw new ArgumentNullException(nameof(name));
+        Color = color;
+        Brush = new() { Color = color, Style = Fill, IsAntialias = true };
     }
 
     public void Dispose()
     {
         if (_disposed) return;
-
-        Parallel.ForEach(_palettes.Values,
-            palette => palette.Dispose());
-        _palettes.Clear();
+        Brush.Dispose();
         _disposed = true;
     }
+}
 
-    private void RegisterFromDefinitions()
+public sealed class SpectrumBrushes : IBrushProvider, IDisposable
+{
+    private static readonly Lazy<SpectrumBrushes> _instance = new(() => new SpectrumBrushes());
+    private readonly ConcurrentDictionary<string, Palette> _palettes = new(StringComparer.OrdinalIgnoreCase);
+    private bool _disposed;
+
+    public static SpectrumBrushes Instance => _instance.Value;
+    public IReadOnlyDictionary<string, Palette> RegisteredPalettes => _palettes;
+
+    private SpectrumBrushes() => RegFromDefs();
+
+    public (SKColor Color, SKPaint Brush) GetColorAndBrush(string name)
     {
-        foreach (var kvp in _colorDefinitionProvider.GetColorDefinitions())
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        if (!_palettes.TryGetValue(name, out Palette? p))
         {
-            var palette = new Palette(kvp.Key, kvp.Value);
-            Register(palette);
+            if (Colors.Definitions.TryGetValue(name, out var c))
+            {
+                p = new Palette(name, c);
+                _palettes[name] = p;
+            }
+            else
+                throw new KeyNotFoundException($"Palette '{name}' not found");
         }
+        return (p.Color, p.Brush);
+    }
+
+    public void Register(Palette p)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(p);
+        _palettes[p.Name] = p;
+    }
+
+    private void RegFromDefs()
+    {
+        foreach (var (n, c) in Colors.Definitions)
+            Register(new Palette(n, c));
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        foreach (Palette p in _palettes.Values) p.Dispose();
+        _palettes.Clear();
+        _disposed = true;
     }
 }

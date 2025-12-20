@@ -1,13 +1,8 @@
-﻿<ResourceDictionary 
+<ResourceDictionary 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
 
-    <!-- =================== -->
-    <!-- ОСНОВНЫЕ КОНСТАНТЫ -->
-    <!-- =================== -->
-
-    <!-- Стандартные размеры -->
     <sys:Double x:Key="SmallSize">4</sys:Double>
     <sys:Double x:Key="NormalSize">8</sys:Double>
     <sys:Double x:Key="MediumSize">12</sys:Double>
@@ -26,18 +21,15 @@
     <sys:Double x:Key="MediumIconSize">20</sys:Double>
     <sys:Double x:Key="LargeIconSize">24</sys:Double>
 
-    <!-- Стандартные отступы -->
     <Thickness x:Key="NormalMargin">8,4</Thickness>
     <Thickness x:Key="SmallMargin">4,2</Thickness>
     <Thickness x:Key="StandardPadding">12,6</Thickness>
     <Thickness x:Key="StandardBorderThickness">1.5</Thickness>
     <Thickness x:Key="HeavyBorderThickness">2</Thickness>
 
-    <!-- Макетные константы -->
     <GridLength x:Key="LabelColumnWidth">120</GridLength>
     <GridLength x:Key="ValueColumnWidth">40</GridLength>
 
-    <!-- Анимационные константы -->
     <Duration x:Key="StandardAnimationDuration">0:0:0.3</Duration>
     <Duration x:Key="QuickAnimationDuration">0:0:0.15</Duration>
     <CubicEase x:Key="StandardEaseOut" EasingMode="EaseOut"/>

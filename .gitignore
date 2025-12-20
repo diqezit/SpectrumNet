@@ -363,3 +363,4 @@ MigrationBackup/
 FodyWeavers.xsd
 /SpectrumNet/EventHandlers.cs
 /SpectrumNet/MainWindow copy.xaml.cs
+SpectrumNetXUnit/

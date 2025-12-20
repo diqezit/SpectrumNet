@@ -1,149 +1,184 @@
-﻿#nullable enable
-
 namespace SpectrumNet;
 
 public partial class App : Application
 {
-    private const string LogPrefix = nameof(App);
-    private readonly ISmartLogger _logger = Instance;
-    private const int SHUTDOWN_TIMEOUT_MS = 5000;
+    private const int Timeout = 5000;
+
+    private IServiceProvider? _svc;
+    private ISmartLogger? _log;
+    private ISettingsService? _cfg;
+
+    public static IServiceProvider Services => ((App)Current)._svc!;
+
+    public static T Get<T>() where T : class =>
+        Services.GetRequiredService<T>();
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        base.OnStartup(e);
+
         try
         {
-            RenderOptions.ProcessRenderMode = RenderMode.Default;
-            Initialize();
-            SetupExceptionHandling();
-            InitializeApplication();
-            RegisterApplicationExitHandler();
+            Configure();
+
+            _log = _svc!.GetRequiredService<ISmartLogger>();
+            _cfg = _svc!.GetRequiredService<ISettingsService>();
+
+            SetupExc();
+            CommonResources.InitialiseResources();
+
+            _cfg.Load();
+            InitTheme();
+            InitBrush();
+            CreateMain();
         }
         catch (Exception ex)
         {
-            LogCriticalStartupError(ex);
+            _log?.Error(nameof(App), "Startup error", ex);
             Shutdown(-1);
         }
     }
 
-    private void SetupExceptionHandling()
+    private void Configure()
     {
-        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        var sc = new ServiceCollection();
+
+        sc.AddSingleton<ISmartLogger>(_ => Instance);
+        sc.AddSingleton<ISettingsService>(_ => SettingsService.Instance);
+        sc.AddSingleton<IThemes>(_ => Theme.Instance);
+        sc.AddSingleton<ITransparencyManager>(_ => TransparencyManager.Instance);
+        sc.AddSingleton<IBrushProvider>(_ => SpectrumBrushes.Instance);
+
+        sc.AddSingleton<IRendererFactory>(p =>
         {
-            if (args.ExceptionObject is Exception ex)
-            {
-                _logger.Error(LogPrefix, "Unhandled exception in application", ex);
-            }
+            RendererFactory r = RendererFactory.Instance;
+            r.Initialize(
+                p.GetRequiredService<ISmartLogger>(),
+                p.GetRequiredService<ITransparencyManager>(),
+                RenderQuality.Medium);
+            return r;
+        });
+
+        sc.AddSingleton<IPerformanceMetricsManager>(_ =>
+        {
+            PerformanceMetricsManager m = PerformanceMetricsManager.Instance;
+            m.Initialize();
+            return m;
+        });
+
+        sc.AddSingleton<MainWindow>();
+        sc.AddSingleton(CreateCtrl);
+
+        sc.AddTransient(p =>
+            new ControlPanelWindow(p.GetRequiredService<AppController>()));
+
+        sc.AddTransient<SettingsWindow>();
+
+        _svc = sc.BuildServiceProvider();
+    }
+
+    private AppController CreateCtrl(IServiceProvider p)
+    {
+        MainWindow mw = p.GetRequiredService<MainWindow>();
+
+        return new AppController(
+            mw,
+            mw.SpectrumCanvas,
+            p.GetRequiredService<ISettingsService>(),
+            p.GetRequiredService<ISmartLogger>(),
+            p.GetRequiredService<IRendererFactory>(),
+            p.GetRequiredService<IBrushProvider>(),
+            p.GetRequiredService<IThemes>(),
+            p.GetRequiredService<ITransparencyManager>(),
+            p.GetRequiredService<IPerformanceMetricsManager>());
+    }
+
+    private void CreateMain()
+    {
+        MainWindow mw = _svc!.GetRequiredService<MainWindow>();
+        AppController c = _svc!.GetRequiredService<AppController>();
+
+        mw.Initialize(c);
+        mw.Show();
+    }
+
+    private void InitTheme()
+    {
+        if (_svc == null || _cfg == null) return;
+
+        IThemes t = _svc.GetRequiredService<IThemes>();
+
+        if (t.IsDarkTheme != _cfg.Current.General.IsDarkTheme)
+            t.SetTheme(_cfg.Current.General.IsDarkTheme);
+    }
+
+    private void InitBrush()
+    {
+        if (_svc == null) return;
+
+        if (Resources["PaletteNameToBrushConverter"] is PaletteNameToBrushConverter c)
+            c.BrushesProvider =
+                _svc.GetRequiredService<IBrushProvider>() as SpectrumBrushes;
+    }
+
+    private void SetupExc()
+    {
+        AppDomain.CurrentDomain.UnhandledException += (_, a) =>
+        {
+            if (a.ExceptionObject is Exception ex)
+                _log?.Error(nameof(App), "Unhandled", ex);
             else
-            {
-                _logger.Fatal(LogPrefix, $"Unhandled non-Exception object in application: {args.ExceptionObject}");
-            }
+                _log?.Fatal(nameof(App), $"Unhandled: {a.ExceptionObject}");
         };
     }
 
-    private void InitializeApplication()
-    {
-        base.OnStartup(null);
-        CommonResources.InitialiseResources();
-        SettingsWindow.Instance.LoadSettings();
-        InitializeBrushProvider();
-    }
-
-    private void InitializeBrushProvider()
-    {
-        if (Resources["PaletteNameToBrushConverter"] is PaletteNameToBrushConverter conv)
-            conv.BrushesProvider = SpectrumBrushes.Instance;
-    }
-
-    private void RegisterApplicationExitHandler()
-    {
-        Current.Exit += (_, _) =>
-            _logger.Log(LogLevel.Information,
-                LogPrefix,
-                "Application is shutting down normally",
-                forceLog: true);
-    }
-
-    private void LogCriticalStartupError(Exception ex) =>
-        _logger.Error(LogPrefix, "Critical error during startup", ex);
-
     protected override void OnExit(ExitEventArgs e)
     {
+        DoShutdown();
         base.OnExit(e);
-        PerformShutdownCleanup();
     }
 
-    private void PerformShutdownCleanup()
+    private void DoShutdown()
     {
         try
         {
-            var shutdownTask = Task.Run(CleanupResources);
+            _cfg?.Apply(_cfg.Current);
 
-            if (!shutdownTask.Wait(SHUTDOWN_TIMEOUT_MS))
-            {
-                LogShutdownTimeout();
-            }
+            var t = Task.Run(DisposeAsync);
+
+            if (!t.Wait(Timeout))
+                _log?.Log(
+                    LogLevel.Warning,
+                    nameof(App),
+                    "Timeout",
+                    forceLog: true);
         }
         catch (Exception ex)
         {
-            LogShutdownError(ex);
-        }
-    }
-
-    private void CleanupResources()
-    {
-        try
-        {
-            DisposeSpectrumBrushes();
-            LogResourceCleanupCompleted();
-        }
-        catch (Exception ex)
-        {
-            LogResourceCleanupError(ex);
-        }
-    }
-
-    private void DisposeSpectrumBrushes()
-    {
-        if (SpectrumBrushes.Instance != null)
-        {
-            _logger.Log(LogLevel.Information,
-                LogPrefix,
-                "Disposing SpectrumBrushes instance",
+            _log?.Log(
+                LogLevel.Error,
+                nameof(App),
+                ex.Message,
                 forceLog: true);
-
-            SpectrumBrushes.Instance.Dispose();
         }
     }
 
-    private void LogResourceCleanupCompleted()
+    private async Task DisposeAsync()
     {
-        _logger.Log(LogLevel.Information,
-            LogPrefix,
-            "Resource cleanup completed",
-            forceLog: true);
-    }
-
-    private void LogResourceCleanupError(Exception ex)
-    {
-        _logger.Log(LogLevel.Error,
-            LogPrefix,
-            $"Error during shutdown resource cleanup: {ex.Message}",
-            forceLog: true);
-    }
-
-    private void LogShutdownTimeout()
-    {
-        _logger.Log(LogLevel.Warning,
-            LogPrefix,
-            "Shutdown resources cleanup taking too long, continuing with exit",
-            forceLog: true);
-    }
-
-    private void LogShutdownError(Exception ex)
-    {
-        _logger.Log(LogLevel.Error,
-            LogPrefix,
-            $"Error during shutdown: {ex.Message}",
-            forceLog: true);
+        try
+        {
+            if (_svc is IAsyncDisposable ad)
+                await ad.DisposeAsync().ConfigureAwait(false);
+            else
+                (_svc as IDisposable)?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _log?.Log(
+                LogLevel.Error,
+                nameof(App),
+                ex.Message,
+                forceLog: true);
+        }
     }
 }

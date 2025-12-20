@@ -1,430 +1,187 @@
-﻿#nullable enable
-
 namespace SpectrumNet.SN.Visualization.Renderers;
 
-public sealed class ParticlesRenderer : EffectSpectrumRenderer<ParticlesRenderer.QualitySettings>
+public sealed class ParticlesRenderer : EffectSpectrumRenderer<ParticlesRenderer.QS>
 {
-    private static readonly Lazy<ParticlesRenderer> _instance =
-        new(() => new ParticlesRenderer());
 
-    public static ParticlesRenderer GetInstance() => _instance.Value;
+    private const float
+        DECAY = 0.98f, MIN_SZ = 1f, MAX_DENS = 3f, VEL_MIN = 2f, VEL_MAX = 10f, VEL_MUL = 1f,
+        THR_OV = 0.15f, THR_NORM = 0.1f, SZ_OV = 4f, SZ_NORM = 6f, SPAWN_P = 0.8f,
+        ALPHA_EXP = 2f, OV_H_MUL = 0.3f, OV_PAD = 10f;
 
-    private const float DEFAULT_LINE_WIDTH = 3f,
-        HIGH_MAGNITUDE_THRESHOLD = 0.7f,
-        OFFSET = 10f,
-        BASELINE_OFFSET = 2f,
-        SMOOTHING_FACTOR_NORMAL = 0.3f,
-        SMOOTHING_FACTOR_OVERLAY = 0.5f,
-        SIZE_DECAY_FACTOR = 0.98f,
-        MIN_PARTICLE_SIZE = 1f,
-        MAX_DENSITY_FACTOR = 3f,
-        PARTICLE_VELOCITY_MIN = 2f,
-        PARTICLE_VELOCITY_MAX = 10f,
-        PARTICLE_LIFE = 3f,
-        PARTICLE_LIFE_DECAY = 0.016f,
-        VELOCITY_MULTIPLIER = 1f,
-        SPAWN_THRESHOLD_OVERLAY = 0.15f,
-        SPAWN_THRESHOLD_NORMAL = 0.1f,
-        PARTICLE_SIZE_OVERLAY = 4f,
-        PARTICLE_SIZE_NORMAL = 6f,
-        SPAWN_PROBABILITY = 0.8f,
-        ALPHA_DECAY_EXPONENT = 2f,
-        OVERLAY_HEIGHT_MULTIPLIER = 0.3f,
-        OVERLAY_BOUNDARY_PADDING = 10f;
+    private const int VEL_LUT_SZ = 1024, ALPHA_LUT_SZ = 101, MAX_P_LO = 300, MAX_P_MD = 600, MAX_P_HI = 1000;
 
-    private const int
-        VELOCITY_LOOKUP_SIZE = 1024,
-        ALPHA_CURVE_SIZE = 101,
-        MAX_PARTICLES_LOW = 300,
-        MAX_PARTICLES_MEDIUM = 600,
-        MAX_PARTICLES_HIGH = 1000;
+    private readonly List<P> _ps = [];
+    private readonly Cache _cache = new();
+    private float[]? _velLut, _alphaLut;
 
-    private readonly List<Particle> _particles = [];
-    private readonly RenderCache _renderCache = new();
-    private float[]? _velocityLookup;
-    private float[]? _alphaCurve;
-    private readonly Random _random = new();
+    private int MaxP => Min(ParticlesCfg.MaxParticles, CurrentQualitySettings?.MaxP ?? MAX_P_MD);
+    private static float Life => ParticlesCfg.ParticleLife;
+    private static float LifeDecay => ParticlesCfg.ParticleLifeDecay;
 
-    public sealed class QualitySettings
+    private static readonly IReadOnlyDictionary<RenderQuality, QS> _pre = new Dictionary<RenderQuality, QS>
     {
-        public bool UseAntiAlias { get; init; }
-        public bool UseAdvancedEffects { get; init; }
-        public int MaxParticles { get; init; }
-        public float ParticleDetail { get; init; }
-        public float SpawnRate { get; init; }
-    }
-
-    protected override IReadOnlyDictionary<RenderQuality, QualitySettings>
-        QualitySettingsPresets
-    { get; } = new Dictionary<RenderQuality, QualitySettings>
-    {
-        [RenderQuality.Low] = new()
-        {
-            UseAntiAlias = false,
-            UseAdvancedEffects = false,
-            MaxParticles = MAX_PARTICLES_LOW,
-            ParticleDetail = 0.6f,
-            SpawnRate = 0.5f
-        },
-        [RenderQuality.Medium] = new()
-        {
-            UseAntiAlias = true,
-            UseAdvancedEffects = true,
-            MaxParticles = MAX_PARTICLES_MEDIUM,
-            ParticleDetail = 0.8f,
-            SpawnRate = 0.7f
-        },
-        [RenderQuality.High] = new()
-        {
-            UseAntiAlias = true,
-            UseAdvancedEffects = true,
-            MaxParticles = MAX_PARTICLES_HIGH,
-            ParticleDetail = 1f,
-            SpawnRate = 1f
-        }
+        [RenderQuality.Low] = new(false, false, MAX_P_LO, 0.6f, 0.5f),
+        [RenderQuality.Medium] = new(true, true, MAX_P_MD, 0.8f, 0.7f),
+        [RenderQuality.High] = new(true, true, MAX_P_HI, 1f, 1f)
     };
 
-    protected override void RenderEffect(
-        SKCanvas canvas,
-        float[] spectrum,
-        SKImageInfo info,
-        RenderParameters renderParams,
-        SKPaint passedInPaint)
-    {
-        if (CurrentQualitySettings == null || renderParams.EffectiveBarCount <= 0)
-            return;
+    public sealed record QS(bool AA, bool Adv, int MaxP, float Detail, float SpawnR);
 
-        var (isValid, processedSpectrum) = ProcessSpectrum(
-            spectrum,
-            renderParams.EffectiveBarCount,
-            applyTemporalSmoothing: true);
+    protected override IReadOnlyDictionary<RenderQuality, QS> QualitySettingsPresets => _pre;
 
-        if (!isValid || processedSpectrum == null)
-            return;
+    protected override RenderParameters CalculateRenderParameters(SKImageInfo info, int bc, float bw, float bs) =>
+        CalcStandardRenderParams(info, bc, bw, bs, GetMaxBarsForQuality());
 
-        var renderData = CalculateRenderData(
-            processedSpectrum,
-            info,
-            renderParams);
-
-        if (!ValidateRenderData(renderData))
-            return;
-
-        RenderVisualization(
-            canvas,
-            renderData,
-            renderParams,
-            passedInPaint);
-    }
-
-    private RenderData CalculateRenderData(
-        float[] spectrum,
-        SKImageInfo info,
-        RenderParameters renderParams)
-    {
-        EnsureInitialized();
-        UpdateRenderCache(info, renderParams);
-        UpdateAndSpawnParticles(spectrum, renderParams);
-
-        return new RenderData(
-            ActiveParticleCount: _particles.Count,
-            CacheData: _renderCache,
-            AverageIntensity: CalculateAverageIntensity(spectrum));
-    }
-
-    private void EnsureInitialized()
-    {
-        if (_alphaCurve == null)
-            InitializeComponents();
-    }
-
-    private void InitializeComponents()
-    {
-        InitializeAlphaCurve();
-        InitializeVelocityLookup();
-    }
-
-    private void InitializeAlphaCurve()
-    {
-        _alphaCurve = new float[ALPHA_CURVE_SIZE];
-        float step = 1f / (_alphaCurve.Length - 1);
-
-        for (int i = 0; i < _alphaCurve.Length; i++)
-            _alphaCurve[i] = MathF.Pow(i * step, ALPHA_DECAY_EXPONENT);
-    }
-
-    private void InitializeVelocityLookup()
-    {
-        _velocityLookup = new float[VELOCITY_LOOKUP_SIZE];
-        float velocityRange = PARTICLE_VELOCITY_MAX - PARTICLE_VELOCITY_MIN;
-
-        for (int i = 0; i < VELOCITY_LOOKUP_SIZE; i++)
-            _velocityLookup[i] = PARTICLE_VELOCITY_MIN + velocityRange * i / VELOCITY_LOOKUP_SIZE;
-    }
-
-    private void UpdateRenderCache(SKImageInfo info, RenderParameters renderParams)
-    {
-        _renderCache.Width = info.Width;
-        _renderCache.Height = info.Height;
-        _renderCache.StepSize = renderParams.BarWidth + renderParams.BarSpacing;
-
-        if (IsOverlayActive)
-        {
-            _renderCache.OverlayHeight = info.Height * OVERLAY_HEIGHT_MULTIPLIER;
-            _renderCache.UpperBound = OVERLAY_BOUNDARY_PADDING;
-            _renderCache.LowerBound = info.Height;
-        }
-        else
-        {
-            _renderCache.OverlayHeight = 0f;
-            _renderCache.UpperBound = 0f;
-            _renderCache.LowerBound = info.Height;
-        }
-    }
-
-    private void UpdateAndSpawnParticles(float[] spectrum, RenderParameters renderParams)
-    {
-        UpdateExistingParticles();
-        SpawnNewParticles(spectrum, renderParams);
-    }
-
-    private void UpdateExistingParticles()
-    {
-        for (int i = _particles.Count - 1; i >= 0; i--)
-        {
-            var particle = _particles[i];
-
-            if (!UpdateParticle(ref particle))
-            {
-                _particles.RemoveAt(i);
-                continue;
-            }
-
-            _particles[i] = particle;
-        }
-    }
-
-    private bool UpdateParticle(ref Particle p)
-    {
-        p.Y -= p.Velocity * VELOCITY_MULTIPLIER;
-        p.Life -= PARTICLE_LIFE_DECAY;
-
-        if (p.Life <= 0 || p.Y <= _renderCache.UpperBound)
-            return false;
-
-        p.Size *= SIZE_DECAY_FACTOR;
-        if (p.Size < MIN_PARTICLE_SIZE)
-            return false;
-
-        p.Alpha = CalculateParticleAlpha(p.Life / PARTICLE_LIFE);
-
-        return true;
-    }
-
-    private float CalculateParticleAlpha(float lifeRatio)
-    {
-        if (lifeRatio <= 0f) return 0f;
-        if (lifeRatio >= 1f) return 1f;
-
-        if (_alphaCurve != null && _alphaCurve.Length > 0)
-        {
-            int index = (int)(lifeRatio * 100);
-            index = Clamp(index, 0, _alphaCurve.Length - 1);
-            return _alphaCurve[index];
-        }
-
-        return MathF.Pow(lifeRatio, ALPHA_DECAY_EXPONENT);
-    }
-
-    private void SpawnNewParticles(float[] spectrum, RenderParameters renderParams)
-    {
-        var settings = CurrentQualitySettings!;
-
-        if (_particles.Count >= settings.MaxParticles)
-            return;
-
-        float threshold = IsOverlayActive ? SPAWN_THRESHOLD_OVERLAY : SPAWN_THRESHOLD_NORMAL;
-        float baseSize = IsOverlayActive ? PARTICLE_SIZE_OVERLAY : PARTICLE_SIZE_NORMAL;
-
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            if (_particles.Count >= settings.MaxParticles)
-                break;
-
-            if (spectrum[i] <= threshold)
-                continue;
-
-            float intensity = spectrum[i] / threshold;
-            float spawnChance = Clamp(intensity, 0f, 1f) * SPAWN_PROBABILITY * settings.SpawnRate;
-
-            if (_random.NextDouble() < spawnChance)
-            {
-                CreateParticle(i, renderParams, baseSize, intensity);
-            }
-        }
-    }
-
-    private void CreateParticle(
-        int index,
-        RenderParameters renderParams,
-        float baseSize,
-        float intensity)
-    {
-        float x = renderParams.StartOffset + index * _renderCache.StepSize +
-                 (float)_random.NextDouble() * renderParams.BarWidth;
-
-        float velocity = GetRandomVelocity() * Clamp(intensity, 1f, MAX_DENSITY_FACTOR);
-        float size = baseSize * Clamp(intensity, 1f, MAX_DENSITY_FACTOR) * CurrentQualitySettings!.ParticleDetail;
-
-        _particles.Add(new Particle
-        {
-            X = x,
-            Y = _renderCache.LowerBound,
-            Velocity = velocity,
-            Size = size,
-            Life = PARTICLE_LIFE,
-            Alpha = 1f
-        });
-    }
-
-    private float GetRandomVelocity()
-    {
-        if (_velocityLookup == null || _velocityLookup.Length == 0)
-            return PARTICLE_VELOCITY_MIN;
-
-        return _velocityLookup[_random.Next(VELOCITY_LOOKUP_SIZE)];
-    }
-
-    private static bool ValidateRenderData(RenderData data) =>
-        data.ActiveParticleCount > 0 || data.AverageIntensity > 0;
-
-    private void RenderVisualization(
-        SKCanvas canvas,
-        RenderData data,
-        RenderParameters renderParams,
-        SKPaint basePaint)
-    {
-        RenderWithOverlay(canvas, () =>
-        {
-            RenderParticlesLayer(canvas, basePaint);
-        });
-    }
-
-    private void RenderParticlesLayer(SKCanvas canvas, SKPaint basePaint)
-    {
-        var particlePaint = CreatePaint(basePaint.Color, SKPaintStyle.Fill);
-
-        try
-        {
-            foreach (var particle in _particles)
-            {
-                if (!IsParticleVisible(particle))
-                    continue;
-
-                particlePaint.Color = basePaint.Color.WithAlpha((byte)(particle.Alpha * 255));
-                canvas.DrawCircle(particle.X, particle.Y, particle.Size / 2, particlePaint);
-            }
-        }
-        finally
-        {
-            ReturnPaint(particlePaint);
-        }
-    }
-
-    private bool IsParticleVisible(Particle particle) =>
-        particle.Y >= _renderCache.UpperBound &&
-        particle.Y <= _renderCache.LowerBound &&
-        particle.Alpha > 0 &&
-        particle.Size > 0 &&
-        IsAreaVisible(null, new SKRect(
-            particle.X - particle.Size,
-            particle.Y - particle.Size,
-            particle.X + particle.Size,
-            particle.Y + particle.Size));
-
-    private static float CalculateAverageIntensity(float[] spectrum)
-    {
-        if (spectrum.Length == 0) return 0f;
-
-        float sum = 0f;
-        foreach (float value in spectrum)
-            sum += value;
-
-        return sum / spectrum.Length;
-    }
-
-    protected override int GetMaxBarsForQuality() => Quality switch
-    {
-        RenderQuality.Low => 64,
-        RenderQuality.Medium => 128,
-        RenderQuality.High => 256,
-        _ => 128
-    };
+    protected override int GetSpectrumProcessingCount(RenderParameters rp) => rp.EffectiveBarCount;
+    protected override int GetMaxBarsForQuality() => GetBarsForQuality(64, 128, 256);
 
     protected override void OnQualitySettingsApplied()
     {
         base.OnQualitySettingsApplied();
-
-        float smoothingFactor = Quality switch
-        {
-            RenderQuality.Low => 0.4f,
-            RenderQuality.Medium => 0.3f,
-            RenderQuality.High => 0.25f,
-            _ => 0.3f
-        };
-
-        if (IsOverlayActive)
-            smoothingFactor *= 1.2f;
-
-        SetProcessingSmoothingFactor(smoothingFactor);
-
-        _particles.Clear();
-
+        ApplyStandardQualitySmoothing();
+        TrimList(_ps, MaxP);
         RequestRedraw();
     }
 
     protected override void CleanupUnusedResources()
     {
         base.CleanupUnusedResources();
-
-        if (_particles.Count > CurrentQualitySettings!.MaxParticles * 2)
-        {
-            _particles.RemoveRange(
-                CurrentQualitySettings.MaxParticles,
-                _particles.Count - CurrentQualitySettings.MaxParticles);
-        }
+        if (_ps.Count > MaxP * 2) _ps.RemoveRange(MaxP, _ps.Count - MaxP);
     }
 
     protected override void OnDispose()
     {
-        _particles.Clear();
-        _velocityLookup = null;
-        _alphaCurve = null;
-
+        _ps.Clear();
+        _velLut = _alphaLut = null;
         base.OnDispose();
     }
 
-    private struct Particle
+    protected override void RenderEffect(
+        SKCanvas c, float[] s, SKImageInfo info, RenderParameters rp, SKPaint paint)
     {
-        public float X, Y;
-        public float Velocity;
-        public float Size;
-        public float Life;
-        public float Alpha;
+        if (CurrentQualitySettings is not { } qs) return;
+        if (rp.EffectiveBarCount <= 0 || rp.BarWidth <= 0f) return;
+
+        EnsureLuts();
+        UpdateCache(info, rp);
+        UpdateAndSpawn(s, rp, qs);
+        Draw(c, paint, qs);
     }
 
-    private sealed class RenderCache
+    private void EnsureLuts()
     {
-        public float Width { get; set; }
-        public float Height { get; set; }
-        public float StepSize { get; set; }
-        public float OverlayHeight { get; set; }
-        public float UpperBound { get; set; }
-        public float LowerBound { get; set; }
+        if (_alphaLut == null)
+        {
+            _alphaLut = new float[ALPHA_LUT_SZ];
+            for (int i = 0; i < _alphaLut.Length; i++)
+                _alphaLut[i] = MathF.Pow(i / (float)(_alphaLut.Length - 1), ALPHA_EXP);
+        }
+
+        if (_velLut == null)
+        {
+            _velLut = new float[VEL_LUT_SZ];
+            float range = VEL_MAX - VEL_MIN;
+            for (int i = 0; i < VEL_LUT_SZ; i++)
+                _velLut[i] = VEL_MIN + range * i / VEL_LUT_SZ;
+        }
     }
 
-    private record RenderData(
-        int ActiveParticleCount,
-        RenderCache CacheData,
-        float AverageIntensity);
+    private void UpdateCache(SKImageInfo info, RenderParameters rp)
+    {
+        _cache.W = info.Width;
+        _cache.H = info.Height;
+        _cache.Off = rp.StartOffset;
+        _cache.BW = rp.BarWidth;
+        _cache.Step = rp.BarWidth + rp.BarSpacing;
+
+        if (IsOverlayActive)
+        {
+            _cache.OvH = info.Height * OV_H_MUL;
+            _cache.Top = OV_PAD;
+            _cache.Bot = info.Height;
+        }
+        else
+        {
+            _cache.OvH = 0f;
+            _cache.Top = 0f;
+            _cache.Bot = info.Height;
+        }
+    }
+
+    private void UpdateAndSpawn(float[] s, RenderParameters rp, QS qs)
+    {
+        float life = Life, decay = LifeDecay;
+
+        for (int i = _ps.Count - 1; i >= 0; i--)
+        {
+            P p = _ps[i];
+            p.Y -= p.V * VEL_MUL;
+            p.L -= decay;
+
+            if (p.L <= 0f || p.Y <= _cache.Top) { _ps.RemoveAt(i); continue; }
+
+            p.S *= DECAY;
+            if (p.S < MIN_SZ) { _ps.RemoveAt(i); continue; }
+
+            p.A = Alpha(p.L / life);
+            _ps[i] = p;
+        }
+
+        Spawn(s, rp, qs);
+    }
+
+    private float Alpha(float r)
+    {
+        if (r <= 0f) return 0f;
+        if (r >= 1f) return 1f;
+        return _alphaLut is { Length: > 0 } a ? a[Clamp((int)(r * 100f), 0, a.Length - 1)] : MathF.Pow(r, ALPHA_EXP);
+    }
+
+    private void Spawn(float[] s, RenderParameters rp, QS qs)
+    {
+        int max = MaxP;
+        if (_ps.Count >= max) return;
+
+        float thr = SelectByOverlay(THR_NORM, THR_OV);
+        float sz0 = SelectByOverlay(SZ_NORM, SZ_OV);
+        float life = Life;
+
+        for (int i = 0; i < s.Length && _ps.Count < max; i++)
+        {
+            float mag = s[i];
+            if (mag <= thr) continue;
+
+            float inten = mag / thr;
+            float ch = Clamp(inten, 0f, 1f) * SPAWN_P * qs.SpawnR;
+
+            if (!RandChance(ch)) continue;
+
+            float dens = Clamp(inten, 1f, MAX_DENS);
+            float x = Clamp(rp.StartOffset + i * _cache.Step + RandFloat() * rp.BarWidth, 0f, _cache.W);
+            float vel = _velLut is { Length: > 0 } v ? v[RandInt(VEL_LUT_SZ)] : VEL_MIN;
+
+            _ps.Add(new P { X = x, Y = _cache.Bot, V = vel * dens, S = sz0 * dens * qs.Detail, L = life, A = 1f });
+        }
+    }
+
+    private void Draw(SKCanvas c, SKPaint basePaint, QS qs)
+    {
+        SKPaint p = CreatePaint(basePaint.Color, Fill);
+        p.IsAntialias = qs.AA;
+
+        try
+        {
+            foreach (P pt in _ps)
+            {
+                if (pt.A <= 0f || pt.S <= 0f) continue;
+                if (pt.Y < _cache.Top || pt.Y > _cache.Bot) continue;
+                p.Color = basePaint.Color.WithAlpha((byte)(pt.A * 255f));
+                c.DrawCircle(pt.X, pt.Y, pt.S * 0.5f, p);
+            }
+        }
+        finally { ReturnPaint(p); }
+    }
+
+    private struct P { public float X, Y, V, S, L, A; }
+    private sealed class Cache { public float W, H, Off, BW, Step, OvH, Top, Bot; }
 }

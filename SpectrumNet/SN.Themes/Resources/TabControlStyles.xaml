@@ -3,59 +3,79 @@
 
     <Style x:Key="ModernTabItemStyle" TargetType="TabItem">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
-        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontSize" Value="13"/>
         <Setter Property="FontWeight" Value="Medium"/>
-        <Setter Property="Padding" Value="20,10"/>
-        <Setter Property="Margin" Value="0,0,4,0"/>
-        <Setter Property="MinHeight" Value="40"/>
+        <Setter Property="Padding" Value="14,9"/>
+        <Setter Property="Margin" Value="2,0"/>
+        <Setter Property="MinHeight" Value="38"/>
+        <Setter Property="MinWidth" Value="60"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
-                    <Grid x:Name="Root">
-                        <Border x:Name="Border"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="0"
-                                CornerRadius="6,6,0,0">
-                            <Grid>
-                                <Border x:Name="HoverBackground"
-                                        Background="{DynamicResource HoverBackgroundBrush}"
-                                        CornerRadius="6,6,0,0"
-                                        Opacity="0"/>
+                    <Grid SnapsToDevicePixels="True">
+                        <Border x:Name="Bg"
+                                Background="Transparent"
+                                CornerRadius="6,6,0,0"/>
 
-                                <Border x:Name="SelectionIndicator"
-                                        Height="2"
-                                        Background="{DynamicResource AccentBrush}"
-                                        VerticalAlignment="Bottom"
-                                        Margin="12,0"
-                                        CornerRadius="1,1,0,0"
-                                        Opacity="0"/>
+                        <Border x:Name="FocusRing"
+                                CornerRadius="6,6,0,0"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource FocusedBorderBrush}"
+                                Opacity="0"
+                                Margin="1"/>
 
-                                <ContentPresenter x:Name="ContentPresenter"
-                                                  ContentSource="Header"
-                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                                  Margin="{TemplateBinding Padding}"
-                                                  RecognizesAccessKey="True"/>
-                            </Grid>
-                        </Border>
+                        <Border x:Name="Indicator"
+                                Height="3"
+                                VerticalAlignment="Bottom"
+                                Margin="10,0"
+                                CornerRadius="2,2,0,0"
+                                Background="{DynamicResource AccentBrush}"
+                                Opacity="0"/>
+
+                        <ContentPresenter x:Name="ContentPresenter"
+                                          ContentSource="Header"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"
+                                          TextElement.FontWeight="{TemplateBinding FontWeight}"/>
                     </Grid>
 
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+                            <Setter TargetName="Indicator" Property="Opacity" Value="1"/>
                             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                             <Setter Property="FontWeight" Value="SemiBold"/>
-                            <Setter TargetName="Border" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
-                            <Setter TargetName="SelectionIndicator" Property="Opacity" Value="1"/>
                         </Trigger>
 
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="HoverBackground" Property="Opacity" Value="1"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+                        </Trigger>
+
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsSelected" Value="True"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+                        </MultiTrigger>
+
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="FocusRing" Property="Opacity" Value="0.9"/>
+                        </Trigger>
+
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+                            <Setter Property="Opacity" Value="0.5"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -65,14 +85,119 @@
 
     <Style x:Key="ModernTabControlStyle" TargetType="TabControl">
         <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding" Value="12"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="ItemContainerStyle" Value="{StaticResource ModernTabItemStyle}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabControl">
-                    <Grid>
+                    <Grid SnapsToDevicePixels="True" KeyboardNavigation.TabNavigation="Local">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border x:Name="HeaderPanel"
+                                Grid.Row="0"
+                                Background="{DynamicResource ControlBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="0,0,0,1"
+                                CornerRadius="0"
+                                HorizontalAlignment="Stretch"
+                                Padding="8,4,8,0">
+                            <TabPanel x:Name="HeaderHost"
+                                      IsItemsHost="True"
+                                      HorizontalAlignment="Left"
+                                      KeyboardNavigation.TabIndex="1"
+                                      KeyboardNavigation.DirectionalNavigation="Contained"/>
+                        </Border>
+
+                        <Border x:Name="ContentPanel"
+                                Grid.Row="1"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="0"
+                                HorizontalAlignment="Stretch">
+                            <ContentPresenter x:Name="PART_SelectedContentHost"
+                                              ContentSource="SelectedContent"
+                                              Margin="{TemplateBinding Padding}"
+                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="CompactTabItemStyle" TargetType="TabItem" BasedOn="{StaticResource ModernTabItemStyle}">
+        <Setter Property="Padding" Value="12,7"/>
+        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+
+    <Style x:Key="PillTabItemStyle" TargetType="TabItem">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Padding" Value="14,6"/>
+        <Setter Property="Margin" Value="2,0"/>
+        <Setter Property="MinHeight" Value="28"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Grid SnapsToDevicePixels="True">
+                        <Border x:Name="Bg"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="14"
+                                Padding="{TemplateBinding Padding}"/>
+
+                        <Border x:Name="FocusRing"
+                                CornerRadius="14"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource FocusedBorderBrush}"
+                                Opacity="0"
+                                Margin="1"/>
+
+                        <ContentPresenter ContentSource="Header"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"
+                                          TextElement.FontWeight="{TemplateBinding FontWeight}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="FocusRing" Property="Opacity" Value="0.9"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="PillTabControlStyle" TargetType="TabControl" BasedOn="{StaticResource ModernTabControlStyle}">
+        <Setter Property="ItemContainerStyle" Value="{StaticResource PillTabItemStyle}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabControl">
+                    <Grid SnapsToDevicePixels="True" KeyboardNavigation.TabNavigation="Local">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
@@ -81,16 +206,19 @@
                         <Border Grid.Row="0"
                                 Background="{DynamicResource ControlBackgroundBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}"
-                                BorderThickness="0,0,0,1">
-                            <TabPanel x:Name="HeaderPanel"
-                                      IsItemsHost="True"
-                                      Margin="12,0"/>
+                                BorderThickness="1"
+                                CornerRadius="16"
+                                Padding="4"
+                                Margin="0,0,0,8"
+                                HorizontalAlignment="Left">
+                            <TabPanel IsItemsHost="True"
+                                      HorizontalAlignment="Left"
+                                      KeyboardNavigation.DirectionalNavigation="Contained"/>
                         </Border>
 
                         <Border Grid.Row="1"
                                 Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}">
+                                CornerRadius="6">
                             <ContentPresenter x:Name="PART_SelectedContentHost"
                                               ContentSource="SelectedContent"
                                               Margin="{TemplateBinding Padding}"/>

@@ -1,28 +1,20 @@
-﻿namespace SpectrumNet.SN.Shared.Converters;
+namespace SpectrumNet.SN.Shared.Converters;
 
 public class IsFavoriteConverter : IValueConverter
 {
-    private readonly ISettings _settings = Settings.Settings.Instance;
+    private readonly ISettingsService _settings = SettingsService.Instance;
 
     public object Convert(
         object value,
         Type targetType,
         object parameter,
-        CultureInfo culture)
-    {
-        if (value is RenderStyle style)
-            _settings.General.FavoriteRenderers.Contains(style);
-
-        return false;
-    }
+        CultureInfo culture) =>
+        value is RenderStyle style &&
+        _settings.Current.General.FavoriteRenderers.Contains(style);
 
     public object ConvertBack(
         object value,
         Type targetType,
         object parameter,
-        CultureInfo culture) 
-    {
-        throw new NotImplementedException();
-    }
-
+        CultureInfo culture) => throw new NotImplementedException();
 }
